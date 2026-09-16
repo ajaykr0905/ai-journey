@@ -1,6 +1,6 @@
 # Progress and Evidence
 
-Last updated: 2026-09-15
+Last updated: 2026-09-16
 
 This file separates repository-verifiable work from activities that require the
 learner's own completion evidence.
@@ -19,6 +19,7 @@ learner's own completion evidence.
 | 9 | Finite-difference check implemented; PyTorch check optional | Pending user confirmation | None required |
 | 10 | Deterministic XOR training implemented and tested | Pending user confirmation | Learning-curve reflection pending |
 | 11 | Python fluency drills implemented and tested | Pending user confirmation | Virtual-environment practice pending |
+| 12 | Validated GPT shape graph, diagram renderer, and tests present | Pending user confirmation | From-memory diagram and tensor-shape review pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,

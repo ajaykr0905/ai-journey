@@ -31,6 +31,7 @@ DEFAULT_CONFIG: dict[str, list[str]] = {
         "SECURITY.md",
         "requirements.txt",
         "scripts/run_days_00_11.py",
+        "scripts/run_day_12.py",
     ],
     "required_directories": ["days", "src/ai_journey", "tests"],
     "required_commands": ["python3"],
