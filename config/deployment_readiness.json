@@ -1,0 +1,19 @@
+{
+  "required_files": [
+    "README.md",
+    "PROGRESS.md",
+    "SECURITY.md",
+    "requirements.txt",
+    "scripts/run_days_00_11.py"
+  ],
+  "required_directories": [
+    "days",
+    "src/ai_journey",
+    "tests"
+  ],
+  "required_commands": [
+    "python3"
+  ],
+  "required_env": [],
+  "optional_env": []
+}

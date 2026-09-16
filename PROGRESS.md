@@ -1,0 +1,25 @@
+# Progress and Evidence
+
+Last updated: 2026-09-15
+
+This file separates repository-verifiable work from activities that require the
+learner's own completion evidence.
+
+| Day | Code status | Lecture status | Manual evidence |
+|---:|---|---|---|
+| 0 | Implemented and locally testable | Not applicable | Repository setup represented by commits |
+| 1 | Notes committed | Pending user confirmation | Personal reflection pending |
+| 2 | Diagnostic implemented and locally testable | Pending user confirmation | Colab/Jupyter screenshot pending |
+| 3 | Gradient descent and optional plot implemented | Pending user confirmation | Experiment notes pending |
+| 4 | Markdown derivation complete | Pending user confirmation | Handwritten derivation photo pending |
+| 5 | Derivation and backward-pass code complete | Pending user confirmation | Handwritten derivation photo pending |
+| 6 | Deterministic NumPy forward pass complete | Pending user confirmation | None required |
+| 7 | Output-bias gradient implemented and tested | Pending user confirmation | Manual calculation check pending |
+| 8 | Output-weight gradients implemented and tested | Pending user confirmation | Manual calculation check pending |
+| 9 | Finite-difference check implemented; PyTorch check optional | Pending user confirmation | None required |
+| 10 | Deterministic XOR training implemented and tested | Pending user confirmation | Learning-curve reflection pending |
+| 11 | Python fluency drills implemented and tested | Pending user confirmation | Virtual-environment practice pending |
+
+“Implemented” means the repository contains executable code and automated checks.
+It does not claim that a video was watched, a notebook was run in a hosted service,
+or handwritten evidence was produced.
