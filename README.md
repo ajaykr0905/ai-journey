@@ -1,7 +1,7 @@
-# AI Journey: Days 0–12
+# AI Journey: Days 0–13
 
 This repository is a public-safe, executable record of an added setup day plus the
-first twelve workbook days of a 90-day AI engineering learning plan. It combines
+first thirteen workbook days of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -21,6 +21,8 @@ then grow these exercises into production-quality training and inference project
 - One command to run Days 0–11 in [`scripts/run_days_00_11.py`](scripts/run_days_00_11.py)
 - A validated GPT tensor-shape diagram generator in
   [`scripts/run_day_12.py`](scripts/run_day_12.py)
+- A deterministic NumPy attention experiment in
+  [`scripts/run_day_13.py`](scripts/run_day_13.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -35,6 +37,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python scripts/run_days_00_11.py
 python scripts/run_day_12.py --output artifacts/day-12-gpt-shapes.md
+python scripts/run_day_13.py --output artifacts/day-13-attention.md
 python -m unittest discover -s tests -v
 ```
 
@@ -44,7 +47,7 @@ finite-difference verification still runs and CI remains meaningful.
 
 ## Configuration safety
 
-Days 0–12 require no credentials. Never commit `.env`, credentials, browser data,
+Days 0–13 require no credentials. Never commit `.env`, credentials, browser data,
 cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 
 ## Daily map
@@ -64,6 +67,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 10 | 2026-09-14 | Deterministic XOR training |
 | 11 | 2026-09-15 | Python fluency drills |
 | 12 | 2026-09-16 | Decoder-only GPT dataflow and tensor shapes |
+| 13 | 2026-09-17 | Single-head scaled dot-product attention in NumPy |
 
 ## License
 

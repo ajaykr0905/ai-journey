@@ -26,6 +26,11 @@ jobs:
         run: python scripts/run_days_00_11.py --artifact-dir /tmp/ai-journey-artifacts
       - name: Run Day 12 shape validation
         run: python scripts/run_day_12.py --output /tmp/ai-journey-artifacts/day-12-gpt-shapes.md
+      - name: Run Day 13 attention validation
+        run: >-
+          python scripts/run_day_13.py
+          --output /tmp/ai-journey-artifacts/day-13-attention.md
+          --json-output /tmp/ai-journey-artifacts/day-13-attention.json
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py
