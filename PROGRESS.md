@@ -1,6 +1,6 @@
 # Progress and Evidence
 
-Last updated: 2026-09-17
+Last updated: 2026-09-18
 
 This file separates repository-verifiable work from activities that require the
 learner's own completion evidence.
@@ -21,6 +21,7 @@ learner's own completion evidence.
 | 11 | Python fluency drills implemented and tested | Pending user confirmation | Virtual-environment practice pending |
 | 12 | Validated GPT shape graph, diagram renderer, and tests present | Pending user confirmation | From-memory diagram and tensor-shape review pending |
 | 13 | Deterministic NumPy attention, independent reference, validator, and tests present | Pending user confirmation | Exercise run and five reflection answers pending |
+| 14 | Deterministic MLP memory, basis-invariance, and superposition experiments present | Pending user confirmation | Exercise run, reflection answers, and 500-word Phase 1 review pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,

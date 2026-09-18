@@ -31,6 +31,11 @@ jobs:
           python scripts/run_day_13.py
           --output /tmp/ai-journey-artifacts/day-13-attention.md
           --json-output /tmp/ai-journey-artifacts/day-13-attention.json
+      - name: Run Day 14 MLP memory validation
+        run: >-
+          python scripts/run_day_14.py
+          --output /tmp/ai-journey-artifacts/day-14-mlp-memory.md
+          --json-output /tmp/ai-journey-artifacts/day-14-mlp-memory.json
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py
