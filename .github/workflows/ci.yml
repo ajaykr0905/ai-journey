@@ -36,6 +36,11 @@ jobs:
           python scripts/run_day_14.py
           --output /tmp/ai-journey-artifacts/day-14-mlp-memory.md
           --json-output /tmp/ai-journey-artifacts/day-14-mlp-memory.json
+      - name: Run Day 15 scalar autodiff validation
+        run: >-
+          python scripts/run_day_15.py
+          --output /tmp/ai-journey-artifacts/day-15-scalar-autodiff.md
+          --json-output /tmp/ai-journey-artifacts/day-15-scalar-autodiff.json
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py
