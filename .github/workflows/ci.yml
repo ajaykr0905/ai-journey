@@ -41,6 +41,11 @@ jobs:
           python scripts/run_day_15.py
           --output /tmp/ai-journey-artifacts/day-15-scalar-autodiff.md
           --json-output /tmp/ai-journey-artifacts/day-15-scalar-autodiff.json
+      - name: Run Day 16 manual backprop validation
+        run: >-
+          python scripts/run_day_16.py
+          --output /tmp/ai-journey-artifacts/day-16-manual-backprop.md
+          --json-output /tmp/ai-journey-artifacts/day-16-manual-backprop.json
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py

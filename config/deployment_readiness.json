@@ -8,7 +8,8 @@
     "scripts/run_day_12.py",
     "scripts/run_day_13.py",
     "scripts/run_day_14.py",
-    "scripts/run_day_15.py"
+    "scripts/run_day_15.py",
+    "scripts/run_day_16.py"
   ],
   "required_directories": [
     "days",

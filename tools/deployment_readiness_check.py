@@ -35,6 +35,7 @@ DEFAULT_CONFIG: dict[str, list[str]] = {
         "scripts/run_day_13.py",
         "scripts/run_day_14.py",
         "scripts/run_day_15.py",
+        "scripts/run_day_16.py",
     ],
     "required_directories": ["days", "src/ai_journey", "tests"],
     "required_commands": ["python3"],
