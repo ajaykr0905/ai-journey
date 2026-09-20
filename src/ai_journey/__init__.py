@@ -2,6 +2,7 @@
 
 from .attention import AttentionConfig, run_attention_experiment
 from .gradients import gradient_descent_x_squared
+from .manual_backprop import manual_backward, run_manual_backprop_experiment
 from .mlp_memory import run_memory_experiment
 from .neural_net import default_parameters, forward, full_backward
 from .scalar_autodiff import Value, run_autodiff_experiment
@@ -10,15 +11,17 @@ from .xor import train_xor
 
 __all__ = [
     "AttentionConfig",
+    "TransformerConfig",
+    "Value",
+    "build_gpt_shape_flow",
     "default_parameters",
     "forward",
     "full_backward",
     "gradient_descent_x_squared",
-    "run_memory_experiment",
+    "manual_backward",
     "run_attention_experiment",
     "run_autodiff_experiment",
-    "TransformerConfig",
-    "Value",
-    "build_gpt_shape_flow",
+    "run_manual_backprop_experiment",
+    "run_memory_experiment",
     "train_xor",
 ]
