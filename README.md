@@ -1,7 +1,7 @@
-# AI Journey: Days 0–15
+# AI Journey: Days 0–16
 
 This repository is a public-safe, executable record of an added setup day plus the
-first fifteen workbook days of a 90-day AI engineering learning plan. It combines
+first sixteen workbook days of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -27,6 +27,8 @@ then grow these exercises into production-quality training and inference project
   [`scripts/run_day_14.py`](scripts/run_day_14.py)
 - A scalar reverse-mode autodiff engine and independent gradient check in
   [`scripts/run_day_15.py`](scripts/run_day_15.py)
+- An edge-by-edge manual backprop trace with three-way gradient verification in
+  [`scripts/run_day_16.py`](scripts/run_day_16.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -44,6 +46,7 @@ python scripts/run_day_12.py --output artifacts/day-12-gpt-shapes.md
 python scripts/run_day_13.py --output artifacts/day-13-attention.md
 python scripts/run_day_14.py --output artifacts/day-14-mlp-memory.md
 python scripts/run_day_15.py --output artifacts/day-15-scalar-autodiff.md
+python scripts/run_day_16.py --output artifacts/day-16-manual-backprop.md
 python -m unittest discover -s tests -v
 ```
 
@@ -53,7 +56,7 @@ finite-difference verification still runs and CI remains meaningful.
 
 ## Configuration safety
 
-Days 0–15 require no credentials. Never commit `.env`, credentials, browser data,
+Days 0–16 require no credentials. Never commit `.env`, credentials, browser data,
 cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 
 ## Daily map
@@ -76,6 +79,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 13 | 2026-09-17 | Single-head scaled dot-product attention in NumPy |
 | 14 | 2026-09-18 | Transformer MLPs as key/value memories and superposition |
 | 15 | 2026-09-19 | Scalar values, computation graphs, and reverse-mode autodiff |
+| 16 | 2026-09-20 | Manual add/multiply backprop and chain-rule trace |
 
 ## License
 
