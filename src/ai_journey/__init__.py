@@ -6,11 +6,14 @@ from .manual_backprop import manual_backward, run_manual_backprop_experiment
 from .mlp_memory import run_memory_experiment
 from .neural_net import default_parameters, forward, full_backward
 from .scalar_autodiff import Value, run_autodiff_experiment
+from .tiny_mlp import MLP, TrainingConfig, run_mlp_experiment, train_mlp
 from .transformer_shapes import TransformerConfig, build_gpt_shape_flow
 from .xor import train_xor
 
 __all__ = [
+    "MLP",
     "AttentionConfig",
+    "TrainingConfig",
     "TransformerConfig",
     "Value",
     "build_gpt_shape_flow",
@@ -23,5 +26,7 @@ __all__ = [
     "run_autodiff_experiment",
     "run_manual_backprop_experiment",
     "run_memory_experiment",
+    "run_mlp_experiment",
+    "train_mlp",
     "train_xor",
 ]
