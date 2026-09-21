@@ -46,6 +46,11 @@ jobs:
           python scripts/run_day_16.py
           --output /tmp/ai-journey-artifacts/day-16-manual-backprop.md
           --json-output /tmp/ai-journey-artifacts/day-16-manual-backprop.json
+      - name: Run Day 17 scalar MLP validation
+        run: >-
+          python scripts/run_day_17.py
+          --output /tmp/ai-journey-artifacts/day-17-scalar-mlp.md
+          --json-output /tmp/ai-journey-artifacts/day-17-scalar-mlp.json
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py

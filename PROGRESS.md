@@ -1,6 +1,6 @@
 # Progress and Evidence
 
-Last updated: 2026-09-20
+Last updated: 2026-09-21
 
 This file separates repository-verifiable work from activities that require the
 learner's own completion evidence.
@@ -24,6 +24,7 @@ learner's own completion evidence.
 | 14 | Deterministic MLP memory, basis-invariance, and superposition experiments present | Pending user confirmation | Exercise run, reflection answers, and 500-word Phase 1 review pending |
 | 15 | Scalar autodiff DAG, reverse pass, graph report, and gradient checks present | Pending user confirmation | Type-along, exercise run, and graph explanation pending |
 | 16 | Manual add/multiply reverse trace and three-way gradient comparison present | Pending user confirmation | Learner-written backward functions, hand verification, exercise run, and explanation pending |
+| 17 | Deterministic scalar MLP, loss trace, and parameter gradient probes present | Pending user confirmation | Learner-written MLP, exercise run, architecture derivation, and explanations pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,
