@@ -51,6 +51,12 @@ jobs:
           python scripts/run_day_17.py
           --output /tmp/ai-journey-artifacts/day-17-scalar-mlp.md
           --json-output /tmp/ai-journey-artifacts/day-17-scalar-mlp.json
+      - name: Run Day 19 character bigram validation
+        run: >-
+          python scripts/run_day_19.py
+          --output /tmp/ai-journey-artifacts/day-19-bigram.md
+          --json-output /tmp/ai-journey-artifacts/day-19-bigram.json
+          --manifest-output /tmp/ai-journey-artifacts/day-19-corpus-manifest.json
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py

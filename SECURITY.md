@@ -1,6 +1,6 @@
 # Security
 
-Days 0–17 require no passwords, tokens, cookies, cloud keys, or other credentials.
+Days 0–19 require no passwords, tokens, cookies, cloud keys, or other credentials.
 Credentials mentioned in prior chats or local files are never migrated into this
 repository.
 

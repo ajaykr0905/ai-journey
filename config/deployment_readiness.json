@@ -10,7 +10,10 @@
     "scripts/run_day_14.py",
     "scripts/run_day_15.py",
     "scripts/run_day_16.py",
-    "scripts/run_day_17.py"
+    "scripts/run_day_17.py",
+    "scripts/run_day_19.py",
+    "data/day-19-demo-names.txt",
+    "data/day-19-demo-names.manifest.json"
   ],
   "required_directories": [
     "days",
