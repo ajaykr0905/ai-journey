@@ -1,0 +1,30 @@
+{
+  "source": "data/day-19-demo-names.txt",
+  "provenance": "Independently selected synthetic name-like tokens for education",
+  "license": "CC0-1.0",
+  "encoding": "UTF-8, one lowercase ASCII token per line, LF line endings",
+  "sha256": "f3670d269756a7b8800389c29599c25b2eccc63ca16e7b4f84b532d21f973411",
+  "word_count": 20,
+  "character_count": 100,
+  "unique_word_count": 20,
+  "vocabulary": [
+    ".",
+    "a",
+    "d",
+    "e",
+    "h",
+    "i",
+    "k",
+    "l",
+    "m",
+    "n",
+    "o",
+    "p",
+    "r",
+    "s",
+    "t",
+    "v",
+    "y",
+    "z"
+  ]
+}

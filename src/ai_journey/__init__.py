@@ -1,6 +1,7 @@
 """Small, deterministic exercises for the AI Journey repository."""
 
 from .attention import AttentionConfig, run_attention_experiment
+from .bigram_lm import BigramModel, Vocabulary, run_bigram_experiment
 from .gradients import gradient_descent_x_squared
 from .manual_backprop import manual_backward, run_manual_backprop_experiment
 from .mlp_memory import run_memory_experiment
@@ -13,9 +14,11 @@ from .xor import train_xor
 __all__ = [
     "MLP",
     "AttentionConfig",
+    "BigramModel",
     "TrainingConfig",
     "TransformerConfig",
     "Value",
+    "Vocabulary",
     "build_gpt_shape_flow",
     "default_parameters",
     "forward",
@@ -24,6 +27,7 @@ __all__ = [
     "manual_backward",
     "run_attention_experiment",
     "run_autodiff_experiment",
+    "run_bigram_experiment",
     "run_manual_backprop_experiment",
     "run_memory_experiment",
     "run_mlp_experiment",
