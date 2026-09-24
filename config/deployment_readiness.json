@@ -12,6 +12,8 @@
     "scripts/run_day_16.py",
     "scripts/run_day_17.py",
     "scripts/run_day_19.py",
+    "scripts/run_day_20.py",
+    "days/day-20.md",
     "data/day-19-demo-names.txt",
     "data/day-19-demo-names.manifest.json"
   ],

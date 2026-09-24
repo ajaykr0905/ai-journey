@@ -57,6 +57,11 @@ jobs:
           --output /tmp/ai-journey-artifacts/day-19-bigram.md
           --json-output /tmp/ai-journey-artifacts/day-19-bigram.json
           --manifest-output /tmp/ai-journey-artifacts/day-19-corpus-manifest.json
+      - name: Run Day 20 neural bigram validation
+        run: >-
+          python scripts/run_day_20.py
+          --output /tmp/ai-journey-artifacts/day-20-neural-bigram.md
+          --json-output /tmp/ai-journey-artifacts/day-20-neural-bigram.json
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py

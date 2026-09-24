@@ -1,6 +1,6 @@
 # Progress and Evidence
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
 
 This file separates repository-verifiable work from activities that require the
 learner's own completion evidence.
@@ -27,6 +27,7 @@ learner's own completion evidence.
 | 17 | Deterministic scalar MLP, loss trace, and parameter gradient probes present | Pending user confirmation | Learner-written MLP, exercise run, architecture derivation, and explanations pending |
 | 18 | No new code scheduled; rebuild instructions recorded without claiming completion | No primary lecture scheduled; support lecture pending user confirmation | Blank-file micrograd rebuild, diff, and gap log pending |
 | 19 | Deterministic bigram count model, corpus manifest, loop oracle, sampling trace, and smoke tests present | Pending user confirmation | Learner type-along, ten-name sample run, broadcasting explanation, and support-lecture reflection pending |
+| 20 | Deterministic neural bigram, exact smoothed-count loss match, finite-difference gradient checks, and training smoke test present | Pending user confirmation | Learner type-along, exercise run, hand NLL, equivalence derivation, and support-lecture explanation pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,

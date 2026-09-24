@@ -1,7 +1,7 @@
-# AI Journey: Days 0–19
+# AI Journey: Days 0–20
 
 This repository is a public-safe, executable record of an added setup day plus the
-first nineteen workbook days of a 90-day AI engineering learning plan. It combines
+first twenty workbook days of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -33,6 +33,9 @@ then grow these exercises into production-quality training and inference project
   [`scripts/run_day_17.py`](scripts/run_day_17.py)
 - A deterministic character bigram count model, corpus manifest, and model smoke
   test in [`scripts/run_day_19.py`](scripts/run_day_19.py)
+- A deterministic neural bigram model with exact smoothed-count equivalence,
+  negative log-likelihood, and gradient checks in
+  [`scripts/run_day_20.py`](scripts/run_day_20.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -56,6 +59,9 @@ python scripts/run_day_19.py \
   --output artifacts/day-19-bigram.md \
   --json-output artifacts/day-19-bigram.json \
   --manifest-output artifacts/day-19-corpus-manifest.json
+python scripts/run_day_20.py \
+  --output artifacts/day-20-neural-bigram.md \
+  --json-output artifacts/day-20-neural-bigram.json
 python -m unittest discover -s tests -v
 ```
 
@@ -65,7 +71,7 @@ finite-difference verification still runs and CI remains meaningful.
 
 ## Configuration safety
 
-Days 0–19 require no credentials. Never commit `.env`, credentials, browser data,
+Days 0–20 require no credentials. Never commit `.env`, credentials, browser data,
 cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 
 ## Daily map
@@ -92,6 +98,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 17 | 2026-09-21 | Scalar neurons, dense layers, and deterministic MLP training |
 | 18 | 2026-09-22 | Blank-file micrograd rebuild; learner evidence remains pending |
 | 19 | 2026-09-23 | Character bigram counts, broadcasting, and deterministic sampling |
+| 20 | 2026-09-24 | Neural bigram NLL, smoothing equivalence, and gradient checks |
 
 ## License
 
