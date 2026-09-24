@@ -1,7 +1,7 @@
-# AI Journey: Days 0–20
+# AI Journey: Days 0–21
 
 This repository is a public-safe, executable record of an added setup day plus the
-first twenty workbook days of a 90-day AI engineering learning plan. It combines
+first twenty-one workbook days of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -36,6 +36,10 @@ then grow these exercises into production-quality training and inference project
 - A deterministic neural bigram model with exact smoothed-count equivalence,
   negative log-likelihood, and gradient checks in
   [`scripts/run_day_20.py`](scripts/run_day_20.py)
+- A deterministic corpus-shift and record-boundary integrity lab in
+  [`scripts/run_day_21.py`](scripts/run_day_21.py)
+- An evidence-bounded map from local exercises to active public infrastructure
+  work in [`OPEN_SOURCE.md`](OPEN_SOURCE.md)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -62,6 +66,9 @@ python scripts/run_day_19.py \
 python scripts/run_day_20.py \
   --output artifacts/day-20-neural-bigram.md \
   --json-output artifacts/day-20-neural-bigram.json
+python scripts/run_day_21.py \
+  --output artifacts/day-21-corpus-shift.md \
+  --json-output artifacts/day-21-corpus-shift.json
 python -m unittest discover -s tests -v
 ```
 
@@ -71,7 +78,7 @@ finite-difference verification still runs and CI remains meaningful.
 
 ## Configuration safety
 
-Days 0–20 require no credentials. Never commit `.env`, credentials, browser data,
+Days 0–21 require no credentials. Never commit `.env`, credentials, browser data,
 cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 
 ## Daily map
@@ -99,6 +106,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 18 | 2026-09-22 | Blank-file micrograd rebuild; learner evidence remains pending |
 | 19 | 2026-09-23 | Character bigram counts, broadcasting, and deterministic sampling |
 | 20 | 2026-09-24 | Neural bigram NLL, smoothing equivalence, and gradient checks |
+| 21 | 2026-09-25 | Dataset shift, cross-corpus evaluation, and record-boundary integrity |
 
 ## License
 

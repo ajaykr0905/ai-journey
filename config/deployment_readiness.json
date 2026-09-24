@@ -13,9 +13,14 @@
     "scripts/run_day_17.py",
     "scripts/run_day_19.py",
     "scripts/run_day_20.py",
+    "scripts/run_day_21.py",
     "days/day-20.md",
+    "days/day-21.md",
     "data/day-19-demo-names.txt",
-    "data/day-19-demo-names.manifest.json"
+    "data/day-19-demo-names.manifest.json",
+    "data/day-21-indian-cities.txt",
+    "data/day-21-indian-cities.manifest.json",
+    "OPEN_SOURCE.md"
   ],
   "required_directories": [
     "days",
