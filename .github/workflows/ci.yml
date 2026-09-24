@@ -65,8 +65,7 @@ jobs:
       - name: Run Day 21 corpus shift validation
         run: >-
           python scripts/run_day_21.py
-          --output /tmp/ai-journey-artifacts/day-21-corpus-shift.md
-          --json-output /tmp/ai-journey-artifacts/day-21-corpus-shift.json
+          --output /tmp/ai-journey-artifacts/day-21-corpus-shift.json
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py

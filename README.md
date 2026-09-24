@@ -38,8 +38,6 @@ then grow these exercises into production-quality training and inference project
   [`scripts/run_day_20.py`](scripts/run_day_20.py)
 - A deterministic corpus-shift and record-boundary integrity lab in
   [`scripts/run_day_21.py`](scripts/run_day_21.py)
-- An evidence-bounded map from local exercises to active public infrastructure
-  work in [`OPEN_SOURCE.md`](OPEN_SOURCE.md)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -67,8 +65,7 @@ python scripts/run_day_20.py \
   --output artifacts/day-20-neural-bigram.md \
   --json-output artifacts/day-20-neural-bigram.json
 python scripts/run_day_21.py \
-  --output artifacts/day-21-corpus-shift.md \
-  --json-output artifacts/day-21-corpus-shift.json
+  --output artifacts/day-21-corpus-shift.json
 python -m unittest discover -s tests -v
 ```
 
