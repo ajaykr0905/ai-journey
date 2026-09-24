@@ -38,11 +38,12 @@ class Day20CliTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("Validated Day 20", result.stderr)
-            self.assertIn("count_neural_error=0.000e+00", result.stderr)
+            self.assertIn("count_neural_error=", result.stderr)
             self.assertIn("Count-to-neural equivalence", output.read_text())
             payload = json.loads(json_output.read_text(encoding="utf-8"))
             self.assertEqual(payload["metrics"]["sample_count"], 4)
             self.assertEqual(payload["metrics"]["seed"], 20)
+            self.assertLess(payload["metrics"]["equivalence_error"], 1e-12)
             self.assertEqual(len(payload["gradient_probes"]), 6)
 
     def test_cli_reports_invalid_smoothing_without_traceback(self) -> None:

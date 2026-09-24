@@ -96,11 +96,13 @@ With `alpha = 1` on the checked-in corpus, the deterministic run reports:
 ```text
 smoothed count-model NLL: 2.051851633208
 log-count neural NLL:     2.051851633208
-absolute difference:     0.0
+absolute difference:     below 1e-12
 ```
 
-This equality is an executable identity for the fixed corpus. It is not a claim
-that every neural language model is equivalent to a count model.
+This is an exact mathematical identity for the fixed corpus. Floating-point
+implementations can differ in their last few bits, so the validator accepts an
+absolute loss difference below `1e-12`. It is not a claim that every neural
+language model is equivalent to a count model.
 
 ## Analytic gradient and numerical oracle
 
