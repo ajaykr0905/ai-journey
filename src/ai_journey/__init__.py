@@ -2,6 +2,7 @@
 
 from .attention import AttentionConfig, run_attention_experiment
 from .bigram_lm import BigramModel, Vocabulary, run_bigram_experiment
+from .corpus_shift import CorpusShiftExperiment, run_corpus_shift_experiment
 from .gradients import gradient_descent_x_squared
 from .manual_backprop import manual_backward, run_manual_backprop_experiment
 from .mlp_memory import run_memory_experiment
@@ -15,6 +16,7 @@ __all__ = [
     "MLP",
     "AttentionConfig",
     "BigramModel",
+    "CorpusShiftExperiment",
     "TrainingConfig",
     "TransformerConfig",
     "Value",
@@ -28,6 +30,7 @@ __all__ = [
     "run_attention_experiment",
     "run_autodiff_experiment",
     "run_bigram_experiment",
+    "run_corpus_shift_experiment",
     "run_manual_backprop_experiment",
     "run_memory_experiment",
     "run_mlp_experiment",
