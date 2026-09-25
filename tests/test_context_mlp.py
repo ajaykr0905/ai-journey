@@ -17,6 +17,7 @@ from ai_journey.context_mlp import (
     build_split_datasets,
     create_minibatches,
     evaluate_context_mlp,
+    gradient_global_norm,
     initialize_context_mlp,
     loss_and_gradients,
     parameter_count,
@@ -187,6 +188,10 @@ class ContextMLPTests(unittest.TestCase):
                 self.assertAlmostEqual(
                     getattr(gradients, name)[index], numeric, places=7
                 )
+        expected = np.sqrt(
+            sum(np.sum(values**2) for values in gradients.__dict__.values())
+        )
+        self.assertAlmostEqual(gradient_global_norm(gradients), expected)
 
     def test_training_reduces_loss(self) -> None:
         result = train_context_mlp(

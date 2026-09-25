@@ -301,6 +301,15 @@ def parameter_count(model: ContextMLP) -> int:
     return sum(int(values.size) for values in model.__dict__.values())
 
 
+def gradient_global_norm(gradients: ContextMLP) -> float:
+    """Compute one L2 norm across all parameter gradients."""
+
+    if not isinstance(gradients, ContextMLP):
+        raise TypeError("gradients must be ContextMLP")
+    squared = sum(float(np.sum(values**2)) for values in gradients.__dict__.values())
+    return sqrt(squared)
+
+
 def predict_probabilities(dataset: ContextDataset, model: ContextMLP) -> np.ndarray:
     """Return next-token probabilities for every context."""
 
