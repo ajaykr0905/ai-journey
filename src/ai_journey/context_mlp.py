@@ -45,6 +45,15 @@ class ContextMLP:
 class TrainingResult:
     model: ContextMLP
     losses: tuple[float, ...]
+    trace: tuple[TrainingStep, ...]
+
+
+@dataclass(frozen=True)
+class TrainingStep:
+    step: int
+    loss: float
+    gradient_norm: float
+    learning_rate: float
 
 
 @dataclass(frozen=True)
@@ -418,9 +427,18 @@ def train_context_mlp(
         seed=seed,
     )
     losses = []
-    for _ in range(steps):
+    trace = []
+    for step in range(steps):
         loss, gradients = loss_and_gradients(dataset, model)
         losses.append(loss)
+        trace.append(
+            TrainingStep(
+                step=step,
+                loss=loss,
+                gradient_norm=gradient_global_norm(gradients),
+                learning_rate=learning_rate,
+            )
+        )
         model = ContextMLP(
             embeddings=model.embeddings - learning_rate * gradients.embeddings,
             input_weights=model.input_weights - learning_rate * gradients.input_weights,
@@ -431,4 +449,4 @@ def train_context_mlp(
         )
     final_loss, _ = loss_and_gradients(dataset, model)
     losses.append(final_loss)
-    return TrainingResult(model=model, losses=tuple(losses))
+    return TrainingResult(model=model, losses=tuple(losses), trace=tuple(trace))
