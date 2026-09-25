@@ -14,6 +14,7 @@ class TrainContextMLPTests(unittest.TestCase):
     def test_cli_trains_and_writes_reproducibility_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "metrics.json"
+            checkpoint = Path(directory) / "model.json"
             result = subprocess.run(
                 [
                     sys.executable,
@@ -26,6 +27,8 @@ class TrainContextMLPTests(unittest.TestCase):
                     "10",
                     "--seed",
                     "22",
+                    "--checkpoint",
+                    str(checkpoint),
                 ],
                 cwd=ROOT,
                 check=False,
@@ -37,6 +40,9 @@ class TrainContextMLPTests(unittest.TestCase):
             self.assertLess(payload["final_loss"], payload["initial_loss"])
             self.assertEqual(payload["steps"], 10)
             self.assertEqual(len(payload["model_fingerprint"]), 64)
+            saved = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(saved["step"], 10)
+            self.assertEqual(saved["model_fingerprint"], payload["model_fingerprint"])
 
 
 if __name__ == "__main__":

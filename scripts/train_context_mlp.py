@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.bigram_lm import load_corpus
+from ai_journey.context_checkpoint import save_checkpoint
 from ai_journey.context_mlp import (
     build_context_dataset,
     dataset_fingerprint,
@@ -27,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--steps", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--checkpoint", type=Path)
     args = parser.parse_args(argv)
 
     dataset = build_context_dataset(load_corpus(args.corpus))
@@ -41,6 +43,8 @@ def main(argv: list[str] | None = None) -> int:
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    if args.checkpoint:
+        save_checkpoint(args.checkpoint, result.model, step=args.steps)
     return 0
 
 
