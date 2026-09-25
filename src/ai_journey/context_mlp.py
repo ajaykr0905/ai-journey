@@ -192,6 +192,36 @@ def _validate_dataset(dataset: ContextDataset) -> None:
         raise ContextMLPError("target token is outside the vocabulary")
 
 
+def create_minibatches(
+    dataset: ContextDataset,
+    *,
+    batch_size: int,
+    seed: int = 0,
+    shuffle: bool = True,
+) -> tuple[ContextDataset, ...]:
+    """Partition every sample once using a deterministic permutation."""
+
+    _validate_dataset(dataset)
+    size = _positive_int("batch_size", batch_size)
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise TypeError("seed must be an integer")
+    if not isinstance(shuffle, bool):
+        raise TypeError("shuffle must be a boolean")
+    order = np.arange(dataset.sample_count)
+    if shuffle:
+        order = np.random.default_rng(seed).permutation(order)
+    return tuple(
+        ContextDataset(
+            vocabulary=dataset.vocabulary,
+            contexts=dataset.contexts[indexes],
+            targets=dataset.targets[indexes],
+            block_size=dataset.block_size,
+        )
+        for start in range(0, dataset.sample_count, size)
+        for indexes in (order[start : start + size],)
+    )
+
+
 def initialize_context_mlp(
     dataset: ContextDataset,
     *,

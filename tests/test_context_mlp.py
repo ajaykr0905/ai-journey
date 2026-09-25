@@ -14,6 +14,7 @@ from ai_journey.context_mlp import (
     ContextMLPError,
     build_context_dataset,
     build_split_datasets,
+    create_minibatches,
     initialize_context_mlp,
     loss_and_gradients,
     predict_probabilities,
@@ -83,6 +84,24 @@ class ContextDatasetTests(unittest.TestCase):
                 self.assertRaises((TypeError, ContextMLPError)),
             ):
                 build_context_dataset(("ab",), block_size=value)
+
+    def test_minibatches_are_deterministic_and_cover_each_sample(self) -> None:
+        dataset = build_context_dataset(("anna", "aria", "navi"))
+        first = create_minibatches(dataset, batch_size=4, seed=17)
+        second = create_minibatches(dataset, batch_size=4, seed=17)
+        self.assertEqual([batch.sample_count for batch in first], [4, 4, 4, 3])
+        np.testing.assert_array_equal(
+            np.concatenate([batch.targets for batch in first]),
+            np.concatenate([batch.targets for batch in second]),
+        )
+        observed = sorted(
+            zip(
+                np.concatenate([batch.contexts for batch in first]).tolist(),
+                np.concatenate([batch.targets for batch in first]).tolist(),
+            )
+        )
+        expected = sorted(zip(dataset.contexts.tolist(), dataset.targets.tolist()))
+        self.assertEqual(observed, expected)
 
 
 class ContextMLPTests(unittest.TestCase):
