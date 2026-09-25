@@ -54,6 +54,12 @@ class CorpusSplit:
 
 
 @dataclass(frozen=True)
+class DatasetSplit:
+    train: ContextDataset
+    validation: ContextDataset
+
+
+@dataclass(frozen=True)
 class _ForwardPass:
     flattened: np.ndarray
     hidden: np.ndarray
@@ -102,13 +108,15 @@ def split_records(
 
 
 def build_context_dataset(
-    words: Iterable[str], *, block_size: int = 3
+    words: Iterable[str], *, block_size: int = 3, vocabulary: Vocabulary | None = None
 ) -> ContextDataset:
     """Create fixed-width contexts without crossing record boundaries."""
 
     corpus = normalize_corpus(words)
     width = _positive_int("block_size", block_size)
-    vocabulary = build_vocabulary(corpus)
+    vocabulary = vocabulary or build_vocabulary(corpus)
+    if not isinstance(vocabulary, Vocabulary):
+        raise TypeError("vocabulary must be Vocabulary")
     boundary_id = vocabulary.encode(BOUNDARY_TOKEN)
     contexts: list[tuple[int, ...]] = []
     targets: list[int] = []
@@ -129,6 +137,28 @@ def build_context_dataset(
     )
     _validate_dataset(dataset)
     return dataset
+
+
+def build_split_datasets(
+    words: Iterable[str],
+    *,
+    block_size: int = 3,
+    validation_fraction: float = 0.2,
+    seed: int = 0,
+) -> DatasetSplit:
+    """Build train and validation datasets with one shared vocabulary."""
+
+    corpus = normalize_corpus(words)
+    vocabulary = build_vocabulary(corpus)
+    split = split_records(corpus, validation_fraction=validation_fraction, seed=seed)
+    return DatasetSplit(
+        train=build_context_dataset(
+            split.train, block_size=block_size, vocabulary=vocabulary
+        ),
+        validation=build_context_dataset(
+            split.validation, block_size=block_size, vocabulary=vocabulary
+        ),
+    )
 
 
 def _validate_dataset(dataset: ContextDataset) -> None:

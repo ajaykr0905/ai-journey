@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from ai_journey.context_mlp import (
     ContextMLPError,
     build_context_dataset,
+    build_split_datasets,
     initialize_context_mlp,
     loss_and_gradients,
     predict_probabilities,
@@ -36,6 +37,16 @@ class ContextDatasetTests(unittest.TestCase):
             split_records(("anna",))
         with self.assertRaises(ContextMLPError):
             split_records(("anna", "aria"), validation_fraction=1.0)
+
+    def test_split_datasets_share_one_vocabulary(self) -> None:
+        datasets = build_split_datasets(
+            ("anna", "aria", "navi", "devin", "priya"), seed=3
+        )
+        self.assertEqual(
+            datasets.train.vocabulary.tokens,
+            datasets.validation.vocabulary.tokens,
+        )
+        self.assertIn("p", datasets.train.vocabulary.tokens)
 
     def test_contexts_are_boundary_aware(self) -> None:
         dataset = build_context_dataset(("ab",), block_size=3)
