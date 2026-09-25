@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -44,3 +46,17 @@ def model_from_payload(payload: dict[str, Any]) -> ContextMLP:
     if model_fingerprint(model) != payload.get("model_fingerprint"):
         raise ValueError("checkpoint fingerprint mismatch")
     return model
+
+
+def save_checkpoint(path: Path, model: ContextMLP, *, step: int) -> None:
+    """Atomically replace a checkpoint with validated JSON."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(checkpoint_payload(model, step=step), separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
