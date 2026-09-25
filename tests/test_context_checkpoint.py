@@ -8,8 +8,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ai_journey.context_checkpoint import checkpoint_payload
-from ai_journey.context_mlp import build_context_dataset, initialize_context_mlp
+from ai_journey.context_checkpoint import checkpoint_payload, model_from_payload
+from ai_journey.context_mlp import (
+    build_context_dataset,
+    initialize_context_mlp,
+    model_fingerprint,
+)
 
 
 class ContextCheckpointTests(unittest.TestCase):
@@ -21,6 +25,15 @@ class ContextCheckpointTests(unittest.TestCase):
         self.assertEqual(payload["step"], 12)
         self.assertEqual(len(payload["model_fingerprint"]), 64)
         json.dumps(payload)
+        restored = model_from_payload(payload)
+        self.assertEqual(model_fingerprint(restored), model_fingerprint(model))
+
+    def test_tampered_payload_is_rejected(self) -> None:
+        dataset = build_context_dataset(("anna", "aria"))
+        payload = checkpoint_payload(initialize_context_mlp(dataset), step=0)
+        payload["parameters"]["output_bias"][0] = 99
+        with self.assertRaisesRegex(ValueError, "fingerprint"):
+            model_from_payload(payload)
 
 
 if __name__ == "__main__":
