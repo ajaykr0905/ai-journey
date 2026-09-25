@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from dataclasses import replace
+from itertools import pairwise
 from math import exp
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from ai_journey.context_mlp import (
     evaluate_context_mlp,
     gradient_global_norm,
     initialize_context_mlp,
+    linear_learning_rate,
     loss_and_gradients,
     parameter_count,
     predict_probabilities,
@@ -128,6 +130,15 @@ class ContextMLPTests(unittest.TestCase):
             + self.dataset.vocabulary.size
         )
         self.assertEqual(parameter_count(model), expected)
+
+    def test_linear_learning_rate_hits_both_endpoints(self) -> None:
+        rates = [
+            linear_learning_rate(0.2, 0.02, step=step, total_steps=5)
+            for step in range(5)
+        ]
+        self.assertEqual(rates[0], 0.2)
+        self.assertAlmostEqual(rates[-1], 0.02)
+        self.assertTrue(all(left > right for left, right in pairwise(rates)))
 
     def test_initialization_is_seeded(self) -> None:
         first = initialize_context_mlp(self.dataset, seed=11)

@@ -334,6 +334,29 @@ def clip_gradients(gradients: ContextMLP, *, max_norm: float) -> ContextMLP:
     )
 
 
+def linear_learning_rate(
+    initial: float, final: float, *, step: int, total_steps: int
+) -> float:
+    """Interpolate a learning rate over a fixed number of update steps."""
+
+    total_steps = _positive_int("total_steps", total_steps)
+    if (
+        isinstance(step, bool)
+        or not isinstance(step, int)
+        or not 0 <= step < total_steps
+    ):
+        raise ContextMLPError("step must be within the training schedule")
+    for name, value in (("initial", initial), ("final", final)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(f"{name} must be a real number")
+        if not isfinite(value) or value <= 0:
+            raise ContextMLPError(f"{name} must be finite and positive")
+    if total_steps == 1:
+        return float(initial)
+    fraction = step / (total_steps - 1)
+    return float(initial + fraction * (final - initial))
+
+
 def predict_probabilities(dataset: ContextDataset, model: ContextMLP) -> np.ndarray:
     """Return next-token probabilities for every context."""
 
