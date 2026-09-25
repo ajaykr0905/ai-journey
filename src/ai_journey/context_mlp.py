@@ -310,6 +310,21 @@ def gradient_global_norm(gradients: ContextMLP) -> float:
     return sqrt(squared)
 
 
+def clip_gradients(gradients: ContextMLP, *, max_norm: float) -> ContextMLP:
+    """Scale all gradients together when their global norm exceeds a limit."""
+
+    if isinstance(max_norm, bool) or not isinstance(max_norm, (int, float)):
+        raise TypeError("max_norm must be a real number")
+    max_norm = float(max_norm)
+    if not isfinite(max_norm) or max_norm <= 0:
+        raise ContextMLPError("max_norm must be finite and positive")
+    norm = gradient_global_norm(gradients)
+    scale = min(1.0, max_norm / norm) if norm else 1.0
+    return ContextMLP(
+        **{name: values * scale for name, values in gradients.__dict__.items()}
+    )
+
+
 def predict_probabilities(dataset: ContextDataset, model: ContextMLP) -> np.ndarray:
     """Return next-token probabilities for every context."""
 

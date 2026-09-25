@@ -15,6 +15,7 @@ from ai_journey.context_mlp import (
     ContextMLPError,
     build_context_dataset,
     build_split_datasets,
+    clip_gradients,
     create_minibatches,
     evaluate_context_mlp,
     gradient_global_norm,
@@ -192,6 +193,14 @@ class ContextMLPTests(unittest.TestCase):
             sum(np.sum(values**2) for values in gradients.__dict__.values())
         )
         self.assertAlmostEqual(gradient_global_norm(gradients), expected)
+
+    def test_gradient_clipping_preserves_direction_and_caps_norm(self) -> None:
+        model = initialize_context_mlp(self.dataset, seed=5)
+        _, gradients = loss_and_gradients(self.dataset, model)
+        original_norm = gradient_global_norm(gradients)
+        clipped = clip_gradients(gradients, max_norm=original_norm / 2)
+        self.assertAlmostEqual(gradient_global_norm(clipped), original_norm / 2)
+        np.testing.assert_allclose(clipped.output_bias, gradients.output_bias / 2)
 
     def test_training_reduces_loss(self) -> None:
         result = train_context_mlp(
