@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from dataclasses import replace
+from math import exp
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,7 @@ from ai_journey.context_mlp import (
     build_context_dataset,
     build_split_datasets,
     create_minibatches,
+    evaluate_context_mlp,
     initialize_context_mlp,
     loss_and_gradients,
     predict_probabilities,
@@ -131,6 +133,12 @@ class ContextMLPTests(unittest.TestCase):
         )
         np.testing.assert_allclose(probabilities.sum(axis=1), 1.0)
         self.assertTrue(np.all(probabilities > 0))
+
+    def test_evaluation_reports_nll_and_perplexity(self) -> None:
+        model = initialize_context_mlp(self.dataset, seed=3)
+        metrics = evaluate_context_mlp(self.dataset, model)
+        self.assertGreater(metrics.nll, 0)
+        self.assertAlmostEqual(metrics.perplexity, exp(metrics.nll))
 
     def test_shape_mismatch_is_rejected(self) -> None:
         model = initialize_context_mlp(self.dataset, seed=3)

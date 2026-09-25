@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from math import isfinite, sqrt
+from math import exp, isfinite, sqrt
 
 import numpy as np
 
@@ -57,6 +57,12 @@ class CorpusSplit:
 class DatasetSplit:
     train: ContextDataset
     validation: ContextDataset
+
+
+@dataclass(frozen=True)
+class EvaluationMetrics:
+    nll: float
+    perplexity: float
 
 
 @dataclass(frozen=True)
@@ -342,6 +348,17 @@ def loss_and_gradients(
         output_weights=output_weights,
         output_bias=output_bias,
     )
+
+
+def evaluate_context_mlp(
+    dataset: ContextDataset, model: ContextMLP
+) -> EvaluationMetrics:
+    """Evaluate mean NLL and perplexity without changing the model."""
+
+    forward = _forward(dataset, model)
+    rows = np.arange(dataset.sample_count)
+    nll = float(-forward.log_probabilities[rows, dataset.targets].mean())
+    return EvaluationMetrics(nll=nll, perplexity=exp(nll))
 
 
 def train_context_mlp(
