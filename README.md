@@ -38,6 +38,8 @@ then grow these exercises into production-quality training and inference project
   [`scripts/run_day_20.py`](scripts/run_day_20.py)
 - A CI-ready corpus drift gate with explicit divergence and perplexity limits in
   [`scripts/check_corpus_shift.py`](scripts/check_corpus_shift.py)
+- A boundary-safe context-window dataset and deterministic embedding MLP in
+  [`src/ai_journey/context_mlp.py`](src/ai_journey/context_mlp.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
