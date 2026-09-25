@@ -221,12 +221,13 @@ class ContextMLPTests(unittest.TestCase):
             steps=100,
             learning_rate=0.2,
             final_learning_rate=0.02,
+            max_gradient_norm=0.25,
             seed=9,
         )
         self.assertLess(result.losses[-1], result.losses[0])
         self.assertEqual(len(result.trace), 100)
         self.assertEqual(result.trace[0].step, 0)
-        self.assertGreater(result.trace[0].gradient_norm, 0)
+        self.assertLessEqual(result.trace[0].gradient_norm, 0.25)
         self.assertEqual(result.trace[0].learning_rate, 0.2)
         self.assertAlmostEqual(result.trace[-1].learning_rate, 0.02)
 

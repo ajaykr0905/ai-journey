@@ -433,6 +433,7 @@ def train_context_mlp(
     steps: int = 200,
     learning_rate: float = 0.1,
     final_learning_rate: float | None = None,
+    max_gradient_norm: float | None = None,
     seed: int = 0,
 ) -> TrainingResult:
     """Train with deterministic full-batch gradient descent."""
@@ -460,6 +461,8 @@ def train_context_mlp(
             learning_rate, final_learning_rate, step=step, total_steps=steps
         )
         loss, gradients = loss_and_gradients(dataset, model)
+        if max_gradient_norm is not None:
+            gradients = clip_gradients(gradients, max_norm=max_gradient_norm)
         losses.append(loss)
         trace.append(
             TrainingStep(
