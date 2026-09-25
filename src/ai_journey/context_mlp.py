@@ -363,6 +363,22 @@ def predict_probabilities(dataset: ContextDataset, model: ContextMLP) -> np.ndar
     return _forward(dataset, model).probabilities
 
 
+def predict_next(
+    vocabulary: Vocabulary, model: ContextMLP, context: tuple[int, ...]
+) -> np.ndarray:
+    """Return one next-token distribution for an encoded context."""
+
+    if not context:
+        raise ContextMLPError("context must not be empty")
+    dataset = ContextDataset(
+        vocabulary=vocabulary,
+        contexts=np.asarray([context], dtype=np.int64),
+        targets=np.zeros(1, dtype=np.int64),
+        block_size=len(context),
+    )
+    return predict_probabilities(dataset, model)[0]
+
+
 def _forward(dataset: ContextDataset, model: ContextMLP) -> _ForwardPass:
     _validate_dataset(dataset)
     _validate_model(model, dataset)

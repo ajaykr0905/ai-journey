@@ -24,6 +24,7 @@ from ai_journey.context_mlp import (
     linear_learning_rate,
     loss_and_gradients,
     parameter_count,
+    predict_next,
     predict_probabilities,
     split_records,
     train_context_mlp,
@@ -155,6 +156,12 @@ class ContextMLPTests(unittest.TestCase):
         )
         np.testing.assert_allclose(probabilities.sum(axis=1), 1.0)
         self.assertTrue(np.all(probabilities > 0))
+        single = predict_next(
+            self.dataset.vocabulary,
+            model,
+            tuple(int(value) for value in self.dataset.contexts[0]),
+        )
+        np.testing.assert_allclose(single, probabilities[0])
 
     def test_evaluation_reports_nll_and_perplexity(self) -> None:
         model = initialize_context_mlp(self.dataset, seed=3)
