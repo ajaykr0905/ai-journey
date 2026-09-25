@@ -391,6 +391,31 @@ def sample_next(probabilities: np.ndarray, *, seed: int) -> int:
     return int(np.random.default_rng(seed).choice(probabilities.size, p=probabilities))
 
 
+def generate_text(
+    vocabulary: Vocabulary,
+    model: ContextMLP,
+    *,
+    block_size: int,
+    seed: int,
+    max_tokens: int = 32,
+) -> str:
+    """Generate one boundary-terminated character sequence."""
+
+    block_size = _positive_int("block_size", block_size)
+    max_tokens = _positive_int("max_tokens", max_tokens)
+    boundary = vocabulary.encode(BOUNDARY_TOKEN)
+    context = [boundary] * block_size
+    output = []
+    for step in range(max_tokens):
+        probabilities = predict_next(vocabulary, model, tuple(context))
+        token = sample_next(probabilities, seed=seed + step)
+        if token == boundary:
+            break
+        output.append(vocabulary.decode(token))
+        context = [*context[1:], token]
+    return "".join(output)
+
+
 def _forward(dataset: ContextDataset, model: ContextMLP) -> _ForwardPass:
     _validate_dataset(dataset)
     _validate_model(model, dataset)

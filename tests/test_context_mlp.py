@@ -19,6 +19,7 @@ from ai_journey.context_mlp import (
     clip_gradients,
     create_minibatches,
     evaluate_context_mlp,
+    generate_text,
     gradient_global_norm,
     initialize_context_mlp,
     linear_learning_rate,
@@ -176,6 +177,17 @@ class ContextMLPTests(unittest.TestCase):
             sample_next(probabilities, seed=21),
             sample_next(probabilities, seed=21),
         )
+
+    def test_generation_is_deterministic_and_bounded(self) -> None:
+        model = initialize_context_mlp(self.dataset, seed=3)
+        first = generate_text(
+            self.dataset.vocabulary, model, block_size=3, seed=8, max_tokens=10
+        )
+        second = generate_text(
+            self.dataset.vocabulary, model, block_size=3, seed=8, max_tokens=10
+        )
+        self.assertEqual(first, second)
+        self.assertLessEqual(len(first), 10)
 
     def test_shape_mismatch_is_rejected(self) -> None:
         model = initialize_context_mlp(self.dataset, seed=3)
