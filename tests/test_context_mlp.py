@@ -26,6 +26,7 @@ from ai_journey.context_mlp import (
     parameter_count,
     predict_next,
     predict_probabilities,
+    sample_next,
     split_records,
     train_context_mlp,
 )
@@ -168,6 +169,13 @@ class ContextMLPTests(unittest.TestCase):
         metrics = evaluate_context_mlp(self.dataset, model)
         self.assertGreater(metrics.nll, 0)
         self.assertAlmostEqual(metrics.perplexity, exp(metrics.nll))
+
+    def test_token_sampling_is_seeded(self) -> None:
+        probabilities = np.array([0.1, 0.2, 0.7])
+        self.assertEqual(
+            sample_next(probabilities, seed=21),
+            sample_next(probabilities, seed=21),
+        )
 
     def test_shape_mismatch_is_rejected(self) -> None:
         model = initialize_context_mlp(self.dataset, seed=3)

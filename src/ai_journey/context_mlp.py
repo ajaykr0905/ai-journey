@@ -379,6 +379,18 @@ def predict_next(
     return predict_probabilities(dataset, model)[0]
 
 
+def sample_next(probabilities: np.ndarray, *, seed: int) -> int:
+    """Sample one token id reproducibly from a normalized distribution."""
+
+    if probabilities.ndim != 1 or not np.all(np.isfinite(probabilities)):
+        raise ContextMLPError("probabilities must be a finite vector")
+    if np.any(probabilities < 0) or not np.isclose(probabilities.sum(), 1.0):
+        raise ContextMLPError("probabilities must be non-negative and sum to one")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise TypeError("seed must be an integer")
+    return int(np.random.default_rng(seed).choice(probabilities.size, p=probabilities))
+
+
 def _forward(dataset: ContextDataset, model: ContextMLP) -> _ForwardPass:
     _validate_dataset(dataset)
     _validate_model(model, dataset)
