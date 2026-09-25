@@ -432,6 +432,7 @@ def train_context_mlp(
     hidden_dim: int = 64,
     steps: int = 200,
     learning_rate: float = 0.1,
+    final_learning_rate: float | None = None,
     seed: int = 0,
 ) -> TrainingResult:
     """Train with deterministic full-batch gradient descent."""
@@ -442,6 +443,9 @@ def train_context_mlp(
     learning_rate = float(learning_rate)
     if not isfinite(learning_rate) or learning_rate <= 0:
         raise ContextMLPError("learning_rate must be finite and positive")
+    final_learning_rate = (
+        learning_rate if final_learning_rate is None else final_learning_rate
+    )
 
     model = initialize_context_mlp(
         dataset,
@@ -452,6 +456,9 @@ def train_context_mlp(
     losses = []
     trace = []
     for step in range(steps):
+        step_learning_rate = linear_learning_rate(
+            learning_rate, final_learning_rate, step=step, total_steps=steps
+        )
         loss, gradients = loss_and_gradients(dataset, model)
         losses.append(loss)
         trace.append(
@@ -459,16 +466,17 @@ def train_context_mlp(
                 step=step,
                 loss=loss,
                 gradient_norm=gradient_global_norm(gradients),
-                learning_rate=learning_rate,
+                learning_rate=step_learning_rate,
             )
         )
         model = ContextMLP(
-            embeddings=model.embeddings - learning_rate * gradients.embeddings,
-            input_weights=model.input_weights - learning_rate * gradients.input_weights,
-            input_bias=model.input_bias - learning_rate * gradients.input_bias,
+            embeddings=model.embeddings - step_learning_rate * gradients.embeddings,
+            input_weights=model.input_weights
+            - step_learning_rate * gradients.input_weights,
+            input_bias=model.input_bias - step_learning_rate * gradients.input_bias,
             output_weights=model.output_weights
-            - learning_rate * gradients.output_weights,
-            output_bias=model.output_bias - learning_rate * gradients.output_bias,
+            - step_learning_rate * gradients.output_weights,
+            output_bias=model.output_bias - step_learning_rate * gradients.output_bias,
         )
     final_loss, _ = loss_and_gradients(dataset, model)
     losses.append(final_loss)

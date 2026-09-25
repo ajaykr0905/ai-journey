@@ -220,12 +220,15 @@ class ContextMLPTests(unittest.TestCase):
             hidden_dim=16,
             steps=100,
             learning_rate=0.2,
+            final_learning_rate=0.02,
             seed=9,
         )
         self.assertLess(result.losses[-1], result.losses[0])
         self.assertEqual(len(result.trace), 100)
         self.assertEqual(result.trace[0].step, 0)
         self.assertGreater(result.trace[0].gradient_norm, 0)
+        self.assertEqual(result.trace[0].learning_rate, 0.2)
+        self.assertAlmostEqual(result.trace[-1].learning_rate, 0.02)
 
     def test_training_is_deterministic(self) -> None:
         first = train_context_mlp(self.dataset, steps=10, seed=13)
