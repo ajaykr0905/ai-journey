@@ -12,7 +12,10 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.corpus_shift import (
     CorpusShiftError,
+    ShiftPolicy,
     analyze_corpus_shift,
+    assess_corpus_shift,
+    assessment_payload,
     boundary_leaks,
     build_shared_vocabulary,
     evaluate,
@@ -109,6 +112,43 @@ class CorpusShiftTests(unittest.TestCase):
                 self.assertRaises((TypeError, CorpusShiftError)),
             ):
                 analyze_corpus_shift(BASELINE, SHIFTED, smoothing=value)
+
+    def test_policy_reports_both_drift_violations(self) -> None:
+        report = analyze_corpus_shift(BASELINE, SHIFTED)
+        assessment = assess_corpus_shift(
+            report,
+            ShiftPolicy(max_js_divergence=1e-9, max_perplexity_ratio=1e-9),
+        )
+        self.assertFalse(assessment.passed)
+        self.assertEqual(
+            assessment.violations,
+            (
+                "transition_js_divergence",
+                "baseline_to_shifted_perplexity_ratio",
+            ),
+        )
+
+    def test_policy_passes_when_metrics_are_within_limits(self) -> None:
+        report = analyze_corpus_shift(BASELINE, SHIFTED)
+        assessment = assess_corpus_shift(
+            report,
+            ShiftPolicy(max_js_divergence=1.0, max_perplexity_ratio=10.0),
+        )
+        payload = assessment_payload(report, assessment)
+        self.assertTrue(assessment.passed)
+        self.assertTrue(payload["passed"])
+        self.assertEqual(payload["violations"], ())
+
+    def test_policy_rejects_invalid_limits(self) -> None:
+        for value in (True, 0, -1, float("inf")):
+            with (
+                self.subTest(value=value),
+                self.assertRaises((TypeError, CorpusShiftError)),
+            ):
+                ShiftPolicy(
+                    max_js_divergence=value,
+                    max_perplexity_ratio=1.0,
+                )
 
     def test_payload_is_compact(self) -> None:
         payload = report_payload(analyze_corpus_shift(BASELINE, SHIFTED))

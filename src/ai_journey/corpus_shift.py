@@ -46,6 +46,33 @@ class ShiftReport:
     evaluations: tuple[Evaluation, ...]
 
 
+@dataclass(frozen=True)
+class ShiftPolicy:
+    max_js_divergence: float
+    max_perplexity_ratio: float
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("max_js_divergence", self.max_js_divergence),
+            ("max_perplexity_ratio", self.max_perplexity_ratio),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"{name} must be a real number")
+            if not isfinite(value) or value <= 0:
+                raise CorpusShiftError(f"{name} must be finite and positive")
+
+
+@dataclass(frozen=True)
+class ShiftAssessment:
+    policy: ShiftPolicy
+    baseline_to_shifted_perplexity_ratio: float
+    violations: tuple[str, ...]
+
+    @property
+    def passed(self) -> bool:
+        return not self.violations
+
+
 def _validate_smoothing(smoothing: float) -> float:
     if isinstance(smoothing, bool) or not isinstance(smoothing, (int, float)):
         raise TypeError("smoothing must be a real number")
@@ -218,9 +245,49 @@ def analyze_corpus_shift(
     )
 
 
+def assess_corpus_shift(report: ShiftReport, policy: ShiftPolicy) -> ShiftAssessment:
+    """Apply CI-friendly drift limits to a shift report."""
+
+    if not isinstance(report, ShiftReport):
+        raise TypeError("report must be ShiftReport")
+    if not isinstance(policy, ShiftPolicy):
+        raise TypeError("policy must be ShiftPolicy")
+
+    evaluations = {
+        (result.trained_on, result.evaluated_on): result
+        for result in report.evaluations
+    }
+    baseline = evaluations[("baseline", "baseline")]
+    shifted = evaluations[("baseline", "shifted")]
+    perplexity_ratio = shifted.perplexity / baseline.perplexity
+
+    violations = []
+    if report.transition_js_divergence > policy.max_js_divergence:
+        violations.append("transition_js_divergence")
+    if perplexity_ratio > policy.max_perplexity_ratio:
+        violations.append("baseline_to_shifted_perplexity_ratio")
+
+    return ShiftAssessment(
+        policy=policy,
+        baseline_to_shifted_perplexity_ratio=perplexity_ratio,
+        violations=tuple(violations),
+    )
+
+
 def report_payload(report: ShiftReport) -> dict[str, object]:
     """Return a compact JSON report without raw corpora or probability matrices."""
 
     if not isinstance(report, ShiftReport):
         raise TypeError("report must be ShiftReport")
     return asdict(report)
+
+
+def assessment_payload(
+    report: ShiftReport, assessment: ShiftAssessment
+) -> dict[str, object]:
+    """Return a single machine-readable drift-gate result."""
+
+    payload = report_payload(report)
+    payload.update(asdict(assessment))
+    payload["passed"] = assessment.passed
+    return payload

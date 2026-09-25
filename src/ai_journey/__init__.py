@@ -2,7 +2,13 @@
 
 from .attention import AttentionConfig, run_attention_experiment
 from .bigram_lm import BigramModel, Vocabulary, run_bigram_experiment
-from .corpus_shift import ShiftReport, analyze_corpus_shift
+from .corpus_shift import (
+    ShiftAssessment,
+    ShiftPolicy,
+    ShiftReport,
+    analyze_corpus_shift,
+    assess_corpus_shift,
+)
 from .gradients import gradient_descent_x_squared
 from .manual_backprop import manual_backward, run_manual_backprop_experiment
 from .mlp_memory import run_memory_experiment
@@ -16,12 +22,15 @@ __all__ = [
     "MLP",
     "AttentionConfig",
     "BigramModel",
+    "ShiftAssessment",
+    "ShiftPolicy",
     "ShiftReport",
     "TrainingConfig",
     "TransformerConfig",
     "Value",
     "Vocabulary",
     "analyze_corpus_shift",
+    "assess_corpus_shift",
     "build_gpt_shape_flow",
     "default_parameters",
     "forward",
