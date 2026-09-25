@@ -293,6 +293,14 @@ def _validate_model(model: ContextMLP, dataset: ContextDataset) -> None:
             raise ContextMLPError(f"{name} must have shape {shape}")
 
 
+def parameter_count(model: ContextMLP) -> int:
+    """Return the number of trainable scalar parameters."""
+
+    if not isinstance(model, ContextMLP):
+        raise TypeError("model must be ContextMLP")
+    return sum(int(values.size) for values in model.__dict__.values())
+
+
 def predict_probabilities(dataset: ContextDataset, model: ContextMLP) -> np.ndarray:
     """Return next-token probabilities for every context."""
 

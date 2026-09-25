@@ -19,6 +19,7 @@ from ai_journey.context_mlp import (
     evaluate_context_mlp,
     initialize_context_mlp,
     loss_and_gradients,
+    parameter_count,
     predict_probabilities,
     split_records,
     train_context_mlp,
@@ -117,6 +118,14 @@ class ContextMLPTests(unittest.TestCase):
         self.assertEqual(model.embeddings.shape, (self.dataset.vocabulary.size, 4))
         self.assertEqual(model.input_weights.shape, (12, 12))
         self.assertEqual(model.output_weights.shape, (12, self.dataset.vocabulary.size))
+        expected = (
+            self.dataset.vocabulary.size * 4
+            + 12 * 12
+            + 12
+            + 12 * self.dataset.vocabulary.size
+            + self.dataset.vocabulary.size
+        )
+        self.assertEqual(parameter_count(model), expected)
 
     def test_initialization_is_seeded(self) -> None:
         first = initialize_context_mlp(self.dataset, seed=11)
