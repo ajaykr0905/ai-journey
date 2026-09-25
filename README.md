@@ -72,6 +72,12 @@ python scripts/check_corpus_shift.py \
   --max-js-divergence 0.05 \
   --max-perplexity-ratio 2.5 \
   --output artifacts/corpus-shift.json
+python scripts/train_context_mlp.py \
+  --corpus data/day-19-demo-names.txt \
+  --steps 100 \
+  --seed 22 \
+  --output artifacts/context-mlp.json \
+  --checkpoint artifacts/context-mlp-checkpoint.json
 python -m unittest discover -s tests -v
 ```
 

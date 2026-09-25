@@ -70,6 +70,14 @@ jobs:
           --max-js-divergence 0.05
           --max-perplexity-ratio 2.5
           --output /tmp/ai-journey-artifacts/corpus-shift.json
+      - name: Train and checkpoint context MLP
+        run: >-
+          python scripts/train_context_mlp.py
+          --corpus data/day-19-demo-names.txt
+          --steps 10
+          --seed 22
+          --output /tmp/ai-journey-artifacts/context-mlp.json
+          --checkpoint /tmp/ai-journey-artifacts/context-mlp-checkpoint.json
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py

@@ -14,6 +14,7 @@
     "scripts/run_day_19.py",
     "scripts/run_day_20.py",
     "scripts/check_corpus_shift.py",
+    "scripts/train_context_mlp.py",
     "days/day-20.md",
     "data/day-19-demo-names.txt",
     "data/day-19-demo-names.manifest.json",
