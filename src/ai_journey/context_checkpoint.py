@@ -60,3 +60,16 @@ def save_checkpoint(path: Path, model: ContextMLP, *, step: int) -> None:
         encoding="utf-8",
     )
     temporary.replace(path)
+
+
+def load_checkpoint(path: Path) -> tuple[ContextMLP, int]:
+    """Load a checkpoint and return its verified model and step."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    model = model_from_payload(payload)
+    step = payload.get("step")
+    if isinstance(step, bool) or not isinstance(step, int) or step < 0:
+        raise ValueError("checkpoint step is invalid")
+    return model, step

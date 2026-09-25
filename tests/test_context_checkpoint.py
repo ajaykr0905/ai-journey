@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.context_checkpoint import (
     checkpoint_payload,
+    load_checkpoint,
     model_from_payload,
     save_checkpoint,
 )
@@ -49,6 +50,9 @@ class ContextCheckpointTests(unittest.TestCase):
             payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(payload["step"], 4)
             self.assertFalse(path.with_name(".model.json.tmp").exists())
+            restored, step = load_checkpoint(path)
+            self.assertEqual(step, 4)
+            self.assertEqual(model_fingerprint(restored), model_fingerprint(model))
 
 
 if __name__ == "__main__":
