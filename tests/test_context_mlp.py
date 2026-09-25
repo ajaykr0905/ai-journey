@@ -18,6 +18,7 @@ from ai_journey.context_mlp import (
     build_split_datasets,
     clip_gradients,
     create_minibatches,
+    dataset_fingerprint,
     evaluate_context_mlp,
     generate_text,
     gradient_global_norm,
@@ -112,6 +113,13 @@ class ContextDatasetTests(unittest.TestCase):
         )
         expected = sorted(zip(dataset.contexts.tolist(), dataset.targets.tolist()))
         self.assertEqual(observed, expected)
+
+    def test_dataset_fingerprint_tracks_encoded_content(self) -> None:
+        first = build_context_dataset(("anna", "aria"))
+        second = build_context_dataset(("anna", "aria"))
+        changed = build_context_dataset(("anna", "navi"))
+        self.assertEqual(dataset_fingerprint(first), dataset_fingerprint(second))
+        self.assertNotEqual(dataset_fingerprint(first), dataset_fingerprint(changed))
 
 
 class ContextMLPTests(unittest.TestCase):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from hashlib import sha256
 from math import exp, isfinite, sqrt
 
 import numpy as np
@@ -235,6 +236,18 @@ def create_minibatches(
         for start in range(0, dataset.sample_count, size)
         for indexes in (order[start : start + size],)
     )
+
+
+def dataset_fingerprint(dataset: ContextDataset) -> str:
+    """Hash vocabulary, shape, contexts, and targets for reproducibility."""
+
+    _validate_dataset(dataset)
+    digest = sha256()
+    digest.update("".join(dataset.vocabulary.tokens).encode())
+    digest.update(str(dataset.block_size).encode())
+    digest.update(dataset.contexts.tobytes())
+    digest.update(dataset.targets.tobytes())
+    return digest.hexdigest()
 
 
 def initialize_context_mlp(
