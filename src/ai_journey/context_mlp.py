@@ -515,6 +515,8 @@ def train_context_mlp(
     final_learning_rate: float | None = None,
     max_gradient_norm: float | None = None,
     seed: int = 0,
+    initial_model: ContextMLP | None = None,
+    start_step: int = 0,
 ) -> TrainingResult:
     """Train with deterministic full-batch gradient descent."""
 
@@ -528,12 +530,16 @@ def train_context_mlp(
         learning_rate if final_learning_rate is None else final_learning_rate
     )
 
-    model = initialize_context_mlp(
-        dataset,
-        embedding_dim=embedding_dim,
-        hidden_dim=hidden_dim,
-        seed=seed,
+    if (
+        isinstance(start_step, bool)
+        or not isinstance(start_step, int)
+        or start_step < 0
+    ):
+        raise ContextMLPError("start_step must be a non-negative integer")
+    model = initial_model or initialize_context_mlp(
+        dataset, embedding_dim=embedding_dim, hidden_dim=hidden_dim, seed=seed
     )
+    _validate_model(model, dataset)
     losses = []
     trace = []
     for step in range(steps):
@@ -546,7 +552,7 @@ def train_context_mlp(
         losses.append(loss)
         trace.append(
             TrainingStep(
-                step=step,
+                step=start_step + step,
                 loss=loss,
                 gradient_norm=gradient_global_norm(gradients),
                 learning_rate=step_learning_rate,

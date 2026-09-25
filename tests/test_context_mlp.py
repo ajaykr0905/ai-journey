@@ -279,6 +279,17 @@ class ContextMLPTests(unittest.TestCase):
                 getattr(first.model, name), getattr(second.model, name)
             )
 
+    def test_training_resumes_from_existing_parameters(self) -> None:
+        first = train_context_mlp(self.dataset, steps=5, seed=13)
+        resumed = train_context_mlp(
+            self.dataset,
+            steps=5,
+            initial_model=first.model,
+            start_step=5,
+        )
+        self.assertEqual(resumed.trace[0].step, 5)
+        self.assertLess(resumed.losses[-1], first.losses[-1])
+
 
 if __name__ == "__main__":
     unittest.main()
