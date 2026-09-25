@@ -62,10 +62,14 @@ jobs:
           python scripts/run_day_20.py
           --output /tmp/ai-journey-artifacts/day-20-neural-bigram.md
           --json-output /tmp/ai-journey-artifacts/day-20-neural-bigram.json
-      - name: Run Day 21 corpus shift validation
+      - name: Enforce corpus shift policy
         run: >-
-          python scripts/run_day_21.py
-          --output /tmp/ai-journey-artifacts/day-21-corpus-shift.json
+          python scripts/check_corpus_shift.py
+          --baseline data/day-19-demo-names.txt
+          --candidate data/day-21-indian-cities.txt
+          --max-js-divergence 0.05
+          --max-perplexity-ratio 2.5
+          --output /tmp/ai-journey-artifacts/corpus-shift.json
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py

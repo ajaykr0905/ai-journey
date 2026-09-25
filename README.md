@@ -36,8 +36,8 @@ then grow these exercises into production-quality training and inference project
 - A deterministic neural bigram model with exact smoothed-count equivalence,
   negative log-likelihood, and gradient checks in
   [`scripts/run_day_20.py`](scripts/run_day_20.py)
-- A deterministic corpus-shift and record-boundary integrity lab in
-  [`scripts/run_day_21.py`](scripts/run_day_21.py)
+- A CI-ready corpus drift gate with explicit divergence and perplexity limits in
+  [`scripts/check_corpus_shift.py`](scripts/check_corpus_shift.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -64,8 +64,12 @@ python scripts/run_day_19.py \
 python scripts/run_day_20.py \
   --output artifacts/day-20-neural-bigram.md \
   --json-output artifacts/day-20-neural-bigram.json
-python scripts/run_day_21.py \
-  --output artifacts/day-21-corpus-shift.json
+python scripts/check_corpus_shift.py \
+  --baseline data/day-19-demo-names.txt \
+  --candidate data/day-21-indian-cities.txt \
+  --max-js-divergence 0.05 \
+  --max-perplexity-ratio 2.5 \
+  --output artifacts/corpus-shift.json
 python -m unittest discover -s tests -v
 ```
 
