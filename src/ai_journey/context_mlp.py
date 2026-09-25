@@ -48,6 +48,12 @@ class TrainingResult:
 
 
 @dataclass(frozen=True)
+class CorpusSplit:
+    train: tuple[str, ...]
+    validation: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class _ForwardPass:
     flattened: np.ndarray
     hidden: np.ndarray
@@ -61,6 +67,38 @@ def _positive_int(name: str, value: int) -> int:
     if value <= 0:
         raise ContextMLPError(f"{name} must be positive")
     return value
+
+
+def split_records(
+    words: Iterable[str], *, validation_fraction: float = 0.2, seed: int = 0
+) -> CorpusSplit:
+    """Split whole records deterministically to prevent sample leakage."""
+
+    corpus = normalize_corpus(words)
+    if len(corpus) < 2:
+        raise ContextMLPError("at least two records are required for a split")
+    if (
+        isinstance(validation_fraction, bool)
+        or not isinstance(validation_fraction, (int, float))
+        or not 0 < validation_fraction < 1
+    ):
+        raise ContextMLPError("validation_fraction must be between zero and one")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise TypeError("seed must be an integer")
+
+    order = np.random.default_rng(seed).permutation(len(corpus))
+    validation_size = max(
+        1, min(len(corpus) - 1, round(len(corpus) * validation_fraction))
+    )
+    validation_indexes = set(order[:validation_size])
+    return CorpusSplit(
+        train=tuple(
+            word for index, word in enumerate(corpus) if index not in validation_indexes
+        ),
+        validation=tuple(
+            word for index, word in enumerate(corpus) if index in validation_indexes
+        ),
+    )
 
 
 def build_context_dataset(

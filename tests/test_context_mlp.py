@@ -16,11 +16,27 @@ from ai_journey.context_mlp import (
     initialize_context_mlp,
     loss_and_gradients,
     predict_probabilities,
+    split_records,
     train_context_mlp,
 )
 
 
 class ContextDatasetTests(unittest.TestCase):
+    def test_record_split_is_deterministic_and_disjoint(self) -> None:
+        words = ("anna", "aria", "navi", "devin", "priya")
+        first = split_records(words, validation_fraction=0.4, seed=7)
+        second = split_records(words, validation_fraction=0.4, seed=7)
+        self.assertEqual(first, second)
+        self.assertEqual(len(first.validation), 2)
+        self.assertFalse(set(first.train) & set(first.validation))
+        self.assertEqual(set(first.train) | set(first.validation), set(words))
+
+    def test_record_split_rejects_invalid_inputs(self) -> None:
+        with self.assertRaises(ContextMLPError):
+            split_records(("anna",))
+        with self.assertRaises(ContextMLPError):
+            split_records(("anna", "aria"), validation_fraction=1.0)
+
     def test_contexts_are_boundary_aware(self) -> None:
         dataset = build_context_dataset(("ab",), block_size=3)
         decoded = [
