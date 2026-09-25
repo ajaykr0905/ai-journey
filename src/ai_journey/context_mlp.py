@@ -323,6 +323,20 @@ def parameter_count(model: ContextMLP) -> int:
     return sum(int(values.size) for values in model.__dict__.values())
 
 
+def model_fingerprint(model: ContextMLP) -> str:
+    """Hash parameter names, shapes, dtypes, and bytes."""
+
+    if not isinstance(model, ContextMLP):
+        raise TypeError("model must be ContextMLP")
+    digest = sha256()
+    for name, values in model.__dict__.items():
+        digest.update(name.encode())
+        digest.update(str(values.shape).encode())
+        digest.update(str(values.dtype).encode())
+        digest.update(values.tobytes())
+    return digest.hexdigest()
+
+
 def gradient_global_norm(gradients: ContextMLP) -> float:
     """Compute one L2 norm across all parameter gradients."""
 

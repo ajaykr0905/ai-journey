@@ -25,6 +25,7 @@ from ai_journey.context_mlp import (
     initialize_context_mlp,
     linear_learning_rate,
     loss_and_gradients,
+    model_fingerprint,
     parameter_count,
     predict_next,
     predict_probabilities,
@@ -156,6 +157,9 @@ class ContextMLPTests(unittest.TestCase):
         second = initialize_context_mlp(self.dataset, seed=11)
         for name in first.__dict__:
             np.testing.assert_array_equal(getattr(first, name), getattr(second, name))
+        self.assertEqual(model_fingerprint(first), model_fingerprint(second))
+        different = initialize_context_mlp(self.dataset, seed=12)
+        self.assertNotEqual(model_fingerprint(first), model_fingerprint(different))
 
     def test_probabilities_are_normalized(self) -> None:
         model = initialize_context_mlp(self.dataset, seed=3)
