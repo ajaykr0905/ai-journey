@@ -13,6 +13,7 @@ from ai_journey.model_selection import (
     minibatch_epochs,
     partition_fingerprints,
     split_train_dev_test,
+    TrainingConfig,
 )
 
 
@@ -88,6 +89,20 @@ class CorpusPartitionTests(unittest.TestCase):
                 [batch.index for batch in epoch_batches],
                 list(range(len(epoch_batches))),
             )
+
+
+class TrainingConfigTests(unittest.TestCase):
+    def test_config_rejects_invalid_hyperparameters(self) -> None:
+        for keyword, value in (
+            ("epochs", 0),
+            ("batch_size", True),
+            ("learning_rate", float("nan")),
+            ("embedding_dim", -1),
+            ("hidden_dim", 0),
+            ("seed", False),
+        ):
+            with self.subTest(keyword=keyword), self.assertRaises((TypeError, ContextMLPError)):
+                TrainingConfig(**{keyword: value})
 
 
 if __name__ == "__main__":

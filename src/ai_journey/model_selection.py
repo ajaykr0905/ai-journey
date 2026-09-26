@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from math import isfinite
 
 import numpy as np
 
@@ -51,6 +52,35 @@ class EpochBatch:
     epoch: int
     index: int
     dataset: ContextDataset
+
+
+@dataclass(frozen=True)
+class TrainingConfig:
+    """Validated hyperparameters for deterministic minibatch training."""
+
+    epochs: int = 20
+    batch_size: int = 32
+    learning_rate: float = 0.1
+    embedding_dim: int = 8
+    hidden_dim: int = 64
+    seed: int = 0
+
+    def __post_init__(self) -> None:
+        for name in ("epochs", "batch_size", "embedding_dim", "hidden_dim"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+            if value <= 0:
+                raise ContextMLPError(f"{name} must be positive")
+        if isinstance(self.seed, bool) or not isinstance(self.seed, int):
+            raise TypeError("seed must be an integer")
+        if (
+            isinstance(self.learning_rate, bool)
+            or not isinstance(self.learning_rate, (int, float))
+            or not isfinite(self.learning_rate)
+            or self.learning_rate <= 0
+        ):
+            raise ContextMLPError("learning_rate must be finite and positive")
 
 
 def split_train_dev_test(
