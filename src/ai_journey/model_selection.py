@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, replace
 import json
 from typing import Any
 from pathlib import Path
-from math import isfinite
+from math import isfinite, log10
 
 import numpy as np
 
@@ -359,6 +359,59 @@ def write_experiment_report(
         json.dumps(experiment_payload(experiment), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    temporary.replace(path)
+
+
+def write_learning_rate_plot(
+    path: Path, experiment: ModelSelectionExperiment
+) -> None:
+    """Render sweep losses as an atomic, headless SVG artifact."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if not isinstance(experiment, ModelSelectionExperiment):
+        raise TypeError("experiment must be ModelSelectionExperiment")
+    rates = [trial.learning_rate for trial in experiment.trials]
+    training = [trial.final_training_nll for trial in experiment.trials]
+    development = [trial.best_development_nll for trial in experiment.trials]
+    left, right, top, bottom = 70.0, 680.0, 30.0, 330.0
+    log_rates = [log10(rate) for rate in rates]
+    x_min, x_max = min(log_rates), max(log_rates)
+    losses = training + development
+    y_min, y_max = min(losses), max(losses)
+
+    def x_position(rate: float) -> float:
+        span = x_max - x_min
+        return left + (log10(rate) - x_min) / (span or 1.0) * (right - left)
+
+    def y_position(loss: float) -> float:
+        span = y_max - y_min
+        return bottom - (loss - y_min) / (span or 1.0) * (bottom - top)
+
+    def points(values: list[float]) -> str:
+        return " ".join(
+            f"{x_position(rate):.2f},{y_position(value):.2f}"
+            for rate, value in zip(rates, values)
+        )
+
+    selected_x = x_position(experiment.selected.learning_rate)
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400">
+  <rect width="720" height="400" fill="white"/>
+  <line x1="{left}" y1="{bottom}" x2="{right}" y2="{bottom}" stroke="black"/>
+  <line x1="{left}" y1="{top}" x2="{left}" y2="{bottom}" stroke="black"/>
+  <line x1="{selected_x:.2f}" y1="{top}" x2="{selected_x:.2f}" y2="{bottom}" stroke="black" stroke-dasharray="4 4"/>
+  <polyline points="{points(training)}" fill="none" stroke="#2563eb" stroke-width="2"/>
+  <polyline points="{points(development)}" fill="none" stroke="#dc2626" stroke-width="2"/>
+  <text x="375" y="380" text-anchor="middle">Learning rate</text>
+  <text x="18" y="180" text-anchor="middle" transform="rotate(-90 18 180)">Negative log-likelihood</text>
+  <text x="500" y="48" fill="#2563eb">Final training NLL</text>
+  <text x="500" y="68" fill="#dc2626">Best development NLL</text>
+</svg>
+"""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(svg, encoding="utf-8")
     temporary.replace(path)
 
 

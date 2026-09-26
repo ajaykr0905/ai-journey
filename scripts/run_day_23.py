@@ -17,6 +17,7 @@ from ai_journey.model_selection import (
     learning_rate_grid,
     run_model_selection,
     write_experiment_report,
+    write_learning_rate_plot,
 )
 
 
@@ -25,6 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--corpus", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path)
+    parser.add_argument("--plot", type=Path)
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--seed", type=int, default=23)
@@ -55,6 +57,8 @@ def main(argv: list[str] | None = None) -> int:
             experiment.selected.model,
             step=experiment.selected.best_epoch + 1,
         )
+    if args.plot is not None:
+        write_learning_rate_plot(args.plot, experiment)
     return 0
 
 

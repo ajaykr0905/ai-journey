@@ -15,6 +15,7 @@ class Day23CLITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "day-23.json"
             checkpoint = Path(directory) / "day-23-model.json"
+            plot = Path(directory) / "day-23-sweep.svg"
             command = [
                 sys.executable,
                 "scripts/run_day_23.py",
@@ -24,6 +25,8 @@ class Day23CLITests(unittest.TestCase):
                 str(output),
                 "--checkpoint",
                 str(checkpoint),
+                "--plot",
+                str(plot),
                 "--epochs",
                 "3",
                 "--batch-size",
@@ -59,6 +62,10 @@ class Day23CLITests(unittest.TestCase):
                 == first_payload["selected_learning_rate"]
             )
             self.assertEqual(saved["step"], selected["best_epoch"] + 1)
+            plot_text = plot.read_text(encoding="utf-8")
+            self.assertIn("<svg", plot_text)
+            self.assertIn("Learning rate", plot_text)
+            self.assertIn("Negative log-likelihood", plot_text)
 
 
 if __name__ == "__main__":
