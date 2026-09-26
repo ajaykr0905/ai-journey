@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isfinite
 
 import numpy as np
@@ -124,6 +124,17 @@ class PartitionMetrics:
         return self.test.nll - self.train.nll
 
 
+@dataclass(frozen=True)
+class LearningRateTrial:
+    """One controlled training run from a learning-rate sweep."""
+
+    learning_rate: float
+    best_epoch: int
+    best_development_nll: float
+    final_training_nll: float
+    model: ContextMLP
+
+
 def learning_rate_grid(
     minimum: float, maximum: float, *, count: int
 ) -> tuple[float, ...]:
@@ -144,6 +155,32 @@ def learning_rate_grid(
     if count < 2:
         raise ContextMLPError("count must be at least two")
     return tuple(float(value) for value in np.geomspace(minimum, maximum, count))
+
+
+def run_learning_rate_sweep(
+    datasets: DatasetPartitions,
+    config: TrainingConfig,
+    learning_rates: Iterable[float],
+) -> tuple[LearningRateTrial, ...]:
+    """Train comparable seeded trials that differ only by learning rate."""
+
+    rates = tuple(learning_rates)
+    if not rates:
+        raise ContextMLPError("learning_rates must not be empty")
+    trials = []
+    for rate in rates:
+        trial_config = replace(config, learning_rate=rate)
+        result = train_and_validate_context_mlp(datasets, trial_config)
+        trials.append(
+            LearningRateTrial(
+                learning_rate=float(rate),
+                best_epoch=result.best_epoch,
+                best_development_nll=result.development_nll[result.best_epoch],
+                final_training_nll=result.training_nll[-1],
+                model=result.best_model,
+            )
+        )
+    return tuple(trials)
 
 
 def apply_sgd(

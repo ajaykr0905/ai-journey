@@ -21,6 +21,7 @@ from ai_journey.model_selection import (
     learning_rate_grid,
     minibatch_epochs,
     partition_fingerprints,
+    run_learning_rate_sweep,
     split_train_dev_test,
     TrainingConfig,
     train_and_validate_context_mlp,
@@ -124,6 +125,20 @@ class TrainingConfigTests(unittest.TestCase):
         self.assertTrue(all(abs(ratio - ratios[0]) < 1e-12 for ratio in ratios))
         with self.assertRaises(ContextMLPError):
             learning_rate_grid(0.1, 0.01, count=5)
+
+    def test_learning_rate_sweep_runs_controlled_trials(self) -> None:
+        datasets = build_partitioned_datasets(
+            tuple(f"name{letter}" for letter in "abcdefghijkl"), seed=3
+        )
+        config = TrainingConfig(epochs=4, batch_size=16, hidden_dim=16, seed=7)
+        first = run_learning_rate_sweep(datasets, config, (0.01, 0.05, 0.1))
+        second = run_learning_rate_sweep(datasets, config, (0.01, 0.05, 0.1))
+
+        self.assertEqual([trial.learning_rate for trial in first], [0.01, 0.05, 0.1])
+        self.assertEqual(
+            [trial.best_development_nll for trial in first],
+            [trial.best_development_nll for trial in second],
+        )
 
     def test_sgd_update_reduces_loss_on_a_small_batch(self) -> None:
         datasets = build_partitioned_datasets(
