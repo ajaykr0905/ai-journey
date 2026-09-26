@@ -179,6 +179,17 @@ class OverfittingSignal:
     final_gap: float
 
 
+@dataclass(frozen=True)
+class ModelSelectionExperiment:
+    """Reproducible sweep inputs, trials, winner, and held-out metrics."""
+
+    config: TrainingConfig
+    fingerprints: PartitionFingerprints
+    trials: tuple[LearningRateTrial, ...]
+    selected: LearningRateTrial
+    metrics: PartitionMetrics
+
+
 def learning_rate_grid(
     minimum: float, maximum: float, *, count: int
 ) -> tuple[float, ...]:
@@ -268,6 +279,35 @@ def detect_overfitting(
         training_change=training_change,
         development_change=development_change,
         final_gap=final_gap,
+    )
+
+
+def run_model_selection(
+    words: Iterable[str],
+    *,
+    config: TrainingConfig,
+    learning_rates: Iterable[float],
+    block_size: int = 3,
+    development_fraction: float = 0.1,
+    test_fraction: float = 0.1,
+) -> ModelSelectionExperiment:
+    """Run a leakage-safe learning-rate search and evaluate its winner once."""
+
+    datasets = build_partitioned_datasets(
+        words,
+        block_size=block_size,
+        development_fraction=development_fraction,
+        test_fraction=test_fraction,
+        seed=config.seed,
+    )
+    trials = run_learning_rate_sweep(datasets, config, learning_rates)
+    selected = select_best_trial(trials)
+    return ModelSelectionExperiment(
+        config=config,
+        fingerprints=partition_fingerprints(datasets),
+        trials=trials,
+        selected=selected,
+        metrics=evaluate_partitions(datasets, selected.model),
     )
 
 

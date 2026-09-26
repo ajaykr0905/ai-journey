@@ -25,6 +25,7 @@ from ai_journey.model_selection import (
     minibatch_epochs,
     partition_fingerprints,
     run_learning_rate_sweep,
+    run_model_selection,
     select_best_trial,
     split_train_dev_test,
     TrainingConfig,
@@ -182,6 +183,23 @@ class TrainingConfigTests(unittest.TestCase):
                 (2.0, 1.8, 1.6, 1.4), (2.1, 1.9, 1.7, 1.5), window=2
             ).detected
         )
+
+    def test_model_selection_experiment_is_reproducible(self) -> None:
+        words = tuple(f"name{letter}" for letter in "abcdefghijkl")
+        config = TrainingConfig(epochs=4, batch_size=16, hidden_dim=16, seed=7)
+        first = run_model_selection(
+            words, config=config, learning_rates=(0.01, 0.05, 0.1)
+        )
+        second = run_model_selection(
+            words, config=config, learning_rates=(0.01, 0.05, 0.1)
+        )
+
+        self.assertEqual(first.fingerprints, second.fingerprints)
+        self.assertEqual(
+            first.selected.best_development_nll,
+            second.selected.best_development_nll,
+        )
+        self.assertEqual(first.metrics, second.metrics)
 
     def test_sgd_update_reduces_loss_on_a_small_batch(self) -> None:
         datasets = build_partitioned_datasets(
