@@ -14,6 +14,7 @@ from ai_journey.context_mlp import (
     evaluate_context_mlp,
     initialize_context_mlp,
     loss_and_gradients,
+    model_fingerprint,
 )
 from ai_journey.model_selection import (
     apply_sgd,
@@ -118,6 +119,7 @@ class TrainingConfigTests(unittest.TestCase):
             ("patience", 0),
             ("minimum_delta", -0.1),
             ("weight_decay", -0.1),
+            ("max_gradient_norm", 0),
         ):
             with self.subTest(keyword=keyword), self.assertRaises((TypeError, ContextMLPError)):
                 TrainingConfig(**{keyword: value})
@@ -206,6 +208,27 @@ class TrainingConfigTests(unittest.TestCase):
 
         self.assertLess(abs(updated.input_weights).sum(), abs(model.input_weights).sum())
         self.assertEqual(abs(updated.input_bias).sum(), abs(model.input_bias).sum())
+
+    def test_minibatch_training_applies_gradient_clipping(self) -> None:
+        datasets = build_partitioned_datasets(
+            tuple(f"name{letter}" for letter in "abcdefghijkl"), seed=3
+        )
+        base = TrainingConfig(
+            epochs=2,
+            batch_size=8,
+            learning_rate=1.0,
+            hidden_dim=16,
+            seed=7,
+        )
+        unclipped = train_minibatch_context_mlp(datasets.train, base)
+        clipped = train_minibatch_context_mlp(
+            datasets.train, replace(base, max_gradient_norm=0.01)
+        )
+
+        self.assertNotEqual(
+            model_fingerprint(unclipped.model), model_fingerprint(clipped.model)
+        )
+        self.assertTrue(all(loss > 0 for loss in clipped.training_nll))
 
     def test_minibatch_training_is_reproducible_and_reduces_loss(self) -> None:
         datasets = build_partitioned_datasets(

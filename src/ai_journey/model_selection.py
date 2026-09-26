@@ -15,6 +15,7 @@ from ai_journey.context_mlp import (
     ContextMLPError,
     EvaluationMetrics,
     build_context_dataset,
+    clip_gradients,
     create_minibatches,
     dataset_fingerprint,
     evaluate_context_mlp,
@@ -72,6 +73,7 @@ class TrainingConfig:
     patience: int | None = None
     minimum_delta: float = 0.0
     weight_decay: float = 0.0
+    max_gradient_norm: float | None = None
 
     def __post_init__(self) -> None:
         for name in ("epochs", "batch_size", "embedding_dim", "hidden_dim"):
@@ -108,6 +110,15 @@ class TrainingConfig:
             or self.weight_decay < 0
         ):
             raise ContextMLPError("weight_decay must be finite and non-negative")
+        if self.max_gradient_norm is not None and (
+            isinstance(self.max_gradient_norm, bool)
+            or not isinstance(self.max_gradient_norm, (int, float))
+            or not isfinite(self.max_gradient_norm)
+            or self.max_gradient_norm <= 0
+        ):
+            raise ContextMLPError(
+                "max_gradient_norm must be finite and positive or None"
+            )
 
 
 @dataclass(frozen=True)
@@ -391,6 +402,10 @@ def _train_epoch(
         seed=config.seed + epoch,
     ):
         _, gradients = loss_and_gradients(batch, model)
+        if config.max_gradient_norm is not None:
+            gradients = clip_gradients(
+                gradients, max_norm=config.max_gradient_norm
+            )
         model = apply_sgd(
             model,
             gradients,
