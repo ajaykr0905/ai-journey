@@ -11,6 +11,7 @@ import numpy as np
 from ai_journey.bigram_lm import build_vocabulary, normalize_corpus
 from ai_journey.context_mlp import (
     ContextDataset,
+    ContextMLP,
     ContextMLPError,
     build_context_dataset,
     create_minibatches,
@@ -81,6 +82,29 @@ class TrainingConfig:
             or self.learning_rate <= 0
         ):
             raise ContextMLPError("learning_rate must be finite and positive")
+
+
+def apply_sgd(
+    model: ContextMLP, gradients: ContextMLP, *, learning_rate: float
+) -> ContextMLP:
+    """Apply one immutable stochastic-gradient update."""
+
+    if not isinstance(model, ContextMLP) or not isinstance(gradients, ContextMLP):
+        raise TypeError("model and gradients must be ContextMLP")
+    if (
+        isinstance(learning_rate, bool)
+        or not isinstance(learning_rate, (int, float))
+        or not isfinite(learning_rate)
+        or learning_rate <= 0
+    ):
+        raise ContextMLPError("learning_rate must be finite and positive")
+    updated: dict[str, np.ndarray] = {}
+    for name, values in model.__dict__.items():
+        gradient = getattr(gradients, name)
+        if values.shape != gradient.shape:
+            raise ContextMLPError(f"gradient shape mismatch for {name}")
+        updated[name] = values - float(learning_rate) * gradient
+    return ContextMLP(**updated)
 
 
 def split_train_dev_test(

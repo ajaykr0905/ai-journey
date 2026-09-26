@@ -8,7 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.context_mlp import ContextMLPError
+from ai_journey.context_mlp import initialize_context_mlp, loss_and_gradients
 from ai_journey.model_selection import (
+    apply_sgd,
     build_partitioned_datasets,
     minibatch_epochs,
     partition_fingerprints,
@@ -103,6 +105,17 @@ class TrainingConfigTests(unittest.TestCase):
         ):
             with self.subTest(keyword=keyword), self.assertRaises((TypeError, ContextMLPError)):
                 TrainingConfig(**{keyword: value})
+
+    def test_sgd_update_reduces_loss_on_a_small_batch(self) -> None:
+        datasets = build_partitioned_datasets(
+            ("anna", "aria", "navi", "devin", "priya", "samira"), seed=3
+        )
+        model = initialize_context_mlp(datasets.train, seed=7)
+        before, gradients = loss_and_gradients(datasets.train, model)
+        updated = apply_sgd(model, gradients, learning_rate=0.1)
+        after, _ = loss_and_gradients(datasets.train, updated)
+
+        self.assertLess(after, before)
 
 
 if __name__ == "__main__":
