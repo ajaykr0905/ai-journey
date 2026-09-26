@@ -1,6 +1,6 @@
 # Progress and Evidence
 
-Last updated: 2026-09-25
+Last updated: 2026-09-27
 
 This file separates repository-verifiable work from activities that require the
 learner's own completion evidence.
@@ -30,6 +30,7 @@ learner's own completion evidence.
 | 20 | Deterministic neural bigram, exact smoothed-count loss match, finite-difference gradient checks, and training smoke test present | Pending user confirmation | Learner type-along, exercise run, hand NLL, equivalence derivation, and support-lecture explanation pending |
 | 21 | Deterministic city-corpus swap, cross-corpus loss matrix, transition-divergence metric, and record-boundary negative control present | No primary lecture scheduled; support lecture pending user confirmation | Blank-file bigram rebuild, city retraining run, diff/gap log, boundary explanation, and calculus explanation pending |
 | 22 | Boundary-safe context windows, embedding lookup, hidden layer, exact gradients, and deterministic training present | Primary and support lectures pending user confirmation | Learner type-along, exercise run, and shape explanation pending |
+| 23 | Deterministic minibatches, train/development/test isolation, learning-rate sweep, overfitting signal, selected checkpoint, and reproducible report present | Primary and support lectures pending user confirmation | Learner sweep run, plot interpretation, and support-lecture explanation pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,

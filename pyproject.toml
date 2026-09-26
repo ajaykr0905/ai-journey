@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ajay-ai-journey"
 version = "0.1.0"
-description = "Executable Days 0-22 of a public-safe AI engineering learning journey"
+description = "Executable Days 0-23 of a public-safe AI engineering learning journey"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

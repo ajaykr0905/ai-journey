@@ -78,6 +78,16 @@ jobs:
           --seed 22
           --output /tmp/ai-journey-artifacts/context-mlp.json
           --checkpoint /tmp/ai-journey-artifacts/context-mlp-checkpoint.json
+      - name: Run Day 23 model selection
+        run: >-
+          python scripts/run_day_23.py
+          --corpus data/day-19-demo-names.txt
+          --epochs 3
+          --batch-size 16
+          --rate-count 3
+          --output /tmp/ai-journey-artifacts/day-23-model-selection.json
+          --checkpoint /tmp/ai-journey-artifacts/day-23-context-mlp.json
+          --plot /tmp/ai-journey-artifacts/day-23-learning-rate-sweep.svg
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py

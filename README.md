@@ -1,7 +1,7 @@
-# AI Journey: Days 0–21
+# AI Journey: Days 0–23
 
 This repository is a public-safe, executable record of an added setup day plus the
-first twenty-one workbook days of a 90-day AI engineering learning plan. It combines
+first twenty-three workbook days of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -40,6 +40,9 @@ then grow these exercises into production-quality training and inference project
   [`scripts/check_corpus_shift.py`](scripts/check_corpus_shift.py)
 - A boundary-safe context-window dataset and deterministic embedding MLP in
   [`src/ai_journey/context_mlp.py`](src/ai_journey/context_mlp.py)
+- Leakage-safe train/development/test model selection, learning-rate sweeps, and
+  overfitting diagnostics in
+  [`src/ai_journey/model_selection.py`](src/ai_journey/model_selection.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -78,6 +81,11 @@ python scripts/train_context_mlp.py \
   --seed 22 \
   --output artifacts/context-mlp.json \
   --checkpoint artifacts/context-mlp-checkpoint.json
+python scripts/run_day_23.py \
+  --corpus data/day-19-demo-names.txt \
+  --output artifacts/day-23-model-selection.json \
+  --checkpoint artifacts/day-23-context-mlp.json \
+  --plot artifacts/day-23-learning-rate-sweep.svg
 python -m unittest discover -s tests -v
 ```
 
@@ -116,6 +124,8 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 19 | 2026-09-23 | Character bigram counts, broadcasting, and deterministic sampling |
 | 20 | 2026-09-24 | Neural bigram NLL, smoothing equivalence, and gradient checks |
 | 21 | 2026-09-25 | Dataset shift, cross-corpus evaluation, and record-boundary integrity |
+| 22 | 2026-09-26 | Context windows, embeddings, deterministic training, and checkpoint restart |
+| 23 | 2026-09-27 | Minibatches, learning-rate search, held-out evaluation, and overfitting diagnostics |
 
 ## License
 
