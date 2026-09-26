@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from itertools import pairwise
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +18,7 @@ from ai_journey.model_selection import (
     apply_sgd,
     build_partitioned_datasets,
     evaluate_partitions,
+    learning_rate_grid,
     minibatch_epochs,
     partition_fingerprints,
     split_train_dev_test,
@@ -112,6 +114,16 @@ class TrainingConfigTests(unittest.TestCase):
         ):
             with self.subTest(keyword=keyword), self.assertRaises((TypeError, ContextMLPError)):
                 TrainingConfig(**{keyword: value})
+
+    def test_learning_rate_grid_is_logarithmic_and_inclusive(self) -> None:
+        rates = learning_rate_grid(0.001, 0.1, count=5)
+
+        self.assertEqual(rates[0], 0.001)
+        self.assertEqual(rates[-1], 0.1)
+        ratios = [right / left for left, right in pairwise(rates)]
+        self.assertTrue(all(abs(ratio - ratios[0]) < 1e-12 for ratio in ratios))
+        with self.assertRaises(ContextMLPError):
+            learning_rate_grid(0.1, 0.01, count=5)
 
     def test_sgd_update_reduces_loss_on_a_small_batch(self) -> None:
         datasets = build_partitioned_datasets(

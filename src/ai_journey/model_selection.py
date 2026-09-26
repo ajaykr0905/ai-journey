@@ -124,6 +124,28 @@ class PartitionMetrics:
         return self.test.nll - self.train.nll
 
 
+def learning_rate_grid(
+    minimum: float, maximum: float, *, count: int
+) -> tuple[float, ...]:
+    """Build an inclusive logarithmic learning-rate search grid."""
+
+    for name, value in (("minimum", minimum), ("maximum", maximum)):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(value)
+            or value <= 0
+        ):
+            raise ContextMLPError(f"{name} must be finite and positive")
+    if maximum < minimum:
+        raise ContextMLPError("maximum must not be below minimum")
+    if isinstance(count, bool) or not isinstance(count, int):
+        raise TypeError("count must be an integer")
+    if count < 2:
+        raise ContextMLPError("count must be at least two")
+    return tuple(float(value) for value in np.geomspace(minimum, maximum, count))
+
+
 def apply_sgd(
     model: ContextMLP, gradients: ContextMLP, *, learning_rate: float
 ) -> ContextMLP:
