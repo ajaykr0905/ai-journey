@@ -16,6 +16,9 @@ from ai_journey.context_mlp import (
     build_context_dataset,
     create_minibatches,
     dataset_fingerprint,
+    evaluate_context_mlp,
+    initialize_context_mlp,
+    loss_and_gradients,
 )
 
 
@@ -84,6 +87,14 @@ class TrainingConfig:
             raise ContextMLPError("learning_rate must be finite and positive")
 
 
+@dataclass(frozen=True)
+class MinibatchTrainingResult:
+    """Final parameters and full-training loss after every epoch."""
+
+    model: ContextMLP
+    training_nll: tuple[float, ...]
+
+
 def apply_sgd(
     model: ContextMLP, gradients: ContextMLP, *, learning_rate: float
 ) -> ContextMLP:
@@ -105,6 +116,33 @@ def apply_sgd(
             raise ContextMLPError(f"gradient shape mismatch for {name}")
         updated[name] = values - float(learning_rate) * gradient
     return ContextMLP(**updated)
+
+
+def train_minibatch_context_mlp(
+    dataset: ContextDataset, config: TrainingConfig
+) -> MinibatchTrainingResult:
+    """Train the context model using seeded shuffled minibatches."""
+
+    if not isinstance(config, TrainingConfig):
+        raise TypeError("config must be TrainingConfig")
+    model = initialize_context_mlp(
+        dataset,
+        embedding_dim=config.embedding_dim,
+        hidden_dim=config.hidden_dim,
+        seed=config.seed,
+    )
+    losses: list[float] = []
+    for epoch in range(config.epochs):
+        batches = create_minibatches(
+            dataset,
+            batch_size=config.batch_size,
+            seed=config.seed + epoch,
+        )
+        for batch in batches:
+            _, gradients = loss_and_gradients(batch, model)
+            model = apply_sgd(model, gradients, learning_rate=config.learning_rate)
+        losses.append(evaluate_context_mlp(dataset, model).nll)
+    return MinibatchTrainingResult(model=model, training_nll=tuple(losses))
 
 
 def split_train_dev_test(

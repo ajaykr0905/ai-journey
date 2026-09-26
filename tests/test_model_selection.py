@@ -16,6 +16,7 @@ from ai_journey.model_selection import (
     partition_fingerprints,
     split_train_dev_test,
     TrainingConfig,
+    train_minibatch_context_mlp,
 )
 
 
@@ -116,6 +117,24 @@ class TrainingConfigTests(unittest.TestCase):
         after, _ = loss_and_gradients(datasets.train, updated)
 
         self.assertLess(after, before)
+
+    def test_minibatch_training_is_reproducible_and_reduces_loss(self) -> None:
+        datasets = build_partitioned_datasets(
+            tuple(f"name{letter}" for letter in "abcdefghijkl"), seed=3
+        )
+        config = TrainingConfig(
+            epochs=8,
+            batch_size=16,
+            learning_rate=0.1,
+            embedding_dim=4,
+            hidden_dim=16,
+            seed=7,
+        )
+        first = train_minibatch_context_mlp(datasets.train, config)
+        second = train_minibatch_context_mlp(datasets.train, config)
+
+        self.assertEqual(first.training_nll, second.training_nll)
+        self.assertLess(first.training_nll[-1], first.training_nll[0])
 
 
 if __name__ == "__main__":
