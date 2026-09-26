@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from ai_journey.context_mlp import ContextMLPError
 from ai_journey.model_selection import (
     build_partitioned_datasets,
+    minibatch_epochs,
     partition_fingerprints,
     split_train_dev_test,
 )
@@ -69,6 +70,24 @@ class CorpusPartitionTests(unittest.TestCase):
         self.assertEqual(fingerprints, partition_fingerprints(second))
         self.assertEqual(len(fingerprints.train), 64)
         self.assertEqual(len({fingerprints.train, fingerprints.development, fingerprints.test}), 3)
+
+    def test_epoch_batches_cover_every_sample_once_per_epoch(self) -> None:
+        datasets = build_partitioned_datasets(
+            tuple(f"name{letter}" for letter in "abcdefghijkl"), seed=3
+        )
+        batches = minibatch_epochs(datasets.train, batch_size=7, epochs=3, seed=21)
+
+        self.assertEqual({batch.epoch for batch in batches}, {0, 1, 2})
+        for epoch in range(3):
+            epoch_batches = [batch for batch in batches if batch.epoch == epoch]
+            self.assertEqual(
+                sum(batch.dataset.sample_count for batch in epoch_batches),
+                datasets.train.sample_count,
+            )
+            self.assertEqual(
+                [batch.index for batch in epoch_batches],
+                list(range(len(epoch_batches))),
+            )
 
 
 if __name__ == "__main__":

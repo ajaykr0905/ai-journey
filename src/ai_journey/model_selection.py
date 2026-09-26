@@ -12,6 +12,7 @@ from ai_journey.context_mlp import (
     ContextDataset,
     ContextMLPError,
     build_context_dataset,
+    create_minibatches,
     dataset_fingerprint,
 )
 
@@ -41,6 +42,15 @@ class PartitionFingerprints:
     train: str
     development: str
     test: str
+
+
+@dataclass(frozen=True)
+class EpochBatch:
+    """One reproducibly shuffled minibatch with its training position."""
+
+    epoch: int
+    index: int
+    dataset: ContextDataset
 
 
 def split_train_dev_test(
@@ -132,4 +142,24 @@ def partition_fingerprints(datasets: DatasetPartitions) -> PartitionFingerprints
         train=dataset_fingerprint(datasets.train),
         development=dataset_fingerprint(datasets.development),
         test=dataset_fingerprint(datasets.test),
+    )
+
+
+def minibatch_epochs(
+    dataset: ContextDataset, *, batch_size: int, epochs: int, seed: int = 0
+) -> tuple[EpochBatch, ...]:
+    """Return deterministic epoch-specific minibatches covering all samples."""
+
+    if isinstance(epochs, bool) or not isinstance(epochs, int):
+        raise TypeError("epochs must be an integer")
+    if epochs <= 0:
+        raise ContextMLPError("epochs must be positive")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise TypeError("seed must be an integer")
+    return tuple(
+        EpochBatch(epoch=epoch, index=index, dataset=batch)
+        for epoch in range(epochs)
+        for index, batch in enumerate(
+            create_minibatches(dataset, batch_size=batch_size, seed=seed + epoch)
+        )
     )
