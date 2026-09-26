@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.context_mlp import ContextMLPError
-from ai_journey.model_selection import split_train_dev_test
+from ai_journey.model_selection import build_partitioned_datasets, split_train_dev_test
 
 
 class CorpusPartitionTests(unittest.TestCase):
@@ -37,6 +37,21 @@ class CorpusPartitionTests(unittest.TestCase):
                 development_fraction=0.5,
                 test_fraction=0.5,
             )
+
+    def test_encoded_partitions_share_vocabulary_and_context_width(self) -> None:
+        datasets = build_partitioned_datasets(
+            ("anna", "aria", "navi", "devin", "priya", "samira"),
+            block_size=4,
+            development_fraction=0.2,
+            test_fraction=0.2,
+            seed=9,
+        )
+
+        self.assertEqual(datasets.train.block_size, 4)
+        self.assertEqual(datasets.development.block_size, 4)
+        self.assertEqual(datasets.test.block_size, 4)
+        self.assertIs(datasets.train.vocabulary, datasets.development.vocabulary)
+        self.assertIs(datasets.train.vocabulary, datasets.test.vocabulary)
 
 
 if __name__ == "__main__":

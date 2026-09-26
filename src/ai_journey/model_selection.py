@@ -7,8 +7,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ai_journey.bigram_lm import normalize_corpus
-from ai_journey.context_mlp import ContextMLPError
+from ai_journey.bigram_lm import build_vocabulary, normalize_corpus
+from ai_journey.context_mlp import (
+    ContextDataset,
+    ContextMLPError,
+    build_context_dataset,
+)
 
 
 @dataclass(frozen=True)
@@ -18,6 +22,15 @@ class CorpusPartitions:
     train: tuple[str, ...]
     development: tuple[str, ...]
     test: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DatasetPartitions:
+    """Encoded partitions that share one vocabulary and context width."""
+
+    train: ContextDataset
+    development: ContextDataset
+    test: ContextDataset
 
 
 def split_train_dev_test(
@@ -66,4 +79,35 @@ def split_train_dev_test(
             word for index, word in enumerate(corpus) if index in development_indexes
         ),
         test=tuple(word for index, word in enumerate(corpus) if index in test_indexes),
+    )
+
+
+def build_partitioned_datasets(
+    words: Iterable[str],
+    *,
+    block_size: int = 3,
+    development_fraction: float = 0.1,
+    test_fraction: float = 0.1,
+    seed: int = 0,
+) -> DatasetPartitions:
+    """Encode three record partitions with a corpus-wide vocabulary."""
+
+    corpus = normalize_corpus(words)
+    vocabulary = build_vocabulary(corpus)
+    partitions = split_train_dev_test(
+        corpus,
+        development_fraction=development_fraction,
+        test_fraction=test_fraction,
+        seed=seed,
+    )
+    return DatasetPartitions(
+        train=build_context_dataset(
+            partitions.train, block_size=block_size, vocabulary=vocabulary
+        ),
+        development=build_context_dataset(
+            partitions.development, block_size=block_size, vocabulary=vocabulary
+        ),
+        test=build_context_dataset(
+            partitions.test, block_size=block_size, vocabulary=vocabulary
+        ),
     )
