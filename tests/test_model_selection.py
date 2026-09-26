@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+import json
 from itertools import pairwise
 from dataclasses import replace
 from pathlib import Path
@@ -21,6 +22,7 @@ from ai_journey.model_selection import (
     build_partitioned_datasets,
     detect_overfitting,
     evaluate_partitions,
+    experiment_payload,
     learning_rate_grid,
     minibatch_epochs,
     partition_fingerprints,
@@ -200,6 +202,20 @@ class TrainingConfigTests(unittest.TestCase):
             second.selected.best_development_nll,
         )
         self.assertEqual(first.metrics, second.metrics)
+
+    def test_experiment_payload_is_json_compatible_and_auditable(self) -> None:
+        experiment = run_model_selection(
+            tuple(f"name{letter}" for letter in "abcdefghijkl"),
+            config=TrainingConfig(epochs=3, batch_size=16, hidden_dim=16, seed=7),
+            learning_rates=(0.01, 0.05),
+        )
+        payload = experiment_payload(experiment)
+
+        json.dumps(payload)
+        self.assertEqual(len(payload["partition_fingerprints"]["train"]), 64)
+        self.assertEqual(len(payload["selected_model_fingerprint"]), 64)
+        self.assertEqual(len(payload["trials"]), 2)
+        self.assertIn("test_gap", payload["metrics"])
 
     def test_sgd_update_reduces_loss_on_a_small_batch(self) -> None:
         datasets = build_partitioned_datasets(

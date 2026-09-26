@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
+from typing import Any
 from math import isfinite
 
 import numpy as np
@@ -21,6 +22,7 @@ from ai_journey.context_mlp import (
     evaluate_context_mlp,
     initialize_context_mlp,
     loss_and_gradients,
+    model_fingerprint,
 )
 
 
@@ -309,6 +311,37 @@ def run_model_selection(
         selected=selected,
         metrics=evaluate_partitions(datasets, selected.model),
     )
+
+
+def experiment_payload(experiment: ModelSelectionExperiment) -> dict[str, Any]:
+    """Serialize experiment evidence without duplicating model parameters."""
+
+    if not isinstance(experiment, ModelSelectionExperiment):
+        raise TypeError("experiment must be ModelSelectionExperiment")
+    selected_fingerprint = model_fingerprint(experiment.selected.model)
+    return {
+        "config": asdict(experiment.config),
+        "partition_fingerprints": asdict(experiment.fingerprints),
+        "trials": [
+            {
+                "learning_rate": trial.learning_rate,
+                "best_epoch": trial.best_epoch,
+                "best_development_nll": trial.best_development_nll,
+                "final_training_nll": trial.final_training_nll,
+                "model_fingerprint": model_fingerprint(trial.model),
+            }
+            for trial in experiment.trials
+        ],
+        "selected_learning_rate": experiment.selected.learning_rate,
+        "selected_model_fingerprint": selected_fingerprint,
+        "metrics": {
+            "train": asdict(experiment.metrics.train),
+            "development": asdict(experiment.metrics.development),
+            "test": asdict(experiment.metrics.test),
+            "development_gap": experiment.metrics.development_gap,
+            "test_gap": experiment.metrics.test_gap,
+        },
+    }
 
 
 def apply_sgd(
