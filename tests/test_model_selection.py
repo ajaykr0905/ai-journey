@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.context_mlp import ContextMLPError
+from ai_journey.context_checkpoint import save_checkpoint
 from ai_journey.context_mlp import (
     evaluate_context_mlp,
     initialize_context_mlp,
@@ -34,6 +35,7 @@ from ai_journey.model_selection import (
     TrainingConfig,
     train_and_validate_context_mlp,
     train_minibatch_context_mlp,
+    verify_selected_checkpoint,
     write_experiment_report,
 )
 
@@ -232,6 +234,24 @@ class TrainingConfigTests(unittest.TestCase):
 
             self.assertEqual(payload["config"]["seed"], 7)
             self.assertFalse(path.with_name(".report.json.tmp").exists())
+
+    def test_selected_checkpoint_verification_rejects_wrong_step(self) -> None:
+        experiment = run_model_selection(
+            tuple(f"name{letter}" for letter in "abcdefghijkl"),
+            config=TrainingConfig(epochs=3, batch_size=16, hidden_dim=16, seed=7),
+            learning_rates=(0.01, 0.05),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.json"
+            save_checkpoint(
+                path,
+                experiment.selected.model,
+                step=experiment.selected.best_epoch + 1,
+            )
+            verify_selected_checkpoint(path, experiment)
+            save_checkpoint(path, experiment.selected.model, step=99)
+            with self.assertRaisesRegex(ContextMLPError, "selected step"):
+                verify_selected_checkpoint(path, experiment)
 
     def test_sgd_update_reduces_loss_on_a_small_batch(self) -> None:
         datasets = build_partitioned_datasets(

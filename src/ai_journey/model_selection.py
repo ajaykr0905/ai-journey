@@ -12,6 +12,7 @@ from math import isfinite, log10
 import numpy as np
 
 from ai_journey.bigram_lm import build_vocabulary, normalize_corpus
+from ai_journey.context_checkpoint import load_checkpoint
 from ai_journey.context_mlp import (
     ContextDataset,
     ContextMLP,
@@ -413,6 +414,25 @@ def write_learning_rate_plot(
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(svg, encoding="utf-8")
     temporary.replace(path)
+
+
+def verify_selected_checkpoint(
+    path: Path, experiment: ModelSelectionExperiment
+) -> None:
+    """Verify that a persisted checkpoint is the selected development winner."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if not isinstance(experiment, ModelSelectionExperiment):
+        raise TypeError("experiment must be ModelSelectionExperiment")
+    restored, step = load_checkpoint(path)
+    if model_fingerprint(restored) != model_fingerprint(experiment.selected.model):
+        raise ContextMLPError("checkpoint model does not match the selected trial")
+    expected_step = experiment.selected.best_epoch + 1
+    if step != expected_step:
+        raise ContextMLPError(
+            f"checkpoint step {step} does not match selected step {expected_step}"
+        )
 
 
 def apply_sgd(

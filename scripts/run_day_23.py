@@ -16,6 +16,7 @@ from ai_journey.model_selection import (
     TrainingConfig,
     learning_rate_grid,
     run_model_selection,
+    verify_selected_checkpoint,
     write_experiment_report,
     write_learning_rate_plot,
 )
@@ -57,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
             experiment.selected.model,
             step=experiment.selected.best_epoch + 1,
         )
+        verify_selected_checkpoint(args.checkpoint, experiment)
     if args.plot is not None:
         write_learning_rate_plot(args.plot, experiment)
     return 0
