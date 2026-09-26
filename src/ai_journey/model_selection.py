@@ -69,6 +69,8 @@ class TrainingConfig:
     embedding_dim: int = 8
     hidden_dim: int = 64
     seed: int = 0
+    patience: int | None = None
+    minimum_delta: float = 0.0
 
     def __post_init__(self) -> None:
         for name in ("epochs", "batch_size", "embedding_dim", "hidden_dim"):
@@ -86,6 +88,18 @@ class TrainingConfig:
             or self.learning_rate <= 0
         ):
             raise ContextMLPError("learning_rate must be finite and positive")
+        if self.patience is not None:
+            if isinstance(self.patience, bool) or not isinstance(self.patience, int):
+                raise TypeError("patience must be an integer or None")
+            if self.patience <= 0:
+                raise ContextMLPError("patience must be positive")
+        if (
+            isinstance(self.minimum_delta, bool)
+            or not isinstance(self.minimum_delta, (int, float))
+            or not isfinite(self.minimum_delta)
+            or self.minimum_delta < 0
+        ):
+            raise ContextMLPError("minimum_delta must be finite and non-negative")
 
 
 @dataclass(frozen=True)
@@ -103,6 +117,7 @@ class ValidationTrainingResult:
     model: ContextMLP
     best_model: ContextMLP
     best_epoch: int
+    stopped_early: bool
     training_nll: tuple[float, ...]
     development_nll: tuple[float, ...]
 
@@ -300,6 +315,8 @@ def train_and_validate_context_mlp(
     best_model = model
     best_epoch = -1
     best_development_nll = float("inf")
+    stale_epochs = 0
+    stopped_early = False
     for epoch in range(config.epochs):
         model = _train_epoch(datasets.train, model, config=config, epoch=epoch)
         training_nll.append(evaluate_context_mlp(datasets.train, model).nll)
@@ -307,14 +324,21 @@ def train_and_validate_context_mlp(
             datasets.development, model
         ).nll
         development_nll.append(current_development_nll)
-        if current_development_nll < best_development_nll:
+        if current_development_nll < best_development_nll - config.minimum_delta:
             best_development_nll = current_development_nll
             best_model = model
             best_epoch = epoch
+            stale_epochs = 0
+        else:
+            stale_epochs += 1
+            if config.patience is not None and stale_epochs >= config.patience:
+                stopped_early = True
+                break
     return ValidationTrainingResult(
         model=model,
         best_model=best_model,
         best_epoch=best_epoch,
+        stopped_early=stopped_early,
         training_nll=tuple(training_nll),
         development_nll=tuple(development_nll),
     )

@@ -114,6 +114,8 @@ class TrainingConfigTests(unittest.TestCase):
             ("embedding_dim", -1),
             ("hidden_dim", 0),
             ("seed", False),
+            ("patience", 0),
+            ("minimum_delta", -0.1),
         ):
             with self.subTest(keyword=keyword), self.assertRaises((TypeError, ContextMLPError)):
                 TrainingConfig(**{keyword: value})
@@ -216,6 +218,26 @@ class TrainingConfigTests(unittest.TestCase):
         self.assertEqual(len(result.training_nll), 4)
         self.assertEqual(len(result.development_nll), 4)
         self.assertTrue(all(loss > 0 for loss in result.development_nll))
+
+    def test_early_stopping_halts_after_stale_development_epochs(self) -> None:
+        datasets = build_partitioned_datasets(
+            tuple(f"name{letter}" for letter in "abcdefghijkl"), seed=3
+        )
+        result = train_and_validate_context_mlp(
+            datasets,
+            TrainingConfig(
+                epochs=20,
+                batch_size=16,
+                hidden_dim=16,
+                seed=7,
+                patience=2,
+                minimum_delta=100.0,
+            ),
+        )
+
+        self.assertTrue(result.stopped_early)
+        self.assertEqual(len(result.development_nll), 3)
+        self.assertEqual(result.best_epoch, 0)
 
     def test_best_model_is_selected_by_development_loss(self) -> None:
         datasets = build_partitioned_datasets(
