@@ -22,6 +22,7 @@ from ai_journey.model_selection import (
     minibatch_epochs,
     partition_fingerprints,
     run_learning_rate_sweep,
+    select_best_trial,
     split_train_dev_test,
     TrainingConfig,
     train_and_validate_context_mlp,
@@ -139,6 +140,24 @@ class TrainingConfigTests(unittest.TestCase):
             [trial.best_development_nll for trial in first],
             [trial.best_development_nll for trial in second],
         )
+
+    def test_sweep_selection_uses_development_loss(self) -> None:
+        datasets = build_partitioned_datasets(
+            tuple(f"name{letter}" for letter in "abcdefghijkl"), seed=3
+        )
+        trials = run_learning_rate_sweep(
+            datasets,
+            TrainingConfig(epochs=4, batch_size=16, hidden_dim=16, seed=7),
+            (0.01, 0.05, 0.1),
+        )
+        selected = select_best_trial(reversed(trials))
+
+        self.assertEqual(
+            selected.best_development_nll,
+            min(trial.best_development_nll for trial in trials),
+        )
+        with self.assertRaises(ContextMLPError):
+            select_best_trial(())
 
     def test_sgd_update_reduces_loss_on_a_small_batch(self) -> None:
         datasets = build_partitioned_datasets(

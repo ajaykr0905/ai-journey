@@ -183,6 +183,20 @@ def run_learning_rate_sweep(
     return tuple(trials)
 
 
+def select_best_trial(trials: Iterable[LearningRateTrial]) -> LearningRateTrial:
+    """Select minimum development NLL with a lower-rate tie breaker."""
+
+    candidates = tuple(trials)
+    if not candidates:
+        raise ContextMLPError("trials must not be empty")
+    if any(not isinstance(trial, LearningRateTrial) for trial in candidates):
+        raise TypeError("trials must contain LearningRateTrial values")
+    return min(
+        candidates,
+        key=lambda trial: (trial.best_development_nll, trial.learning_rate),
+    )
+
+
 def apply_sgd(
     model: ContextMLP, gradients: ContextMLP, *, learning_rate: float
 ) -> ContextMLP:
