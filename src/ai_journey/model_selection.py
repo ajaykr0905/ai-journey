@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, replace
-import json
-from typing import Any
-from pathlib import Path
 from math import isfinite, log10
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -591,6 +591,8 @@ def split_train_dev_test(
     corpus = normalize_corpus(words)
     if len(corpus) < 3:
         raise ContextMLPError("at least three records are required")
+    if len(set(corpus)) != len(corpus):
+        raise ContextMLPError("duplicate records would leak across partitions")
     for name, fraction in (
         ("development_fraction", development_fraction),
         ("test_fraction", test_fraction),

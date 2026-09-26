@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
-import json
-from itertools import pairwise
 from dataclasses import replace
+from itertools import pairwise
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +60,8 @@ class CorpusPartitionTests(unittest.TestCase):
     def test_three_way_split_rejects_invalid_allocations(self) -> None:
         with self.assertRaises(ContextMLPError):
             split_train_dev_test(("anna", "aria"))
+        with self.assertRaisesRegex(ContextMLPError, "duplicate"):
+            split_train_dev_test(("anna", "aria", "anna", "navi"))
         with self.assertRaises(ContextMLPError):
             split_train_dev_test(
                 ("anna", "aria", "navi", "priya"),
