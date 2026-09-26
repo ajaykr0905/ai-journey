@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from itertools import pairwise
+from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -116,6 +117,7 @@ class TrainingConfigTests(unittest.TestCase):
             ("seed", False),
             ("patience", 0),
             ("minimum_delta", -0.1),
+            ("weight_decay", -0.1),
         ):
             with self.subTest(keyword=keyword), self.assertRaises((TypeError, ContextMLPError)):
                 TrainingConfig(**{keyword: value})
@@ -189,6 +191,21 @@ class TrainingConfigTests(unittest.TestCase):
         after, _ = loss_and_gradients(datasets.train, updated)
 
         self.assertLess(after, before)
+
+    def test_weight_decay_shrinks_weights_but_not_biases(self) -> None:
+        datasets = build_partitioned_datasets(
+            ("anna", "aria", "navi", "devin", "priya", "samira"), seed=3
+        )
+        model = initialize_context_mlp(datasets.train, seed=7)
+        gradients = replace(
+            model, **{name: values * 0 for name, values in model.__dict__.items()}
+        )
+        updated = apply_sgd(
+            model, gradients, learning_rate=0.1, weight_decay=0.5
+        )
+
+        self.assertLess(abs(updated.input_weights).sum(), abs(model.input_weights).sum())
+        self.assertEqual(abs(updated.input_bias).sum(), abs(model.input_bias).sum())
 
     def test_minibatch_training_is_reproducible_and_reduces_loss(self) -> None:
         datasets = build_partitioned_datasets(

@@ -71,6 +71,7 @@ class TrainingConfig:
     seed: int = 0
     patience: int | None = None
     minimum_delta: float = 0.0
+    weight_decay: float = 0.0
 
     def __post_init__(self) -> None:
         for name in ("epochs", "batch_size", "embedding_dim", "hidden_dim"):
@@ -100,6 +101,13 @@ class TrainingConfig:
             or self.minimum_delta < 0
         ):
             raise ContextMLPError("minimum_delta must be finite and non-negative")
+        if (
+            isinstance(self.weight_decay, bool)
+            or not isinstance(self.weight_decay, (int, float))
+            or not isfinite(self.weight_decay)
+            or self.weight_decay < 0
+        ):
+            raise ContextMLPError("weight_decay must be finite and non-negative")
 
 
 @dataclass(frozen=True)
@@ -253,7 +261,11 @@ def detect_overfitting(
 
 
 def apply_sgd(
-    model: ContextMLP, gradients: ContextMLP, *, learning_rate: float
+    model: ContextMLP,
+    gradients: ContextMLP,
+    *,
+    learning_rate: float,
+    weight_decay: float = 0.0,
 ) -> ContextMLP:
     """Apply one immutable stochastic-gradient update."""
 
@@ -266,12 +278,20 @@ def apply_sgd(
         or learning_rate <= 0
     ):
         raise ContextMLPError("learning_rate must be finite and positive")
+    if (
+        isinstance(weight_decay, bool)
+        or not isinstance(weight_decay, (int, float))
+        or not isfinite(weight_decay)
+        or weight_decay < 0
+    ):
+        raise ContextMLPError("weight_decay must be finite and non-negative")
     updated: dict[str, np.ndarray] = {}
     for name, values in model.__dict__.items():
         gradient = getattr(gradients, name)
         if values.shape != gradient.shape:
             raise ContextMLPError(f"gradient shape mismatch for {name}")
-        updated[name] = values - float(learning_rate) * gradient
+        penalty = values * weight_decay if not name.endswith("bias") else 0.0
+        updated[name] = values - float(learning_rate) * (gradient + penalty)
     return ContextMLP(**updated)
 
 
@@ -371,7 +391,12 @@ def _train_epoch(
         seed=config.seed + epoch,
     ):
         _, gradients = loss_and_gradients(batch, model)
-        model = apply_sgd(model, gradients, learning_rate=config.learning_rate)
+        model = apply_sgd(
+            model,
+            gradients,
+            learning_rate=config.learning_rate,
+            weight_decay=config.weight_decay,
+        )
     return model
 
 
