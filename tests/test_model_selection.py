@@ -17,6 +17,7 @@ from ai_journey.context_mlp import (
 from ai_journey.model_selection import (
     apply_sgd,
     build_partitioned_datasets,
+    detect_overfitting,
     evaluate_partitions,
     learning_rate_grid,
     minibatch_epochs,
@@ -158,6 +159,23 @@ class TrainingConfigTests(unittest.TestCase):
         )
         with self.assertRaises(ContextMLPError):
             select_best_trial(())
+
+    def test_overfitting_requires_train_dev_divergence(self) -> None:
+        signal = detect_overfitting(
+            (2.0, 1.7, 1.4, 1.2, 1.0),
+            (2.1, 1.8, 1.7, 1.9, 2.2),
+            window=2,
+        )
+
+        self.assertTrue(signal.detected)
+        self.assertLess(signal.training_change, 0)
+        self.assertGreater(signal.development_change, 0)
+        self.assertGreater(signal.final_gap, 0)
+        self.assertFalse(
+            detect_overfitting(
+                (2.0, 1.8, 1.6, 1.4), (2.1, 1.9, 1.7, 1.5), window=2
+            ).detected
+        )
 
     def test_sgd_update_reduces_loss_on_a_small_batch(self) -> None:
         datasets = build_partitioned_datasets(

@@ -135,6 +135,16 @@ class LearningRateTrial:
     model: ContextMLP
 
 
+@dataclass(frozen=True)
+class OverfittingSignal:
+    """Evidence that training improved while development performance regressed."""
+
+    detected: bool
+    training_change: float
+    development_change: float
+    final_gap: float
+
+
 def learning_rate_grid(
     minimum: float, maximum: float, *, count: int
 ) -> tuple[float, ...]:
@@ -194,6 +204,36 @@ def select_best_trial(trials: Iterable[LearningRateTrial]) -> LearningRateTrial:
     return min(
         candidates,
         key=lambda trial: (trial.best_development_nll, trial.learning_rate),
+    )
+
+
+def detect_overfitting(
+    training_nll: Iterable[float],
+    development_nll: Iterable[float],
+    *,
+    window: int = 3,
+) -> OverfittingSignal:
+    """Detect late divergence between training and development loss."""
+
+    training = tuple(float(value) for value in training_nll)
+    development = tuple(float(value) for value in development_nll)
+    if len(training) != len(development):
+        raise ContextMLPError("training and development traces must align")
+    if isinstance(window, bool) or not isinstance(window, int):
+        raise TypeError("window must be an integer")
+    if window <= 0 or len(training) <= window:
+        raise ContextMLPError("window must be smaller than the trace")
+    if not all(isfinite(value) for value in training + development):
+        raise ContextMLPError("loss traces must be finite")
+
+    training_change = training[-1] - training[-1 - window]
+    development_change = development[-1] - development[-1 - window]
+    final_gap = development[-1] - training[-1]
+    return OverfittingSignal(
+        detected=training_change < 0 < development_change and final_gap > 0,
+        training_change=training_change,
+        development_change=development_change,
+        final_gap=final_gap,
     )
 
 
