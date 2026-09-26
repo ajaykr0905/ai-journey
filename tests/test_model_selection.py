@@ -16,6 +16,7 @@ from ai_journey.model_selection import (
     partition_fingerprints,
     split_train_dev_test,
     TrainingConfig,
+    train_and_validate_context_mlp,
     train_minibatch_context_mlp,
 )
 
@@ -135,6 +136,17 @@ class TrainingConfigTests(unittest.TestCase):
 
         self.assertEqual(first.training_nll, second.training_nll)
         self.assertLess(first.training_nll[-1], first.training_nll[0])
+
+    def test_validation_loss_is_measured_after_every_epoch(self) -> None:
+        datasets = build_partitioned_datasets(
+            tuple(f"name{letter}" for letter in "abcdefghijkl"), seed=3
+        )
+        config = TrainingConfig(epochs=4, batch_size=16, hidden_dim=16, seed=7)
+        result = train_and_validate_context_mlp(datasets, config)
+
+        self.assertEqual(len(result.training_nll), 4)
+        self.assertEqual(len(result.development_nll), 4)
+        self.assertTrue(all(loss > 0 for loss in result.development_nll))
 
 
 if __name__ == "__main__":

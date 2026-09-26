@@ -95,6 +95,15 @@ class MinibatchTrainingResult:
     training_nll: tuple[float, ...]
 
 
+@dataclass(frozen=True)
+class ValidationTrainingResult:
+    """Final parameters plus train and development loss by epoch."""
+
+    model: ContextMLP
+    training_nll: tuple[float, ...]
+    development_nll: tuple[float, ...]
+
+
 def apply_sgd(
     model: ContextMLP, gradients: ContextMLP, *, learning_rate: float
 ) -> ContextMLP:
@@ -133,16 +142,56 @@ def train_minibatch_context_mlp(
     )
     losses: list[float] = []
     for epoch in range(config.epochs):
-        batches = create_minibatches(
-            dataset,
-            batch_size=config.batch_size,
-            seed=config.seed + epoch,
-        )
-        for batch in batches:
-            _, gradients = loss_and_gradients(batch, model)
-            model = apply_sgd(model, gradients, learning_rate=config.learning_rate)
+        model = _train_epoch(dataset, model, config=config, epoch=epoch)
         losses.append(evaluate_context_mlp(dataset, model).nll)
     return MinibatchTrainingResult(model=model, training_nll=tuple(losses))
+
+
+def train_and_validate_context_mlp(
+    datasets: DatasetPartitions, config: TrainingConfig
+) -> ValidationTrainingResult:
+    """Evaluate development loss after every deterministic training epoch."""
+
+    if not isinstance(datasets, DatasetPartitions):
+        raise TypeError("datasets must be DatasetPartitions")
+    if not isinstance(config, TrainingConfig):
+        raise TypeError("config must be TrainingConfig")
+    model = initialize_context_mlp(
+        datasets.train,
+        embedding_dim=config.embedding_dim,
+        hidden_dim=config.hidden_dim,
+        seed=config.seed,
+    )
+    training_nll: list[float] = []
+    development_nll: list[float] = []
+    for epoch in range(config.epochs):
+        model = _train_epoch(datasets.train, model, config=config, epoch=epoch)
+        training_nll.append(evaluate_context_mlp(datasets.train, model).nll)
+        development_nll.append(
+            evaluate_context_mlp(datasets.development, model).nll
+        )
+    return ValidationTrainingResult(
+        model=model,
+        training_nll=tuple(training_nll),
+        development_nll=tuple(development_nll),
+    )
+
+
+def _train_epoch(
+    dataset: ContextDataset,
+    model: ContextMLP,
+    *,
+    config: TrainingConfig,
+    epoch: int,
+) -> ContextMLP:
+    for batch in create_minibatches(
+        dataset,
+        batch_size=config.batch_size,
+        seed=config.seed + epoch,
+    ):
+        _, gradients = loss_and_gradients(batch, model)
+        model = apply_sgd(model, gradients, learning_rate=config.learning_rate)
+    return model
 
 
 def split_train_dev_test(
