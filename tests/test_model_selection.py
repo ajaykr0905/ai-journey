@@ -8,7 +8,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.context_mlp import ContextMLPError
-from ai_journey.context_mlp import initialize_context_mlp, loss_and_gradients
+from ai_journey.context_mlp import (
+    evaluate_context_mlp,
+    initialize_context_mlp,
+    loss_and_gradients,
+)
 from ai_journey.model_selection import (
     apply_sgd,
     build_partitioned_datasets,
@@ -147,6 +151,23 @@ class TrainingConfigTests(unittest.TestCase):
         self.assertEqual(len(result.training_nll), 4)
         self.assertEqual(len(result.development_nll), 4)
         self.assertTrue(all(loss > 0 for loss in result.development_nll))
+
+    def test_best_model_is_selected_by_development_loss(self) -> None:
+        datasets = build_partitioned_datasets(
+            tuple(f"name{letter}" for letter in "abcdefghijkl"), seed=3
+        )
+        result = train_and_validate_context_mlp(
+            datasets,
+            TrainingConfig(epochs=6, batch_size=16, hidden_dim=16, seed=7),
+        )
+
+        self.assertEqual(
+            result.development_nll[result.best_epoch], min(result.development_nll)
+        )
+        self.assertAlmostEqual(
+            evaluate_context_mlp(datasets.development, result.best_model).nll,
+            min(result.development_nll),
+        )
 
 
 if __name__ == "__main__":

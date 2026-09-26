@@ -100,6 +100,8 @@ class ValidationTrainingResult:
     """Final parameters plus train and development loss by epoch."""
 
     model: ContextMLP
+    best_model: ContextMLP
+    best_epoch: int
     training_nll: tuple[float, ...]
     development_nll: tuple[float, ...]
 
@@ -164,14 +166,24 @@ def train_and_validate_context_mlp(
     )
     training_nll: list[float] = []
     development_nll: list[float] = []
+    best_model = model
+    best_epoch = -1
+    best_development_nll = float("inf")
     for epoch in range(config.epochs):
         model = _train_epoch(datasets.train, model, config=config, epoch=epoch)
         training_nll.append(evaluate_context_mlp(datasets.train, model).nll)
-        development_nll.append(
-            evaluate_context_mlp(datasets.development, model).nll
-        )
+        current_development_nll = evaluate_context_mlp(
+            datasets.development, model
+        ).nll
+        development_nll.append(current_development_nll)
+        if current_development_nll < best_development_nll:
+            best_development_nll = current_development_nll
+            best_model = model
+            best_epoch = epoch
     return ValidationTrainingResult(
         model=model,
+        best_model=best_model,
+        best_epoch=best_epoch,
         training_nll=tuple(training_nll),
         development_nll=tuple(development_nll),
     )
