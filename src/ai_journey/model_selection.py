@@ -12,6 +12,7 @@ from ai_journey.context_mlp import (
     ContextDataset,
     ContextMLPError,
     build_context_dataset,
+    dataset_fingerprint,
 )
 
 
@@ -31,6 +32,15 @@ class DatasetPartitions:
     train: ContextDataset
     development: ContextDataset
     test: ContextDataset
+
+
+@dataclass(frozen=True)
+class PartitionFingerprints:
+    """Content identities for each encoded evaluation partition."""
+
+    train: str
+    development: str
+    test: str
 
 
 def split_train_dev_test(
@@ -110,4 +120,16 @@ def build_partitioned_datasets(
         test=build_context_dataset(
             partitions.test, block_size=block_size, vocabulary=vocabulary
         ),
+    )
+
+
+def partition_fingerprints(datasets: DatasetPartitions) -> PartitionFingerprints:
+    """Fingerprint every partition so an experiment can prove its inputs."""
+
+    if not isinstance(datasets, DatasetPartitions):
+        raise TypeError("datasets must be DatasetPartitions")
+    return PartitionFingerprints(
+        train=dataset_fingerprint(datasets.train),
+        development=dataset_fingerprint(datasets.development),
+        test=dataset_fingerprint(datasets.test),
     )
