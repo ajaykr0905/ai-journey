@@ -16,6 +16,7 @@ from ai_journey.context_mlp import (
 from ai_journey.model_selection import (
     apply_sgd,
     build_partitioned_datasets,
+    evaluate_partitions,
     minibatch_epochs,
     partition_fingerprints,
     split_train_dev_test,
@@ -168,6 +169,23 @@ class TrainingConfigTests(unittest.TestCase):
             evaluate_context_mlp(datasets.development, result.best_model).nll,
             min(result.development_nll),
         )
+
+    def test_partition_metrics_report_generalization_gaps(self) -> None:
+        datasets = build_partitioned_datasets(
+            tuple(f"name{letter}" for letter in "abcdefghijkl"), seed=3
+        )
+        result = train_and_validate_context_mlp(
+            datasets,
+            TrainingConfig(epochs=4, batch_size=16, hidden_dim=16, seed=7),
+        )
+        metrics = evaluate_partitions(datasets, result.best_model)
+
+        self.assertAlmostEqual(
+            metrics.development_gap,
+            metrics.development.nll - metrics.train.nll,
+        )
+        self.assertAlmostEqual(metrics.test_gap, metrics.test.nll - metrics.train.nll)
+        self.assertGreater(metrics.test.perplexity, 0)
 
 
 if __name__ == "__main__":

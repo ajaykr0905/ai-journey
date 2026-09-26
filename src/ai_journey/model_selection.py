@@ -13,6 +13,7 @@ from ai_journey.context_mlp import (
     ContextDataset,
     ContextMLP,
     ContextMLPError,
+    EvaluationMetrics,
     build_context_dataset,
     create_minibatches,
     dataset_fingerprint,
@@ -106,6 +107,23 @@ class ValidationTrainingResult:
     development_nll: tuple[float, ...]
 
 
+@dataclass(frozen=True)
+class PartitionMetrics:
+    """Comparable loss metrics and generalization gaps for one model."""
+
+    train: EvaluationMetrics
+    development: EvaluationMetrics
+    test: EvaluationMetrics
+
+    @property
+    def development_gap(self) -> float:
+        return self.development.nll - self.train.nll
+
+    @property
+    def test_gap(self) -> float:
+        return self.test.nll - self.train.nll
+
+
 def apply_sgd(
     model: ContextMLP, gradients: ContextMLP, *, learning_rate: float
 ) -> ContextMLP:
@@ -186,6 +204,20 @@ def train_and_validate_context_mlp(
         best_epoch=best_epoch,
         training_nll=tuple(training_nll),
         development_nll=tuple(development_nll),
+    )
+
+
+def evaluate_partitions(
+    datasets: DatasetPartitions, model: ContextMLP
+) -> PartitionMetrics:
+    """Evaluate one frozen model on train, development, and test data."""
+
+    if not isinstance(datasets, DatasetPartitions):
+        raise TypeError("datasets must be DatasetPartitions")
+    return PartitionMetrics(
+        train=evaluate_context_mlp(datasets.train, model),
+        development=evaluate_context_mlp(datasets.development, model),
+        test=evaluate_context_mlp(datasets.test, model),
     )
 
 
