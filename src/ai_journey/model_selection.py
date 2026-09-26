@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, replace
+import json
 from typing import Any
+from pathlib import Path
 from math import isfinite
 
 import numpy as np
@@ -342,6 +344,22 @@ def experiment_payload(experiment: ModelSelectionExperiment) -> dict[str, Any]:
             "test_gap": experiment.metrics.test_gap,
         },
     }
+
+
+def write_experiment_report(
+    path: Path, experiment: ModelSelectionExperiment
+) -> None:
+    """Atomically persist model-selection evidence as stable JSON."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(experiment_payload(experiment), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
 
 
 def apply_sgd(

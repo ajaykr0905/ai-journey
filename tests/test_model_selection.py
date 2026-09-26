@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 import json
 from itertools import pairwise
@@ -33,6 +34,7 @@ from ai_journey.model_selection import (
     TrainingConfig,
     train_and_validate_context_mlp,
     train_minibatch_context_mlp,
+    write_experiment_report,
 )
 
 
@@ -216,6 +218,20 @@ class TrainingConfigTests(unittest.TestCase):
         self.assertEqual(len(payload["selected_model_fingerprint"]), 64)
         self.assertEqual(len(payload["trials"]), 2)
         self.assertIn("test_gap", payload["metrics"])
+
+    def test_experiment_report_is_written_atomically(self) -> None:
+        experiment = run_model_selection(
+            tuple(f"name{letter}" for letter in "abcdefghijkl"),
+            config=TrainingConfig(epochs=2, batch_size=16, hidden_dim=16, seed=7),
+            learning_rates=(0.01, 0.05),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "report.json"
+            write_experiment_report(path, experiment)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+
+            self.assertEqual(payload["config"]["seed"], 7)
+            self.assertFalse(path.with_name(".report.json.tmp").exists())
 
     def test_sgd_update_reduces_loss_on_a_small_batch(self) -> None:
         datasets = build_partitioned_datasets(
