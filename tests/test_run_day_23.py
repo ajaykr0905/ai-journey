@@ -14,6 +14,7 @@ class Day23CLITests(unittest.TestCase):
     def test_cli_writes_a_reproducible_sweep_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "day-23.json"
+            checkpoint = Path(directory) / "day-23-model.json"
             command = [
                 sys.executable,
                 "scripts/run_day_23.py",
@@ -21,6 +22,8 @@ class Day23CLITests(unittest.TestCase):
                 "data/day-19-demo-names.txt",
                 "--output",
                 str(output),
+                "--checkpoint",
+                str(checkpoint),
                 "--epochs",
                 "3",
                 "--batch-size",
@@ -44,6 +47,18 @@ class Day23CLITests(unittest.TestCase):
             self.assertEqual(first_payload, second_payload)
             self.assertEqual(len(first_payload["trials"]), 3)
             self.assertIn("test", first_payload["metrics"])
+            saved = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(
+                saved["model_fingerprint"],
+                first_payload["selected_model_fingerprint"],
+            )
+            selected = next(
+                trial
+                for trial in first_payload["trials"]
+                if trial["learning_rate"]
+                == first_payload["selected_learning_rate"]
+            )
+            self.assertEqual(saved["step"], selected["best_epoch"] + 1)
 
 
 if __name__ == "__main__":

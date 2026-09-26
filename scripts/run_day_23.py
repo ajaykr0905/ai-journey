@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.bigram_lm import load_corpus
+from ai_journey.context_checkpoint import save_checkpoint
 from ai_journey.model_selection import (
     TrainingConfig,
     learning_rate_grid,
@@ -23,6 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--seed", type=int, default=23)
@@ -47,6 +49,12 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     write_experiment_report(args.output, experiment)
+    if args.checkpoint is not None:
+        save_checkpoint(
+            args.checkpoint,
+            experiment.selected.model,
+            step=experiment.selected.best_epoch + 1,
+        )
     return 0
 
 
