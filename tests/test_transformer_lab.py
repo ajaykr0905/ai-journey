@@ -19,6 +19,7 @@ from ai_journey.transformer_lab import (
     TransformerConfig,
     TransformerLabError,
     TrainingConfig,
+    build_optimizer,
     seed_everything,
 )
 
@@ -196,6 +197,16 @@ class DecoderLanguageModelTests(unittest.TestCase):
         )
         self.assertTrue(torch.equal(first, second))
         self.assertEqual(first.shape, (1, 8))
+
+    def test_optimizer_excludes_biases_and_norms_from_weight_decay(self) -> None:
+        model = DecoderLanguageModel(
+            TransformerConfig(vocab_size=5, embedding_dim=8, head_count=2)
+        )
+        optimizer = build_optimizer(model, TrainingConfig(weight_decay=0.2))
+        groups = {group["weight_decay"]: group["params"] for group in optimizer.param_groups}
+        self.assertEqual(set(groups), {0.0, 0.2})
+        self.assertTrue(all(parameter.ndim >= 2 for parameter in groups[0.2]))
+        self.assertTrue(all(parameter.ndim < 2 for parameter in groups[0.0]))
 
 
 if __name__ == "__main__":

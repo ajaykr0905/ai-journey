@@ -408,3 +408,21 @@ class DecoderLanguageModel(nn.Module):
             generated = torch.cat((generated, next_token), dim=1)
         self.train(was_training)
         return generated
+
+
+def build_optimizer(
+    model: DecoderLanguageModel, config: TrainingConfig
+) -> torch.optim.AdamW:
+    """Build AdamW with decay limited to matrix-shaped parameters."""
+
+    decay = [parameter for parameter in model.parameters() if parameter.ndim >= 2]
+    no_decay = [parameter for parameter in model.parameters() if parameter.ndim < 2]
+    if sum(map(len, (decay, no_decay))) != len(list(model.parameters())):
+        raise RuntimeError("optimizer parameter grouping is incomplete")
+    return torch.optim.AdamW(
+        [
+            {"params": decay, "weight_decay": config.weight_decay},
+            {"params": no_decay, "weight_decay": 0.0},
+        ],
+        lr=config.learning_rate,
+    )
