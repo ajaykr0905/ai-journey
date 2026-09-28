@@ -21,6 +21,9 @@ from ai_journey.transformer_lab import (
     TrainingConfig,
     build_optimizer,
     evaluate_nll,
+    load_training_checkpoint,
+    model_fingerprint,
+    save_training_checkpoint,
     seed_everything,
     train_steps,
 )
@@ -240,6 +243,49 @@ class DecoderLanguageModelTests(unittest.TestCase):
         self.assertEqual([metric.step for metric in metrics], [1, 2, 3])
         self.assertTrue(all(math.isfinite(metric.loss) for metric in metrics))
         self.assertTrue(all(math.isfinite(metric.gradient_norm) for metric in metrics))
+
+    def test_checkpoint_restores_model_optimizer_cursor_and_rng(self) -> None:
+        import torch
+
+        seed_everything(8)
+        model_config = TransformerConfig(
+            vocab_size=5, block_size=4, embedding_dim=8, head_count=2
+        )
+        training = TrainingConfig(steps=2, batch_size=3)
+        model = DecoderLanguageModel(model_config)
+        optimizer = build_optimizer(model, training)
+        cursor = BatchCursor(
+            torch.arange(30) % 5, block_size=4, batch_size=3, seed=training.seed
+        )
+        train_steps(model, cursor, optimizer, training, step_count=1)
+        expected_fingerprint = model_fingerprint(model)
+        expected_cursor = cursor.state_dict()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "checkpoint.pt"
+            save_training_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                training_config=training,
+                corpus_fingerprint="a" * 64,
+                step=1,
+            )
+            with torch.no_grad():
+                next(model.parameters()).add_(1)
+            cursor.next()
+            step = load_training_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                training_config=training,
+                corpus_fingerprint="a" * 64,
+            )
+            self.assertFalse(path.with_name(".checkpoint.pt.tmp").exists())
+        self.assertEqual(step, 1)
+        self.assertEqual(model_fingerprint(model), expected_fingerprint)
+        self.assertEqual(cursor.state_dict(), expected_cursor)
 
 
 if __name__ == "__main__":

@@ -503,3 +503,87 @@ def train_steps(
             )
         )
     return tuple(metrics)
+
+
+CHECKPOINT_SCHEMA_VERSION = 1
+
+
+def model_fingerprint(model: DecoderLanguageModel) -> str:
+    """Hash model state names, dtypes, shapes, and values."""
+
+    digest = sha256()
+    for name, tensor in sorted(model.state_dict().items()):
+        value = tensor.detach().cpu().contiguous()
+        digest.update(name.encode())
+        digest.update(str(value.dtype).encode())
+        digest.update(str(tuple(value.shape)).encode())
+        digest.update(value.numpy().tobytes())
+    return digest.hexdigest()
+
+
+def save_training_checkpoint(
+    path: Path,
+    *,
+    model: DecoderLanguageModel,
+    optimizer: torch.optim.Optimizer,
+    cursor: BatchCursor,
+    training_config: TrainingConfig,
+    corpus_fingerprint: str,
+    step: int,
+) -> None:
+    """Atomically save all state required for an exact training restart."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if isinstance(step, bool) or not isinstance(step, int) or step < 0:
+        raise TransformerLabError("step must be a non-negative integer")
+    if len(corpus_fingerprint) != 64:
+        raise TransformerLabError("corpus_fingerprint must be a SHA-256 hex digest")
+    payload = {
+        "schema_version": CHECKPOINT_SCHEMA_VERSION,
+        "step": step,
+        "model_config": asdict(model.config),
+        "training_config": asdict(training_config),
+        "corpus_fingerprint": corpus_fingerprint,
+        "model_fingerprint": model_fingerprint(model),
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "cursor_state": cursor.state_dict(),
+        "torch_rng_state": torch.get_rng_state(),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    torch.save(payload, temporary)
+    temporary.replace(path)
+
+
+def load_training_checkpoint(
+    path: Path,
+    *,
+    model: DecoderLanguageModel,
+    optimizer: torch.optim.Optimizer,
+    cursor: BatchCursor,
+    training_config: TrainingConfig,
+    corpus_fingerprint: str,
+) -> int:
+    """Validate and restore an exact transformer training checkpoint."""
+
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
+        raise TransformerLabError("unsupported checkpoint schema")
+    if payload.get("model_config") != asdict(model.config):
+        raise TransformerLabError("checkpoint model configuration mismatch")
+    if payload.get("training_config") != asdict(training_config):
+        raise TransformerLabError("checkpoint training configuration mismatch")
+    if payload.get("corpus_fingerprint") != corpus_fingerprint:
+        raise TransformerLabError("checkpoint corpus fingerprint mismatch")
+    model.load_state_dict(payload["model_state"])
+    if model_fingerprint(model) != payload.get("model_fingerprint"):
+        raise TransformerLabError("checkpoint model fingerprint mismatch")
+    optimizer.load_state_dict(payload["optimizer_state"])
+    cursor.load_state_dict(payload["cursor_state"])
+    torch.set_rng_state(payload["torch_rng_state"])
+    step = payload.get("step")
+    if isinstance(step, bool) or not isinstance(step, int) or step < 0:
+        raise TransformerLabError("checkpoint step is invalid")
+    return step
