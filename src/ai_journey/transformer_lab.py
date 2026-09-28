@@ -693,3 +693,50 @@ def write_experiment_report(path: Path, result: ExperimentResult) -> None:
         encoding="utf-8",
     )
     temporary.replace(path)
+
+
+@dataclass(frozen=True)
+class OverfitProbeResult:
+    example_count: int
+    steps: int
+    initial_nll: float
+    final_nll: float
+    model_fingerprint: str
+
+
+def run_overfit_probe(
+    corpus: TokenCorpus,
+    *,
+    model_config: TransformerConfig,
+    training_config: TrainingConfig,
+    example_count: int = 100,
+) -> OverfitProbeResult:
+    """Deliberately fit an exact-size window subset as a capacity regression."""
+
+    if isinstance(example_count, bool) or not isinstance(example_count, int):
+        raise TypeError("example_count must be an integer")
+    if example_count <= 0:
+        raise TransformerLabError("example_count must be positive")
+    combined = torch.cat((corpus.train_tokens, corpus.validation_tokens))
+    required = example_count + model_config.block_size
+    if len(combined) < required:
+        raise TransformerLabError("corpus has too few windows for the overfit probe")
+    subset = combined[:required]
+    seed_everything(training_config.seed)
+    model = DecoderLanguageModel(model_config)
+    optimizer = build_optimizer(model, training_config)
+    cursor = BatchCursor(
+        subset,
+        block_size=model_config.block_size,
+        batch_size=training_config.batch_size,
+        seed=training_config.seed,
+    )
+    initial = evaluate_nll(model, subset)
+    train_steps(model, cursor, optimizer, training_config)
+    return OverfitProbeResult(
+        example_count=example_count,
+        steps=training_config.steps,
+        initial_nll=initial,
+        final_nll=evaluate_nll(model, subset),
+        model_fingerprint=model_fingerprint(model),
+    )
