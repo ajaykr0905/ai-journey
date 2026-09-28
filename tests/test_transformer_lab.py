@@ -14,6 +14,7 @@ from ai_journey.transformer_lab import (
     CausalSelfAttention,
     FeedForward,
     TokenCorpus,
+    TransformerBlock,
     TransformerConfig,
     TransformerLabError,
 )
@@ -113,6 +114,19 @@ class FeedForwardTests(unittest.TestCase):
         self.assertEqual(outputs.shape, inputs.shape)
         outputs.square().mean().backward()
         self.assertIsNotNone(inputs.grad)
+
+
+class TransformerBlockTests(unittest.TestCase):
+    def test_block_preserves_residual_shape_and_parameter_gradients(self) -> None:
+        import torch
+
+        block = TransformerBlock(
+            TransformerConfig(vocab_size=8, block_size=6, embedding_dim=12, head_count=3)
+        )
+        inputs = torch.randn(2, 6, 12, requires_grad=True)
+        block(inputs).mean().backward()
+        self.assertEqual(inputs.grad.shape, inputs.shape)
+        self.assertTrue(all(parameter.grad is not None for parameter in block.parameters()))
 
 
 if __name__ == "__main__":

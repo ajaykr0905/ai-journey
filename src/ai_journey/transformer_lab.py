@@ -263,3 +263,18 @@ class FeedForward(nn.Module):
 
     def forward(self, inputs: Tensor) -> Tensor:
         return self.network(inputs)
+
+
+class TransformerBlock(nn.Module):
+    """Pre-normalized attention and feed-forward residual block."""
+
+    def __init__(self, config: TransformerConfig) -> None:
+        super().__init__()
+        self.attention_norm = nn.LayerNorm(config.embedding_dim)
+        self.attention = CausalSelfAttention(config)
+        self.feed_forward_norm = nn.LayerNorm(config.embedding_dim)
+        self.feed_forward = FeedForward(config)
+
+    def forward(self, inputs: Tensor) -> Tensor:
+        inputs = inputs + self.attention(self.attention_norm(inputs))
+        return inputs + self.feed_forward(self.feed_forward_norm(inputs))
