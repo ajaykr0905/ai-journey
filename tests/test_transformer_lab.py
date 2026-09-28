@@ -26,6 +26,8 @@ from ai_journey.transformer_lab import (
     save_training_checkpoint,
     seed_everything,
     train_steps,
+    run_transformer_experiment,
+    write_experiment_report,
 )
 
 
@@ -343,6 +345,38 @@ class DecoderLanguageModelTests(unittest.TestCase):
             )[0]
         self.assertEqual(actual_metric, expected_metric)
         self.assertEqual(model_fingerprint(resumed_model), expected_fingerprint)
+
+
+class TransformerExperimentTests(unittest.TestCase):
+    def test_experiment_writes_reproducible_training_evidence(self) -> None:
+        import json
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus_path = root / "corpus.txt"
+            corpus_path.write_text("anna\naria\namara\n" * 8, encoding="utf-8")
+            corpus = TokenCorpus.from_path(corpus_path, block_size=4)
+            result = run_transformer_experiment(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                ),
+                training_config=TrainingConfig(
+                    steps=4, batch_size=4, learning_rate=0.02
+                ),
+                checkpoint_path=root / "checkpoint.pt",
+            )
+            report_path = root / "report.json"
+            write_experiment_report(report_path, result)
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+        self.assertEqual(payload["completed_steps"], 4)
+        self.assertEqual(len(payload["trace"]), 4)
+        self.assertEqual(len(payload["model_fingerprint"]), 64)
+        self.assertTrue(result.final_train_nll < result.initial_train_nll)
 
 
 if __name__ == "__main__":

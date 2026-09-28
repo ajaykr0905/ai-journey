@@ -587,3 +587,109 @@ def load_training_checkpoint(
     if isinstance(step, bool) or not isinstance(step, int) or step < 0:
         raise TransformerLabError("checkpoint step is invalid")
     return step
+
+
+@dataclass(frozen=True)
+class ExperimentResult:
+    model_config: TransformerConfig
+    training_config: TrainingConfig
+    corpus_fingerprint: str
+    codec_fingerprint: str
+    model_fingerprint: str
+    parameter_count: int
+    completed_steps: int
+    initial_train_nll: float
+    final_train_nll: float
+    initial_validation_nll: float
+    final_validation_nll: float
+    trace: tuple[StepMetric, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["trace"] = [asdict(metric) for metric in self.trace]
+        return payload
+
+
+def run_transformer_experiment(
+    corpus: TokenCorpus,
+    *,
+    model_config: TransformerConfig,
+    training_config: TrainingConfig,
+    checkpoint_path: Path,
+    resume: bool = False,
+) -> ExperimentResult:
+    """Train, evaluate, and checkpoint a deterministic transformer experiment."""
+
+    if model_config.vocab_size != corpus.vocab_size:
+        raise TransformerLabError("model vocabulary does not match corpus codec")
+    seed_everything(training_config.seed)
+    model = DecoderLanguageModel(model_config)
+    optimizer = build_optimizer(model, training_config)
+    cursor = BatchCursor(
+        corpus.train_tokens,
+        block_size=model_config.block_size,
+        batch_size=training_config.batch_size,
+        seed=training_config.seed,
+    )
+    initial_train_nll = evaluate_nll(model, corpus.train_tokens)
+    initial_validation_nll = evaluate_nll(model, corpus.validation_tokens)
+    start_step = 0
+    if resume:
+        start_step = load_training_checkpoint(
+            checkpoint_path,
+            model=model,
+            optimizer=optimizer,
+            cursor=cursor,
+            training_config=training_config,
+            corpus_fingerprint=corpus.fingerprint(),
+        )
+    if start_step > training_config.steps:
+        raise TransformerLabError("checkpoint is beyond configured training steps")
+    remaining = training_config.steps - start_step
+    trace = (
+        train_steps(
+            model,
+            cursor,
+            optimizer,
+            training_config,
+            start_step=start_step,
+            step_count=remaining,
+        )
+        if remaining
+        else ()
+    )
+    save_training_checkpoint(
+        checkpoint_path,
+        model=model,
+        optimizer=optimizer,
+        cursor=cursor,
+        training_config=training_config,
+        corpus_fingerprint=corpus.fingerprint(),
+        step=training_config.steps,
+    )
+    return ExperimentResult(
+        model_config=model_config,
+        training_config=training_config,
+        corpus_fingerprint=corpus.fingerprint(),
+        codec_fingerprint=corpus.codec.fingerprint(),
+        model_fingerprint=model_fingerprint(model),
+        parameter_count=model.parameter_count,
+        completed_steps=training_config.steps,
+        initial_train_nll=initial_train_nll,
+        final_train_nll=evaluate_nll(model, corpus.train_tokens),
+        initial_validation_nll=initial_validation_nll,
+        final_validation_nll=evaluate_nll(model, corpus.validation_tokens),
+        trace=trace,
+    )
+
+
+def write_experiment_report(path: Path, result: ExperimentResult) -> None:
+    """Atomically write stable JSON evidence for an experiment."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
