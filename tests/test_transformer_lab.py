@@ -151,6 +151,29 @@ class DecoderLanguageModelTests(unittest.TestCase):
         with self.assertRaisesRegex(TransformerLabError, "vocabulary"):
             model(torch.tensor([[0, 3]]))
 
+    def test_seeded_generation_is_repeatable_beyond_the_context_window(self) -> None:
+        import torch
+
+        torch.manual_seed(2)
+        model = DecoderLanguageModel(
+            TransformerConfig(vocab_size=5, block_size=3, embedding_dim=8, head_count=2)
+        )
+        prompt = torch.tensor([[0, 1, 2]])
+        first = model.generate(
+            prompt,
+            new_tokens=5,
+            top_k=3,
+            generator=torch.Generator().manual_seed(9),
+        )
+        second = model.generate(
+            prompt,
+            new_tokens=5,
+            top_k=3,
+            generator=torch.Generator().manual_seed(9),
+        )
+        self.assertTrue(torch.equal(first, second))
+        self.assertEqual(first.shape, (1, 8))
+
 
 if __name__ == "__main__":
     unittest.main()

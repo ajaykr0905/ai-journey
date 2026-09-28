@@ -331,3 +331,41 @@ class DecoderLanguageModel(nn.Module):
     @property
     def parameter_count(self) -> int:
         return sum(parameter.numel() for parameter in self.parameters())
+
+    @torch.no_grad()
+    def generate(
+        self,
+        token_ids: Tensor,
+        *,
+        new_tokens: int,
+        temperature: float = 1.0,
+        top_k: int | None = None,
+        generator: torch.Generator | None = None,
+    ) -> Tensor:
+        if isinstance(new_tokens, bool) or not isinstance(new_tokens, int):
+            raise TypeError("new_tokens must be an integer")
+        if new_tokens < 0:
+            raise TransformerLabError("new_tokens must be non-negative")
+        if not isinstance(temperature, (int, float)) or temperature <= 0:
+            raise TransformerLabError("temperature must be positive")
+        if top_k is not None and (
+            isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0
+        ):
+            raise TransformerLabError("top_k must be a positive integer")
+        was_training = self.training
+        self.eval()
+        generated = token_ids.clone()
+        for _ in range(new_tokens):
+            context = generated[:, -self.config.block_size :]
+            logits, _ = self(context)
+            next_logits = logits[:, -1] / temperature
+            if top_k is not None:
+                values, _ = torch.topk(next_logits, min(top_k, next_logits.shape[-1]))
+                next_logits[next_logits < values[:, [-1]]] = float("-inf")
+            probabilities = F.softmax(next_logits, dim=-1)
+            next_token = torch.multinomial(
+                probabilities, num_samples=1, generator=generator
+            )
+            generated = torch.cat((generated, next_token), dim=1)
+        self.train(was_training)
+        return generated
