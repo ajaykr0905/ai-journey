@@ -457,3 +457,49 @@ def evaluate_nll(
         losses.append(per_token)
     model.train(was_training)
     return float(torch.cat(losses).mean())
+
+
+@dataclass(frozen=True)
+class StepMetric:
+    step: int
+    loss: float
+    gradient_norm: float
+
+
+def train_steps(
+    model: DecoderLanguageModel,
+    cursor: BatchCursor,
+    optimizer: torch.optim.Optimizer,
+    config: TrainingConfig,
+    *,
+    start_step: int = 0,
+    step_count: int | None = None,
+) -> tuple[StepMetric, ...]:
+    """Train a bounded number of steps and return inspectable metrics."""
+
+    count = config.steps if step_count is None else step_count
+    if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+        raise TransformerLabError("step_count must be a positive integer")
+    if isinstance(start_step, bool) or not isinstance(start_step, int) or start_step < 0:
+        raise TransformerLabError("start_step must be a non-negative integer")
+    model.train()
+    metrics: list[StepMetric] = []
+    for step in range(start_step, start_step + count):
+        x, y = cursor.next()
+        optimizer.zero_grad(set_to_none=True)
+        _, loss = model(x, y)
+        if loss is None:
+            raise RuntimeError("training loss was not computed")
+        loss.backward()
+        gradient_norm = nn.utils.clip_grad_norm_(
+            model.parameters(), max_norm=config.gradient_clip
+        )
+        optimizer.step()
+        metrics.append(
+            StepMetric(
+                step=step + 1,
+                loss=float(loss.detach()),
+                gradient_norm=float(gradient_norm),
+            )
+        )
+    return tuple(metrics)

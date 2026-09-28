@@ -22,6 +22,7 @@ from ai_journey.transformer_lab import (
     build_optimizer,
     evaluate_nll,
     seed_everything,
+    train_steps,
 )
 
 
@@ -219,6 +220,26 @@ class DecoderLanguageModelTests(unittest.TestCase):
         loss = evaluate_nll(model, torch.arange(30) % 5, batch_size=3)
         self.assertTrue(math.isfinite(loss))
         self.assertTrue(model.training)
+
+    def test_training_emits_finite_step_and_gradient_metrics(self) -> None:
+        import math
+        import torch
+
+        seed_everything(11)
+        model = DecoderLanguageModel(
+            TransformerConfig(vocab_size=5, block_size=4, embedding_dim=8, head_count=2)
+        )
+        training = TrainingConfig(steps=3, batch_size=4, learning_rate=0.01)
+        cursor = BatchCursor(
+            torch.arange(40) % 5,
+            block_size=model.config.block_size,
+            batch_size=training.batch_size,
+            seed=training.seed,
+        )
+        metrics = train_steps(model, cursor, build_optimizer(model, training), training)
+        self.assertEqual([metric.step for metric in metrics], [1, 2, 3])
+        self.assertTrue(all(math.isfinite(metric.loss) for metric in metrics))
+        self.assertTrue(all(math.isfinite(metric.gradient_norm) for metric in metrics))
 
 
 if __name__ == "__main__":
