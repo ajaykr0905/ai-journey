@@ -24,6 +24,17 @@ from .mlp_memory import run_memory_experiment
 from .neural_net import default_parameters, forward, full_backward
 from .scalar_autodiff import Value, run_autodiff_experiment
 from .tiny_mlp import MLP, TrainingConfig, run_mlp_experiment, train_mlp
+from .transformer_lab import (
+    DecoderLanguageModel,
+    TokenCorpus,
+    run_transformer_experiment,
+)
+from .transformer_lab import (
+    TrainingConfig as TransformerTrainingConfig,
+)
+from .transformer_lab import (
+    TransformerConfig as TransformerModelConfig,
+)
 from .transformer_shapes import TransformerConfig, build_gpt_shape_flow
 from .xor import train_xor
 
@@ -34,11 +45,15 @@ __all__ = [
     "ContextDataset",
     "ContextMLP",
     "ContextTrainingResult",
+    "DecoderLanguageModel",
     "ShiftAssessment",
     "ShiftPolicy",
     "ShiftReport",
+    "TokenCorpus",
     "TrainingConfig",
     "TransformerConfig",
+    "TransformerModelConfig",
+    "TransformerTrainingConfig",
     "Value",
     "Vocabulary",
     "analyze_corpus_shift",
@@ -56,6 +71,7 @@ __all__ = [
     "run_manual_backprop_experiment",
     "run_memory_experiment",
     "run_mlp_experiment",
+    "run_transformer_experiment",
     "train_context_mlp",
     "train_mlp",
     "train_xor",

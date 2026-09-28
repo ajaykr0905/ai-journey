@@ -88,6 +88,29 @@ jobs:
           --output /tmp/ai-journey-artifacts/day-23-model-selection.json
           --checkpoint /tmp/ai-journey-artifacts/day-23-context-mlp.json
           --plot /tmp/ai-journey-artifacts/day-23-learning-rate-sweep.svg
+      - name: Train and checkpoint the Day 24 transformer
+        run: >-
+          python scripts/run_day_24.py
+          --corpus data/day-19-demo-names.txt
+          --steps 5
+          --batch-size 4
+          --block-size 4
+          --embedding-dim 8
+          --heads 2
+          --layers 1
+          --output /tmp/ai-journey-artifacts/day-24-transformer.json
+          --checkpoint /tmp/ai-journey-artifacts/day-24-transformer.pt
+      - name: Verify the Day 24 overfit capacity gate
+        run: >-
+          python scripts/check_day_24_overfit.py
+          --corpus data/day-19-demo-names.txt
+          --examples 10
+          --steps 20
+          --batch-size 5
+          --embedding-dim 8
+          --heads 2
+          --layers 1
+          --output /tmp/ai-journey-artifacts/day-24-overfit.json
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py
