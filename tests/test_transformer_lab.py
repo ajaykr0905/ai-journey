@@ -20,6 +20,7 @@ from ai_journey.transformer_lab import (
     TransformerLabError,
     TrainingConfig,
     build_optimizer,
+    evaluate_nll,
     seed_everything,
 )
 
@@ -207,6 +208,17 @@ class DecoderLanguageModelTests(unittest.TestCase):
         self.assertEqual(set(groups), {0.0, 0.2})
         self.assertTrue(all(parameter.ndim >= 2 for parameter in groups[0.2]))
         self.assertTrue(all(parameter.ndim < 2 for parameter in groups[0.0]))
+
+    def test_evaluation_is_finite_and_restores_training_mode(self) -> None:
+        import math
+        import torch
+
+        model = DecoderLanguageModel(
+            TransformerConfig(vocab_size=5, block_size=4, embedding_dim=8, head_count=2)
+        ).train()
+        loss = evaluate_nll(model, torch.arange(30) % 5, batch_size=3)
+        self.assertTrue(math.isfinite(loss))
+        self.assertTrue(model.training)
 
 
 if __name__ == "__main__":

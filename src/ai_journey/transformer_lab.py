@@ -426,3 +426,34 @@ def build_optimizer(
         ],
         lr=config.learning_rate,
     )
+
+
+@torch.no_grad()
+def evaluate_nll(
+    model: DecoderLanguageModel, tokens: Tensor, *, batch_size: int = 64
+) -> float:
+    """Evaluate every contiguous window in a token stream without shuffling."""
+
+    if len(tokens) <= model.config.block_size:
+        raise TransformerLabError("evaluation stream is too short")
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
+        raise TransformerLabError("batch_size must be a positive integer")
+    was_training = model.training
+    model.eval()
+    losses: list[Tensor] = []
+    for start in range(0, len(tokens) - model.config.block_size, batch_size):
+        indexes = range(
+            start,
+            min(start + batch_size, len(tokens) - model.config.block_size),
+        )
+        x = torch.stack([tokens[i : i + model.config.block_size] for i in indexes])
+        y = torch.stack([tokens[i + 1 : i + model.config.block_size + 1] for i in indexes])
+        logits, _ = model(x)
+        per_token = F.cross_entropy(
+            logits.reshape(-1, model.config.vocab_size),
+            y.reshape(-1),
+            reduction="none",
+        )
+        losses.append(per_token)
+    model.train(was_training)
+    return float(torch.cat(losses).mean())
