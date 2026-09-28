@@ -287,6 +287,63 @@ class DecoderLanguageModelTests(unittest.TestCase):
         self.assertEqual(model_fingerprint(model), expected_fingerprint)
         self.assertEqual(cursor.state_dict(), expected_cursor)
 
+    def test_checkpoint_restart_matches_uninterrupted_training_bit_exactly(self) -> None:
+        import torch
+
+        seed_everything(12)
+        model_config = TransformerConfig(
+            vocab_size=5,
+            block_size=4,
+            embedding_dim=8,
+            head_count=2,
+            dropout=0.1,
+        )
+        training = TrainingConfig(steps=2, batch_size=3, learning_rate=0.005)
+        tokens = torch.arange(40) % 5
+        model = DecoderLanguageModel(model_config)
+        optimizer = build_optimizer(model, training)
+        cursor = BatchCursor(tokens, block_size=4, batch_size=3, seed=training.seed)
+        train_steps(model, cursor, optimizer, training, step_count=1)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "checkpoint.pt"
+            save_training_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                training_config=training,
+                corpus_fingerprint="b" * 64,
+                step=1,
+            )
+            expected_metric = train_steps(
+                model, cursor, optimizer, training, start_step=1, step_count=1
+            )[0]
+            expected_fingerprint = model_fingerprint(model)
+
+            resumed_model = DecoderLanguageModel(model_config)
+            resumed_optimizer = build_optimizer(resumed_model, training)
+            resumed_cursor = BatchCursor(
+                tokens, block_size=4, batch_size=3, seed=training.seed
+            )
+            start_step = load_training_checkpoint(
+                path,
+                model=resumed_model,
+                optimizer=resumed_optimizer,
+                cursor=resumed_cursor,
+                training_config=training,
+                corpus_fingerprint="b" * 64,
+            )
+            actual_metric = train_steps(
+                resumed_model,
+                resumed_cursor,
+                resumed_optimizer,
+                training,
+                start_step=start_step,
+                step_count=1,
+            )[0]
+        self.assertEqual(actual_metric, expected_metric)
+        self.assertEqual(model_fingerprint(resumed_model), expected_fingerprint)
+
 
 if __name__ == "__main__":
     unittest.main()
