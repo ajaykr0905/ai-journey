@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import random
 from dataclasses import asdict, dataclass
 from hashlib import sha256
-import json
 from pathlib import Path
-import random
 from typing import Any
 
 import numpy as np
@@ -161,7 +161,9 @@ class TokenCorpus:
             or not isinstance(validation_fraction, (int, float))
             or not 0 < validation_fraction < 1
         ):
-            raise TransformerLabError("validation_fraction must be between zero and one")
+            raise TransformerLabError(
+                "validation_fraction must be between zero and one"
+            )
         if isinstance(block_size, bool) or not isinstance(block_size, int):
             raise TypeError("block_size must be an integer")
         if block_size <= 0:
@@ -233,7 +235,9 @@ class BatchCursor:
         order = self._order()
         starts = order[self.offset : self.offset + self.batch_size]
         self.offset += len(starts)
-        x = torch.stack([self.tokens[start : start + self.block_size] for start in starts])
+        x = torch.stack(
+            [self.tokens[start : start + self.block_size] for start in starts]
+        )
         y = torch.stack(
             [self.tokens[start + 1 : start + self.block_size + 1] for start in starts]
         )
@@ -246,7 +250,10 @@ class BatchCursor:
         if set(state) != {"epoch", "offset"}:
             raise TransformerLabError("batch cursor state has invalid fields")
         epoch, offset = state["epoch"], state["offset"]
-        if any(isinstance(value, bool) or not isinstance(value, int) for value in state.values()):
+        if any(
+            isinstance(value, bool) or not isinstance(value, int)
+            for value in state.values()
+        ):
             raise TypeError("batch cursor state values must be integers")
         if epoch < 0 or not 0 <= offset <= self.sample_count:
             raise TransformerLabError("batch cursor state is out of range")
@@ -265,7 +272,9 @@ class CausalSelfAttention(nn.Module):
         self.projection = nn.Linear(config.embedding_dim, config.embedding_dim)
         self.attention_dropout = nn.Dropout(config.dropout)
         self.residual_dropout = nn.Dropout(config.dropout)
-        mask = torch.tril(torch.ones(config.block_size, config.block_size, dtype=torch.bool))
+        mask = torch.tril(
+            torch.ones(config.block_size, config.block_size, dtype=torch.bool)
+        )
         self.register_buffer("causal_mask", mask, persistent=False)
 
     def forward(self, inputs: Tensor) -> Tensor:
@@ -436,7 +445,11 @@ def evaluate_nll(
 
     if len(tokens) <= model.config.block_size:
         raise TransformerLabError("evaluation stream is too short")
-    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
+    if (
+        isinstance(batch_size, bool)
+        or not isinstance(batch_size, int)
+        or batch_size <= 0
+    ):
         raise TransformerLabError("batch_size must be a positive integer")
     was_training = model.training
     model.eval()
@@ -447,7 +460,9 @@ def evaluate_nll(
             min(start + batch_size, len(tokens) - model.config.block_size),
         )
         x = torch.stack([tokens[i : i + model.config.block_size] for i in indexes])
-        y = torch.stack([tokens[i + 1 : i + model.config.block_size + 1] for i in indexes])
+        y = torch.stack(
+            [tokens[i + 1 : i + model.config.block_size + 1] for i in indexes]
+        )
         logits, _ = model(x)
         per_token = F.cross_entropy(
             logits.reshape(-1, model.config.vocab_size),
@@ -480,7 +495,11 @@ def train_steps(
     count = config.steps if step_count is None else step_count
     if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
         raise TransformerLabError("step_count must be a positive integer")
-    if isinstance(start_step, bool) or not isinstance(start_step, int) or start_step < 0:
+    if (
+        isinstance(start_step, bool)
+        or not isinstance(start_step, int)
+        or start_step < 0
+    ):
         raise TransformerLabError("start_step must be a non-negative integer")
     model.train()
     metrics: list[StepMetric] = []

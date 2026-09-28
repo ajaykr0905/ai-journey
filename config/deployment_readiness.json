@@ -16,8 +16,11 @@
     "scripts/check_corpus_shift.py",
     "scripts/train_context_mlp.py",
     "scripts/run_day_23.py",
+    "scripts/run_day_24.py",
+    "scripts/check_day_24_overfit.py",
     "days/day-20.md",
     "days/day-23.md",
+    "days/day-24.md",
     "data/day-19-demo-names.txt",
     "data/day-19-demo-names.manifest.json",
     "data/day-21-indian-cities.txt"

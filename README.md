@@ -1,7 +1,7 @@
-# AI Journey: Days 0–23
+# AI Journey: Days 0–24
 
 This repository is a public-safe, executable record of an added setup day plus the
-first twenty-three workbook days of a 90-day AI engineering learning plan. It combines
+first twenty-four workbook days of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -43,6 +43,9 @@ then grow these exercises into production-quality training and inference project
 - Leakage-safe train/development/test model selection, learning-rate sweeps, and
   overfitting diagnostics in
   [`src/ai_journey/model_selection.py`](src/ai_journey/model_selection.py)
+- A deterministic PyTorch decoder-only transformer, exact restart checkpoints,
+  held-out evaluation, and an exact-size overfit capacity gate in
+  [`src/ai_journey/transformer_lab.py`](src/ai_journey/transformer_lab.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -86,12 +89,20 @@ python scripts/run_day_23.py \
   --output artifacts/day-23-model-selection.json \
   --checkpoint artifacts/day-23-context-mlp.json \
   --plot artifacts/day-23-learning-rate-sweep.svg
+python scripts/run_day_24.py \
+  --corpus data/day-19-demo-names.txt \
+  --steps 100 \
+  --output artifacts/day-24-transformer.json \
+  --checkpoint artifacts/day-24-transformer.pt
+python scripts/check_day_24_overfit.py \
+  --corpus data/day-19-demo-names.txt \
+  --examples 100 \
+  --output artifacts/day-24-overfit.json
 python -m unittest discover -s tests -v
 ```
 
-PyTorch is optional. When it is installed, Day 2 reports CUDA availability and
-Day 9 compares the manual gradients with `torch.autograd`. Without PyTorch, the
-finite-difference verification still runs and CI remains meaningful.
+PyTorch is required for the Day 24 transformer baseline. The default verification
+commands run on CPU and do not claim GPU or distributed execution.
 
 ## Configuration safety
 
@@ -126,6 +137,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 21 | 2026-09-25 | Dataset shift, cross-corpus evaluation, and record-boundary integrity |
 | 22 | 2026-09-26 | Context windows, embeddings, deterministic training, and checkpoint restart |
 | 23 | 2026-09-27 | Minibatches, learning-rate search, held-out evaluation, and overfitting diagnostics |
+| 24 | 2026-09-28 | Deterministic transformer training, exact restart, and overfit capacity gate |
 
 ## License
 

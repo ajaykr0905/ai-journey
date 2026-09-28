@@ -10,23 +10,23 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.transformer_lab import (
     BatchCursor,
-    CharacterCodec,
     CausalSelfAttention,
+    CharacterCodec,
     DecoderLanguageModel,
     FeedForward,
     TokenCorpus,
+    TrainingConfig,
     TransformerBlock,
     TransformerConfig,
     TransformerLabError,
-    TrainingConfig,
     build_optimizer,
     evaluate_nll,
     load_training_checkpoint,
     model_fingerprint,
+    run_transformer_experiment,
     save_training_checkpoint,
     seed_everything,
     train_steps,
-    run_transformer_experiment,
     write_experiment_report,
 )
 
@@ -53,7 +53,9 @@ class TransformerConfigTests(unittest.TestCase):
         self.assertTrue(
             all(
                 torch.equal(left, right)
-                for left, right in zip(first.parameters(), second.parameters(), strict=True)
+                for left, right in zip(
+                    first.parameters(), second.parameters(), strict=True
+                )
             )
         )
 
@@ -125,7 +127,9 @@ class CausalSelfAttentionTests(unittest.TestCase):
 
         torch.manual_seed(3)
         attention = CausalSelfAttention(
-            TransformerConfig(vocab_size=8, block_size=5, embedding_dim=12, head_count=3)
+            TransformerConfig(
+                vocab_size=8, block_size=5, embedding_dim=12, head_count=3
+            )
         ).eval()
         original = torch.randn(2, 5, 12)
         changed = original.clone()
@@ -153,12 +157,16 @@ class TransformerBlockTests(unittest.TestCase):
         import torch
 
         block = TransformerBlock(
-            TransformerConfig(vocab_size=8, block_size=6, embedding_dim=12, head_count=3)
+            TransformerConfig(
+                vocab_size=8, block_size=6, embedding_dim=12, head_count=3
+            )
         )
         inputs = torch.randn(2, 6, 12, requires_grad=True)
         block(inputs).mean().backward()
         self.assertEqual(inputs.grad.shape, inputs.shape)
-        self.assertTrue(all(parameter.grad is not None for parameter in block.parameters()))
+        self.assertTrue(
+            all(parameter.grad is not None for parameter in block.parameters())
+        )
 
 
 class DecoderLanguageModelTests(unittest.TestCase):
@@ -210,13 +218,16 @@ class DecoderLanguageModelTests(unittest.TestCase):
             TransformerConfig(vocab_size=5, embedding_dim=8, head_count=2)
         )
         optimizer = build_optimizer(model, TrainingConfig(weight_decay=0.2))
-        groups = {group["weight_decay"]: group["params"] for group in optimizer.param_groups}
+        groups = {
+            group["weight_decay"]: group["params"] for group in optimizer.param_groups
+        }
         self.assertEqual(set(groups), {0.0, 0.2})
         self.assertTrue(all(parameter.ndim >= 2 for parameter in groups[0.2]))
         self.assertTrue(all(parameter.ndim < 2 for parameter in groups[0.0]))
 
     def test_evaluation_is_finite_and_restores_training_mode(self) -> None:
         import math
+
         import torch
 
         model = DecoderLanguageModel(
@@ -228,6 +239,7 @@ class DecoderLanguageModelTests(unittest.TestCase):
 
     def test_training_emits_finite_step_and_gradient_metrics(self) -> None:
         import math
+
         import torch
 
         seed_everything(11)
@@ -289,7 +301,9 @@ class DecoderLanguageModelTests(unittest.TestCase):
         self.assertEqual(model_fingerprint(model), expected_fingerprint)
         self.assertEqual(cursor.state_dict(), expected_cursor)
 
-    def test_checkpoint_restart_matches_uninterrupted_training_bit_exactly(self) -> None:
+    def test_checkpoint_restart_matches_uninterrupted_training_bit_exactly(
+        self,
+    ) -> None:
         import torch
 
         seed_everything(12)
