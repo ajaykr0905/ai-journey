@@ -100,3 +100,56 @@ class CharacterCodec:
 
     def fingerprint(self) -> str:
         return sha256("".join(self.tokens).encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class TokenCorpus:
+    """Tokenized public text with immutable provenance and held-out split."""
+
+    codec: CharacterCodec
+    train_tokens: Tensor
+    validation_tokens: Tensor
+    source_sha256: str
+
+    @classmethod
+    def from_path(
+        cls, path: Path, *, validation_fraction: float = 0.2, block_size: int = 16
+    ) -> TokenCorpus:
+        if not isinstance(path, Path):
+            raise TypeError("path must be pathlib.Path")
+        if (
+            isinstance(validation_fraction, bool)
+            or not isinstance(validation_fraction, (int, float))
+            or not 0 < validation_fraction < 1
+        ):
+            raise TransformerLabError("validation_fraction must be between zero and one")
+        if isinstance(block_size, bool) or not isinstance(block_size, int):
+            raise TypeError("block_size must be an integer")
+        if block_size <= 0:
+            raise TransformerLabError("block_size must be positive")
+        source = path.read_bytes()
+        text = source.decode("utf-8")
+        codec = CharacterCodec.from_text(text)
+        tokens = torch.tensor(codec.encode(text), dtype=torch.long)
+        validation_size = max(block_size + 1, round(len(tokens) * validation_fraction))
+        split = len(tokens) - validation_size
+        if split <= block_size:
+            raise TransformerLabError("corpus is too small for the requested split")
+        return cls(
+            codec=codec,
+            train_tokens=tokens[:split].clone(),
+            validation_tokens=tokens[split:].clone(),
+            source_sha256=sha256(source).hexdigest(),
+        )
+
+    @property
+    def vocab_size(self) -> int:
+        return len(self.codec.tokens)
+
+    def fingerprint(self) -> str:
+        digest = sha256()
+        digest.update(self.source_sha256.encode())
+        digest.update(self.codec.fingerprint().encode())
+        digest.update(self.train_tokens.numpy().tobytes())
+        digest.update(self.validation_tokens.numpy().tobytes())
+        return digest.hexdigest()

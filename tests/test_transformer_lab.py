@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,6 +10,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.transformer_lab import (
     CharacterCodec,
+    TokenCorpus,
     TransformerConfig,
     TransformerLabError,
 )
@@ -37,6 +39,22 @@ class CharacterCodecTests(unittest.TestCase):
         codec = CharacterCodec.from_text("ab")
         with self.assertRaisesRegex(TransformerLabError, "unknown"):
             codec.encode("abc")
+
+
+class TokenCorpusTests(unittest.TestCase):
+    def test_corpus_split_is_disjoint_and_fingerprinted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "corpus.txt"
+            path.write_text("anna\naria\namara\n" * 6, encoding="utf-8")
+            corpus = TokenCorpus.from_path(path, block_size=4)
+        self.assertGreater(len(corpus.train_tokens), len(corpus.validation_tokens))
+        self.assertEqual(
+            corpus.codec.decode(
+                [*corpus.train_tokens.tolist(), *corpus.validation_tokens.tolist()]
+            ),
+            "anna\naria\namara\n" * 6,
+        )
+        self.assertEqual(len(corpus.fingerprint()), 64)
 
 
 if __name__ == "__main__":
