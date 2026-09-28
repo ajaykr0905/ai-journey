@@ -73,6 +73,34 @@ class TransformerConfig:
 
 
 @dataclass(frozen=True)
+class TrainingConfig:
+    """Validated controls for deterministic CPU training."""
+
+    steps: int = 100
+    batch_size: int = 16
+    learning_rate: float = 3e-3
+    weight_decay: float = 0.01
+    gradient_clip: float = 1.0
+    seed: int = 24
+
+    def __post_init__(self) -> None:
+        for name in ("steps", "batch_size"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+            if value <= 0:
+                raise TransformerLabError(f"{name} must be positive")
+        if isinstance(self.seed, bool) or not isinstance(self.seed, int):
+            raise TypeError("seed must be an integer")
+        for name in ("learning_rate", "gradient_clip"):
+            value = getattr(self, name)
+            if not isinstance(value, (int, float)) or value <= 0:
+                raise TransformerLabError(f"{name} must be positive")
+        if not isinstance(self.weight_decay, (int, float)) or self.weight_decay < 0:
+            raise TransformerLabError("weight_decay must be non-negative")
+
+
+@dataclass(frozen=True)
 class CharacterCodec:
     """Lossless deterministic mapping between characters and token ids."""
 

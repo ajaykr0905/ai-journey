@@ -18,6 +18,7 @@ from ai_journey.transformer_lab import (
     TransformerBlock,
     TransformerConfig,
     TransformerLabError,
+    TrainingConfig,
     seed_everything,
 )
 
@@ -47,6 +48,12 @@ class TransformerConfigTests(unittest.TestCase):
                 for left, right in zip(first.parameters(), second.parameters(), strict=True)
             )
         )
+
+    def test_training_config_rejects_non_positive_controls(self) -> None:
+        with self.assertRaisesRegex(TransformerLabError, "steps"):
+            TrainingConfig(steps=0)
+        with self.assertRaisesRegex(TransformerLabError, "learning_rate"):
+            TrainingConfig(learning_rate=0)
 
 
 class CharacterCodecTests(unittest.TestCase):
