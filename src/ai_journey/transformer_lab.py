@@ -59,3 +59,44 @@ class TransformerConfig:
     def fingerprint(self) -> str:
         payload = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
         return sha256(payload.encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class CharacterCodec:
+    """Lossless deterministic mapping between characters and token ids."""
+
+    tokens: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.tokens) < 2:
+            raise TransformerLabError("codec requires at least two distinct tokens")
+        if any(not isinstance(token, str) or len(token) != 1 for token in self.tokens):
+            raise TransformerLabError("codec tokens must be single characters")
+        if tuple(sorted(set(self.tokens))) != self.tokens:
+            raise TransformerLabError("codec tokens must be unique and sorted")
+
+    @classmethod
+    def from_text(cls, text: str) -> CharacterCodec:
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        return cls(tuple(sorted(set(text))))
+
+    def encode(self, text: str) -> tuple[int, ...]:
+        indexes = {token: index for index, token in enumerate(self.tokens)}
+        try:
+            return tuple(indexes[token] for token in text)
+        except KeyError as exc:
+            raise TransformerLabError(f"unknown character: {exc.args[0]!r}") from exc
+
+    def decode(self, token_ids: tuple[int, ...] | list[int]) -> str:
+        decoded: list[str] = []
+        for token_id in token_ids:
+            if isinstance(token_id, bool) or not isinstance(token_id, int):
+                raise TypeError("token ids must be integers")
+            if not 0 <= token_id < len(self.tokens):
+                raise TransformerLabError(f"token id out of range: {token_id}")
+            decoded.append(self.tokens[token_id])
+        return "".join(decoded)
+
+    def fingerprint(self) -> str:
+        return sha256("".join(self.tokens).encode()).hexdigest()
