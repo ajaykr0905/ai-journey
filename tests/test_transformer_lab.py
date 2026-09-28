@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.transformer_lab import (
+    BatchCursor,
     CharacterCodec,
     TokenCorpus,
     TransformerConfig,
@@ -55,6 +56,32 @@ class TokenCorpusTests(unittest.TestCase):
             "anna\naria\namara\n" * 6,
         )
         self.assertEqual(len(corpus.fingerprint()), 64)
+
+
+class BatchCursorTests(unittest.TestCase):
+    def test_cursor_visits_each_window_once_per_epoch(self) -> None:
+        import torch
+
+        cursor = BatchCursor(torch.arange(8), block_size=3, batch_size=2, seed=7)
+        starts: list[int] = []
+        for _ in range(3):
+            x, y = cursor.next()
+            starts.extend(x[:, 0].tolist())
+            self.assertTrue(torch.equal(x[:, 1:], y[:, :-1]))
+        self.assertEqual(sorted(starts), list(range(5)))
+
+    def test_cursor_state_restores_the_next_batch(self) -> None:
+        import torch
+
+        first = BatchCursor(torch.arange(12), block_size=3, batch_size=2, seed=4)
+        first.next()
+        state = first.state_dict()
+        expected = first.next()
+        resumed = BatchCursor(torch.arange(12), block_size=3, batch_size=2, seed=4)
+        resumed.load_state_dict(state)
+        actual = resumed.next()
+        self.assertTrue(torch.equal(expected[0], actual[0]))
+        self.assertTrue(torch.equal(expected[1], actual[1]))
 
 
 if __name__ == "__main__":

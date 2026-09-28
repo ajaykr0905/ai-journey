@@ -153,3 +153,63 @@ class TokenCorpus:
         digest.update(self.train_tokens.numpy().tobytes())
         digest.update(self.validation_tokens.numpy().tobytes())
         return digest.hexdigest()
+
+
+class BatchCursor:
+    """Deterministic shuffled language-model batches with resumable position."""
+
+    def __init__(
+        self, tokens: Tensor, *, block_size: int, batch_size: int, seed: int = 0
+    ) -> None:
+        if tokens.ndim != 1 or tokens.dtype != torch.long:
+            raise TypeError("tokens must be a one-dimensional torch.long tensor")
+        for name, value in (("block_size", block_size), ("batch_size", batch_size)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+            if value <= 0:
+                raise TransformerLabError(f"{name} must be positive")
+        if len(tokens) <= block_size:
+            raise TransformerLabError("token stream must be longer than block_size")
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            raise TypeError("seed must be an integer")
+        self.tokens = tokens.clone()
+        self.block_size = block_size
+        self.batch_size = batch_size
+        self.seed = seed
+        self.epoch = 0
+        self.offset = 0
+
+    @property
+    def sample_count(self) -> int:
+        return len(self.tokens) - self.block_size
+
+    def _order(self) -> Tensor:
+        generator = torch.Generator().manual_seed(self.seed + self.epoch)
+        return torch.randperm(self.sample_count, generator=generator)
+
+    def next(self) -> tuple[Tensor, Tensor]:
+        if self.offset >= self.sample_count:
+            self.epoch += 1
+            self.offset = 0
+        order = self._order()
+        starts = order[self.offset : self.offset + self.batch_size]
+        self.offset += len(starts)
+        x = torch.stack([self.tokens[start : start + self.block_size] for start in starts])
+        y = torch.stack(
+            [self.tokens[start + 1 : start + self.block_size + 1] for start in starts]
+        )
+        return x, y
+
+    def state_dict(self) -> dict[str, int]:
+        return {"epoch": self.epoch, "offset": self.offset}
+
+    def load_state_dict(self, state: dict[str, int]) -> None:
+        if set(state) != {"epoch", "offset"}:
+            raise TransformerLabError("batch cursor state has invalid fields")
+        epoch, offset = state["epoch"], state["offset"]
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in state.values()):
+            raise TypeError("batch cursor state values must be integers")
+        if epoch < 0 or not 0 <= offset <= self.sample_count:
+            raise TransformerLabError("batch cursor state is out of range")
+        self.epoch = epoch
+        self.offset = offset
