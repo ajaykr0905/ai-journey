@@ -246,3 +246,20 @@ class CausalSelfAttention(nn.Module):
         attended = weights @ value
         attended = attended.transpose(1, 2).contiguous().view(batch, time, channels)
         return self.residual_dropout(self.projection(attended))
+
+
+class FeedForward(nn.Module):
+    """Transformer position-wise MLP with a four-times expansion."""
+
+    def __init__(self, config: TransformerConfig) -> None:
+        super().__init__()
+        hidden_dim = 4 * config.embedding_dim
+        self.network = nn.Sequential(
+            nn.Linear(config.embedding_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, config.embedding_dim),
+            nn.Dropout(config.dropout),
+        )
+
+    def forward(self, inputs: Tensor) -> Tensor:
+        return self.network(inputs)

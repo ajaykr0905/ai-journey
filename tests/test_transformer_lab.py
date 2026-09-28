@@ -12,6 +12,7 @@ from ai_journey.transformer_lab import (
     BatchCursor,
     CharacterCodec,
     CausalSelfAttention,
+    FeedForward,
     TokenCorpus,
     TransformerConfig,
     TransformerLabError,
@@ -100,6 +101,18 @@ class CausalSelfAttentionTests(unittest.TestCase):
             before = attention(original)
             after = attention(changed)
         self.assertTrue(torch.equal(before[:, :3], after[:, :3]))
+
+
+class FeedForwardTests(unittest.TestCase):
+    def test_feed_forward_preserves_token_shape_and_backpropagates(self) -> None:
+        import torch
+
+        layer = FeedForward(TransformerConfig(vocab_size=8, embedding_dim=12)).eval()
+        inputs = torch.randn(2, 4, 12, requires_grad=True)
+        outputs = layer(inputs)
+        self.assertEqual(outputs.shape, inputs.shape)
+        outputs.square().mean().backward()
+        self.assertIsNotNone(inputs.grad)
 
 
 if __name__ == "__main__":
