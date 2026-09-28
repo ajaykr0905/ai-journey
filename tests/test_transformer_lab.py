@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from ai_journey.transformer_lab import (
     BatchCursor,
     CharacterCodec,
+    CausalSelfAttention,
     TokenCorpus,
     TransformerConfig,
     TransformerLabError,
@@ -82,6 +83,23 @@ class BatchCursorTests(unittest.TestCase):
         actual = resumed.next()
         self.assertTrue(torch.equal(expected[0], actual[0]))
         self.assertTrue(torch.equal(expected[1], actual[1]))
+
+
+class CausalSelfAttentionTests(unittest.TestCase):
+    def test_future_inputs_do_not_change_past_outputs(self) -> None:
+        import torch
+
+        torch.manual_seed(3)
+        attention = CausalSelfAttention(
+            TransformerConfig(vocab_size=8, block_size=5, embedding_dim=12, head_count=3)
+        ).eval()
+        original = torch.randn(2, 5, 12)
+        changed = original.clone()
+        changed[:, 3:] += 100
+        with torch.no_grad():
+            before = attention(original)
+            after = attention(changed)
+        self.assertTrue(torch.equal(before[:, :3], after[:, :3]))
 
 
 if __name__ == "__main__":

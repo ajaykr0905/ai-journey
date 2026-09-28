@@ -213,3 +213,36 @@ class BatchCursor:
             raise TransformerLabError("batch cursor state is out of range")
         self.epoch = epoch
         self.offset = offset
+
+
+class CausalSelfAttention(nn.Module):
+    """Multi-head self-attention with an explicit causal mask."""
+
+    def __init__(self, config: TransformerConfig) -> None:
+        super().__init__()
+        self.head_count = config.head_count
+        self.head_dim = config.head_dim
+        self.query_key_value = nn.Linear(config.embedding_dim, 3 * config.embedding_dim)
+        self.projection = nn.Linear(config.embedding_dim, config.embedding_dim)
+        self.attention_dropout = nn.Dropout(config.dropout)
+        self.residual_dropout = nn.Dropout(config.dropout)
+        mask = torch.tril(torch.ones(config.block_size, config.block_size, dtype=torch.bool))
+        self.register_buffer("causal_mask", mask, persistent=False)
+
+    def forward(self, inputs: Tensor) -> Tensor:
+        batch, time, channels = inputs.shape
+        if time > self.causal_mask.shape[0]:
+            raise TransformerLabError("sequence exceeds configured block_size")
+        qkv = self.query_key_value(inputs)
+        query, key, value = qkv.chunk(3, dim=-1)
+        shape = (batch, time, self.head_count, self.head_dim)
+        query = query.view(shape).transpose(1, 2)
+        key = key.view(shape).transpose(1, 2)
+        value = value.view(shape).transpose(1, 2)
+        scores = query @ key.transpose(-2, -1) * self.head_dim**-0.5
+        mask = self.causal_mask[:time, :time]
+        scores = scores.masked_fill(~mask, float("-inf"))
+        weights = self.attention_dropout(F.softmax(scores, dim=-1))
+        attended = weights @ value
+        attended = attended.transpose(1, 2).contiguous().view(batch, time, channels)
+        return self.residual_dropout(self.projection(attended))
