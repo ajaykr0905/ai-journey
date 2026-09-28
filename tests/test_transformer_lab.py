@@ -18,6 +18,7 @@ from ai_journey.transformer_lab import (
     TransformerBlock,
     TransformerConfig,
     TransformerLabError,
+    seed_everything,
 )
 
 
@@ -31,6 +32,21 @@ class TransformerConfigTests(unittest.TestCase):
     def test_config_rejects_incompatible_heads(self) -> None:
         with self.assertRaisesRegex(TransformerLabError, "divisible"):
             TransformerConfig(vocab_size=27, embedding_dim=10, head_count=3)
+
+    def test_seed_everything_repeats_model_initialization(self) -> None:
+        import torch
+
+        config = TransformerConfig(vocab_size=5, embedding_dim=8, head_count=2)
+        seed_everything(41)
+        first = DecoderLanguageModel(config)
+        seed_everything(41)
+        second = DecoderLanguageModel(config)
+        self.assertTrue(
+            all(
+                torch.equal(left, right)
+                for left, right in zip(first.parameters(), second.parameters(), strict=True)
+            )
+        )
 
 
 class CharacterCodecTests(unittest.TestCase):

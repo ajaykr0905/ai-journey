@@ -19,6 +19,17 @@ class TransformerLabError(ValueError):
     """Raised when transformer data, configuration, or state is invalid."""
 
 
+def seed_everything(seed: int) -> None:
+    """Seed Python, NumPy, and PyTorch and request deterministic kernels."""
+
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise TypeError("seed must be an integer")
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.use_deterministic_algorithms(True)
+
+
 @dataclass(frozen=True)
 class TransformerConfig:
     """Validated architecture and training-independent model settings."""
