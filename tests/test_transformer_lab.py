@@ -12,6 +12,7 @@ from ai_journey.transformer_lab import (
     BatchCursor,
     CharacterCodec,
     CausalSelfAttention,
+    DecoderLanguageModel,
     FeedForward,
     TokenCorpus,
     TransformerBlock,
@@ -127,6 +128,28 @@ class TransformerBlockTests(unittest.TestCase):
         block(inputs).mean().backward()
         self.assertEqual(inputs.grad.shape, inputs.shape)
         self.assertTrue(all(parameter.grad is not None for parameter in block.parameters()))
+
+
+class DecoderLanguageModelTests(unittest.TestCase):
+    def test_model_returns_token_logits_and_cross_entropy(self) -> None:
+        import torch
+
+        config = TransformerConfig(
+            vocab_size=7, block_size=5, embedding_dim=12, head_count=3, layer_count=2
+        )
+        model = DecoderLanguageModel(config)
+        tokens = torch.randint(0, config.vocab_size, (3, config.block_size))
+        logits, loss = model(tokens, tokens)
+        self.assertEqual(logits.shape, (3, 5, 7))
+        self.assertIsNotNone(loss)
+        self.assertGreater(model.parameter_count, 0)
+
+    def test_model_rejects_out_of_vocabulary_tokens(self) -> None:
+        import torch
+
+        model = DecoderLanguageModel(TransformerConfig(vocab_size=3))
+        with self.assertRaisesRegex(TransformerLabError, "vocabulary"):
+            model(torch.tensor([[0, 3]]))
 
 
 if __name__ == "__main__":

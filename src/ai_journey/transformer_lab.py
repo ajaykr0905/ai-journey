@@ -278,3 +278,56 @@ class TransformerBlock(nn.Module):
     def forward(self, inputs: Tensor) -> Tensor:
         inputs = inputs + self.attention(self.attention_norm(inputs))
         return inputs + self.feed_forward(self.feed_forward_norm(inputs))
+
+
+class DecoderLanguageModel(nn.Module):
+    """Small decoder-only character language model."""
+
+    def __init__(self, config: TransformerConfig) -> None:
+        super().__init__()
+        self.config = config
+        self.token_embedding = nn.Embedding(config.vocab_size, config.embedding_dim)
+        self.position_embedding = nn.Embedding(config.block_size, config.embedding_dim)
+        self.blocks = nn.ModuleList(
+            [TransformerBlock(config) for _ in range(config.layer_count)]
+        )
+        self.final_norm = nn.LayerNorm(config.embedding_dim)
+        self.lm_head = nn.Linear(config.embedding_dim, config.vocab_size, bias=False)
+        self.apply(self._initialize)
+
+    @staticmethod
+    def _initialize(module: nn.Module) -> None:
+        if isinstance(module, (nn.Linear, nn.Embedding)):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if isinstance(module, nn.Linear) and module.bias is not None:
+                nn.init.zeros_(module.bias)
+
+    def forward(
+        self, token_ids: Tensor, targets: Tensor | None = None
+    ) -> tuple[Tensor, Tensor | None]:
+        if token_ids.ndim != 2 or token_ids.dtype != torch.long:
+            raise TypeError("token_ids must be a two-dimensional torch.long tensor")
+        _, time = token_ids.shape
+        if time > self.config.block_size:
+            raise TransformerLabError("sequence exceeds configured block_size")
+        if token_ids.numel() and (
+            int(token_ids.min()) < 0 or int(token_ids.max()) >= self.config.vocab_size
+        ):
+            raise TransformerLabError("token id is outside the vocabulary")
+        positions = torch.arange(time, device=token_ids.device)
+        hidden = self.token_embedding(token_ids) + self.position_embedding(positions)
+        for block in self.blocks:
+            hidden = block(hidden)
+        logits = self.lm_head(self.final_norm(hidden))
+        loss = None
+        if targets is not None:
+            if targets.shape != token_ids.shape or targets.dtype != torch.long:
+                raise TypeError("targets must match token_ids shape and dtype")
+            loss = F.cross_entropy(
+                logits.reshape(-1, self.config.vocab_size), targets.reshape(-1)
+            )
+        return logits, loss
+
+    @property
+    def parameter_count(self) -> int:
+        return sum(parameter.numel() for parameter in self.parameters())
