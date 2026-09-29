@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.training_diagnostics import (
+    ActivationCollector,
     DiagnosticError,
     HistogramSpec,
     summarize_tensor,
@@ -56,6 +57,35 @@ class TensorDistributionTests(unittest.TestCase):
             summarize_tensor(torch.tensor([]))
         with self.assertRaisesRegex(DiagnosticError, "no finite"):
             summarize_tensor(torch.tensor([float("nan")]))
+
+
+class ActivationCollectorTests(unittest.TestCase):
+    def test_collector_records_selected_outputs_and_removes_hooks(self) -> None:
+        model = torch.nn.Sequential(
+            torch.nn.Linear(3, 4), torch.nn.Tanh(), torch.nn.Linear(4, 2)
+        )
+        inputs = torch.ones(5, 3)
+        with ActivationCollector(model, ("0", "1")) as collector:
+            model(inputs)
+            snapshot = collector.snapshot()
+        self.assertEqual(snapshot["0"][0].count, 20)
+        self.assertEqual(snapshot["1"][0].count, 20)
+        model(inputs)
+        self.assertEqual(collector.snapshot(), snapshot)
+
+    def test_collector_clear_discards_prior_summaries(self) -> None:
+        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.ReLU())
+        with ActivationCollector(model, ("1",)) as collector:
+            model(torch.ones(1, 2))
+            collector.clear()
+            self.assertEqual(collector.snapshot(), {"1": ()})
+
+    def test_collector_rejects_unknown_or_duplicate_modules(self) -> None:
+        model = torch.nn.Linear(2, 2)
+        with self.assertRaisesRegex(DiagnosticError, "unknown"):
+            ActivationCollector(model, ("missing",))
+        with self.assertRaisesRegex(DiagnosticError, "unique"):
+            ActivationCollector(model, ("", ""))
 
 
 if __name__ == "__main__":

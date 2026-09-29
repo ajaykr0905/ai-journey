@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass
-from typing import Any
+from types import TracebackType
+from typing import Any, Self
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 
 
 class DiagnosticError(ValueError):
@@ -101,3 +102,80 @@ def summarize_tensor(
         underflow_count=below,
         overflow_count=above,
     )
+
+
+def _output_tensor(output: Any) -> Tensor:
+    tensors: list[Tensor] = []
+
+    def visit(value: Any) -> None:
+        if isinstance(value, Tensor):
+            tensors.append(value.detach().reshape(-1))
+        elif isinstance(value, (tuple, list)):
+            for item in value:
+                visit(item)
+        elif isinstance(value, dict):
+            for key in sorted(value):
+                visit(value[key])
+
+    visit(output)
+    if not tensors:
+        raise DiagnosticError("observed module output contains no tensor")
+    return torch.cat(tensors)
+
+
+class ActivationCollector:
+    """Collect bounded summaries from explicitly selected module outputs."""
+
+    def __init__(
+        self,
+        model: nn.Module,
+        module_names: tuple[str, ...],
+        *,
+        spec: HistogramSpec | None = None,
+    ) -> None:
+        if not isinstance(model, nn.Module):
+            raise TypeError("model must be a torch module")
+        if not module_names or len(set(module_names)) != len(module_names):
+            raise DiagnosticError("module_names must be non-empty and unique")
+        modules = dict(model.named_modules())
+        missing = sorted(set(module_names) - set(modules))
+        if missing:
+            raise DiagnosticError(f"unknown module names: {', '.join(missing)}")
+        self._modules = {name: modules[name] for name in module_names}
+        self._spec = spec or HistogramSpec()
+        self._records: dict[str, list[TensorDistribution]] = {
+            name: [] for name in module_names
+        }
+        self._handles: list[torch.utils.hooks.RemovableHandle] = []
+
+    def __enter__(self) -> Self:
+        if self._handles:
+            raise RuntimeError("collector is already active")
+        for name, module in self._modules.items():
+            self._handles.append(module.register_forward_hook(self._hook(name)))
+        return self
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        for handle in self._handles:
+            handle.remove()
+        self._handles.clear()
+
+    def _hook(self, name: str) -> Any:
+        def record(_module: nn.Module, _inputs: tuple[Any, ...], output: Any) -> None:
+            self._records[name].append(
+                summarize_tensor(_output_tensor(output), self._spec)
+            )
+
+        return record
+
+    def clear(self) -> None:
+        for records in self._records.values():
+            records.clear()
+
+    def snapshot(self) -> dict[str, tuple[TensorDistribution, ...]]:
+        return {name: tuple(records) for name, records in self._records.items()}
