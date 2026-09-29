@@ -92,6 +92,28 @@ class ParameterGradientSnapshot:
         }
 
 
+@dataclass(frozen=True)
+class TrainingSnapshot:
+    """One forward/backward pass with activation and gradient evidence."""
+
+    loss: float
+    activations: tuple[NamedDistribution, ...]
+    parameter_gradients: ParameterGradientSnapshot
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "loss": self.loss,
+            "activations": [
+                {
+                    "name": item.name,
+                    "distribution": item.distribution.to_dict(),
+                }
+                for item in self.activations
+            ],
+            "parameter_gradients": self.parameter_gradients.to_dict(),
+        }
+
+
 def summarize_tensor(
     tensor: Tensor, spec: HistogramSpec | None = None
 ) -> TensorDistribution:
@@ -230,3 +252,50 @@ def collect_parameter_gradients(
             NamedDistribution(name, summarize_tensor(gradient, selected_spec))
         )
     return ParameterGradientSnapshot(tuple(gradients), tuple(missing))
+
+
+def capture_training_snapshot(
+    model: nn.Module,
+    inputs: Tensor,
+    targets: Tensor,
+    module_names: tuple[str, ...],
+    *,
+    activation_spec: HistogramSpec | None = None,
+    gradient_spec: HistogramSpec | None = None,
+) -> TrainingSnapshot:
+    """Run one backward pass without an optimizer update and summarize it."""
+
+    if not isinstance(model, nn.Module):
+        raise TypeError("model must be a torch module")
+    was_training = model.training
+    model.train()
+    model.zero_grad(set_to_none=True)
+    try:
+        with ActivationCollector(
+            model, module_names, spec=activation_spec
+        ) as collector:
+            output = model(inputs, targets)
+        if (
+            not isinstance(output, tuple)
+            or len(output) != 2
+            or not isinstance(output[1], Tensor)
+            or output[1].numel() != 1
+        ):
+            raise DiagnosticError(
+                "model must return an output and one scalar loss tensor"
+            )
+        loss = output[1]
+        loss.backward()
+        activation_records = collector.snapshot()
+        activations: list[NamedDistribution] = []
+        for name, records in activation_records.items():
+            if len(records) != 1:
+                raise DiagnosticError(
+                    f"module {name!r} executed {len(records)} times; expected once"
+                )
+            activations.append(NamedDistribution(name, records[0]))
+        gradients = collect_parameter_gradients(model, gradient_spec)
+        return TrainingSnapshot(float(loss.detach()), tuple(activations), gradients)
+    finally:
+        model.zero_grad(set_to_none=True)
+        model.train(was_training)

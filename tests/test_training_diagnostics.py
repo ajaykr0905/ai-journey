@@ -14,6 +14,7 @@ from ai_journey.training_diagnostics import (
     ActivationCollector,
     DiagnosticError,
     HistogramSpec,
+    capture_training_snapshot,
     collect_parameter_gradients,
     summarize_tensor,
 )
@@ -115,6 +116,55 @@ class ParameterGradientSnapshotTests(unittest.TestCase):
         snapshot = collect_parameter_gradients(model)
         self.assertEqual(snapshot.gradients, ())
         self.assertEqual(snapshot.missing_parameters, ("bias", "weight"))
+
+
+class TrainingSnapshotTests(unittest.TestCase):
+    def test_capture_restores_mode_clears_gradients_and_preserves_weights(self) -> None:
+        class TinyModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.projection = torch.nn.Linear(3, 2)
+                self.activation = torch.nn.Tanh()
+
+            def forward(
+                self, inputs: torch.Tensor, targets: torch.Tensor
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                outputs = self.activation(self.projection(inputs))
+                return outputs, torch.nn.functional.mse_loss(outputs, targets)
+
+        torch.manual_seed(25)
+        model = TinyModel().eval()
+        before = {
+            name: parameter.detach().clone()
+            for name, parameter in model.named_parameters()
+        }
+        snapshot = capture_training_snapshot(
+            model,
+            torch.ones(4, 3),
+            torch.zeros(4, 2),
+            ("projection", "activation"),
+        )
+        self.assertFalse(model.training)
+        self.assertTrue(all(parameter.grad is None for parameter in model.parameters()))
+        self.assertEqual(
+            [item.name for item in snapshot.activations],
+            ["projection", "activation"],
+        )
+        self.assertEqual(snapshot.parameter_gradients.missing_parameters, ())
+        self.assertGreater(snapshot.loss, 0)
+        for name, parameter in model.named_parameters():
+            self.assertTrue(torch.equal(parameter, before[name]))
+
+    def test_capture_requires_scalar_loss_contract(self) -> None:
+        class InvalidModel(torch.nn.Module):
+            def forward(
+                self, inputs: torch.Tensor, targets: torch.Tensor
+            ) -> torch.Tensor:
+                return inputs + targets
+
+        model = InvalidModel()
+        with self.assertRaisesRegex(DiagnosticError, "scalar loss"):
+            capture_training_snapshot(model, torch.ones(2), torch.ones(2), ("",))
 
 
 if __name__ == "__main__":
