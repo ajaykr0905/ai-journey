@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import random
 import sys
 import tempfile
 import unittest
 from hashlib import sha256
 from pathlib import Path
+
+import numpy as np
+import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -114,6 +118,33 @@ class InitializationComparisonTests(unittest.TestCase):
     def test_contrast_gate_rejects_non_effect_thresholds(self) -> None:
         with self.assertRaisesRegex(TransformerLabError, "greater than one"):
             contrast_meets_minimum(object(), 1)  # type: ignore[arg-type]
+
+    def test_comparison_restores_caller_random_state(self) -> None:
+        random.seed(91)
+        np.random.seed(91)
+        torch.manual_seed(91)
+        torch.use_deterministic_algorithms(False)
+        expected = (random.random(), float(np.random.random()), float(torch.rand(())))
+        random.seed(91)
+        np.random.seed(91)
+        torch.manual_seed(91)
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = self._corpus(directory)
+            result = run_initialization_comparison(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                ),
+                training_config=TrainingConfig(steps=1, batch_size=4),
+            )
+        actual = (random.random(), float(np.random.random()), float(torch.rand(())))
+        self.assertEqual(actual, expected)
+        self.assertFalse(torch.are_deterministic_algorithms_enabled())
+        self.assertTrue(result.runtime.deterministic_algorithms)
 
     def test_report_writer_is_stable_and_atomic(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

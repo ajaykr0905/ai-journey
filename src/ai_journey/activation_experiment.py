@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 import platform
+import random
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 
 from ai_journey.training_diagnostics import (
@@ -37,6 +41,22 @@ from ai_journey.transformer_lab import (
 )
 
 COMPARISON_SCHEMA_VERSION = 1
+
+
+@contextmanager
+def _preserve_random_state() -> Iterator[None]:
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    torch_state = torch.get_rng_state()
+    deterministic = torch.are_deterministic_algorithms_enabled()
+    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+    try:
+        yield
+    finally:
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
+        torch.set_rng_state(torch_state)
+        torch.use_deterministic_algorithms(deterministic, warn_only=warn_only)
 
 
 @dataclass(frozen=True)
@@ -253,58 +273,60 @@ def run_initialization_comparison(
         max_near_zero_fraction=0.999,
         min_standard_deviation=1e-12,
     )
-    variants = (
-        _run_variant(
-            "baseline",
-            corpus,
-            model_config,
-            training_config,
-            modules,
-            activation_spec,
-            gradient_spec,
-            thresholds,
-        ),
-        _run_variant(
-            "stressed",
-            corpus,
-            replace(model_config, initialization_std=stressed_initialization_std),
-            training_config,
-            modules,
-            activation_spec,
-            gradient_spec,
-            thresholds,
-        ),
-    )
-    baseline_activation = variants[0].initial_snapshot.activations[0].distribution
-    stressed_activation = variants[1].initial_snapshot.activations[0].distribution
-    if baseline_activation.rms == 0:
-        raise TransformerLabError("baseline activation RMS is zero")
-    contrast = InitializationContrast(
-        activation_module=modules[0],
-        baseline_initial_rms=baseline_activation.rms,
-        stressed_initial_rms=stressed_activation.rms,
-        stressed_to_baseline_rms_ratio=(
-            stressed_activation.rms / baseline_activation.rms
-        ),
-        baseline_initial_loss=variants[0].initial_snapshot.loss,
-        stressed_initial_loss=variants[1].initial_snapshot.loss,
-    )
-    return InitializationComparisonResult(
-        corpus_fingerprint=corpus.fingerprint(),
-        training_config=training_config,
-        activation_modules=modules,
-        activation_histogram=activation_spec,
-        gradient_histogram=gradient_spec,
-        health_thresholds=thresholds,
-        variants=variants,
-        contrast=contrast,
-        runtime=RuntimeMetadata(
-            python_version=platform.python_version(),
-            torch_version=str(torch.__version__),
-            device="cpu",
-            deterministic_algorithms=torch.are_deterministic_algorithms_enabled(),
-        ),
-    )
+    with _preserve_random_state():
+        variants = (
+            _run_variant(
+                "baseline",
+                corpus,
+                model_config,
+                training_config,
+                modules,
+                activation_spec,
+                gradient_spec,
+                thresholds,
+            ),
+            _run_variant(
+                "stressed",
+                corpus,
+                replace(model_config, initialization_std=stressed_initialization_std),
+                training_config,
+                modules,
+                activation_spec,
+                gradient_spec,
+                thresholds,
+            ),
+        )
+        baseline_activation = variants[0].initial_snapshot.activations[0].distribution
+        stressed_activation = variants[1].initial_snapshot.activations[0].distribution
+        if baseline_activation.rms == 0:
+            raise TransformerLabError("baseline activation RMS is zero")
+        contrast = InitializationContrast(
+            activation_module=modules[0],
+            baseline_initial_rms=baseline_activation.rms,
+            stressed_initial_rms=stressed_activation.rms,
+            stressed_to_baseline_rms_ratio=(
+                stressed_activation.rms / baseline_activation.rms
+            ),
+            baseline_initial_loss=variants[0].initial_snapshot.loss,
+            stressed_initial_loss=variants[1].initial_snapshot.loss,
+        )
+        result = InitializationComparisonResult(
+            corpus_fingerprint=corpus.fingerprint(),
+            training_config=training_config,
+            activation_modules=modules,
+            activation_histogram=activation_spec,
+            gradient_histogram=gradient_spec,
+            health_thresholds=thresholds,
+            variants=variants,
+            contrast=contrast,
+            runtime=RuntimeMetadata(
+                python_version=platform.python_version(),
+                torch_version=str(torch.__version__),
+                device="cpu",
+                deterministic_algorithms=torch.are_deterministic_algorithms_enabled(),
+            ),
+        )
+    return result
 
 
 def contrast_meets_minimum(
