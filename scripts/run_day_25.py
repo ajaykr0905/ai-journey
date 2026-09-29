@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.activation_experiment import (
+    contrast_meets_minimum,
     render_activation_histograms,
     render_gradient_histograms,
     run_initialization_comparison,
@@ -40,6 +41,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--validation-fraction", type=float, default=0.2)
     parser.add_argument("--initialization-std", type=float, default=0.02)
     parser.add_argument("--stressed-initialization-std", type=float, default=1.0)
+    parser.add_argument("--min-activation-rms-ratio", type=float, default=2.0)
     parser.add_argument("--seed", type=int, default=25)
     return parser.parse_args(argv)
 
@@ -88,10 +90,16 @@ def main(argv: list[str] | None = None) -> int:
             f"initial_health={variant.initial_health.passed} "
             f"final_health={variant.final_health.passed}"
         )
+    contrast = result.contrast
+    contrast_passed = contrast_meets_minimum(result, args.min_activation_rms_ratio)
+    print(
+        f"activation_rms_ratio={contrast.stressed_to_baseline_rms_ratio:.6f} "
+        f"minimum={args.min_activation_rms_ratio:.6f} passed={contrast_passed}"
+    )
     print(f"report={args.output}")
     print(f"plot={args.plot}")
     print(f"gradient_plot={args.gradient_plot}")
-    return 0
+    return 0 if contrast_passed else 1
 
 
 if __name__ == "__main__":

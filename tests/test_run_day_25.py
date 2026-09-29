@@ -81,6 +81,51 @@ class Day25RunnerTests(unittest.TestCase):
         )
         self.assertIn("baseline: initial_loss=", first.stdout)
         self.assertIn("stressed: initial_loss=", first.stdout)
+        self.assertIn("passed=True", first.stdout)
+
+    def test_runner_fails_when_required_contrast_is_not_met(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "run_day_25.py"),
+                    "--corpus",
+                    str(ROOT / "data" / "day-19-demo-names.txt"),
+                    "--output",
+                    str(Path(directory) / "report.json"),
+                    "--plot",
+                    str(Path(directory) / "activations.svg"),
+                    "--gradient-plot",
+                    str(Path(directory) / "gradients.svg"),
+                    "--steps",
+                    "1",
+                    "--batch-size",
+                    "4",
+                    "--block-size",
+                    "4",
+                    "--embedding-dim",
+                    "8",
+                    "--heads",
+                    "2",
+                    "--layers",
+                    "1",
+                    "--stressed-initialization-std",
+                    "0.8",
+                    "--min-activation-rms-ratio",
+                    "1000000",
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "MPLCONFIGDIR": str(Path(directory) / "matplotlib"),
+                    "XDG_CACHE_HOME": str(Path(directory) / "cache"),
+                },
+            )
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        self.assertIn("passed=False", completed.stdout)
 
 
 if __name__ == "__main__":
