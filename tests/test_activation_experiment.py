@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from ai_journey.activation_experiment import (
     default_activation_modules,
     render_activation_histograms,
+    render_gradient_histograms,
     run_initialization_comparison,
     write_comparison_report,
 )
@@ -160,6 +161,52 @@ class InitializationComparisonTests(unittest.TestCase):
             with self.assertRaisesRegex(TransformerLabError, "not captured"):
                 render_activation_histograms(
                     Path(directory) / "plot.svg", result, module_name="missing"
+                )
+
+    def test_gradient_renderer_writes_stable_svg(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = self._corpus(directory)
+            result = run_initialization_comparison(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                ),
+                training_config=TrainingConfig(steps=1, batch_size=4),
+                stressed_initialization_std=0.8,
+            )
+            output = Path(directory) / "plots" / "gradients.svg"
+            parameter = "blocks.0.feed_forward.network.0.weight"
+            render_gradient_histograms(output, result, parameter_name=parameter)
+            first = output.read_bytes()
+            render_gradient_histograms(output, result, parameter_name=parameter)
+            second = output.read_bytes()
+        self.assertEqual(first, second)
+        self.assertIn(b"Gradient distributions", first)
+        self.assertIn(parameter.encode(), first)
+
+    def test_gradient_renderer_rejects_uncaptured_parameter(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = self._corpus(directory)
+            result = run_initialization_comparison(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                ),
+                training_config=TrainingConfig(steps=1, batch_size=4),
+            )
+            with self.assertRaisesRegex(TransformerLabError, "not captured"):
+                render_gradient_histograms(
+                    Path(directory) / "gradient.svg",
+                    result,
+                    parameter_name="missing",
                 )
 
 

@@ -323,3 +323,78 @@ def render_activation_histograms(
         figure.savefig(temporary, format="svg", metadata={"Date": None})
         plt.close(figure)
     temporary.replace(path)
+
+
+def render_gradient_histograms(
+    path: Path,
+    result: InitializationComparisonResult,
+    *,
+    parameter_name: str | None = None,
+) -> None:
+    """Render deterministic initial/final parameter-gradient histograms as SVG."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if not isinstance(result, InitializationComparisonResult):
+        raise TypeError("result must be an InitializationComparisonResult")
+    first_gradients = result.variants[0].initial_snapshot.parameter_gradients.gradients
+    if not first_gradients:
+        raise TransformerLabError("comparison contains no parameter gradients")
+    selected_parameter = parameter_name or first_gradients[0].name
+    available = {item.name for item in first_gradients}
+    if selected_parameter not in available:
+        raise TransformerLabError(
+            f"gradient parameter was not captured: {selected_parameter}"
+        )
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    with matplotlib.rc_context({"svg.hashsalt": "ai-journey-day-25-gradients"}):
+        figure, axes = plt.subplots(
+            len(result.variants),
+            2,
+            figsize=(10, 3.5 * len(result.variants)),
+            squeeze=False,
+        )
+        for row, variant in enumerate(result.variants):
+            for column, (phase, snapshot) in enumerate(
+                (
+                    ("initial", variant.initial_snapshot),
+                    ("final", variant.final_snapshot),
+                )
+            ):
+                distributions = {
+                    item.name: item.distribution
+                    for item in snapshot.parameter_gradients.gradients
+                }
+                if selected_parameter not in distributions:
+                    raise TransformerLabError(
+                        f"gradient parameter was not captured: {selected_parameter}"
+                    )
+                distribution = distributions[selected_parameter]
+                edges = distribution.histogram_edges
+                widths = [right - left for left, right in pairwise(edges)]
+                axis = axes[row][column]
+                axis.bar(
+                    edges[:-1],
+                    distribution.histogram_counts,
+                    width=widths,
+                    align="edge",
+                    color="#2563EB" if variant.name == "baseline" else "#DC2626",
+                    edgecolor="white",
+                    linewidth=0.3,
+                )
+                axis.set_title(f"{variant.name} {phase}")
+                axis.set_xlabel("Gradient value")
+                axis.set_ylabel("Count")
+                axis.grid(axis="y", alpha=0.2)
+        figure.suptitle(f"Gradient distributions · {selected_parameter}")
+        figure.tight_layout()
+        figure.savefig(temporary, format="svg", metadata={"Date": None})
+        plt.close(figure)
+    temporary.replace(path)
