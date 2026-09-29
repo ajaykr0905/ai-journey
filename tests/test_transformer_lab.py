@@ -42,6 +42,10 @@ class TransformerConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(TransformerLabError, "divisible"):
             TransformerConfig(vocab_size=27, embedding_dim=10, head_count=3)
 
+    def test_config_rejects_invalid_initialization_scale(self) -> None:
+        with self.assertRaisesRegex(TransformerLabError, "initialization_std"):
+            TransformerConfig(vocab_size=27, initialization_std=0)
+
     def test_seed_everything_repeats_model_initialization(self) -> None:
         import torch
 
@@ -58,6 +62,22 @@ class TransformerConfigTests(unittest.TestCase):
                 )
             )
         )
+
+    def test_initialization_scale_changes_parameter_distribution(self) -> None:
+        base = TransformerConfig(
+            vocab_size=7, embedding_dim=32, head_count=4, initialization_std=0.01
+        )
+        stressed = TransformerConfig(
+            vocab_size=7, embedding_dim=32, head_count=4, initialization_std=0.5
+        )
+        seed_everything(25)
+        base_model = DecoderLanguageModel(base)
+        seed_everything(25)
+        stressed_model = DecoderLanguageModel(stressed)
+        base_std = float(base_model.token_embedding.weight.detach().std())
+        stressed_std = float(stressed_model.token_embedding.weight.detach().std())
+        self.assertGreater(stressed_std, base_std * 20)
+        self.assertNotEqual(base.fingerprint(), stressed.fingerprint())
 
     def test_training_config_rejects_non_positive_controls(self) -> None:
         with self.assertRaisesRegex(TransformerLabError, "steps"):

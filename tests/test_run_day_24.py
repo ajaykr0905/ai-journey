@@ -38,6 +38,8 @@ class Day24RunnerTests(unittest.TestCase):
                     "2",
                     "--layers",
                     "1",
+                    "--initialization-std",
+                    "0.03",
                 ],
                 check=True,
                 capture_output=True,
@@ -46,6 +48,7 @@ class Day24RunnerTests(unittest.TestCase):
             payload = json.loads(output.read_text(encoding="utf-8"))
             self.assertTrue(checkpoint.is_file())
             self.assertEqual(payload["completed_steps"], 2)
+            self.assertEqual(payload["model_config"]["initialization_std"], 0.03)
             self.assertIn("train_nll=", completed.stdout)
 
     def test_overfit_probe_uses_the_requested_example_count(self) -> None:

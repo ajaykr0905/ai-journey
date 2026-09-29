@@ -40,6 +40,7 @@ class TransformerConfig:
     head_count: int = 4
     layer_count: int = 2
     dropout: float = 0.0
+    initialization_std: float = 0.02
 
     def __post_init__(self) -> None:
         for name in (
@@ -62,6 +63,12 @@ class TransformerConfig:
             or not 0 <= self.dropout < 1
         ):
             raise TransformerLabError("dropout must be in [0, 1)")
+        if (
+            isinstance(self.initialization_std, bool)
+            or not isinstance(self.initialization_std, (int, float))
+            or self.initialization_std <= 0
+        ):
+            raise TransformerLabError("initialization_std must be positive")
 
     @property
     def head_dim(self) -> int:
@@ -343,10 +350,9 @@ class DecoderLanguageModel(nn.Module):
         self.lm_head = nn.Linear(config.embedding_dim, config.vocab_size, bias=False)
         self.apply(self._initialize)
 
-    @staticmethod
-    def _initialize(module: nn.Module) -> None:
+    def _initialize(self, module: nn.Module) -> None:
         if isinstance(module, (nn.Linear, nn.Embedding)):
-            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            nn.init.normal_(module.weight, mean=0.0, std=self.config.initialization_std)
             if isinstance(module, nn.Linear) and module.bias is not None:
                 nn.init.zeros_(module.bias)
 

@@ -111,6 +111,20 @@ jobs:
           --heads 2
           --layers 1
           --output /tmp/ai-journey-artifacts/day-24-overfit.json
+      - name: Compare Day 25 activation and gradient health
+        run: >-
+          python scripts/run_day_25.py
+          --corpus data/day-19-demo-names.txt
+          --steps 2
+          --batch-size 4
+          --block-size 4
+          --embedding-dim 8
+          --heads 2
+          --layers 1
+          --stressed-initialization-std 0.8
+          --output /tmp/ai-journey-artifacts/day-25-diagnostics.json
+          --plot /tmp/ai-journey-artifacts/day-25-activations.svg
+          --gradient-plot /tmp/ai-journey-artifacts/day-25-gradients.svg
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py
