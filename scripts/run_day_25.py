@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.activation_experiment import (
     render_activation_histograms,
+    render_gradient_histograms,
     run_initialization_comparison,
     write_comparison_report,
 )
@@ -24,6 +25,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--plot", type=Path, required=True)
     parser.add_argument("--plot-module")
+    parser.add_argument("--gradient-plot", type=Path, required=True)
+    parser.add_argument("--gradient-parameter")
     parser.add_argument("--steps", type=int, default=25)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--block-size", type=int, default=16)
@@ -73,6 +76,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     write_comparison_report(args.output, result)
     render_activation_histograms(args.plot, result, module_name=args.plot_module)
+    render_gradient_histograms(
+        args.gradient_plot,
+        result,
+        parameter_name=args.gradient_parameter,
+    )
     for variant in result.variants:
         print(
             f"{variant.name}: initial_loss={variant.initial_snapshot.loss:.6f} "
@@ -82,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     print(f"report={args.output}")
     print(f"plot={args.plot}")
+    print(f"gradient_plot={args.gradient_plot}")
     return 0
 
 

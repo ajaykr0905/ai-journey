@@ -16,6 +16,7 @@ class Day25RunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "day-25.json"
             plot = Path(directory) / "day-25.svg"
+            gradient_plot = Path(directory) / "day-25-gradients.svg"
             command = [
                 sys.executable,
                 str(ROOT / "scripts" / "run_day_25.py"),
@@ -25,6 +26,8 @@ class Day25RunnerTests(unittest.TestCase):
                 str(output),
                 "--plot",
                 str(plot),
+                "--gradient-plot",
+                str(gradient_plot),
                 "--steps",
                 "1",
                 "--batch-size",
@@ -56,6 +59,7 @@ class Day25RunnerTests(unittest.TestCase):
             self.assertEqual(first.returncode, 0, first.stderr)
             first_report = output.read_bytes()
             first_plot = plot.read_bytes()
+            first_gradient_plot = gradient_plot.read_bytes()
             second = subprocess.run(
                 command,
                 cwd=ROOT,
@@ -68,8 +72,10 @@ class Day25RunnerTests(unittest.TestCase):
             payload = json.loads(output.read_text(encoding="utf-8"))
             second_report = output.read_bytes()
             second_plot = plot.read_bytes()
+            second_gradient_plot = gradient_plot.read_bytes()
         self.assertEqual(first_report, second_report)
         self.assertEqual(first_plot, second_plot)
+        self.assertEqual(first_gradient_plot, second_gradient_plot)
         self.assertEqual(
             [item["name"] for item in payload["variants"]], ["baseline", "stressed"]
         )
