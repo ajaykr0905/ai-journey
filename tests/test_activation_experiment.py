@@ -57,6 +57,7 @@ class InitializationComparisonTests(unittest.TestCase):
                 stressed_initialization_std=0.8,
             )
         self.assertEqual(first.to_dict(), second.to_dict())
+        self.assertEqual(first.to_dict()["schema_version"], 1)
         baseline, stressed = first.variants
         self.assertEqual(baseline.name, "baseline")
         self.assertEqual(stressed.name, "stressed")

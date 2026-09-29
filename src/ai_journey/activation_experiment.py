@@ -32,6 +32,8 @@ from ai_journey.transformer_lab import (
     train_steps,
 )
 
+COMPARISON_SCHEMA_VERSION = 1
+
 
 @dataclass(frozen=True)
 class InitializationVariantResult:
@@ -90,6 +92,7 @@ class InitializationComparisonResult:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": COMPARISON_SCHEMA_VERSION,
             "corpus_fingerprint": self.corpus_fingerprint,
             "training_config": asdict(self.training_config),
             "activation_modules": list(self.activation_modules),
