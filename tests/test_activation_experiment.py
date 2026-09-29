@@ -58,6 +58,10 @@ class InitializationComparisonTests(unittest.TestCase):
             )
         self.assertEqual(first.to_dict(), second.to_dict())
         self.assertEqual(first.to_dict()["schema_version"], 1)
+        self.assertEqual(first.runtime.device, "cpu")
+        self.assertTrue(first.runtime.deterministic_algorithms)
+        self.assertTrue(first.runtime.python_version)
+        self.assertTrue(first.runtime.torch_version)
         baseline, stressed = first.variants
         self.assertEqual(baseline.name, "baseline")
         self.assertEqual(stressed.name, "stressed")

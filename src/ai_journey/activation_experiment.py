@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import platform
 from dataclasses import asdict, dataclass, replace
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
+
+import torch
 
 from ai_journey.training_diagnostics import (
     DiagnosticHealthReport,
@@ -78,6 +81,16 @@ class InitializationContrast:
 
 
 @dataclass(frozen=True)
+class RuntimeMetadata:
+    """Public-safe software and execution context for the CPU experiment."""
+
+    python_version: str
+    torch_version: str
+    device: str
+    deterministic_algorithms: bool
+
+
+@dataclass(frozen=True)
 class InitializationComparisonResult:
     """Reproducible baseline-versus-stressed initialization comparison."""
 
@@ -89,6 +102,7 @@ class InitializationComparisonResult:
     health_thresholds: HealthThresholds
     variants: tuple[InitializationVariantResult, ...]
     contrast: InitializationContrast
+    runtime: RuntimeMetadata
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -101,6 +115,7 @@ class InitializationComparisonResult:
             "health_thresholds": asdict(self.health_thresholds),
             "variants": [variant.to_dict() for variant in self.variants],
             "contrast": asdict(self.contrast),
+            "runtime": asdict(self.runtime),
         }
 
 
@@ -269,6 +284,12 @@ def run_initialization_comparison(
         health_thresholds=thresholds,
         variants=variants,
         contrast=contrast,
+        runtime=RuntimeMetadata(
+            python_version=platform.python_version(),
+            torch_version=str(torch.__version__),
+            device="cpu",
+            deterministic_algorithms=torch.are_deterministic_algorithms_enabled(),
+        ),
     )
 
 
