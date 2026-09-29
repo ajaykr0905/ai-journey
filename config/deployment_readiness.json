@@ -18,6 +18,7 @@
     "scripts/run_day_23.py",
     "scripts/run_day_24.py",
     "scripts/check_day_24_overfit.py",
+    "scripts/run_day_25.py",
     "days/day-20.md",
     "days/day-23.md",
     "days/day-24.md",
