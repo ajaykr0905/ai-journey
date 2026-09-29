@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, replace
+from pathlib import Path
 from typing import Any
 
 from ai_journey.training_diagnostics import (
@@ -235,3 +237,19 @@ def run_initialization_comparison(
         health_thresholds=thresholds,
         variants=variants,
     )
+
+
+def write_comparison_report(path: Path, result: InitializationComparisonResult) -> None:
+    """Atomically write stable JSON evidence for a diagnostic comparison."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if not isinstance(result, InitializationComparisonResult):
+        raise TypeError("result must be an InitializationComparisonResult")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from ai_journey.activation_experiment import (
     default_activation_modules,
     run_initialization_comparison,
+    write_comparison_report,
 )
 from ai_journey.transformer_lab import (
     TokenCorpus,
@@ -88,6 +90,33 @@ class InitializationComparisonTests(unittest.TestCase):
                     training_config=TrainingConfig(steps=1),
                     stressed_initialization_std=config.initialization_std,
                 )
+
+    def test_report_writer_is_stable_and_atomic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = self._corpus(directory)
+            result = run_initialization_comparison(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                ),
+                training_config=TrainingConfig(steps=1, batch_size=4),
+                stressed_initialization_std=0.8,
+            )
+            output = Path(directory) / "nested" / "report.json"
+            write_comparison_report(output, result)
+            first = output.read_bytes()
+            write_comparison_report(output, result)
+            second = output.read_bytes()
+            payload = json.loads(second)
+        self.assertEqual(first, second)
+        self.assertEqual(
+            [item["name"] for item in payload["variants"]], ["baseline", "stressed"]
+        )
+        self.assertFalse(output.with_name(".report.json.tmp").exists())
 
 
 if __name__ == "__main__":
