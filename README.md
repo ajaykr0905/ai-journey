@@ -1,7 +1,7 @@
-# AI Journey: Days 0–24
+# AI Journey: Days 0–25
 
 This repository is a public-safe, executable record of an added setup day plus the
-first twenty-four workbook days of a 90-day AI engineering learning plan. It combines
+first twenty-five workbook days of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -46,6 +46,9 @@ then grow these exercises into production-quality training and inference project
 - A deterministic PyTorch decoder-only transformer, exact restart checkpoints,
   held-out evaluation, and an exact-size overfit capacity gate in
   [`src/ai_journey/transformer_lab.py`](src/ai_journey/transformer_lab.py)
+- Controlled transformer initialization comparisons with activation and gradient
+  histograms, distribution-health checks, and update-to-parameter ratios in
+  [`src/ai_journey/activation_experiment.py`](src/ai_journey/activation_experiment.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -98,15 +101,20 @@ python scripts/check_day_24_overfit.py \
   --corpus data/day-19-demo-names.txt \
   --examples 100 \
   --output artifacts/day-24-overfit.json
+python scripts/run_day_25.py \
+  --corpus data/day-19-demo-names.txt \
+  --output artifacts/day-25-diagnostics.json \
+  --plot artifacts/day-25-activations.svg \
+  --gradient-plot artifacts/day-25-gradients.svg
 python -m unittest discover -s tests -v
 ```
 
-PyTorch is required for the Day 24 transformer baseline. The default verification
+PyTorch is required for the Day 24–25 transformer experiments. The default verification
 commands run on CPU and do not claim GPU or distributed execution.
 
 ## Configuration safety
 
-Days 0–21 require no credentials. Never commit `.env`, credentials, browser data,
+Days 0–25 require no credentials. Never commit `.env`, credentials, browser data,
 cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 
 ## Daily map
@@ -138,6 +146,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 22 | 2026-09-26 | Context windows, embeddings, deterministic training, and checkpoint restart |
 | 23 | 2026-09-27 | Minibatches, learning-rate search, held-out evaluation, and overfitting diagnostics |
 | 24 | 2026-09-28 | Deterministic transformer training, exact restart, and overfit capacity gate |
+| 25 | 2026-09-29 | Controlled initialization, activation histograms, and gradient diagnostics |
 
 ## License
 
