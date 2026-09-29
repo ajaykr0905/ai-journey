@@ -32,6 +32,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--heads", type=int, default=4)
     parser.add_argument("--layers", type=int, default=2)
     parser.add_argument("--dropout", type=float, default=0.0)
+    parser.add_argument("--initialization-std", type=float, default=0.02)
     parser.add_argument("--learning-rate", type=float, default=3e-3)
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--gradient-clip", type=float, default=1.0)
@@ -54,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
         head_count=args.heads,
         layer_count=args.layers,
         dropout=args.dropout,
+        initialization_std=args.initialization_std,
     )
     training_config = TrainingConfig(
         steps=args.steps,
