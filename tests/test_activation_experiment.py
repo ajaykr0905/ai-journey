@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.activation_experiment import (
+    contrast_meets_minimum,
     default_activation_modules,
     render_activation_histograms,
     render_gradient_histograms,
@@ -64,6 +65,10 @@ class InitializationComparisonTests(unittest.TestCase):
         base_activation = baseline.initial_snapshot.activations[0].distribution
         stressed_activation = stressed.initial_snapshot.activations[0].distribution
         self.assertGreater(stressed_activation.rms, base_activation.rms)
+        self.assertEqual(first.contrast.activation_module, first.activation_modules[0])
+        self.assertGreater(first.contrast.stressed_to_baseline_rms_ratio, 2)
+        self.assertTrue(contrast_meets_minimum(first, 2))
+        self.assertFalse(contrast_meets_minimum(first, 1_000_000))
 
     def test_default_modules_cover_each_transformer_block(self) -> None:
         config = TransformerConfig(vocab_size=5, layer_count=3)
@@ -92,6 +97,10 @@ class InitializationComparisonTests(unittest.TestCase):
                     training_config=TrainingConfig(steps=1),
                     stressed_initialization_std=config.initialization_std,
                 )
+
+    def test_contrast_gate_rejects_non_effect_thresholds(self) -> None:
+        with self.assertRaisesRegex(TransformerLabError, "greater than one"):
+            contrast_meets_minimum(object(), 1)  # type: ignore[arg-type]
 
     def test_report_writer_is_stable_and_atomic(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

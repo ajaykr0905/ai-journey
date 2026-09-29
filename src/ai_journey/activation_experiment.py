@@ -64,6 +64,18 @@ class InitializationVariantResult:
 
 
 @dataclass(frozen=True)
+class InitializationContrast:
+    """Directly comparable effect size for the controlled initialization change."""
+
+    activation_module: str
+    baseline_initial_rms: float
+    stressed_initial_rms: float
+    stressed_to_baseline_rms_ratio: float
+    baseline_initial_loss: float
+    stressed_initial_loss: float
+
+
+@dataclass(frozen=True)
 class InitializationComparisonResult:
     """Reproducible baseline-versus-stressed initialization comparison."""
 
@@ -74,6 +86,7 @@ class InitializationComparisonResult:
     gradient_histogram: HistogramSpec
     health_thresholds: HealthThresholds
     variants: tuple[InitializationVariantResult, ...]
+    contrast: InitializationContrast
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -84,6 +97,7 @@ class InitializationComparisonResult:
             "gradient_histogram": asdict(self.gradient_histogram),
             "health_thresholds": asdict(self.health_thresholds),
             "variants": [variant.to_dict() for variant in self.variants],
+            "contrast": asdict(self.contrast),
         }
 
 
@@ -229,6 +243,20 @@ def run_initialization_comparison(
             thresholds,
         ),
     )
+    baseline_activation = variants[0].initial_snapshot.activations[0].distribution
+    stressed_activation = variants[1].initial_snapshot.activations[0].distribution
+    if baseline_activation.rms == 0:
+        raise TransformerLabError("baseline activation RMS is zero")
+    contrast = InitializationContrast(
+        activation_module=modules[0],
+        baseline_initial_rms=baseline_activation.rms,
+        stressed_initial_rms=stressed_activation.rms,
+        stressed_to_baseline_rms_ratio=(
+            stressed_activation.rms / baseline_activation.rms
+        ),
+        baseline_initial_loss=variants[0].initial_snapshot.loss,
+        stressed_initial_loss=variants[1].initial_snapshot.loss,
+    )
     return InitializationComparisonResult(
         corpus_fingerprint=corpus.fingerprint(),
         training_config=training_config,
@@ -237,7 +265,22 @@ def run_initialization_comparison(
         gradient_histogram=gradient_spec,
         health_thresholds=thresholds,
         variants=variants,
+        contrast=contrast,
     )
+
+
+def contrast_meets_minimum(
+    result: InitializationComparisonResult, minimum_rms_ratio: float
+) -> bool:
+    """Return whether the stressed initialization produced the required effect."""
+
+    if (
+        isinstance(minimum_rms_ratio, bool)
+        or not isinstance(minimum_rms_ratio, (int, float))
+        or minimum_rms_ratio <= 1
+    ):
+        raise TransformerLabError("minimum_rms_ratio must be greater than one")
+    return result.contrast.stressed_to_baseline_rms_ratio >= minimum_rms_ratio
 
 
 def write_comparison_report(path: Path, result: InitializationComparisonResult) -> None:
