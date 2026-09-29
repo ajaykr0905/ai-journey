@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.activation_experiment import (
     default_activation_modules,
+    render_activation_histograms,
     run_initialization_comparison,
     write_comparison_report,
 )
@@ -117,6 +118,49 @@ class InitializationComparisonTests(unittest.TestCase):
             [item["name"] for item in payload["variants"]], ["baseline", "stressed"]
         )
         self.assertFalse(output.with_name(".report.json.tmp").exists())
+
+    def test_histogram_renderer_writes_stable_svg(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = self._corpus(directory)
+            result = run_initialization_comparison(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                ),
+                training_config=TrainingConfig(steps=1, batch_size=4),
+                stressed_initialization_std=0.8,
+            )
+            output = Path(directory) / "plots" / "activations.svg"
+            render_activation_histograms(output, result)
+            first = output.read_bytes()
+            render_activation_histograms(output, result)
+            second = output.read_bytes()
+        self.assertEqual(first, second)
+        self.assertIn(b"baseline initial", first)
+        self.assertIn(b"stressed final", first)
+
+    def test_histogram_renderer_rejects_uncaptured_module(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = self._corpus(directory)
+            result = run_initialization_comparison(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                ),
+                training_config=TrainingConfig(steps=1, batch_size=4),
+            )
+            with self.assertRaisesRegex(TransformerLabError, "not captured"):
+                render_activation_histograms(
+                    Path(directory) / "plot.svg", result, module_name="missing"
+                )
 
 
 if __name__ == "__main__":

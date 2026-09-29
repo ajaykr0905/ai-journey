@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, replace
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -252,4 +253,73 @@ def write_comparison_report(path: Path, result: InitializationComparisonResult) 
         json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    temporary.replace(path)
+
+
+def render_activation_histograms(
+    path: Path,
+    result: InitializationComparisonResult,
+    *,
+    module_name: str | None = None,
+) -> None:
+    """Render deterministic initial/final activation histograms as SVG."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if not isinstance(result, InitializationComparisonResult):
+        raise TypeError("result must be an InitializationComparisonResult")
+    selected_module = module_name or result.activation_modules[0]
+    if selected_module not in result.activation_modules:
+        raise TransformerLabError(
+            f"activation module was not captured: {selected_module}"
+        )
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    with matplotlib.rc_context({"svg.hashsalt": "ai-journey-day-25"}):
+        figure, axes = plt.subplots(
+            len(result.variants),
+            2,
+            figsize=(10, 3.5 * len(result.variants)),
+            squeeze=False,
+        )
+        for row, variant in enumerate(result.variants):
+            for column, (phase, snapshot) in enumerate(
+                (
+                    ("initial", variant.initial_snapshot),
+                    ("final", variant.final_snapshot),
+                )
+            ):
+                distributions = {
+                    item.name: item.distribution for item in snapshot.activations
+                }
+                distribution = distributions[selected_module]
+                edges = distribution.histogram_edges
+                widths = [right - left for left, right in pairwise(edges)]
+                axis = axes[row][column]
+                axis.bar(
+                    edges[:-1],
+                    distribution.histogram_counts,
+                    width=widths,
+                    align="edge",
+                    color="#2563EB" if variant.name == "baseline" else "#DC2626",
+                    edgecolor="white",
+                    linewidth=0.3,
+                )
+                axis.set_title(
+                    f"{variant.name} {phase} · outside range "
+                    f"{distribution.underflow_count + distribution.overflow_count}"
+                )
+                axis.set_xlabel("Activation value")
+                axis.set_ylabel("Count")
+                axis.grid(axis="y", alpha=0.2)
+        figure.suptitle(f"Activation distributions · {selected_module}")
+        figure.tight_layout()
+        figure.savefig(temporary, format="svg", metadata={"Date": None})
+        plt.close(figure)
     temporary.replace(path)
