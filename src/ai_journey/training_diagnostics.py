@@ -168,6 +168,55 @@ class DiagnosticHealthReport:
         }
 
 
+@dataclass(frozen=True)
+class ParameterUpdate:
+    """One parameter's optimizer-step magnitude relative to its weights."""
+
+    name: str
+    parameter_rms: float
+    update_rms: float
+    update_to_parameter_ratio: float | None
+
+
+class ParameterUpdateTracker:
+    """Capture a one-use parameter baseline for optimizer update diagnostics."""
+
+    def __init__(self, model: nn.Module) -> None:
+        if not isinstance(model, nn.Module):
+            raise TypeError("model must be a torch module")
+        self._before = {
+            name: parameter.detach().cpu().clone()
+            for name, parameter in sorted(model.named_parameters())
+        }
+        if not self._before:
+            raise DiagnosticError("model has no parameters")
+        self._used = False
+
+    def measure(self, model: nn.Module) -> tuple[ParameterUpdate, ...]:
+        if self._used:
+            raise RuntimeError("parameter update tracker has already been measured")
+        current = dict(sorted(model.named_parameters()))
+        if set(current) != set(self._before):
+            raise DiagnosticError("model parameters changed since tracker creation")
+        updates: list[ParameterUpdate] = []
+        for name, before in self._before.items():
+            after = current[name].detach().cpu()
+            if after.shape != before.shape:
+                raise DiagnosticError(f"parameter shape changed: {name}")
+            parameter_rms = float(before.to(torch.float64).square().mean().sqrt())
+            update_rms = float(
+                (after.to(torch.float64) - before.to(torch.float64))
+                .square()
+                .mean()
+                .sqrt()
+            )
+            ratio = update_rms / parameter_rms if parameter_rms else None
+            updates.append(ParameterUpdate(name, parameter_rms, update_rms, ratio))
+        self._used = True
+        self._before.clear()
+        return tuple(updates)
+
+
 def summarize_tensor(
     tensor: Tensor, spec: HistogramSpec | None = None
 ) -> TensorDistribution:

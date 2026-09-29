@@ -15,6 +15,7 @@ from ai_journey.training_diagnostics import (
     DiagnosticError,
     HealthThresholds,
     HistogramSpec,
+    ParameterUpdateTracker,
     capture_training_snapshot,
     collect_parameter_gradients,
     evaluate_snapshot_health,
@@ -206,6 +207,38 @@ class DiagnosticHealthTests(unittest.TestCase):
     def test_thresholds_reject_invalid_fractions(self) -> None:
         with self.assertRaisesRegex(DiagnosticError, r"\[0, 1\]"):
             HealthThresholds(max_near_zero_fraction=1.1)
+
+
+class ParameterUpdateTrackerTests(unittest.TestCase):
+    def test_tracker_measures_optimizer_update_ratios_once(self) -> None:
+        torch.manual_seed(3)
+        model = torch.nn.Linear(2, 1)
+        tracker = ParameterUpdateTracker(model)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+        loss = model(torch.ones(2, 2)).square().mean()
+        loss.backward()
+        optimizer.step()
+        updates = tracker.measure(model)
+        self.assertEqual([update.name for update in updates], ["bias", "weight"])
+        self.assertTrue(all(update.update_rms > 0 for update in updates))
+        self.assertTrue(
+            all(
+                update.update_to_parameter_ratio is not None
+                and update.update_to_parameter_ratio > 0
+                for update in updates
+            )
+        )
+        with self.assertRaisesRegex(RuntimeError, "already"):
+            tracker.measure(model)
+
+    def test_tracker_represents_zero_weight_ratio_as_unavailable(self) -> None:
+        model = torch.nn.Linear(2, 1, bias=False)
+        torch.nn.init.zeros_(model.weight)
+        tracker = ParameterUpdateTracker(model)
+        update = tracker.measure(model)[0]
+        self.assertEqual(update.parameter_rms, 0)
+        self.assertEqual(update.update_rms, 0)
+        self.assertIsNone(update.update_to_parameter_ratio)
 
 
 if __name__ == "__main__":
