@@ -13,9 +13,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from ai_journey.training_diagnostics import (
     ActivationCollector,
     DiagnosticError,
+    HealthThresholds,
     HistogramSpec,
     capture_training_snapshot,
     collect_parameter_gradients,
+    evaluate_snapshot_health,
     summarize_tensor,
 )
 
@@ -165,6 +167,45 @@ class TrainingSnapshotTests(unittest.TestCase):
         model = InvalidModel()
         with self.assertRaisesRegex(DiagnosticError, "scalar loss"):
             capture_training_snapshot(model, torch.ones(2), torch.ones(2), ("",))
+
+
+class DiagnosticHealthTests(unittest.TestCase):
+    def test_health_report_names_failed_activation_and_gradient_limits(self) -> None:
+        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Tanh())
+
+        class LossModel(torch.nn.Module):
+            def __init__(self, network: torch.nn.Module) -> None:
+                super().__init__()
+                self.network = network
+
+            def forward(
+                self, inputs: torch.Tensor, targets: torch.Tensor
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                outputs = self.network(inputs)
+                return outputs, torch.nn.functional.mse_loss(outputs, targets)
+
+        snapshot = capture_training_snapshot(
+            LossModel(model),
+            torch.ones(2, 2),
+            torch.zeros(2, 2),
+            ("network.1",),
+            activation_spec=HistogramSpec(lower=-0.01, upper=0.01),
+        )
+        report = evaluate_snapshot_health(
+            snapshot,
+            HealthThresholds(max_out_of_range_fraction=0.0),
+        )
+        self.assertFalse(report.passed)
+        failed = {
+            check.name: check.issues for check in report.checks if not check.passed
+        }
+        self.assertIn("activation:network.1", failed)
+        self.assertIn("out_of_range_values", failed["activation:network.1"])
+        self.assertEqual(report.to_dict()["passed"], False)
+
+    def test_thresholds_reject_invalid_fractions(self) -> None:
+        with self.assertRaisesRegex(DiagnosticError, r"\[0, 1\]"):
+            HealthThresholds(max_near_zero_fraction=1.1)
 
 
 if __name__ == "__main__":

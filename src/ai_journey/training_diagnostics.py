@@ -114,6 +114,60 @@ class TrainingSnapshot:
         }
 
 
+@dataclass(frozen=True)
+class HealthThresholds:
+    """Explicit limits for detecting unusable tensor distributions."""
+
+    max_nonfinite_count: int = 0
+    max_out_of_range_fraction: float = 0.05
+    max_near_zero_fraction: float = 0.99
+    min_standard_deviation: float = 1e-10
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.max_nonfinite_count, bool)
+            or not isinstance(self.max_nonfinite_count, int)
+            or self.max_nonfinite_count < 0
+        ):
+            raise DiagnosticError("max_nonfinite_count must be non-negative")
+        for name in ("max_out_of_range_fraction", "max_near_zero_fraction"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not 0 <= value <= 1
+            ):
+                raise DiagnosticError(f"{name} must be in [0, 1]")
+        if (
+            isinstance(self.min_standard_deviation, bool)
+            or not isinstance(self.min_standard_deviation, (int, float))
+            or self.min_standard_deviation < 0
+        ):
+            raise DiagnosticError("min_standard_deviation must be non-negative")
+
+
+@dataclass(frozen=True)
+class HealthCheck:
+    name: str
+    passed: bool
+    issues: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DiagnosticHealthReport:
+    checks: tuple[HealthCheck, ...]
+
+    @property
+    def passed(self) -> bool:
+        return all(check.passed for check in self.checks)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "passed": self.passed,
+            "checks": [asdict(check) for check in self.checks],
+        }
+
+
 def summarize_tensor(
     tensor: Tensor, spec: HistogramSpec | None = None
 ) -> TensorDistribution:
@@ -299,3 +353,46 @@ def capture_training_snapshot(
     finally:
         model.zero_grad(set_to_none=True)
         model.train(was_training)
+
+
+def _health_check(
+    name: str,
+    distribution: TensorDistribution,
+    thresholds: HealthThresholds,
+) -> HealthCheck:
+    issues: list[str] = []
+    if distribution.nonfinite_count > thresholds.max_nonfinite_count:
+        issues.append("nonfinite_values")
+    out_of_range = (
+        distribution.underflow_count + distribution.overflow_count
+    ) / distribution.finite_count
+    if out_of_range > thresholds.max_out_of_range_fraction:
+        issues.append("out_of_range_values")
+    if distribution.near_zero_fraction > thresholds.max_near_zero_fraction:
+        issues.append("near_zero_values")
+    if distribution.standard_deviation < thresholds.min_standard_deviation:
+        issues.append("low_variance")
+    return HealthCheck(name, not issues, tuple(issues))
+
+
+def evaluate_snapshot_health(
+    snapshot: TrainingSnapshot, thresholds: HealthThresholds | None = None
+) -> DiagnosticHealthReport:
+    """Evaluate a training snapshot against explicit, auditable limits."""
+
+    if not isinstance(snapshot, TrainingSnapshot):
+        raise TypeError("snapshot must be a TrainingSnapshot")
+    selected = thresholds or HealthThresholds()
+    checks = [
+        _health_check(f"activation:{item.name}", item.distribution, selected)
+        for item in snapshot.activations
+    ]
+    checks.extend(
+        _health_check(f"gradient:{item.name}", item.distribution, selected)
+        for item in snapshot.parameter_gradients.gradients
+    )
+    checks.extend(
+        HealthCheck(f"gradient:{name}", False, ("missing_gradient",))
+        for name in snapshot.parameter_gradients.missing_parameters
+    )
+    return DiagnosticHealthReport(tuple(checks))
