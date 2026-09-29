@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import platform
 from dataclasses import asdict, dataclass, replace
+from hashlib import sha256
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -104,7 +105,7 @@ class InitializationComparisonResult:
     contrast: InitializationContrast
     runtime: RuntimeMetadata
 
-    def to_dict(self) -> dict[str, Any]:
+    def _payload(self) -> dict[str, Any]:
         return {
             "schema_version": COMPARISON_SCHEMA_VERSION,
             "corpus_fingerprint": self.corpus_fingerprint,
@@ -117,6 +118,19 @@ class InitializationComparisonResult:
             "contrast": asdict(self.contrast),
             "runtime": asdict(self.runtime),
         }
+
+    def evidence_fingerprint(self) -> str:
+        """Hash the canonical report payload for integrity verification."""
+
+        encoded = json.dumps(
+            self._payload(), sort_keys=True, separators=(",", ":")
+        ).encode()
+        return sha256(encoded).hexdigest()
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = self._payload()
+        payload["evidence_fingerprint"] = self.evidence_fingerprint()
+        return payload
 
 
 def default_activation_modules(config: TransformerConfig) -> tuple[str, ...]:

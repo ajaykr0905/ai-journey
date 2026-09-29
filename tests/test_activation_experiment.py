@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
+from hashlib import sha256
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +63,13 @@ class InitializationComparisonTests(unittest.TestCase):
         self.assertTrue(first.runtime.deterministic_algorithms)
         self.assertTrue(first.runtime.python_version)
         self.assertTrue(first.runtime.torch_version)
+        payload = first.to_dict()
+        fingerprint = payload.pop("evidence_fingerprint")
+        expected = sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        self.assertEqual(fingerprint, expected)
+        self.assertEqual(fingerprint, first.evidence_fingerprint())
         baseline, stressed = first.variants
         self.assertEqual(baseline.name, "baseline")
         self.assertEqual(stressed.name, "stressed")
