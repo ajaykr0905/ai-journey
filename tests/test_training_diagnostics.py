@@ -14,6 +14,7 @@ from ai_journey.training_diagnostics import (
     ActivationCollector,
     DiagnosticError,
     HistogramSpec,
+    collect_parameter_gradients,
     summarize_tensor,
 )
 
@@ -86,6 +87,34 @@ class ActivationCollectorTests(unittest.TestCase):
             ActivationCollector(model, ("missing",))
         with self.assertRaisesRegex(DiagnosticError, "unique"):
             ActivationCollector(model, ("", ""))
+
+
+class ParameterGradientSnapshotTests(unittest.TestCase):
+    def test_snapshot_reports_gradients_and_disconnected_parameters(self) -> None:
+        class PartialModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.used = torch.nn.Parameter(torch.tensor([1.0, -2.0]))
+                self.unused = torch.nn.Parameter(torch.tensor([3.0]))
+
+            def forward(self) -> torch.Tensor:
+                return self.used.square().sum()
+
+        model = PartialModel()
+        model().backward()
+        snapshot = collect_parameter_gradients(
+            model, HistogramSpec(lower=-5, upper=5, bins=10)
+        )
+        self.assertEqual([item.name for item in snapshot.gradients], ["used"])
+        self.assertEqual(snapshot.missing_parameters, ("unused",))
+        self.assertEqual(snapshot.gradients[0].distribution.count, 2)
+        self.assertEqual(snapshot.to_dict()["missing_parameters"], ["unused"])
+
+    def test_snapshot_is_empty_before_backward(self) -> None:
+        model = torch.nn.Linear(2, 1)
+        snapshot = collect_parameter_gradients(model)
+        self.assertEqual(snapshot.gradients, ())
+        self.assertEqual(snapshot.missing_parameters, ("bias", "weight"))
 
 
 if __name__ == "__main__":

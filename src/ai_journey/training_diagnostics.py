@@ -64,6 +64,34 @@ class TensorDistribution:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class NamedDistribution:
+    """Tensor distribution associated with a stable model path."""
+
+    name: str
+    distribution: TensorDistribution
+
+
+@dataclass(frozen=True)
+class ParameterGradientSnapshot:
+    """Gradient distributions plus parameters omitted from the backward graph."""
+
+    gradients: tuple[NamedDistribution, ...]
+    missing_parameters: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "gradients": [
+                {
+                    "name": item.name,
+                    "distribution": item.distribution.to_dict(),
+                }
+                for item in self.gradients
+            ],
+            "missing_parameters": list(self.missing_parameters),
+        }
+
+
 def summarize_tensor(
     tensor: Tensor, spec: HistogramSpec | None = None
 ) -> TensorDistribution:
@@ -179,3 +207,26 @@ class ActivationCollector:
 
     def snapshot(self) -> dict[str, tuple[TensorDistribution, ...]]:
         return {name: tuple(records) for name, records in self._records.items()}
+
+
+def collect_parameter_gradients(
+    model: nn.Module, spec: HistogramSpec | None = None
+) -> ParameterGradientSnapshot:
+    """Summarize every available parameter gradient in stable name order."""
+
+    if not isinstance(model, nn.Module):
+        raise TypeError("model must be a torch module")
+    selected_spec = spec or HistogramSpec()
+    gradients: list[NamedDistribution] = []
+    missing: list[str] = []
+    for name, parameter in sorted(model.named_parameters()):
+        if parameter.grad is None:
+            missing.append(name)
+            continue
+        gradient = parameter.grad
+        if gradient.is_sparse:
+            gradient = gradient.to_dense()
+        gradients.append(
+            NamedDistribution(name, summarize_tensor(gradient, selected_spec))
+        )
+    return ParameterGradientSnapshot(tuple(gradients), tuple(missing))
