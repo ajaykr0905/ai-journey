@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import math
 import random
 import sys
 import unittest
+from hashlib import sha256
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -121,6 +123,16 @@ class KaimingComparisonTests(unittest.TestCase):
                 training_config=training_config,
             )
         self.assertEqual(first.to_dict(), second.to_dict())
+        payload = first.to_dict()
+        fingerprint = payload.pop("evidence_fingerprint")
+        self.assertEqual(payload["schema_version"], 1)
+        self.assertEqual(
+            fingerprint,
+            sha256(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest(),
+        )
+        self.assertEqual(fingerprint, first.evidence_fingerprint())
         self.assertEqual(first.runtime.device, "cpu")
         self.assertTrue(first.runtime.python_version)
         self.assertTrue(first.runtime.torch_version)

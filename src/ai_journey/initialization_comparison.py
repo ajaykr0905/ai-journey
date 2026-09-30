@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import math
 import platform
 import random
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
+from hashlib import sha256
 from itertools import pairwise
 from typing import Any
 
@@ -30,6 +32,8 @@ from ai_journey.transformer_lab import (
     seed_everything,
     train_steps,
 )
+
+COMPARISON_SCHEMA_VERSION = 1
 
 
 @contextmanager
@@ -146,14 +150,28 @@ class KaimingComparisonResult:
     contrast: KaimingContrast
     runtime: RuntimeMetadata
 
-    def to_dict(self) -> dict[str, Any]:
+    def _payload(self) -> dict[str, Any]:
         return {
+            "schema_version": COMPARISON_SCHEMA_VERSION,
             "corpus_fingerprint": self.corpus_fingerprint,
             "training_config": asdict(self.training_config),
             "variants": [variant.to_dict() for variant in self.variants],
             "contrast": asdict(self.contrast),
             "runtime": asdict(self.runtime),
         }
+
+    def evidence_fingerprint(self) -> str:
+        """Hash the canonical evidence payload for later integrity checks."""
+
+        encoded = json.dumps(
+            self._payload(), sort_keys=True, separators=(",", ":")
+        ).encode()
+        return sha256(encoded).hexdigest()
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = self._payload()
+        payload["evidence_fingerprint"] = self.evidence_fingerprint()
+        return payload
 
 
 @dataclass(frozen=True)
