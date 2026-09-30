@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import platform
 import random
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -143,6 +144,7 @@ class KaimingComparisonResult:
     training_config: TrainingConfig
     variants: tuple[KaimingVariantResult, KaimingVariantResult]
     contrast: KaimingContrast
+    runtime: RuntimeMetadata
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -150,7 +152,21 @@ class KaimingComparisonResult:
             "training_config": asdict(self.training_config),
             "variants": [variant.to_dict() for variant in self.variants],
             "contrast": asdict(self.contrast),
+            "runtime": asdict(self.runtime),
         }
+
+
+@dataclass(frozen=True)
+class RuntimeMetadata:
+    """Public-safe runtime provenance for reproducing the CPU comparison."""
+
+    python_version: str
+    torch_version: str
+    numpy_version: str
+    device: str
+    machine: str
+    deterministic_algorithms: bool
+    intraop_threads: int
 
 
 @dataclass(frozen=True)
@@ -344,6 +360,15 @@ def run_kaiming_comparison(
                 training_config,
             ),
         )
+        runtime = RuntimeMetadata(
+            python_version=platform.python_version(),
+            torch_version=str(torch.__version__),
+            numpy_version=str(np.__version__),
+            device="cpu",
+            machine=platform.machine(),
+            deterministic_algorithms=torch.are_deterministic_algorithms_enabled(),
+            intraop_threads=torch.get_num_threads(),
+        )
     fixed, kaiming = variants
     contrast = KaimingContrast(
         fixed_mean_loss=fixed.loss_curve.mean_loss,
@@ -365,4 +390,5 @@ def run_kaiming_comparison(
         training_config=training_config,
         variants=variants,
         contrast=contrast,
+        runtime=runtime,
     )

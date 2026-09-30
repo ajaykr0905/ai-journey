@@ -121,6 +121,13 @@ class KaimingComparisonTests(unittest.TestCase):
                 training_config=training_config,
             )
         self.assertEqual(first.to_dict(), second.to_dict())
+        self.assertEqual(first.runtime.device, "cpu")
+        self.assertTrue(first.runtime.python_version)
+        self.assertTrue(first.runtime.torch_version)
+        self.assertTrue(first.runtime.numpy_version)
+        self.assertTrue(first.runtime.machine)
+        self.assertTrue(first.runtime.deterministic_algorithms)
+        self.assertGreater(first.runtime.intraop_threads, 0)
         fixed, kaiming = first.variants
         self.assertEqual((fixed.name, kaiming.name), ("fixed_normal", "kaiming_normal"))
         fixed_config = fixed.to_dict()["model_config"]
