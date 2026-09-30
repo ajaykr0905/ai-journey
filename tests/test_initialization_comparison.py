@@ -8,10 +8,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ai_journey.initialization_comparison import audit_model_initialization
+from ai_journey.initialization_comparison import (
+    audit_model_initialization,
+    run_kaiming_comparison,
+)
 from ai_journey.transformer_lab import (
     DecoderLanguageModel,
+    TokenCorpus,
+    TrainingConfig,
     TransformerConfig,
+    TransformerLabError,
     seed_everything,
 )
 
@@ -72,6 +78,79 @@ class InitializationAuditTests(unittest.TestCase):
 
         with self.assertRaisesRegex(TypeError, "DecoderLanguageModel"):
             audit_model_initialization(nn.Linear(2, 2))  # type: ignore[arg-type]
+
+
+class KaimingComparisonTests(unittest.TestCase):
+    def _corpus(self, directory: str) -> TokenCorpus:
+        path = Path(directory) / "corpus.txt"
+        path.write_text("anna\naria\namara\n" * 8, encoding="utf-8")
+        return TokenCorpus.from_path(path, block_size=4)
+
+    def test_comparison_is_deterministic_and_changes_only_policy(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = self._corpus(directory)
+            model_config = TransformerConfig(
+                vocab_size=corpus.vocab_size,
+                block_size=4,
+                embedding_dim=8,
+                head_count=2,
+                layer_count=1,
+                initialization_gain=1.0,
+            )
+            training_config = TrainingConfig(
+                steps=2,
+                batch_size=4,
+                learning_rate=0.01,
+                seed=26,
+            )
+            first = run_kaiming_comparison(
+                corpus,
+                model_config=model_config,
+                training_config=training_config,
+            )
+            second = run_kaiming_comparison(
+                corpus,
+                model_config=model_config,
+                training_config=training_config,
+            )
+        self.assertEqual(first.to_dict(), second.to_dict())
+        fixed, kaiming = first.variants
+        self.assertEqual((fixed.name, kaiming.name), ("fixed_normal", "kaiming_normal"))
+        fixed_config = fixed.to_dict()["model_config"]
+        kaiming_config = kaiming.to_dict()["model_config"]
+        differing = {
+            key for key in fixed_config if fixed_config[key] != kaiming_config[key]
+        }
+        self.assertEqual(differing, {"initialization_mode"})
+        self.assertEqual(len(fixed.trace), training_config.steps)
+        self.assertEqual(len(kaiming.trace), training_config.steps)
+        self.assertNotEqual(
+            [item.loss for item in fixed.trace],
+            [item.loss for item in kaiming.trace],
+        )
+
+    def test_comparison_rejects_invalid_baseline_or_vocabulary(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = self._corpus(directory)
+            with self.assertRaisesRegex(TransformerLabError, "fixed_normal"):
+                run_kaiming_comparison(
+                    corpus,
+                    model_config=TransformerConfig(
+                        vocab_size=corpus.vocab_size,
+                        initialization_mode="kaiming_normal",
+                    ),
+                    training_config=TrainingConfig(steps=1),
+                )
+            with self.assertRaisesRegex(TransformerLabError, "vocabulary"):
+                run_kaiming_comparison(
+                    corpus,
+                    model_config=TransformerConfig(vocab_size=corpus.vocab_size + 1),
+                    training_config=TrainingConfig(steps=1),
+                )
 
 
 if __name__ == "__main__":
