@@ -158,6 +158,13 @@ class KaimingComparisonTests(unittest.TestCase):
             key for key in fixed_config if fixed_config[key] != kaiming_config[key]
         }
         self.assertEqual(differing, {"initialization_mode"})
+        self.assertEqual(fixed.embedding_fingerprint, kaiming.embedding_fingerprint)
+        self.assertEqual(
+            fixed.first_batch_fingerprint,
+            kaiming.first_batch_fingerprint,
+        )
+        self.assertEqual(len(fixed.embedding_fingerprint), 64)
+        self.assertEqual(len(fixed.first_batch_fingerprint), 64)
         self.assertEqual(len(fixed.trace), training_config.steps)
         self.assertEqual(len(kaiming.trace), training_config.steps)
         self.assertNotEqual(

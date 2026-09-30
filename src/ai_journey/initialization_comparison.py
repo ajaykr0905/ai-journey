@@ -116,6 +116,8 @@ class KaimingVariantResult:
     name: str
     model_config: TransformerConfig
     initialization_audit: tuple[ParameterInitializationAudit, ...]
+    embedding_fingerprint: str
+    first_batch_fingerprint: str
     initial_train_nll: float
     initial_validation_nll: float
     trace: tuple[StepMetric, ...]
@@ -131,6 +133,8 @@ class KaimingVariantResult:
             "initialization_audit": [
                 item.to_dict() for item in self.initialization_audit
             ],
+            "embedding_fingerprint": self.embedding_fingerprint,
+            "first_batch_fingerprint": self.first_batch_fingerprint,
             "initial_train_nll": self.initial_train_nll,
             "initial_validation_nll": self.initial_validation_nll,
             "trace": [asdict(metric) for metric in self.trace],
@@ -460,6 +464,19 @@ def _run_variant(
     seed_everything(training_config.seed)
     model = DecoderLanguageModel(model_config)
     audit = audit_model_initialization(model)
+    embedding_digest = sha256()
+    embedding_digest.update(model.token_embedding.weight.detach().numpy().tobytes())
+    embedding_digest.update(model.position_embedding.weight.detach().numpy().tobytes())
+    batch_probe = BatchCursor(
+        corpus.train_tokens,
+        block_size=model_config.block_size,
+        batch_size=training_config.batch_size,
+        seed=training_config.seed,
+    )
+    first_inputs, first_targets = batch_probe.next()
+    batch_digest = sha256()
+    batch_digest.update(first_inputs.numpy().tobytes())
+    batch_digest.update(first_targets.numpy().tobytes())
     initial_train = evaluate_nll(model, corpus.train_tokens)
     initial_validation = evaluate_nll(model, corpus.validation_tokens)
     cursor = BatchCursor(
@@ -478,6 +495,8 @@ def _run_variant(
         name=name,
         model_config=model_config,
         initialization_audit=audit,
+        embedding_fingerprint=embedding_digest.hexdigest(),
+        first_batch_fingerprint=batch_digest.hexdigest(),
         initial_train_nll=initial_train,
         initial_validation_nll=initial_validation,
         trace=trace,
