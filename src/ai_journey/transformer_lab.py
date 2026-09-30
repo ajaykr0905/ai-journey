@@ -349,6 +349,17 @@ class TransformerBlock(nn.Module):
         return inputs + self.feed_forward(self.feed_forward_norm(inputs))
 
 
+def expected_initialization_std(module: nn.Module, config: TransformerConfig) -> float:
+    """Return the configured standard deviation for an initialized weight."""
+
+    if not isinstance(module, (nn.Linear, nn.Embedding)):
+        raise TypeError("module must be torch.nn.Linear or torch.nn.Embedding")
+    if config.initialization_mode == "kaiming_normal" and isinstance(module, nn.Linear):
+        fan_in = module.weight.shape[1]
+        return config.initialization_gain / math.sqrt(fan_in)
+    return config.initialization_std
+
+
 class DecoderLanguageModel(nn.Module):
     """Small decoder-only character language model."""
 
@@ -366,7 +377,11 @@ class DecoderLanguageModel(nn.Module):
 
     def _initialize(self, module: nn.Module) -> None:
         if isinstance(module, (nn.Linear, nn.Embedding)):
-            nn.init.normal_(module.weight, mean=0.0, std=self.config.initialization_std)
+            nn.init.normal_(
+                module.weight,
+                mean=0.0,
+                std=expected_initialization_std(module, self.config),
+            )
             if isinstance(module, nn.Linear) and module.bias is not None:
                 nn.init.zeros_(module.bias)
 

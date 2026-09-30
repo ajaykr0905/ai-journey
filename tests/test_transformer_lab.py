@@ -21,6 +21,7 @@ from ai_journey.transformer_lab import (
     TransformerLabError,
     build_optimizer,
     evaluate_nll,
+    expected_initialization_std,
     load_training_checkpoint,
     model_fingerprint,
     run_transformer_experiment,
@@ -88,6 +89,65 @@ class TransformerConfigTests(unittest.TestCase):
         stressed_std = float(stressed_model.token_embedding.weight.detach().std())
         self.assertGreater(stressed_std, base_std * 20)
         self.assertNotEqual(base.fingerprint(), stressed.fingerprint())
+
+    def test_kaiming_std_uses_linear_fan_in_and_explicit_gain(self) -> None:
+        import math
+
+        from torch import nn
+
+        config = TransformerConfig(
+            vocab_size=7,
+            initialization_mode="kaiming_normal",
+            initialization_gain=1.5,
+        )
+        self.assertEqual(
+            expected_initialization_std(nn.Linear(9, 4), config),
+            1.5 / math.sqrt(9),
+        )
+        self.assertEqual(
+            expected_initialization_std(nn.Embedding(9, 4), config),
+            config.initialization_std,
+        )
+        with self.assertRaisesRegex(TypeError, "Linear or torch.nn.Embedding"):
+            expected_initialization_std(nn.LayerNorm(4), config)
+
+    def test_kaiming_policy_changes_linear_but_not_embedding_initialization(
+        self,
+    ) -> None:
+        import torch
+
+        fixed = TransformerConfig(
+            vocab_size=31,
+            embedding_dim=64,
+            head_count=4,
+            layer_count=1,
+            initialization_std=0.02,
+        )
+        kaiming = TransformerConfig(
+            vocab_size=31,
+            embedding_dim=64,
+            head_count=4,
+            layer_count=1,
+            initialization_std=0.02,
+            initialization_mode="kaiming_normal",
+            initialization_gain=1.0,
+        )
+        seed_everything(26)
+        fixed_model = DecoderLanguageModel(fixed)
+        seed_everything(26)
+        kaiming_model = DecoderLanguageModel(kaiming)
+        self.assertTrue(
+            torch.equal(
+                fixed_model.token_embedding.weight,
+                kaiming_model.token_embedding.weight,
+            )
+        )
+        fixed_weight = fixed_model.blocks[0].feed_forward.network[0].weight
+        kaiming_weight = kaiming_model.blocks[0].feed_forward.network[0].weight
+        self.assertGreater(
+            float(kaiming_weight.detach().std()),
+            float(fixed_weight.detach().std()) * 4,
+        )
 
     def test_training_config_rejects_non_positive_controls(self) -> None:
         with self.assertRaisesRegex(TransformerLabError, "steps"):
