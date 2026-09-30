@@ -165,6 +165,11 @@ class KaimingComparisonTests(unittest.TestCase):
         )
         self.assertEqual(len(fixed.embedding_fingerprint), 64)
         self.assertEqual(len(fixed.first_batch_fingerprint), 64)
+        self.assertTrue(first.controls.passed)
+        self.assertEqual(
+            first.controls.model_config_differences,
+            ("initialization_mode",),
+        )
         self.assertEqual(len(fixed.trace), training_config.steps)
         self.assertEqual(len(kaiming.trace), training_config.steps)
         self.assertNotEqual(

@@ -153,6 +153,7 @@ class KaimingComparisonResult:
     training_config: TrainingConfig
     variants: tuple[KaimingVariantResult, KaimingVariantResult]
     contrast: KaimingContrast
+    controls: ControlVerification
     runtime: RuntimeMetadata
 
     def _payload(self) -> dict[str, Any]:
@@ -162,6 +163,7 @@ class KaimingComparisonResult:
             "training_config": asdict(self.training_config),
             "variants": [variant.to_dict() for variant in self.variants],
             "contrast": asdict(self.contrast),
+            "controls": asdict(self.controls),
             "runtime": asdict(self.runtime),
         }
 
@@ -190,6 +192,24 @@ class RuntimeMetadata:
     machine: str
     deterministic_algorithms: bool
     intraop_threads: int
+
+
+@dataclass(frozen=True)
+class ControlVerification:
+    """Machine-checkable evidence that only the intended policy changed."""
+
+    model_config_differences: tuple[str, ...]
+    expected_model_config_differences: tuple[str, ...]
+    embedding_parameters_match: bool
+    first_batch_matches: bool
+
+    @property
+    def passed(self) -> bool:
+        return (
+            self.model_config_differences == self.expected_model_config_differences
+            and self.embedding_parameters_match
+            and self.first_batch_matches
+        )
 
 
 @dataclass(frozen=True)
@@ -284,6 +304,8 @@ def evaluate_comparison(
     violations: list[str] = []
     if any(audit.bias_is_zero is False for audit in audits):
         violations.append("linear_bias_not_zero")
+    if not result.controls.passed:
+        violations.append("uncontrolled_experiment_difference")
     if maximum_error > policy.max_relative_std_error:
         violations.append("initialization_std_error")
     if minimum_reduction < policy.min_variant_loss_reduction:
@@ -539,6 +561,20 @@ def run_kaiming_comparison(
             intraop_threads=torch.get_num_threads(),
         )
     fixed, kaiming = variants
+    fixed_config = asdict(fixed.model_config)
+    kaiming_config = asdict(kaiming.model_config)
+    controls = ControlVerification(
+        model_config_differences=tuple(
+            key for key in fixed_config if fixed_config[key] != kaiming_config[key]
+        ),
+        expected_model_config_differences=("initialization_mode",),
+        embedding_parameters_match=(
+            fixed.embedding_fingerprint == kaiming.embedding_fingerprint
+        ),
+        first_batch_matches=(
+            fixed.first_batch_fingerprint == kaiming.first_batch_fingerprint
+        ),
+    )
     contrast = KaimingContrast(
         fixed_mean_loss=fixed.loss_curve.mean_loss,
         kaiming_mean_loss=kaiming.loss_curve.mean_loss,
@@ -559,5 +595,6 @@ def run_kaiming_comparison(
         training_config=training_config,
         variants=variants,
         contrast=contrast,
+        controls=controls,
         runtime=runtime,
     )
