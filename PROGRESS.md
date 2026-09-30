@@ -1,6 +1,6 @@
 # Progress and Evidence
 
-Last updated: 2026-09-29
+Last updated: 2026-09-30
 
 This file separates repository-verifiable work from activities that require the
 learner's own completion evidence.
@@ -33,6 +33,7 @@ learner's own completion evidence.
 | 23 | Deterministic minibatches, train/development/test isolation, learning-rate sweep, overfitting signal, selected checkpoint, and reproducible report present | Primary and support lectures pending user confirmation | Learner sweep run, plot interpretation, and support-lecture explanation pending |
 | 24 | Deterministic CPU transformer baseline, held-out evaluation, exact restart checkpoint, and exact-size overfit gate present | No primary lecture scheduled; support lecture pending user confirmation | Learner blank-file MLP rebuild, 100-example overfit run, interpretation, and support-lecture explanation pending |
 | 25 | Controlled transformer initialization comparison, activation/gradient histograms, health checks, update ratios, and deterministic evidence present | Primary and support lectures pending user confirmation | Learner type-along or notebook run, plot interpretation, and support-lecture explanation pending |
+| 26 | Fan-in Kaiming policy, initialization audits, matched deterministic loss curves, held-out evaluation, and evidence gates present | Primary and support lectures pending user confirmation | Learner Kaiming implementation or notebook run, loss-curve interpretation, and support-lecture explanation pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,
