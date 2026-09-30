@@ -1,7 +1,7 @@
-# AI Journey: Days 0–25
+# AI Journey: Days 0–26
 
 This repository is a public-safe, executable record of an added setup day plus the
-first twenty-five workbook days of a 90-day AI engineering learning plan. It combines
+first twenty-six workbook days of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -49,6 +49,9 @@ then grow these exercises into production-quality training and inference project
 - Controlled transformer initialization comparisons with activation and gradient
   histograms, distribution-health checks, and update-to-parameter ratios in
   [`src/ai_journey/activation_experiment.py`](src/ai_journey/activation_experiment.py)
+- A controlled fixed-normal versus fan-in Kaiming experiment with initialization
+  audits, matched loss curves, held-out evaluation, and evidence gates in
+  [`src/ai_journey/initialization_comparison.py`](src/ai_journey/initialization_comparison.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -106,15 +109,20 @@ python scripts/run_day_25.py \
   --output artifacts/day-25-diagnostics.json \
   --plot artifacts/day-25-activations.svg \
   --gradient-plot artifacts/day-25-gradients.svg
+python scripts/run_day_26.py \
+  --corpus data/day-19-demo-names.txt \
+  --output artifacts/day-26-kaiming.json \
+  --loss-plot artifacts/day-26-loss-curves.svg \
+  --audit-plot artifacts/day-26-initialization.svg
 python -m unittest discover -s tests -v
 ```
 
-PyTorch is required for the Day 24–25 transformer experiments. The default verification
+PyTorch is required for the Day 24–26 transformer experiments. The default verification
 commands run on CPU and do not claim GPU or distributed execution.
 
 ## Configuration safety
 
-Days 0–25 require no credentials. Never commit `.env`, credentials, browser data,
+Days 0–26 require no credentials. Never commit `.env`, credentials, browser data,
 cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 
 ## Daily map
@@ -147,6 +155,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 23 | 2026-09-27 | Minibatches, learning-rate search, held-out evaluation, and overfitting diagnostics |
 | 24 | 2026-09-28 | Deterministic transformer training, exact restart, and overfit capacity gate |
 | 25 | 2026-09-29 | Controlled initialization, activation histograms, and gradient diagnostics |
+| 26 | 2026-09-30 | Fan-in Kaiming initialization, scale audits, and matched loss curves |
 
 ## License
 
