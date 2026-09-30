@@ -45,6 +45,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-relative-std-error", type=float, default=0.25)
     parser.add_argument("--min-variant-loss-reduction", type=float, default=0.01)
     parser.add_argument("--min-kaiming-mean-loss-improvement", type=float, default=0.01)
+    parser.add_argument(
+        "--require-kaiming-validation-improvement",
+        action="store_true",
+        help="fail when Kaiming does not improve final held-out NLL",
+    )
     return parser.parse_args(argv)
 
 
@@ -77,6 +82,9 @@ def main(argv: list[str] | None = None) -> int:
         max_relative_std_error=args.max_relative_std_error,
         min_variant_loss_reduction=args.min_variant_loss_reduction,
         min_kaiming_mean_loss_improvement=(args.min_kaiming_mean_loss_improvement),
+        require_kaiming_validation_improvement=(
+            args.require_kaiming_validation_improvement
+        ),
     )
     result = run_kaiming_comparison(
         corpus,

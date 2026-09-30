@@ -41,6 +41,10 @@ Kaiming mean-loss improvement is absent. These gates describe this small,
 deterministic experiment; they are not a claim that Kaiming initialization is
 universally superior for every transformer architecture.
 
+Add `--require-kaiming-validation-improvement` when a run must reject a
+training-only gain that does not transfer to held-out NLL. The default report
+still records that tradeoff without hiding the negative result.
+
 ## Evidence boundary
 
 This is a CPU-only comparison on the committed public character corpus. It does

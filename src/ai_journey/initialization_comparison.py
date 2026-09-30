@@ -260,6 +260,7 @@ class ComparisonCriteria:
     max_relative_std_error: float = 0.25
     min_variant_loss_reduction: float = 0.01
     min_kaiming_mean_loss_improvement: float = 0.01
+    require_kaiming_validation_improvement: bool = False
 
     def __post_init__(self) -> None:
         if (
@@ -283,6 +284,8 @@ class ComparisonCriteria:
                 or not 0 <= value < 1
             ):
                 raise TransformerLabError(f"{name} must be finite and in [0, 1)")
+        if not isinstance(self.require_kaiming_validation_improvement, bool):
+            raise TypeError("require_kaiming_validation_improvement must be a boolean")
 
 
 @dataclass(frozen=True)
@@ -324,6 +327,11 @@ def evaluate_comparison(
         violations.append("insufficient_variant_loss_reduction")
     if improvement < policy.min_kaiming_mean_loss_improvement:
         violations.append("insufficient_kaiming_mean_loss_improvement")
+    if (
+        policy.require_kaiming_validation_improvement
+        and result.contrast.final_validation_nll_delta >= 0
+    ):
+        violations.append("kaiming_validation_not_improved")
     return ComparisonEvaluation(
         passed=not violations,
         maximum_relative_std_error=maximum_error,

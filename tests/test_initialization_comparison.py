@@ -5,6 +5,7 @@ import math
 import random
 import sys
 import unittest
+from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 
@@ -331,10 +332,52 @@ class KaimingComparisonTests(unittest.TestCase):
             {"max_relative_std_error": -1},
             {"min_variant_loss_reduction": 1},
             {"min_kaiming_mean_loss_improvement": float("nan")},
+            {"require_kaiming_validation_improvement": 1},
         )
         for values in invalid:
-            with self.subTest(values=values), self.assertRaises(TransformerLabError):
+            with (
+                self.subTest(values=values),
+                self.assertRaises((TransformerLabError, TypeError)),
+            ):
                 ComparisonCriteria(**values)
+
+    def test_evaluation_can_require_held_out_improvement(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = self._corpus(directory)
+            result = run_kaiming_comparison(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                    initialization_gain=1.0,
+                ),
+                training_config=TrainingConfig(
+                    steps=2,
+                    batch_size=4,
+                    learning_rate=0.01,
+                    seed=26,
+                ),
+            )
+        result = replace(
+            result,
+            contrast=replace(result.contrast, final_validation_nll_delta=1.0),
+        )
+        evaluation = evaluate_comparison(
+            result,
+            ComparisonCriteria(
+                max_relative_std_error=1.0,
+                min_variant_loss_reduction=0,
+                min_kaiming_mean_loss_improvement=0,
+                require_kaiming_validation_improvement=True,
+            ),
+        )
+        self.assertFalse(evaluation.passed)
+        self.assertIn("kaiming_validation_not_improved", evaluation.violations)
 
     def test_report_writer_is_stable_atomic_and_self_verifying(self) -> None:
         import tempfile
