@@ -14,9 +14,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from ai_journey.initialization_comparison import (
     ComparisonCriteria,
     audit_model_initialization,
+    build_comparison_report,
     evaluate_comparison,
     run_kaiming_comparison,
     summarize_loss_curve,
+    write_comparison_report,
 )
 from ai_journey.transformer_lab import (
     DecoderLanguageModel,
@@ -300,6 +302,51 @@ class KaimingComparisonTests(unittest.TestCase):
         for values in invalid:
             with self.subTest(values=values), self.assertRaises(TransformerLabError):
                 ComparisonCriteria(**values)
+
+    def test_report_writer_is_stable_atomic_and_self_verifying(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = self._corpus(directory)
+            result = run_kaiming_comparison(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                    initialization_gain=1.0,
+                ),
+                training_config=TrainingConfig(
+                    steps=2,
+                    batch_size=4,
+                    learning_rate=0.01,
+                    seed=26,
+                ),
+            )
+            criteria = ComparisonCriteria(
+                max_relative_std_error=1.0,
+                min_variant_loss_reduction=0,
+                min_kaiming_mean_loss_improvement=0,
+            )
+            output = Path(directory) / "nested" / "day-26.json"
+            write_comparison_report(output, result, criteria)
+            first = output.read_bytes()
+            write_comparison_report(output, result, criteria)
+            second = output.read_bytes()
+            payload = json.loads(second)
+        self.assertEqual(first, second)
+        self.assertFalse(output.with_name(f".{output.name}.tmp").exists())
+        fingerprint = payload.pop("report_fingerprint")
+        expected = sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        self.assertEqual(fingerprint, expected)
+        self.assertEqual(
+            build_comparison_report(result, criteria)["report_fingerprint"], expected
+        )
+        self.assertTrue(payload["evaluation"]["passed"])
 
 
 if __name__ == "__main__":

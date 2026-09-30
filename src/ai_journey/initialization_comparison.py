@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
 from itertools import pairwise
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -292,6 +293,45 @@ def evaluate_comparison(
         kaiming_mean_loss_improvement=improvement,
         violations=tuple(violations),
     )
+
+
+def build_comparison_report(
+    result: KaimingComparisonResult,
+    criteria: ComparisonCriteria | None = None,
+) -> dict[str, Any]:
+    """Build a self-verifying report containing experiment and gate evidence."""
+
+    if not isinstance(result, KaimingComparisonResult):
+        raise TypeError("result must be a KaimingComparisonResult")
+    policy = criteria or ComparisonCriteria()
+    evaluation = evaluate_comparison(result, policy)
+    payload = {
+        "experiment": result.to_dict(),
+        "criteria": asdict(policy),
+        "evaluation": asdict(evaluation),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    payload["report_fingerprint"] = sha256(encoded).hexdigest()
+    return payload
+
+
+def write_comparison_report(
+    path: Path,
+    result: KaimingComparisonResult,
+    criteria: ComparisonCriteria | None = None,
+) -> None:
+    """Atomically write stable JSON evidence for the controlled comparison."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    payload = build_comparison_report(result, criteria)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
 
 
 def summarize_loss_curve(trace: tuple[StepMetric, ...]) -> LossCurveMetrics:
