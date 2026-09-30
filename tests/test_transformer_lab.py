@@ -21,6 +21,7 @@ from ai_journey.transformer_lab import (
     TransformerLabError,
     build_optimizer,
     evaluate_nll,
+    expected_initialization_std,
     load_training_checkpoint,
     model_fingerprint,
     run_transformer_experiment,
@@ -45,6 +46,16 @@ class TransformerConfigTests(unittest.TestCase):
     def test_config_rejects_invalid_initialization_scale(self) -> None:
         with self.assertRaisesRegex(TransformerLabError, "initialization_std"):
             TransformerConfig(vocab_size=27, initialization_std=0)
+
+    def test_config_rejects_invalid_initialization_policy(self) -> None:
+        with self.assertRaisesRegex(TransformerLabError, "initialization_mode"):
+            TransformerConfig(vocab_size=27, initialization_mode="xavier")
+        for gain in (0, float("inf"), float("nan"), True):
+            with (
+                self.subTest(gain=gain),
+                self.assertRaisesRegex(TransformerLabError, "initialization_gain"),
+            ):
+                TransformerConfig(vocab_size=27, initialization_gain=gain)
 
     def test_seed_everything_repeats_model_initialization(self) -> None:
         import torch
@@ -78,6 +89,65 @@ class TransformerConfigTests(unittest.TestCase):
         stressed_std = float(stressed_model.token_embedding.weight.detach().std())
         self.assertGreater(stressed_std, base_std * 20)
         self.assertNotEqual(base.fingerprint(), stressed.fingerprint())
+
+    def test_kaiming_std_uses_linear_fan_in_and_explicit_gain(self) -> None:
+        import math
+
+        from torch import nn
+
+        config = TransformerConfig(
+            vocab_size=7,
+            initialization_mode="kaiming_normal",
+            initialization_gain=1.5,
+        )
+        self.assertEqual(
+            expected_initialization_std(nn.Linear(9, 4), config),
+            1.5 / math.sqrt(9),
+        )
+        self.assertEqual(
+            expected_initialization_std(nn.Embedding(9, 4), config),
+            config.initialization_std,
+        )
+        with self.assertRaisesRegex(TypeError, "Linear or torch.nn.Embedding"):
+            expected_initialization_std(nn.LayerNorm(4), config)
+
+    def test_kaiming_policy_changes_linear_but_not_embedding_initialization(
+        self,
+    ) -> None:
+        import torch
+
+        fixed = TransformerConfig(
+            vocab_size=31,
+            embedding_dim=64,
+            head_count=4,
+            layer_count=1,
+            initialization_std=0.02,
+        )
+        kaiming = TransformerConfig(
+            vocab_size=31,
+            embedding_dim=64,
+            head_count=4,
+            layer_count=1,
+            initialization_std=0.02,
+            initialization_mode="kaiming_normal",
+            initialization_gain=1.0,
+        )
+        seed_everything(26)
+        fixed_model = DecoderLanguageModel(fixed)
+        seed_everything(26)
+        kaiming_model = DecoderLanguageModel(kaiming)
+        self.assertTrue(
+            torch.equal(
+                fixed_model.token_embedding.weight,
+                kaiming_model.token_embedding.weight,
+            )
+        )
+        fixed_weight = fixed_model.blocks[0].feed_forward.network[0].weight
+        kaiming_weight = kaiming_model.blocks[0].feed_forward.network[0].weight
+        self.assertGreater(
+            float(kaiming_weight.detach().std()),
+            float(fixed_weight.detach().std()) * 4,
+        )
 
     def test_training_config_rejects_non_positive_controls(self) -> None:
         with self.assertRaisesRegex(TransformerLabError, "steps"):
@@ -320,6 +390,64 @@ class DecoderLanguageModelTests(unittest.TestCase):
         self.assertEqual(step, 1)
         self.assertEqual(model_fingerprint(model), expected_fingerprint)
         self.assertEqual(cursor.state_dict(), expected_cursor)
+
+    def test_checkpoint_rejects_a_different_initialization_policy(self) -> None:
+        import torch
+
+        training = TrainingConfig(steps=1, batch_size=3)
+        kaiming_config = TransformerConfig(
+            vocab_size=5,
+            block_size=4,
+            embedding_dim=8,
+            head_count=2,
+            initialization_mode="kaiming_normal",
+            initialization_gain=1.0,
+        )
+        seed_everything(26)
+        model = DecoderLanguageModel(kaiming_config)
+        optimizer = build_optimizer(model, training)
+        cursor = BatchCursor(
+            torch.arange(30) % 5,
+            block_size=4,
+            batch_size=3,
+            seed=training.seed,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "kaiming.pt"
+            save_training_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                training_config=training,
+                corpus_fingerprint="c" * 64,
+                step=0,
+            )
+            fixed_model = DecoderLanguageModel(
+                TransformerConfig(
+                    vocab_size=5,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    initialization_gain=1.0,
+                )
+            )
+            with self.assertRaisesRegex(
+                TransformerLabError, "model configuration mismatch"
+            ):
+                load_training_checkpoint(
+                    path,
+                    model=fixed_model,
+                    optimizer=build_optimizer(fixed_model, training),
+                    cursor=BatchCursor(
+                        torch.arange(30) % 5,
+                        block_size=4,
+                        batch_size=3,
+                        seed=training.seed,
+                    ),
+                    training_config=training,
+                    corpus_fingerprint="c" * 64,
+                )
 
     def test_checkpoint_restart_matches_uninterrupted_training_bit_exactly(
         self,
