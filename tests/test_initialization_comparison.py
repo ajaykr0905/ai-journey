@@ -9,7 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ai_journey.initialization_comparison import (
+    ComparisonCriteria,
     audit_model_initialization,
+    evaluate_comparison,
     run_kaiming_comparison,
     summarize_loss_curve,
 )
@@ -138,6 +140,15 @@ class KaimingComparisonTests(unittest.TestCase):
             first.contrast.final_train_nll_delta,
             kaiming.final_train_nll - fixed.final_train_nll,
         )
+        evaluation = evaluate_comparison(
+            first,
+            ComparisonCriteria(
+                max_relative_std_error=1.0,
+                min_variant_loss_reduction=0.0,
+                min_kaiming_mean_loss_improvement=0.0,
+            ),
+        )
+        self.assertTrue(evaluation.passed, evaluation.violations)
 
     def test_comparison_rejects_invalid_baseline_or_vocabulary(self) -> None:
         import tempfile
@@ -188,6 +199,56 @@ class KaimingComparisonTests(unittest.TestCase):
                     StepMetric(step=1, loss=0.5, gradient_norm=1.0),
                 )
             )
+
+    def test_evaluation_reports_named_threshold_violations(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = self._corpus(directory)
+            result = run_kaiming_comparison(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                    initialization_gain=1.0,
+                ),
+                training_config=TrainingConfig(
+                    steps=2,
+                    batch_size=4,
+                    learning_rate=0.01,
+                    seed=26,
+                ),
+            )
+        evaluation = evaluate_comparison(
+            result,
+            ComparisonCriteria(
+                max_relative_std_error=0,
+                min_variant_loss_reduction=0.99,
+                min_kaiming_mean_loss_improvement=0.99,
+            ),
+        )
+        self.assertFalse(evaluation.passed)
+        self.assertEqual(
+            set(evaluation.violations),
+            {
+                "initialization_std_error",
+                "insufficient_variant_loss_reduction",
+                "insufficient_kaiming_mean_loss_improvement",
+            },
+        )
+
+    def test_comparison_criteria_reject_invalid_thresholds(self) -> None:
+        invalid = (
+            {"max_relative_std_error": -1},
+            {"min_variant_loss_reduction": 1},
+            {"min_kaiming_mean_loss_improvement": float("nan")},
+        )
+        for values in invalid:
+            with self.subTest(values=values), self.assertRaises(TransformerLabError):
+                ComparisonCriteria(**values)
 
 
 if __name__ == "__main__":

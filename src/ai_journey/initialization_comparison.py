@@ -162,6 +162,84 @@ class KaimingContrast:
     final_validation_nll_delta: float
 
 
+@dataclass(frozen=True)
+class ComparisonCriteria:
+    """Explicit evidence thresholds for the controlled comparison."""
+
+    max_relative_std_error: float = 0.25
+    min_variant_loss_reduction: float = 0.01
+    min_kaiming_mean_loss_improvement: float = 0.01
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.max_relative_std_error, (int, float))
+            or isinstance(self.max_relative_std_error, bool)
+            or not math.isfinite(self.max_relative_std_error)
+            or self.max_relative_std_error < 0
+        ):
+            raise TransformerLabError(
+                "max_relative_std_error must be finite and non-negative"
+            )
+        for name in (
+            "min_variant_loss_reduction",
+            "min_kaiming_mean_loss_improvement",
+        ):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(value)
+                or not 0 <= value < 1
+            ):
+                raise TransformerLabError(f"{name} must be finite and in [0, 1)")
+
+
+@dataclass(frozen=True)
+class ComparisonEvaluation:
+    """Measured gate values and named violations for review and CI."""
+
+    passed: bool
+    maximum_relative_std_error: float
+    minimum_variant_loss_reduction: float
+    kaiming_mean_loss_improvement: float
+    violations: tuple[str, ...]
+
+
+def evaluate_comparison(
+    result: KaimingComparisonResult,
+    criteria: ComparisonCriteria | None = None,
+) -> ComparisonEvaluation:
+    """Evaluate initialization fidelity and the predeclared loss-curve effect."""
+
+    if not isinstance(result, KaimingComparisonResult):
+        raise TypeError("result must be a KaimingComparisonResult")
+    policy = criteria or ComparisonCriteria()
+    audits = tuple(
+        audit for variant in result.variants for audit in variant.initialization_audit
+    )
+    maximum_error = max(audit.relative_std_error for audit in audits)
+    minimum_reduction = min(
+        variant.loss_curve.relative_loss_reduction for variant in result.variants
+    )
+    improvement = 1 - result.contrast.kaiming_to_fixed_mean_loss_ratio
+    violations: list[str] = []
+    if any(audit.bias_is_zero is False for audit in audits):
+        violations.append("linear_bias_not_zero")
+    if maximum_error > policy.max_relative_std_error:
+        violations.append("initialization_std_error")
+    if minimum_reduction < policy.min_variant_loss_reduction:
+        violations.append("insufficient_variant_loss_reduction")
+    if improvement < policy.min_kaiming_mean_loss_improvement:
+        violations.append("insufficient_kaiming_mean_loss_improvement")
+    return ComparisonEvaluation(
+        passed=not violations,
+        maximum_relative_std_error=maximum_error,
+        minimum_variant_loss_reduction=minimum_reduction,
+        kaiming_mean_loss_improvement=improvement,
+        violations=tuple(violations),
+    )
+
+
 def summarize_loss_curve(trace: tuple[StepMetric, ...]) -> LossCurveMetrics:
     """Summarize a non-empty, finite, strictly ordered loss trace."""
 
