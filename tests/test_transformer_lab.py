@@ -46,6 +46,16 @@ class TransformerConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(TransformerLabError, "initialization_std"):
             TransformerConfig(vocab_size=27, initialization_std=0)
 
+    def test_config_rejects_invalid_initialization_policy(self) -> None:
+        with self.assertRaisesRegex(TransformerLabError, "initialization_mode"):
+            TransformerConfig(vocab_size=27, initialization_mode="xavier")
+        for gain in (0, float("inf"), float("nan"), True):
+            with (
+                self.subTest(gain=gain),
+                self.assertRaisesRegex(TransformerLabError, "initialization_gain"),
+            ):
+                TransformerConfig(vocab_size=27, initialization_gain=gain)
+
     def test_seed_everything_repeats_model_initialization(self) -> None:
         import torch
 

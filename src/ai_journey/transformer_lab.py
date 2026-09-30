@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 from dataclasses import asdict, dataclass
 from hashlib import sha256
@@ -41,6 +42,8 @@ class TransformerConfig:
     layer_count: int = 2
     dropout: float = 0.0
     initialization_std: float = 0.02
+    initialization_mode: str = "fixed_normal"
+    initialization_gain: float = math.sqrt(2.0)
 
     def __post_init__(self) -> None:
         for name in (
@@ -69,6 +72,17 @@ class TransformerConfig:
             or self.initialization_std <= 0
         ):
             raise TransformerLabError("initialization_std must be positive")
+        if self.initialization_mode not in {"fixed_normal", "kaiming_normal"}:
+            raise TransformerLabError(
+                "initialization_mode must be 'fixed_normal' or 'kaiming_normal'"
+            )
+        if (
+            isinstance(self.initialization_gain, bool)
+            or not isinstance(self.initialization_gain, (int, float))
+            or not math.isfinite(self.initialization_gain)
+            or self.initialization_gain <= 0
+        ):
+            raise TransformerLabError("initialization_gain must be positive and finite")
 
     @property
     def head_dim(self) -> int:
