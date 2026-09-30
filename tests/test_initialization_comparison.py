@@ -16,6 +16,7 @@ from ai_journey.initialization_comparison import (
     audit_model_initialization,
     build_comparison_report,
     evaluate_comparison,
+    render_loss_curves,
     run_kaiming_comparison,
     summarize_loss_curve,
     write_comparison_report,
@@ -347,6 +348,39 @@ class KaimingComparisonTests(unittest.TestCase):
             build_comparison_report(result, criteria)["report_fingerprint"], expected
         )
         self.assertTrue(payload["evaluation"]["passed"])
+
+    def test_loss_curve_renderer_writes_stable_atomic_svg(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = self._corpus(directory)
+            result = run_kaiming_comparison(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                    initialization_gain=1.0,
+                ),
+                training_config=TrainingConfig(
+                    steps=2,
+                    batch_size=4,
+                    learning_rate=0.01,
+                    seed=26,
+                ),
+            )
+            output = Path(directory) / "plots" / "loss-curves.svg"
+            render_loss_curves(output, result)
+            first = output.read_bytes()
+            render_loss_curves(output, result)
+            second = output.read_bytes()
+        self.assertEqual(first, second)
+        self.assertFalse(output.with_name(f".{output.name}.tmp").exists())
+        self.assertIn(b"Matched transformer loss curves", first)
+        self.assertIn(b"fixed_normal", first)
+        self.assertIn(b"kaiming_normal", first)
 
 
 if __name__ == "__main__":

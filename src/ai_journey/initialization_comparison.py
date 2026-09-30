@@ -334,6 +334,43 @@ def write_comparison_report(
     temporary.replace(path)
 
 
+def render_loss_curves(path: Path, result: KaimingComparisonResult) -> None:
+    """Render deterministic matched training-loss curves as an atomic SVG."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if not isinstance(result, KaimingComparisonResult):
+        raise TypeError("result must be a KaimingComparisonResult")
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    colors = {"fixed_normal": "#DC2626", "kaiming_normal": "#2563EB"}
+    with matplotlib.rc_context({"svg.hashsalt": "ai-journey-day-26-loss-curves"}):
+        figure, axis = plt.subplots(figsize=(9, 5))
+        for variant in result.variants:
+            axis.plot(
+                [metric.step for metric in variant.trace],
+                [metric.loss for metric in variant.trace],
+                label=(f"{variant.name} · mean {variant.loss_curve.mean_loss:.4f}"),
+                color=colors[variant.name],
+                linewidth=1.8,
+            )
+        axis.set_title("Matched transformer loss curves")
+        axis.set_xlabel("Training step")
+        axis.set_ylabel("Batch cross-entropy")
+        axis.grid(alpha=0.2)
+        axis.legend()
+        figure.tight_layout()
+        figure.savefig(temporary, format="svg", metadata={"Date": None})
+        plt.close(figure)
+    temporary.replace(path)
+
+
 def summarize_loss_curve(trace: tuple[StepMetric, ...]) -> LossCurveMetrics:
     """Summarize a non-empty, finite, strictly ordered loss trace."""
 
