@@ -371,6 +371,61 @@ def render_loss_curves(path: Path, result: KaimingComparisonResult) -> None:
     temporary.replace(path)
 
 
+def render_initialization_audit(path: Path, result: KaimingComparisonResult) -> None:
+    """Render expected and observed standard deviations for linear weights."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if not isinstance(result, KaimingComparisonResult):
+        raise TypeError("result must be a KaimingComparisonResult")
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    linear_names = tuple(
+        item.name
+        for item in result.variants[0].initialization_audit
+        if item.module_type == "Linear"
+    )
+    if not linear_names:
+        raise TransformerLabError("comparison contains no linear initialization audits")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    with matplotlib.rc_context({"svg.hashsalt": "ai-journey-day-26-init-audit"}):
+        figure, axes = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
+        positions = list(range(len(linear_names)))
+        for axis, variant in zip(axes, result.variants, strict=True):
+            by_name = {item.name: item for item in variant.initialization_audit}
+            expected = [by_name[name].expected_std for name in linear_names]
+            observed = [by_name[name].observed_std for name in linear_names]
+            axis.bar(
+                [position - 0.2 for position in positions],
+                expected,
+                width=0.4,
+                label="expected",
+                color="#94A3B8",
+            )
+            axis.bar(
+                [position + 0.2 for position in positions],
+                observed,
+                width=0.4,
+                label="observed",
+                color="#2563EB",
+            )
+            axis.set_title(variant.name)
+            axis.set_ylabel("Weight standard deviation")
+            axis.grid(axis="y", alpha=0.2)
+            axis.legend()
+        axes[-1].set_xticks(positions, linear_names, rotation=35, ha="right")
+        figure.suptitle("Linear-weight initialization audit")
+        figure.tight_layout()
+        figure.savefig(temporary, format="svg", metadata={"Date": None})
+        plt.close(figure)
+    temporary.replace(path)
+
+
 def summarize_loss_curve(trace: tuple[StepMetric, ...]) -> LossCurveMetrics:
     """Summarize a non-empty, finite, strictly ordered loss trace."""
 
