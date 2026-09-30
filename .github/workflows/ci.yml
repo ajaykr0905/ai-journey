@@ -125,6 +125,20 @@ jobs:
           --output /tmp/ai-journey-artifacts/day-25-diagnostics.json
           --plot /tmp/ai-journey-artifacts/day-25-activations.svg
           --gradient-plot /tmp/ai-journey-artifacts/day-25-gradients.svg
+      - name: Compare Day 26 fixed-normal and Kaiming loss curves
+        run: >-
+          python scripts/run_day_26.py
+          --corpus data/day-19-demo-names.txt
+          --steps 10
+          --batch-size 8
+          --block-size 8
+          --embedding-dim 16
+          --heads 4
+          --layers 1
+          --kaiming-gain 1.0
+          --output /tmp/ai-journey-artifacts/day-26-kaiming.json
+          --loss-plot /tmp/ai-journey-artifacts/day-26-loss-curves.svg
+          --audit-plot /tmp/ai-journey-artifacts/day-26-initialization.svg
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py
