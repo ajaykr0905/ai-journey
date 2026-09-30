@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import math
+import random
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from itertools import pairwise
 from typing import Any
 
+import numpy as np
 import torch
 from torch import nn
 
@@ -25,6 +29,22 @@ from ai_journey.transformer_lab import (
     seed_everything,
     train_steps,
 )
+
+
+@contextmanager
+def _preserve_random_state() -> Iterator[None]:
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    torch_state = torch.get_rng_state()
+    deterministic = torch.are_deterministic_algorithms_enabled()
+    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+    try:
+        yield
+    finally:
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
+        torch.set_rng_state(torch_state)
+        torch.use_deterministic_algorithms(deterministic, warn_only=warn_only)
 
 
 @dataclass(frozen=True)
@@ -314,15 +334,16 @@ def run_kaiming_comparison(
         raise TransformerLabError("model vocabulary does not match corpus codec")
     if model_config.initialization_mode != "fixed_normal":
         raise TransformerLabError("comparison baseline must use fixed_normal")
-    variants = (
-        _run_variant("fixed_normal", corpus, model_config, training_config),
-        _run_variant(
-            "kaiming_normal",
-            corpus,
-            replace(model_config, initialization_mode="kaiming_normal"),
-            training_config,
-        ),
-    )
+    with _preserve_random_state():
+        variants = (
+            _run_variant("fixed_normal", corpus, model_config, training_config),
+            _run_variant(
+                "kaiming_normal",
+                corpus,
+                replace(model_config, initialization_mode="kaiming_normal"),
+                training_config,
+            ),
+        )
     fixed, kaiming = variants
     contrast = KaimingContrast(
         fixed_mean_loss=fixed.loss_curve.mean_loss,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import random
 import sys
 import unittest
 from pathlib import Path
@@ -170,6 +171,37 @@ class KaimingComparisonTests(unittest.TestCase):
                     model_config=TransformerConfig(vocab_size=corpus.vocab_size + 1),
                     training_config=TrainingConfig(steps=1),
                 )
+
+    def test_comparison_restores_caller_random_state(self) -> None:
+        import tempfile
+
+        import numpy as np
+        import torch
+
+        random.seed(91)
+        np.random.seed(91)
+        torch.manual_seed(91)
+        torch.use_deterministic_algorithms(False)
+        expected = (random.random(), float(np.random.random()), float(torch.rand(())))
+        random.seed(91)
+        np.random.seed(91)
+        torch.manual_seed(91)
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = self._corpus(directory)
+            run_kaiming_comparison(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                ),
+                training_config=TrainingConfig(steps=1, batch_size=4),
+            )
+        actual = (random.random(), float(np.random.random()), float(torch.rand(())))
+        self.assertEqual(actual, expected)
+        self.assertFalse(torch.are_deterministic_algorithms_enabled())
 
     def test_loss_curve_summary_reports_improvement_and_best_step(self) -> None:
         trace = (
