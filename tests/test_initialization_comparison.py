@@ -182,6 +182,19 @@ class KaimingComparisonTests(unittest.TestCase):
             first.contrast.final_train_nll_delta,
             kaiming.final_train_nll - fixed.final_train_nll,
         )
+        self.assertEqual(
+            first.finding.kaiming_mean_training_loss_improved,
+            first.contrast.kaiming_to_fixed_mean_loss_ratio < 1,
+        )
+        self.assertEqual(
+            first.finding.kaiming_final_validation_nll_improved,
+            first.contrast.final_validation_nll_delta < 0,
+        )
+        self.assertEqual(
+            first.finding.train_validation_tradeoff,
+            first.finding.kaiming_mean_training_loss_improved
+            and not first.finding.kaiming_final_validation_nll_improved,
+        )
         evaluation = evaluate_comparison(
             first,
             ComparisonCriteria(

@@ -84,6 +84,7 @@ class Day26RunnerTests(unittest.TestCase):
             ["fixed_normal", "kaiming_normal"],
         )
         self.assertIn("kaiming_mean_loss_improvement=", first.stdout)
+        self.assertIn("kaiming_validation_improved=", first.stdout)
         self.assertIn("passed=True", first.stdout)
 
     def test_runner_returns_one_when_a_predeclared_gate_fails(self) -> None:

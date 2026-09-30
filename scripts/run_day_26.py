@@ -100,6 +100,11 @@ def main(argv: list[str] | None = None) -> int:
         f"max_relative_std_error={evaluation.maximum_relative_std_error:.6f} "
         f"passed={evaluation.passed}"
     )
+    print(
+        f"kaiming_validation_improved="
+        f"{result.finding.kaiming_final_validation_nll_improved} "
+        f"train_validation_tradeoff={result.finding.train_validation_tradeoff}"
+    )
     if evaluation.violations:
         print(f"violations={','.join(evaluation.violations)}")
     print(f"report={args.output}")

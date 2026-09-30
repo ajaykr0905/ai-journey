@@ -154,6 +154,7 @@ class KaimingComparisonResult:
     variants: tuple[KaimingVariantResult, KaimingVariantResult]
     contrast: KaimingContrast
     controls: ControlVerification
+    finding: GeneralizationFinding
     runtime: RuntimeMetadata
 
     def _payload(self) -> dict[str, Any]:
@@ -164,6 +165,7 @@ class KaimingComparisonResult:
             "variants": [variant.to_dict() for variant in self.variants],
             "contrast": asdict(self.contrast),
             "controls": asdict(self.controls),
+            "finding": asdict(self.finding),
             "runtime": asdict(self.runtime),
         }
 
@@ -210,6 +212,16 @@ class ControlVerification:
             and self.embedding_parameters_match
             and self.first_batch_matches
         )
+
+
+@dataclass(frozen=True)
+class GeneralizationFinding:
+    """Explicitly surface whether training gains transfer to held-out data."""
+
+    kaiming_mean_training_loss_improved: bool
+    kaiming_final_train_nll_improved: bool
+    kaiming_final_validation_nll_improved: bool
+    train_validation_tradeoff: bool
 
 
 @dataclass(frozen=True)
@@ -590,11 +602,20 @@ def run_kaiming_comparison(
             kaiming.final_validation_nll - fixed.final_validation_nll
         ),
     )
+    training_improved = contrast.kaiming_to_fixed_mean_loss_ratio < 1
+    validation_improved = contrast.final_validation_nll_delta < 0
+    finding = GeneralizationFinding(
+        kaiming_mean_training_loss_improved=training_improved,
+        kaiming_final_train_nll_improved=contrast.final_train_nll_delta < 0,
+        kaiming_final_validation_nll_improved=validation_improved,
+        train_validation_tradeoff=training_improved and not validation_improved,
+    )
     return KaimingComparisonResult(
         corpus_fingerprint=corpus.fingerprint(),
         training_config=training_config,
         variants=variants,
         contrast=contrast,
         controls=controls,
+        finding=finding,
         runtime=runtime,
     )
