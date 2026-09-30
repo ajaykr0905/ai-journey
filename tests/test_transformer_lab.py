@@ -391,6 +391,64 @@ class DecoderLanguageModelTests(unittest.TestCase):
         self.assertEqual(model_fingerprint(model), expected_fingerprint)
         self.assertEqual(cursor.state_dict(), expected_cursor)
 
+    def test_checkpoint_rejects_a_different_initialization_policy(self) -> None:
+        import torch
+
+        training = TrainingConfig(steps=1, batch_size=3)
+        kaiming_config = TransformerConfig(
+            vocab_size=5,
+            block_size=4,
+            embedding_dim=8,
+            head_count=2,
+            initialization_mode="kaiming_normal",
+            initialization_gain=1.0,
+        )
+        seed_everything(26)
+        model = DecoderLanguageModel(kaiming_config)
+        optimizer = build_optimizer(model, training)
+        cursor = BatchCursor(
+            torch.arange(30) % 5,
+            block_size=4,
+            batch_size=3,
+            seed=training.seed,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "kaiming.pt"
+            save_training_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                training_config=training,
+                corpus_fingerprint="c" * 64,
+                step=0,
+            )
+            fixed_model = DecoderLanguageModel(
+                TransformerConfig(
+                    vocab_size=5,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    initialization_gain=1.0,
+                )
+            )
+            with self.assertRaisesRegex(
+                TransformerLabError, "model configuration mismatch"
+            ):
+                load_training_checkpoint(
+                    path,
+                    model=fixed_model,
+                    optimizer=build_optimizer(fixed_model, training),
+                    cursor=BatchCursor(
+                        torch.arange(30) % 5,
+                        block_size=4,
+                        batch_size=3,
+                        seed=training.seed,
+                    ),
+                    training_config=training,
+                    corpus_fingerprint="c" * 64,
+                )
+
     def test_checkpoint_restart_matches_uninterrupted_training_bit_exactly(
         self,
     ) -> None:
