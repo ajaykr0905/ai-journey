@@ -11,9 +11,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from ai_journey.initialization_comparison import (
     audit_model_initialization,
     run_kaiming_comparison,
+    summarize_loss_curve,
 )
 from ai_journey.transformer_lab import (
     DecoderLanguageModel,
+    StepMetric,
     TokenCorpus,
     TrainingConfig,
     TransformerConfig,
@@ -130,6 +132,12 @@ class KaimingComparisonTests(unittest.TestCase):
             [item.loss for item in fixed.trace],
             [item.loss for item in kaiming.trace],
         )
+        self.assertEqual(fixed.loss_curve.step_count, training_config.steps)
+        self.assertGreater(first.contrast.kaiming_to_fixed_mean_loss_ratio, 0)
+        self.assertEqual(
+            first.contrast.final_train_nll_delta,
+            kaiming.final_train_nll - fixed.final_train_nll,
+        )
 
     def test_comparison_rejects_invalid_baseline_or_vocabulary(self) -> None:
         import tempfile
@@ -151,6 +159,35 @@ class KaimingComparisonTests(unittest.TestCase):
                     model_config=TransformerConfig(vocab_size=corpus.vocab_size + 1),
                     training_config=TrainingConfig(steps=1),
                 )
+
+    def test_loss_curve_summary_reports_improvement_and_best_step(self) -> None:
+        trace = (
+            StepMetric(step=2, loss=4.0, gradient_norm=1.0),
+            StepMetric(step=3, loss=2.0, gradient_norm=1.0),
+            StepMetric(step=4, loss=3.0, gradient_norm=1.0),
+        )
+        summary = summarize_loss_curve(trace)
+        self.assertEqual(summary.step_count, 3)
+        self.assertEqual(summary.best_loss, 2.0)
+        self.assertEqual(summary.best_step, 3)
+        self.assertEqual(summary.mean_loss, 3.0)
+        self.assertEqual(summary.relative_loss_reduction, 0.25)
+        self.assertEqual(summary.improving_transition_fraction, 0.5)
+
+    def test_loss_curve_summary_rejects_invalid_traces(self) -> None:
+        with self.assertRaisesRegex(TransformerLabError, "must not be empty"):
+            summarize_loss_curve(())
+        with self.assertRaisesRegex(TransformerLabError, "finite"):
+            summarize_loss_curve(
+                (StepMetric(step=0, loss=float("nan"), gradient_norm=1.0),)
+            )
+        with self.assertRaisesRegex(TransformerLabError, "strictly increasing"):
+            summarize_loss_curve(
+                (
+                    StepMetric(step=1, loss=1.0, gradient_norm=1.0),
+                    StepMetric(step=1, loss=0.5, gradient_norm=1.0),
+                )
+            )
 
 
 if __name__ == "__main__":

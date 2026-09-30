@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, replace
+from itertools import pairwise
 from typing import Any
 
 import torch
@@ -91,6 +93,7 @@ class KaimingVariantResult:
     initial_train_nll: float
     initial_validation_nll: float
     trace: tuple[StepMetric, ...]
+    loss_curve: LossCurveMetrics
     final_train_nll: float
     final_validation_nll: float
     model_fingerprint: str
@@ -105,6 +108,7 @@ class KaimingVariantResult:
             "initial_train_nll": self.initial_train_nll,
             "initial_validation_nll": self.initial_validation_nll,
             "trace": [asdict(metric) for metric in self.trace],
+            "loss_curve": asdict(self.loss_curve),
             "final_train_nll": self.final_train_nll,
             "final_validation_nll": self.final_validation_nll,
             "model_fingerprint": self.model_fingerprint,
@@ -118,13 +122,69 @@ class KaimingComparisonResult:
     corpus_fingerprint: str
     training_config: TrainingConfig
     variants: tuple[KaimingVariantResult, KaimingVariantResult]
+    contrast: KaimingContrast
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "corpus_fingerprint": self.corpus_fingerprint,
             "training_config": asdict(self.training_config),
             "variants": [variant.to_dict() for variant in self.variants],
+            "contrast": asdict(self.contrast),
         }
+
+
+@dataclass(frozen=True)
+class LossCurveMetrics:
+    """Stable summary of a finite per-step training-loss trace."""
+
+    step_count: int
+    initial_loss: float
+    final_loss: float
+    best_loss: float
+    best_step: int
+    mean_loss: float
+    relative_loss_reduction: float
+    improving_transition_fraction: float
+
+
+@dataclass(frozen=True)
+class KaimingContrast:
+    """Direct comparison of the two matched loss curves and held-out results."""
+
+    fixed_mean_loss: float
+    kaiming_mean_loss: float
+    kaiming_to_fixed_mean_loss_ratio: float
+    fixed_final_train_nll: float
+    kaiming_final_train_nll: float
+    final_train_nll_delta: float
+    fixed_final_validation_nll: float
+    kaiming_final_validation_nll: float
+    final_validation_nll_delta: float
+
+
+def summarize_loss_curve(trace: tuple[StepMetric, ...]) -> LossCurveMetrics:
+    """Summarize a non-empty, finite, strictly ordered loss trace."""
+
+    if not trace:
+        raise TransformerLabError("loss trace must not be empty")
+    if any(not math.isfinite(metric.loss) for metric in trace):
+        raise TransformerLabError("loss trace must contain only finite losses")
+    if any(right.step <= left.step for left, right in pairwise(trace)):
+        raise TransformerLabError("loss trace steps must be strictly increasing")
+    losses = tuple(metric.loss for metric in trace)
+    best_index = min(range(len(trace)), key=lambda index: losses[index])
+    improving = sum(right < left for left, right in pairwise(losses))
+    transitions = max(len(losses) - 1, 1)
+    return LossCurveMetrics(
+        step_count=len(trace),
+        initial_loss=losses[0],
+        final_loss=losses[-1],
+        best_loss=losses[best_index],
+        best_step=trace[best_index].step,
+        mean_loss=math.fsum(losses) / len(losses),
+        relative_loss_reduction=(losses[0] - losses[-1]) / losses[0],
+        improving_transition_fraction=improving / transitions,
+    )
 
 
 def _run_variant(
@@ -157,6 +217,7 @@ def _run_variant(
         initial_train_nll=initial_train,
         initial_validation_nll=initial_validation,
         trace=trace,
+        loss_curve=summarize_loss_curve(trace),
         final_train_nll=evaluate_nll(model, corpus.train_tokens),
         final_validation_nll=evaluate_nll(model, corpus.validation_tokens),
         model_fingerprint=model_fingerprint(model),
@@ -184,8 +245,25 @@ def run_kaiming_comparison(
             training_config,
         ),
     )
+    fixed, kaiming = variants
+    contrast = KaimingContrast(
+        fixed_mean_loss=fixed.loss_curve.mean_loss,
+        kaiming_mean_loss=kaiming.loss_curve.mean_loss,
+        kaiming_to_fixed_mean_loss_ratio=(
+            kaiming.loss_curve.mean_loss / fixed.loss_curve.mean_loss
+        ),
+        fixed_final_train_nll=fixed.final_train_nll,
+        kaiming_final_train_nll=kaiming.final_train_nll,
+        final_train_nll_delta=kaiming.final_train_nll - fixed.final_train_nll,
+        fixed_final_validation_nll=fixed.final_validation_nll,
+        kaiming_final_validation_nll=kaiming.final_validation_nll,
+        final_validation_nll_delta=(
+            kaiming.final_validation_nll - fixed.final_validation_nll
+        ),
+    )
     return KaimingComparisonResult(
         corpus_fingerprint=corpus.fingerprint(),
         training_config=training_config,
         variants=variants,
+        contrast=contrast,
     )
