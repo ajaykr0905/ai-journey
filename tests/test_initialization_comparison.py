@@ -34,6 +34,12 @@ from ai_journey.transformer_lab import (
 
 
 class InitializationAuditTests(unittest.TestCase):
+    def test_public_package_exports_comparison_entry_points(self) -> None:
+        import ai_journey
+
+        self.assertIs(ai_journey.run_kaiming_comparison, run_kaiming_comparison)
+        self.assertIs(ai_journey.ComparisonCriteria, ComparisonCriteria)
+
     def test_audit_covers_every_initialized_matrix_in_module_order(self) -> None:
         seed_everything(26)
         model = DecoderLanguageModel(

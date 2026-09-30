@@ -19,6 +19,11 @@ from .corpus_shift import (
     assess_corpus_shift,
 )
 from .gradients import gradient_descent_x_squared
+from .initialization_comparison import (
+    ComparisonCriteria,
+    KaimingComparisonResult,
+    run_kaiming_comparison,
+)
 from .manual_backprop import manual_backward, run_manual_backprop_experiment
 from .mlp_memory import run_memory_experiment
 from .neural_net import default_parameters, forward, full_backward
@@ -42,10 +47,12 @@ __all__ = [
     "MLP",
     "AttentionConfig",
     "BigramModel",
+    "ComparisonCriteria",
     "ContextDataset",
     "ContextMLP",
     "ContextTrainingResult",
     "DecoderLanguageModel",
+    "KaimingComparisonResult",
     "ShiftAssessment",
     "ShiftPolicy",
     "ShiftReport",
@@ -68,6 +75,7 @@ __all__ = [
     "run_attention_experiment",
     "run_autodiff_experiment",
     "run_bigram_experiment",
+    "run_kaiming_comparison",
     "run_manual_backprop_experiment",
     "run_memory_experiment",
     "run_mlp_experiment",
