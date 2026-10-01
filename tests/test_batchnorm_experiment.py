@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,10 +10,11 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import torch
 
-from ai_journey.batchnorm_experiment import evaluate_mode_nll
+from ai_journey.batchnorm_experiment import evaluate_mode_nll, run_batchnorm_experiment
 from ai_journey.transformer_lab import (
     BatchCursor,
     DecoderLanguageModel,
+    TokenCorpus,
     TrainingConfig,
     TransformerConfig,
     build_optimizer,
@@ -68,3 +70,48 @@ class ModeEvaluationTests(unittest.TestCase):
             evaluate_mode_nll(model, torch.ones(2, 2), training_mode=False)
         with self.assertRaisesRegex(TypeError, "boolean"):
             evaluate_mode_nll(model, torch.arange(20) % 5, training_mode=1)  # type: ignore[arg-type]
+
+
+class BatchNormExperimentTests(unittest.TestCase):
+    def test_experiment_records_training_mode_trap_and_layer_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            corpus_path = Path(directory) / "corpus.txt"
+            corpus_path.write_text("anna\naria\namara\n" * 8, encoding="utf-8")
+            corpus = TokenCorpus.from_path(corpus_path, block_size=4)
+            result = run_batchnorm_experiment(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                    normalization_mode="scratch_batch_norm",
+                ),
+                training_config=TrainingConfig(
+                    steps=2, batch_size=4, learning_rate=0.01, seed=27
+                ),
+            )
+        payload = result.to_dict()
+        self.assertEqual(len(result.trace), 2)
+        self.assertEqual(len(result.layer_state_fingerprints), 3)
+        self.assertEqual(len(result.model_fingerprint), 64)
+        self.assertEqual(len(result.corpus_fingerprint), 64)
+        self.assertNotEqual(result.mode_trap.train_minus_eval_nll, 0.0)
+        self.assertGreater(result.batch_coupling.train_max_abs_delta, 0.0)
+        self.assertEqual(result.batch_coupling.eval_max_abs_delta, 0.0)
+        self.assertEqual(
+            payload["model_config"]["normalization_mode"], "scratch_batch_norm"
+        )
+
+    def test_experiment_rejects_layernorm_and_vocabulary_mismatches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            corpus_path = Path(directory) / "corpus.txt"
+            corpus_path.write_text("anna\naria\namara\n" * 8, encoding="utf-8")
+            corpus = TokenCorpus.from_path(corpus_path, block_size=4)
+            with self.assertRaisesRegex(ValueError, "scratch_batch_norm"):
+                run_batchnorm_experiment(
+                    corpus,
+                    model_config=TransformerConfig(vocab_size=corpus.vocab_size),
+                    training_config=TrainingConfig(steps=1),
+                )
