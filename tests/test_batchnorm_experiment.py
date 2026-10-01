@@ -77,6 +77,39 @@ class ModeEvaluationTests(unittest.TestCase):
 
 
 class BatchNormExperimentTests(unittest.TestCase):
+    def test_experiment_is_bitwise_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            corpus_path = Path(directory) / "corpus.txt"
+            corpus_path.write_text("anna\naria\namara\n" * 8, encoding="utf-8")
+            corpus = TokenCorpus.from_path(corpus_path, block_size=4)
+            model_config = TransformerConfig(
+                vocab_size=corpus.vocab_size,
+                block_size=4,
+                embedding_dim=8,
+                head_count=2,
+                layer_count=1,
+                normalization_mode="scratch_batch_norm",
+            )
+            training_config = TrainingConfig(
+                steps=1, batch_size=4, learning_rate=0.01, seed=27
+            )
+            first = run_batchnorm_experiment(
+                corpus,
+                model_config=model_config,
+                training_config=training_config,
+            )
+            second = run_batchnorm_experiment(
+                corpus,
+                model_config=model_config,
+                training_config=training_config,
+            )
+        self.assertEqual(first.to_dict(), second.to_dict())
+        self.assertEqual(
+            first.initial_model_fingerprint, second.initial_model_fingerprint
+        )
+        self.assertEqual(first.first_batch_fingerprint, second.first_batch_fingerprint)
+        self.assertEqual(first.model_fingerprint, second.model_fingerprint)
+
     def test_experiment_records_training_mode_trap_and_layer_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             corpus_path = Path(directory) / "corpus.txt"
