@@ -12,6 +12,7 @@ import torch
 from ai_journey.batch_normalization import (
     BatchNormalizationError,
     ScratchBatchNorm,
+    snapshot_batch_norm,
 )
 
 
@@ -181,6 +182,36 @@ class PyTorchParityTests(unittest.TestCase):
                 atol=1e-6,
             )
         )
+
+
+class BatchNormStateSnapshotTests(unittest.TestCase):
+    def test_snapshot_fingerprints_complete_persistent_state(self) -> None:
+        layer = ScratchBatchNorm(3, eps=1e-4, momentum=0.25)
+        initial = snapshot_batch_norm(layer)
+        self.assertEqual(initial.num_features, 3)
+        self.assertEqual(initial.running_mean, (0.0, 0.0, 0.0))
+        self.assertEqual(initial.running_var, (1.0, 1.0, 1.0))
+        self.assertEqual(initial.num_batches_tracked, 0)
+        self.assertEqual(len(initial.fingerprint()), 64)
+        self.assertEqual(initial.fingerprint(), initial.fingerprint())
+
+        layer(torch.tensor([[1.0, 2.0, 3.0], [4.0, 8.0, 12.0]]))
+        updated = snapshot_batch_norm(layer)
+        self.assertNotEqual(initial.fingerprint(), updated.fingerprint())
+        self.assertEqual(updated.num_batches_tracked, 1)
+        self.assertEqual(updated.weight, (1.0, 1.0, 1.0))
+        self.assertEqual(updated.bias, (0.0, 0.0, 0.0))
+
+    def test_snapshot_handles_non_affine_layers_and_rejects_invalid_state(self) -> None:
+        layer = ScratchBatchNorm(2, affine=False)
+        snapshot = snapshot_batch_norm(layer)
+        self.assertIsNone(snapshot.weight)
+        self.assertIsNone(snapshot.bias)
+        layer.running_mean[0] = float("nan")
+        with self.assertRaisesRegex(BatchNormalizationError, "finite"):
+            snapshot_batch_norm(layer)
+        with self.assertRaisesRegex(TypeError, "ScratchBatchNorm"):
+            snapshot_batch_norm(torch.nn.BatchNorm1d(2))  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":

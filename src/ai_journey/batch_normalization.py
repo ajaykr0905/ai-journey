@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import math
+from dataclasses import asdict, dataclass
+from hashlib import sha256
 
 import torch
 from torch import Tensor, nn
@@ -10,6 +13,25 @@ from torch import Tensor, nn
 
 class BatchNormalizationError(ValueError):
     """Raised when scratch BatchNorm inputs or controls are invalid."""
+
+
+@dataclass(frozen=True)
+class BatchNormStateSnapshot:
+    """JSON-safe snapshot of one normalization layer's persistent state."""
+
+    num_features: int
+    eps: float
+    momentum: float
+    affine: bool
+    running_mean: tuple[float, ...]
+    running_var: tuple[float, ...]
+    num_batches_tracked: int
+    weight: tuple[float, ...] | None
+    bias: tuple[float, ...] | None
+
+    def fingerprint(self) -> str:
+        payload = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
+        return sha256(payload.encode()).hexdigest()
 
 
 class ScratchBatchNorm(nn.Module):
@@ -106,3 +128,30 @@ class ScratchBatchNorm(nn.Module):
             f"num_features={self.num_features}, eps={self.eps}, "
             f"momentum={self.momentum}, affine={self.affine}"
         )
+
+
+def snapshot_batch_norm(layer: ScratchBatchNorm) -> BatchNormStateSnapshot:
+    """Capture deterministic, public-safe evidence of a scratch BatchNorm layer."""
+
+    if not isinstance(layer, ScratchBatchNorm):
+        raise TypeError("layer must be ScratchBatchNorm")
+
+    def values(tensor: Tensor | None) -> tuple[float, ...] | None:
+        if tensor is None:
+            return None
+        flattened = tensor.detach().cpu().reshape(-1)
+        if not bool(torch.isfinite(flattened).all()):
+            raise BatchNormalizationError("BatchNorm state must be finite")
+        return tuple(float(value) for value in flattened)
+
+    return BatchNormStateSnapshot(
+        num_features=layer.num_features,
+        eps=layer.eps,
+        momentum=layer.momentum,
+        affine=layer.affine,
+        running_mean=values(layer.running_mean) or (),
+        running_var=values(layer.running_var) or (),
+        num_batches_tracked=int(layer.num_batches_tracked),
+        weight=values(layer.weight),
+        bias=values(layer.bias),
+    )
