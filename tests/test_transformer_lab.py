@@ -431,6 +431,36 @@ class DecoderLanguageModelTests(unittest.TestCase):
         self.assertTrue(math.isfinite(loss))
         self.assertTrue(model.training)
 
+    def test_inference_paths_preserve_batchnorm_running_state(self) -> None:
+        import torch
+
+        from ai_journey.batch_normalization import ScratchBatchNorm, snapshot_batch_norm
+
+        config = TransformerConfig(
+            vocab_size=5,
+            block_size=4,
+            embedding_dim=8,
+            head_count=2,
+            layer_count=1,
+            normalization_mode="scratch_batch_norm",
+        )
+        model = DecoderLanguageModel(config).train()
+        model(torch.arange(12).reshape(3, 4) % config.vocab_size)
+        layers = [
+            module for module in model.modules() if isinstance(module, ScratchBatchNorm)
+        ]
+        before = [snapshot_batch_norm(layer).fingerprint() for layer in layers]
+        evaluate_nll(model, torch.arange(30) % config.vocab_size, batch_size=3)
+        generated = model.generate(
+            torch.tensor([[0, 1, 2, 3]]),
+            new_tokens=2,
+            generator=torch.Generator().manual_seed(27),
+        )
+        after = [snapshot_batch_norm(layer).fingerprint() for layer in layers]
+        self.assertEqual(before, after)
+        self.assertEqual(generated.shape, (1, 6))
+        self.assertTrue(model.training)
+
     def test_training_emits_finite_step_and_gradient_metrics(self) -> None:
         import math
 
