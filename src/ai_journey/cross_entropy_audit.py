@@ -48,7 +48,9 @@ def audit_cross_entropy(
     trace = manual_cross_entropy(logits, targets)
     values = np.array(logits, dtype=np.float64, copy=True)
     labels = np.array(targets, dtype=np.int64, copy=True)
-    reference_logits = torch.tensor(values, dtype=torch.float64, requires_grad=True)
+    reference_logits = torch.tensor(
+        values, dtype=torch.float64, device="cpu", requires_grad=True
+    )
     reference_loss = F.cross_entropy(reference_logits, torch.from_numpy(labels))
     reference_loss.backward()
     numeric = np.zeros_like(values)
