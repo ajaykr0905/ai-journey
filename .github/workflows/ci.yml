@@ -151,6 +151,10 @@ jobs:
           --layers 1
           --output /tmp/ai-journey-artifacts/day-27-batchnorm.json
           --plot /tmp/ai-journey-artifacts/day-27-batchnorm.svg
+      - name: Verify manual loss and transformer parameter gradients
+        run: >-
+          python scripts/run_day_28.py
+          --output /tmp/ai-journey-artifacts/day-28-gradient-audit.json
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py
