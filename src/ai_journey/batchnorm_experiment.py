@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from hashlib import sha256
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -195,6 +196,40 @@ def evaluate_batchnorm_experiment(
         passed=not violations,
         violations=tuple(violations),
     )
+
+
+def build_batchnorm_report(
+    result: BatchNormExperimentResult,
+    criteria: BatchNormCriteria,
+) -> dict[str, Any]:
+    """Build a self-verifying report with inputs, results, and gate outcome."""
+
+    evaluation = evaluate_batchnorm_experiment(result, criteria)
+    payload: dict[str, Any] = {
+        "experiment": result.to_dict(),
+        "criteria": asdict(criteria),
+        "evaluation": asdict(evaluation),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    payload["report_fingerprint"] = sha256(encoded).hexdigest()
+    return payload
+
+
+def write_batchnorm_report(
+    path: Path,
+    result: BatchNormExperimentResult,
+    criteria: BatchNormCriteria,
+) -> None:
+    """Atomically write a canonical JSON report."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    payload = build_batchnorm_report(result, criteria)
+    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(rendered, encoding="utf-8", newline="\n")
+    temporary.replace(path)
 
 
 @torch.no_grad()

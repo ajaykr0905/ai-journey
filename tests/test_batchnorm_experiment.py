@@ -16,9 +16,11 @@ import torch
 
 from ai_journey.batchnorm_experiment import (
     BatchNormCriteria,
+    build_batchnorm_report,
     evaluate_batchnorm_experiment,
     evaluate_mode_nll,
     run_batchnorm_experiment,
+    write_batchnorm_report,
 )
 from ai_journey.transformer_lab import (
     BatchCursor,
@@ -257,3 +259,48 @@ class BatchNormExperimentTests(unittest.TestCase):
         for value in (-1.0, float("inf"), float("nan"), True):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 BatchNormCriteria(min_mode_nll_gap=value)
+
+    def test_report_writer_is_stable_atomic_and_self_verifying(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus_path = root / "corpus.txt"
+            corpus_path.write_text("anna\naria\namara\n" * 8, encoding="utf-8")
+            corpus = TokenCorpus.from_path(corpus_path, block_size=4)
+            result = run_batchnorm_experiment(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                    normalization_mode="scratch_batch_norm",
+                ),
+                training_config=TrainingConfig(steps=2, batch_size=4, seed=27),
+            )
+            criteria = BatchNormCriteria(
+                min_training_loss_reduction=0.0,
+                min_mode_nll_gap=0.0,
+                min_train_batch_coupling=0.0,
+            )
+            path = root / "nested" / "report.json"
+            write_batchnorm_report(path, result, criteria)
+            first = path.read_bytes()
+            write_batchnorm_report(path, result, criteria)
+            second = path.read_bytes()
+            payload = json.loads(second)
+            report_fingerprint = payload.pop("report_fingerprint")
+            expected = sha256(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+        self.assertEqual(first, second)
+        self.assertEqual(report_fingerprint, expected)
+        self.assertEqual(
+            payload["experiment"]["evidence_fingerprint"],
+            result.evidence_fingerprint(),
+        )
+        self.assertTrue(payload["evaluation"]["passed"])
+        self.assertFalse(path.with_name(".report.json.tmp").exists())
+        expected_payload = build_batchnorm_report(result, criteria)
+        expected_payload.pop("report_fingerprint")
+        self.assertEqual(payload, json.loads(json.dumps(expected_payload)))
