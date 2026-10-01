@@ -104,5 +104,84 @@ class ScratchBatchNormTests(unittest.TestCase):
         self.assertEqual(int(layer.num_batches_tracked), 0)
 
 
+class PyTorchParityTests(unittest.TestCase):
+    def _native_forward(self, layer: torch.nn.BatchNorm1d, inputs: torch.Tensor):
+        flattened = inputs.reshape(-1, inputs.shape[-1])
+        return layer(flattened).reshape_as(inputs)
+
+    def test_training_outputs_gradients_and_running_state_match_pytorch(self) -> None:
+        torch.manual_seed(27)
+        scratch = ScratchBatchNorm(4, eps=3e-5, momentum=0.2).double()
+        native = torch.nn.BatchNorm1d(4, eps=3e-5, momentum=0.2).double()
+        with torch.no_grad():
+            scale = torch.tensor([0.5, 1.0, 1.5, 2.0], dtype=torch.double)
+            shift = torch.tensor([-0.2, 0.1, 0.3, -0.4], dtype=torch.double)
+            scratch.weight.copy_(scale)
+            scratch.bias.copy_(shift)
+            native.weight.copy_(scale)
+            native.bias.copy_(shift)
+
+        for _ in range(2):
+            values = torch.randn(3, 5, 4, dtype=torch.double)
+            scratch_inputs = values.clone().requires_grad_(True)
+            native_inputs = values.clone().requires_grad_(True)
+            scratch_outputs = scratch(scratch_inputs)
+            native_outputs = self._native_forward(native, native_inputs)
+            self.assertTrue(
+                torch.allclose(scratch_outputs, native_outputs, atol=1e-12, rtol=1e-10)
+            )
+            scratch_outputs.square().sum().backward()
+            native_outputs.square().sum().backward()
+            self.assertTrue(
+                torch.allclose(
+                    scratch_inputs.grad,
+                    native_inputs.grad,
+                    atol=1e-11,
+                    rtol=1e-9,
+                )
+            )
+            self.assertTrue(
+                torch.allclose(
+                    scratch.weight.grad, native.weight.grad, atol=1e-11, rtol=1e-9
+                )
+            )
+            self.assertTrue(
+                torch.allclose(
+                    scratch.bias.grad, native.bias.grad, atol=1e-11, rtol=1e-9
+                )
+            )
+            scratch.zero_grad(set_to_none=True)
+            native.zero_grad(set_to_none=True)
+
+        self.assertTrue(
+            torch.allclose(scratch.running_mean, native.running_mean, atol=1e-12)
+        )
+        self.assertTrue(
+            torch.allclose(scratch.running_var, native.running_var, atol=1e-12)
+        )
+        self.assertEqual(
+            int(scratch.num_batches_tracked), int(native.num_batches_tracked)
+        )
+
+    def test_eval_outputs_match_pytorch_running_statistics(self) -> None:
+        torch.manual_seed(28)
+        scratch = ScratchBatchNorm(3, momentum=0.4)
+        native = torch.nn.BatchNorm1d(3, momentum=0.4)
+        for _ in range(3):
+            inputs = torch.randn(4, 2, 3)
+            scratch(inputs)
+            self._native_forward(native, inputs)
+        scratch.eval()
+        native.eval()
+        evaluation = torch.randn(2, 7, 3)
+        self.assertTrue(
+            torch.allclose(
+                scratch(evaluation),
+                self._native_forward(native, evaluation),
+                atol=1e-6,
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
