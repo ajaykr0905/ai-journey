@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import sys
 import tempfile
 import unittest
@@ -8,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+import numpy as np
 import torch
 
 from ai_journey.batchnorm_experiment import evaluate_mode_nll, run_batchnorm_experiment
@@ -115,3 +117,32 @@ class BatchNormExperimentTests(unittest.TestCase):
                     model_config=TransformerConfig(vocab_size=corpus.vocab_size),
                     training_config=TrainingConfig(steps=1),
                 )
+
+    def test_experiment_restores_caller_random_state(self) -> None:
+        random.seed(91)
+        np.random.seed(91)
+        torch.manual_seed(91)
+        torch.use_deterministic_algorithms(False)
+        expected = (random.random(), float(np.random.random()), float(torch.rand(())))
+        random.seed(91)
+        np.random.seed(91)
+        torch.manual_seed(91)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "corpus.txt"
+            path.write_text("anna\naria\namara\n" * 8, encoding="utf-8")
+            corpus = TokenCorpus.from_path(path, block_size=4)
+            run_batchnorm_experiment(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                    normalization_mode="scratch_batch_norm",
+                ),
+                training_config=TrainingConfig(steps=1, batch_size=4, seed=27),
+            )
+        actual = (random.random(), float(np.random.random()), float(torch.rand(())))
+        self.assertEqual(actual, expected)
+        self.assertFalse(torch.are_deterministic_algorithms_enabled())

@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import math
+import random
+from collections.abc import Iterator
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from typing import Any
 
+import numpy as np
 import torch
 from torch import Tensor
 from torch.nn import functional as F
@@ -31,6 +35,21 @@ from .transformer_lab import (
     seed_everything,
     train_steps,
 )
+
+
+@contextmanager
+def _preserve_random_state() -> Iterator[None]:
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    torch_state = torch.get_rng_state()
+    deterministic = torch.are_deterministic_algorithms_enabled()
+    try:
+        yield
+    finally:
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
+        torch.set_rng_state(torch_state)
+        torch.use_deterministic_algorithms(deterministic)
 
 
 @dataclass(frozen=True)
@@ -130,7 +149,7 @@ def evaluate_mode_nll(
     return result
 
 
-def run_batchnorm_experiment(
+def _run_batchnorm_experiment(
     corpus: TokenCorpus,
     *,
     model_config: TransformerConfig,
@@ -191,3 +210,19 @@ def run_batchnorm_experiment(
         layer_state_fingerprints=states,
         model_fingerprint=model_fingerprint(model),
     )
+
+
+def run_batchnorm_experiment(
+    corpus: TokenCorpus,
+    *,
+    model_config: TransformerConfig,
+    training_config: TrainingConfig,
+) -> BatchNormExperimentResult:
+    """Run the experiment without changing caller RNG or determinism state."""
+
+    with _preserve_random_state():
+        return _run_batchnorm_experiment(
+            corpus,
+            model_config=model_config,
+            training_config=training_config,
+        )
