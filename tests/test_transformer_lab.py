@@ -392,6 +392,33 @@ class DecoderLanguageModelTests(unittest.TestCase):
         self.assertTrue(all(parameter.ndim >= 2 for parameter in groups[0.2]))
         self.assertTrue(all(parameter.ndim < 2 for parameter in groups[0.0]))
 
+    def test_optimizer_excludes_scratch_batchnorm_affine_state_from_decay(self) -> None:
+        from ai_journey.batch_normalization import ScratchBatchNorm
+
+        model = DecoderLanguageModel(
+            TransformerConfig(
+                vocab_size=5,
+                embedding_dim=8,
+                head_count=2,
+                normalization_mode="scratch_batch_norm",
+            )
+        )
+        optimizer = build_optimizer(model, TrainingConfig(weight_decay=0.3))
+        no_decay = {
+            id(parameter)
+            for group in optimizer.param_groups
+            if group["weight_decay"] == 0.0
+            for parameter in group["params"]
+        }
+        batch_norm_parameters = {
+            id(parameter)
+            for module in model.modules()
+            if isinstance(module, ScratchBatchNorm)
+            for parameter in module.parameters(recurse=False)
+        }
+        self.assertTrue(batch_norm_parameters)
+        self.assertTrue(batch_norm_parameters <= no_decay)
+
     def test_evaluation_is_finite_and_restores_training_mode(self) -> None:
         import math
 
