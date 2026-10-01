@@ -14,7 +14,12 @@ sys.path.insert(0, str(ROOT / "src"))
 import numpy as np
 import torch
 
-from ai_journey.batchnorm_experiment import evaluate_mode_nll, run_batchnorm_experiment
+from ai_journey.batchnorm_experiment import (
+    BatchNormCriteria,
+    evaluate_batchnorm_experiment,
+    evaluate_mode_nll,
+    run_batchnorm_experiment,
+)
 from ai_journey.transformer_lab import (
     BatchCursor,
     DecoderLanguageModel,
@@ -199,3 +204,56 @@ class BatchNormExperimentTests(unittest.TestCase):
         actual = (random.random(), float(np.random.random()), float(torch.rand(())))
         self.assertEqual(actual, expected)
         self.assertFalse(torch.are_deterministic_algorithms_enabled())
+
+    def test_evaluation_reports_named_threshold_violations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "corpus.txt"
+            path.write_text("anna\naria\namara\n" * 8, encoding="utf-8")
+            corpus = TokenCorpus.from_path(path, block_size=4)
+            result = run_batchnorm_experiment(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                    normalization_mode="scratch_batch_norm",
+                ),
+                training_config=TrainingConfig(
+                    steps=2, batch_size=4, learning_rate=0.01, seed=27
+                ),
+            )
+        loose = evaluate_batchnorm_experiment(
+            result,
+            BatchNormCriteria(
+                min_training_loss_reduction=0.0,
+                min_mode_nll_gap=0.0,
+                min_train_batch_coupling=0.0,
+                max_eval_batch_coupling=1.0,
+            ),
+        )
+        self.assertTrue(loose.passed, loose.violations)
+        strict = evaluate_batchnorm_experiment(
+            result,
+            BatchNormCriteria(
+                min_training_loss_reduction=10.0,
+                min_mode_nll_gap=10.0,
+                min_train_batch_coupling=10.0,
+                max_eval_batch_coupling=0.0,
+            ),
+        )
+        self.assertFalse(strict.passed)
+        self.assertEqual(
+            strict.violations,
+            (
+                "training_loss_reduction",
+                "mode_nll_gap",
+                "train_batch_coupling",
+            ),
+        )
+
+    def test_criteria_reject_invalid_thresholds(self) -> None:
+        for value in (-1.0, float("inf"), float("nan"), True):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                BatchNormCriteria(min_mode_nll_gap=value)

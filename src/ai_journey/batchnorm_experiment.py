@@ -80,6 +80,38 @@ class BatchNormRuntimeMetadata:
 
 
 @dataclass(frozen=True)
+class BatchNormCriteria:
+    """Predeclared thresholds for useful, non-leaking BatchNorm evidence."""
+
+    min_training_loss_reduction: float = 0.01
+    min_mode_nll_gap: float = 1e-4
+    min_train_batch_coupling: float = 1e-4
+    max_eval_batch_coupling: float = 1e-7
+
+    def __post_init__(self) -> None:
+        for name, value in asdict(self).items():
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                raise TransformerLabError(f"{name} must be finite and non-negative")
+
+
+@dataclass(frozen=True)
+class BatchNormEvaluation:
+    """Measured gate values and named violations."""
+
+    training_loss_reduction: float
+    absolute_mode_nll_gap: float
+    train_batch_coupling: float
+    eval_batch_coupling: float
+    passed: bool
+    violations: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class BatchNormExperimentResult:
     """Deterministic transformer evidence for scratch BatchNorm behavior."""
 
@@ -128,6 +160,41 @@ class BatchNormExperimentResult:
         payload = self._payload()
         payload["evidence_fingerprint"] = self.evidence_fingerprint()
         return payload
+
+
+def evaluate_batchnorm_experiment(
+    result: BatchNormExperimentResult,
+    criteria: BatchNormCriteria,
+) -> BatchNormEvaluation:
+    """Apply explicit gates to a completed BatchNorm experiment."""
+
+    if not isinstance(result, BatchNormExperimentResult):
+        raise TypeError("result must be BatchNormExperimentResult")
+    if not isinstance(criteria, BatchNormCriteria):
+        raise TypeError("criteria must be BatchNormCriteria")
+    initial_loss = result.trace[0].loss
+    final_loss = result.trace[-1].loss
+    loss_reduction = (initial_loss - final_loss) / initial_loss
+    mode_gap = abs(result.mode_trap.train_minus_eval_nll)
+    train_coupling = result.batch_coupling.train_max_abs_delta
+    eval_coupling = result.batch_coupling.eval_max_abs_delta
+    violations: list[str] = []
+    if loss_reduction < criteria.min_training_loss_reduction:
+        violations.append("training_loss_reduction")
+    if mode_gap < criteria.min_mode_nll_gap:
+        violations.append("mode_nll_gap")
+    if train_coupling < criteria.min_train_batch_coupling:
+        violations.append("train_batch_coupling")
+    if eval_coupling > criteria.max_eval_batch_coupling:
+        violations.append("eval_batch_coupling")
+    return BatchNormEvaluation(
+        training_loss_reduction=loss_reduction,
+        absolute_mode_nll_gap=mode_gap,
+        train_batch_coupling=train_coupling,
+        eval_batch_coupling=eval_coupling,
+        passed=not violations,
+        violations=tuple(violations),
+    )
 
 
 @torch.no_grad()
