@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Iterable
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 
@@ -42,6 +43,16 @@ class BatchNormCalibrationResult:
     batch_count: int
     before_fingerprints: tuple[tuple[str, str], ...]
     after_fingerprints: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class BatchCouplingResult:
+    """How much an anchor output changes when companion examples change."""
+
+    train_max_abs_delta: float
+    train_rms_delta: float
+    eval_max_abs_delta: float
+    eval_rms_delta: float
 
 
 class ScratchBatchNorm(nn.Module):
@@ -215,4 +226,51 @@ def calibrate_batch_norm(
         batch_count=batch_count,
         before_fingerprints=before,
         after_fingerprints=after,
+    )
+
+
+def measure_batch_coupling(
+    model: nn.Module,
+    anchor: Tensor,
+    companions: Tensor,
+) -> BatchCouplingResult:
+    """Measure train/eval sensitivity of one example to batch composition."""
+
+    if not isinstance(model, nn.Module):
+        raise TypeError("model must be torch.nn.Module")
+    for name, value in (("anchor", anchor), ("companions", companions)):
+        if not isinstance(value, Tensor):
+            raise TypeError(f"{name} must be a torch.Tensor")
+        if value.ndim < 2 or value.shape[0] == 0:
+            raise BatchNormalizationError(f"{name} must contain a non-empty batch")
+    if anchor.shape[0] != 1:
+        raise BatchNormalizationError("anchor must contain exactly one example")
+    if anchor.shape[1:] != companions.shape[1:]:
+        raise BatchNormalizationError("anchor and companions must share sample shape")
+
+    def output(value: object) -> Tensor:
+        if isinstance(value, Tensor):
+            return value
+        if isinstance(value, tuple) and value and isinstance(value[0], Tensor):
+            return value[0]
+        raise TypeError("model output must be a Tensor or begin with a Tensor")
+
+    paired = torch.cat((anchor, companions), dim=0)
+
+    def deltas(training: bool) -> tuple[float, float]:
+        isolated_model = deepcopy(model).train(training)
+        paired_model = deepcopy(model).train(training)
+        with torch.no_grad():
+            isolated = output(isolated_model(anchor))[0]
+            batched = output(paired_model(paired))[0]
+        delta = isolated - batched
+        return float(delta.abs().max()), float(delta.square().mean().sqrt())
+
+    train_max, train_rms = deltas(True)
+    eval_max, eval_rms = deltas(False)
+    return BatchCouplingResult(
+        train_max_abs_delta=train_max,
+        train_rms_delta=train_rms,
+        eval_max_abs_delta=eval_max,
+        eval_rms_delta=eval_rms,
     )

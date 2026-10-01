@@ -13,6 +13,7 @@ from ai_journey.batch_normalization import (
     BatchNormalizationError,
     ScratchBatchNorm,
     calibrate_batch_norm,
+    measure_batch_coupling,
     snapshot_batch_norm,
 )
 
@@ -248,6 +249,30 @@ class BatchNormCalibrationTests(unittest.TestCase):
             calibrate_batch_norm(model, [])
         with self.assertRaisesRegex(TypeError, "torch.Tensor"):
             calibrate_batch_norm(model, [object()])  # type: ignore[list-item]
+
+
+class BatchCouplingTests(unittest.TestCase):
+    def test_training_depends_on_companions_while_eval_is_invariant(self) -> None:
+        layer = ScratchBatchNorm(2, momentum=1.0)
+        layer(torch.tensor([[[0.0, 1.0], [1.0, 2.0]], [[2.0, 3.0], [3.0, 4.0]]]))
+        state_before = snapshot_batch_norm(layer).fingerprint()
+        result = measure_batch_coupling(
+            layer,
+            torch.tensor([[[1.0, 2.0], [2.0, 3.0]]]),
+            torch.tensor([[[100.0, -50.0], [120.0, -60.0]]]),
+        )
+        self.assertGreater(result.train_max_abs_delta, 0.5)
+        self.assertGreater(result.train_rms_delta, 0.1)
+        self.assertEqual(result.eval_max_abs_delta, 0.0)
+        self.assertEqual(result.eval_rms_delta, 0.0)
+        self.assertEqual(snapshot_batch_norm(layer).fingerprint(), state_before)
+
+    def test_coupling_measure_validates_batch_contract(self) -> None:
+        layer = ScratchBatchNorm(2)
+        with self.assertRaisesRegex(BatchNormalizationError, "exactly one"):
+            measure_batch_coupling(layer, torch.ones(2, 2, 2), torch.ones(1, 2, 2))
+        with self.assertRaisesRegex(BatchNormalizationError, "share sample shape"):
+            measure_batch_coupling(layer, torch.ones(1, 2, 2), torch.ones(1, 3, 2))
 
 
 if __name__ == "__main__":
