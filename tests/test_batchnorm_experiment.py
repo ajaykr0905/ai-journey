@@ -98,6 +98,8 @@ class BatchNormExperimentTests(unittest.TestCase):
         self.assertEqual(len(result.trace), 2)
         self.assertEqual(len(result.layer_state_fingerprints), 3)
         self.assertEqual(len(result.model_fingerprint), 64)
+        self.assertEqual(len(result.initial_model_fingerprint), 64)
+        self.assertEqual(len(result.first_batch_fingerprint), 64)
         self.assertEqual(len(result.corpus_fingerprint), 64)
         self.assertNotEqual(result.mode_trap.train_minus_eval_nll, 0.0)
         self.assertGreater(result.batch_coupling.train_max_abs_delta, 0.0)

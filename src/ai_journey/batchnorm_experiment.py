@@ -8,6 +8,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass
+from hashlib import sha256
 from typing import Any
 
 import numpy as np
@@ -68,6 +69,8 @@ class BatchNormExperimentResult:
     corpus_fingerprint: str
     model_config: TransformerConfig
     training_config: TrainingConfig
+    initial_model_fingerprint: str
+    first_batch_fingerprint: str
     initial_eval_nll: float
     trace: tuple[StepMetric, ...]
     final_train_nll: float
@@ -81,6 +84,8 @@ class BatchNormExperimentResult:
             "corpus_fingerprint": self.corpus_fingerprint,
             "model_config": asdict(self.model_config),
             "training_config": asdict(self.training_config),
+            "initial_model_fingerprint": self.initial_model_fingerprint,
+            "first_batch_fingerprint": self.first_batch_fingerprint,
             "initial_eval_nll": self.initial_eval_nll,
             "trace": [asdict(metric) for metric in self.trace],
             "final_train_nll": self.final_train_nll,
@@ -167,7 +172,21 @@ def _run_batchnorm_experiment(
         raise TransformerLabError("model vocabulary does not match corpus")
     seed_everything(training_config.seed)
     model = DecoderLanguageModel(model_config)
+    initial_model_fingerprint = model_fingerprint(model)
     initial_eval_nll = evaluate_nll(model, corpus.validation_tokens)
+    control_cursor = BatchCursor(
+        corpus.train_tokens,
+        block_size=model_config.block_size,
+        batch_size=training_config.batch_size,
+        seed=training_config.seed,
+    )
+    control_inputs, control_targets = control_cursor.next()
+    first_batch_digest = sha256()
+    for tensor in (control_inputs, control_targets):
+        value = tensor.detach().cpu().contiguous()
+        first_batch_digest.update(str(value.dtype).encode())
+        first_batch_digest.update(str(tuple(value.shape)).encode())
+        first_batch_digest.update(value.numpy().tobytes())
     cursor = BatchCursor(
         corpus.train_tokens,
         block_size=model_config.block_size,
@@ -198,6 +217,8 @@ def _run_batchnorm_experiment(
         corpus_fingerprint=corpus.fingerprint(),
         model_config=model_config,
         training_config=training_config,
+        initial_model_fingerprint=initial_model_fingerprint,
+        first_batch_fingerprint=first_batch_digest.hexdigest(),
         initial_eval_nll=initial_eval_nll,
         trace=trace,
         final_train_nll=final_train_nll,
