@@ -376,9 +376,9 @@ class TransformerBlock(nn.Module):
 
     def __init__(self, config: TransformerConfig) -> None:
         super().__init__()
-        self.attention_norm = nn.LayerNorm(config.embedding_dim)
+        self.attention_norm = build_normalization(config)
         self.attention = CausalSelfAttention(config)
-        self.feed_forward_norm = nn.LayerNorm(config.embedding_dim)
+        self.feed_forward_norm = build_normalization(config)
         self.feed_forward = FeedForward(config)
 
     def forward(self, inputs: Tensor) -> Tensor:

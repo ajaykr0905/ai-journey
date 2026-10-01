@@ -289,6 +289,28 @@ class TransformerBlockTests(unittest.TestCase):
             all(parameter.grad is not None for parameter in block.parameters())
         )
 
+    def test_scratch_batchnorm_policy_updates_both_block_statistics(self) -> None:
+        import torch
+
+        from ai_journey.batch_normalization import ScratchBatchNorm
+
+        block = TransformerBlock(
+            TransformerConfig(
+                vocab_size=8,
+                block_size=4,
+                embedding_dim=8,
+                head_count=2,
+                normalization_mode="scratch_batch_norm",
+            )
+        )
+        outputs = block(torch.randn(3, 4, 8))
+        self.assertEqual(outputs.shape, (3, 4, 8))
+        layers = [
+            module for module in block.modules() if isinstance(module, ScratchBatchNorm)
+        ]
+        self.assertEqual(len(layers), 2)
+        self.assertEqual([int(layer.num_batches_tracked) for layer in layers], [1, 1])
+
 
 class DecoderLanguageModelTests(unittest.TestCase):
     def test_model_returns_token_logits_and_cross_entropy(self) -> None:
