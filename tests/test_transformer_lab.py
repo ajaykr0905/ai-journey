@@ -495,6 +495,59 @@ class DecoderLanguageModelTests(unittest.TestCase):
         self.assertEqual(model_fingerprint(model), expected_fingerprint)
         self.assertEqual(cursor.state_dict(), expected_cursor)
 
+    def test_checkpoint_restores_scratch_batchnorm_running_statistics(self) -> None:
+        import torch
+
+        from ai_journey.batch_normalization import ScratchBatchNorm, snapshot_batch_norm
+
+        seed_everything(27)
+        model_config = TransformerConfig(
+            vocab_size=5,
+            block_size=4,
+            embedding_dim=8,
+            head_count=2,
+            layer_count=1,
+            normalization_mode="scratch_batch_norm",
+        )
+        training = TrainingConfig(steps=2, batch_size=3, seed=27)
+        model = DecoderLanguageModel(model_config)
+        optimizer = build_optimizer(model, training)
+        cursor = BatchCursor(
+            torch.arange(40) % 5,
+            block_size=4,
+            batch_size=3,
+            seed=training.seed,
+        )
+        train_steps(model, cursor, optimizer, training, step_count=2)
+        layers = [
+            module for module in model.modules() if isinstance(module, ScratchBatchNorm)
+        ]
+        expected = [snapshot_batch_norm(layer).fingerprint() for layer in layers]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "batchnorm.pt"
+            save_training_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                training_config=training,
+                corpus_fingerprint="d" * 64,
+                step=2,
+            )
+            for layer in layers:
+                layer.reset_running_stats()
+            load_training_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                training_config=training,
+                corpus_fingerprint="d" * 64,
+            )
+        actual = [snapshot_batch_norm(layer).fingerprint() for layer in layers]
+        self.assertEqual(actual, expected)
+        self.assertTrue(all(int(layer.num_batches_tracked) == 2 for layer in layers))
+
     def test_checkpoint_rejects_a_different_initialization_policy(self) -> None:
         import torch
 
