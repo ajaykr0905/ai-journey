@@ -1,7 +1,7 @@
-# AI Journey: Days 0–27
+# AI Journey: Days 0–28
 
 This repository is a public-safe, executable record of an added setup day plus the
-first twenty-seven workbook days of a 90-day AI engineering learning plan. It combines
+first twenty-eight workbook days of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -55,6 +55,9 @@ then grow these exercises into production-quality training and inference project
 - A scratch BatchNorm implementation with persistent running statistics,
   checkpoint-safe transformer integration, and a controlled train/eval mode-trap
   experiment in [`src/ai_journey/batch_normalization.py`](src/ai_journey/batch_normalization.py)
+- A stable manual categorical loss, finite-difference and PyTorch gradient checks,
+  and a parameter-wide transformer audit in
+  [`scripts/run_day_28.py`](scripts/run_day_28.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -124,7 +127,26 @@ python scripts/run_day_27.py \
 python -m unittest discover -s tests -v
 ```
 
-PyTorch is required for the Day 24–27 transformer experiments. The default verification
+## Verify the loss derivative
+
+```bash
+python scripts/run_day_28.py --output artifacts/day-28-gradient-audit.json
+```
+
+The JSON report compares handwritten mean cross-entropy gradients with PyTorch
+autograd and centered finite differences, including tied maxima and underflowing
+target probabilities. It also compares every parameter gradient in the existing
+small transformer using manual versus native loss derivatives. Model derivatives
+still use PyTorch. The fixed synthetic token batch is CPU float64 diagnostic
+evidence, not public-corpus training, GPU performance, or production evidence.
+
+Exit code 0 means all declared tolerances passed; 1 means a numerical gate failed;
+2 means an argument is invalid. Failed numerical gates retain their diagnostic
+report. Invalid arguments leave an existing report untouched. Reports are
+published with an atomic file replacement. Set `--seed`, `--epsilon`,
+`--tolerance`, and `--transformer-tolerance` explicitly when changing the experiment.
+
+PyTorch is required for the Day 24–28 transformer experiments. The default verification
 commands run on CPU and do not claim GPU or distributed execution.
 
 ## Configuration safety
