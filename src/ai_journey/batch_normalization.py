@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 
@@ -32,6 +33,15 @@ class BatchNormStateSnapshot:
     def fingerprint(self) -> str:
         payload = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
         return sha256(payload.encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class BatchNormCalibrationResult:
+    """State transition produced by a bounded calibration pass."""
+
+    batch_count: int
+    before_fingerprints: tuple[tuple[str, str], ...]
+    after_fingerprints: tuple[tuple[str, str], ...]
 
 
 class ScratchBatchNorm(nn.Module):
@@ -154,4 +164,55 @@ def snapshot_batch_norm(layer: ScratchBatchNorm) -> BatchNormStateSnapshot:
         num_batches_tracked=int(layer.num_batches_tracked),
         weight=values(layer.weight),
         bias=values(layer.bias),
+    )
+
+
+def calibrate_batch_norm(
+    model: nn.Module,
+    batches: Iterable[Tensor],
+    *,
+    reset_running_stats: bool = True,
+) -> BatchNormCalibrationResult:
+    """Update only scratch BatchNorm statistics with dropout disabled."""
+
+    if not isinstance(model, nn.Module):
+        raise TypeError("model must be torch.nn.Module")
+    if not isinstance(reset_running_stats, bool):
+        raise TypeError("reset_running_stats must be a boolean")
+    layers = tuple(
+        (name, module)
+        for name, module in model.named_modules()
+        if isinstance(module, ScratchBatchNorm)
+    )
+    if not layers:
+        raise BatchNormalizationError("model has no ScratchBatchNorm layers")
+    before = tuple(
+        (name, snapshot_batch_norm(layer).fingerprint()) for name, layer in layers
+    )
+    training_states = {module: module.training for module in model.modules()}
+    batch_count = 0
+    try:
+        model.eval()
+        for _, layer in layers:
+            if reset_running_stats:
+                layer.reset_running_stats()
+            layer.train()
+        with torch.no_grad():
+            for batch in batches:
+                if not isinstance(batch, Tensor):
+                    raise TypeError("calibration batches must be torch.Tensor values")
+                model(batch)
+                batch_count += 1
+    finally:
+        for module, was_training in training_states.items():
+            module.training = was_training
+    if batch_count == 0:
+        raise BatchNormalizationError("calibration requires at least one batch")
+    after = tuple(
+        (name, snapshot_batch_norm(layer).fingerprint()) for name, layer in layers
+    )
+    return BatchNormCalibrationResult(
+        batch_count=batch_count,
+        before_fingerprints=before,
+        after_fingerprints=after,
     )

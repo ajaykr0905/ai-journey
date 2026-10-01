@@ -12,6 +12,7 @@ import torch
 from ai_journey.batch_normalization import (
     BatchNormalizationError,
     ScratchBatchNorm,
+    calibrate_batch_norm,
     snapshot_batch_norm,
 )
 
@@ -212,6 +213,41 @@ class BatchNormStateSnapshotTests(unittest.TestCase):
             snapshot_batch_norm(layer)
         with self.assertRaisesRegex(TypeError, "ScratchBatchNorm"):
             snapshot_batch_norm(torch.nn.BatchNorm1d(2))  # type: ignore[arg-type]
+
+
+class BatchNormCalibrationTests(unittest.TestCase):
+    def test_calibration_updates_only_batchnorm_state_and_restores_modes(self) -> None:
+        model = torch.nn.Sequential(
+            torch.nn.Linear(3, 3, bias=False),
+            ScratchBatchNorm(3, momentum=0.5),
+            torch.nn.Dropout(0.9),
+        )
+        model.train()
+        weight_before = model[0].weight.detach().clone()
+        batches = [
+            torch.arange(12, dtype=torch.float32).reshape(4, 3) + index
+            for index in range(3)
+        ]
+        result = calibrate_batch_norm(model, batches)
+        self.assertEqual(result.batch_count, 3)
+        self.assertNotEqual(result.before_fingerprints, result.after_fingerprints)
+        self.assertEqual(int(model[1].num_batches_tracked), 3)
+        self.assertTrue(model.training)
+        self.assertTrue(model[1].training)
+        self.assertTrue(model[2].training)
+        self.assertTrue(torch.equal(model[0].weight, weight_before))
+        self.assertTrue(all(parameter.grad is None for parameter in model.parameters()))
+
+    def test_calibration_rejects_missing_layers_and_empty_or_invalid_batches(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(BatchNormalizationError, "no ScratchBatchNorm"):
+            calibrate_batch_norm(torch.nn.Linear(2, 2), [torch.ones(2, 2)])
+        model = torch.nn.Sequential(ScratchBatchNorm(2))
+        with self.assertRaisesRegex(BatchNormalizationError, "at least one"):
+            calibrate_batch_norm(model, [])
+        with self.assertRaisesRegex(TypeError, "torch.Tensor"):
+            calibrate_batch_norm(model, [object()])  # type: ignore[list-item]
 
 
 if __name__ == "__main__":
