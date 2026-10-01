@@ -606,6 +606,56 @@ class DecoderLanguageModelTests(unittest.TestCase):
                     corpus_fingerprint="c" * 64,
                 )
 
+    def test_checkpoint_rejects_a_different_normalization_policy(self) -> None:
+        import torch
+
+        training = TrainingConfig(steps=1, batch_size=3)
+        layer_norm_model = DecoderLanguageModel(
+            TransformerConfig(vocab_size=5, block_size=4, embedding_dim=8, head_count=2)
+        )
+        cursor = BatchCursor(
+            torch.arange(30) % 5,
+            block_size=4,
+            batch_size=3,
+            seed=training.seed,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "layer-norm.pt"
+            save_training_checkpoint(
+                path,
+                model=layer_norm_model,
+                optimizer=build_optimizer(layer_norm_model, training),
+                cursor=cursor,
+                training_config=training,
+                corpus_fingerprint="e" * 64,
+                step=0,
+            )
+            batch_norm_model = DecoderLanguageModel(
+                TransformerConfig(
+                    vocab_size=5,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    normalization_mode="scratch_batch_norm",
+                )
+            )
+            with self.assertRaisesRegex(
+                TransformerLabError, "model configuration mismatch"
+            ):
+                load_training_checkpoint(
+                    path,
+                    model=batch_norm_model,
+                    optimizer=build_optimizer(batch_norm_model, training),
+                    cursor=BatchCursor(
+                        torch.arange(30) % 5,
+                        block_size=4,
+                        batch_size=3,
+                        seed=training.seed,
+                    ),
+                    training_config=training,
+                    corpus_fingerprint="e" * 64,
+                )
+
     def test_checkpoint_restart_matches_uninterrupted_training_bit_exactly(
         self,
     ) -> None:
