@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import numpy as np
 import torch
 
+import ai_journey
 from ai_journey.batchnorm_experiment import (
     BatchNormCriteria,
     build_batchnorm_report,
@@ -34,6 +35,13 @@ from ai_journey.transformer_lab import (
     seed_everything,
     train_steps,
 )
+
+
+class PublicApiTests(unittest.TestCase):
+    def test_batchnorm_capabilities_are_exported(self) -> None:
+        self.assertIs(ai_journey.BatchNormCriteria, BatchNormCriteria)
+        self.assertIs(ai_journey.run_batchnorm_experiment, run_batchnorm_experiment)
+        self.assertEqual(ai_journey.ScratchBatchNorm.__name__, "ScratchBatchNorm")
 
 
 class ModeEvaluationTests(unittest.TestCase):

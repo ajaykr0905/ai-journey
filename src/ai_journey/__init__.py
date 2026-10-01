@@ -1,6 +1,12 @@
 """Small, deterministic exercises for the AI Journey repository."""
 
 from .attention import AttentionConfig, run_attention_experiment
+from .batch_normalization import ScratchBatchNorm
+from .batchnorm_experiment import (
+    BatchNormCriteria,
+    BatchNormExperimentResult,
+    run_batchnorm_experiment,
+)
 from .bigram_lm import BigramModel, Vocabulary, run_bigram_experiment
 from .context_mlp import (
     ContextDataset,
@@ -46,6 +52,8 @@ from .xor import train_xor
 __all__ = [
     "MLP",
     "AttentionConfig",
+    "BatchNormCriteria",
+    "BatchNormExperimentResult",
     "BigramModel",
     "ComparisonCriteria",
     "ContextDataset",
@@ -53,6 +61,7 @@ __all__ = [
     "ContextTrainingResult",
     "DecoderLanguageModel",
     "KaimingComparisonResult",
+    "ScratchBatchNorm",
     "ShiftAssessment",
     "ShiftPolicy",
     "ShiftReport",
@@ -74,6 +83,7 @@ __all__ = [
     "manual_backward",
     "run_attention_experiment",
     "run_autodiff_experiment",
+    "run_batchnorm_experiment",
     "run_bigram_experiment",
     "run_kaiming_comparison",
     "run_manual_backprop_experiment",
