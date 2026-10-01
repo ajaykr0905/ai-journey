@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import platform
 import random
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -63,6 +64,19 @@ class BatchNormModeTrap:
 
 
 @dataclass(frozen=True)
+class BatchNormRuntimeMetadata:
+    """Public-safe runtime provenance for the CPU experiment."""
+
+    python_version: str
+    torch_version: str
+    numpy_version: str
+    device: str
+    machine: str
+    deterministic_algorithms: bool
+    intraop_threads: int
+
+
+@dataclass(frozen=True)
 class BatchNormExperimentResult:
     """Deterministic transformer evidence for scratch BatchNorm behavior."""
 
@@ -78,6 +92,7 @@ class BatchNormExperimentResult:
     batch_coupling: BatchCouplingResult
     layer_state_fingerprints: tuple[tuple[str, str], ...]
     model_fingerprint: str
+    runtime: BatchNormRuntimeMetadata
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -96,6 +111,7 @@ class BatchNormExperimentResult:
                 for name, fingerprint in self.layer_state_fingerprints
             ],
             "model_fingerprint": self.model_fingerprint,
+            "runtime": asdict(self.runtime),
         }
 
 
@@ -230,6 +246,15 @@ def _run_batchnorm_experiment(
         batch_coupling=coupling,
         layer_state_fingerprints=states,
         model_fingerprint=model_fingerprint(model),
+        runtime=BatchNormRuntimeMetadata(
+            python_version=platform.python_version(),
+            torch_version=torch.__version__,
+            numpy_version=np.__version__,
+            device="cpu",
+            machine=platform.machine() or "unknown",
+            deterministic_algorithms=torch.are_deterministic_algorithms_enabled(),
+            intraop_threads=torch.get_num_threads(),
+        ),
     )
 
 
