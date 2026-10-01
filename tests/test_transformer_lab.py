@@ -19,6 +19,7 @@ from ai_journey.transformer_lab import (
     TransformerBlock,
     TransformerConfig,
     TransformerLabError,
+    build_normalization,
     build_optimizer,
     evaluate_nll,
     expected_initialization_std,
@@ -154,6 +155,36 @@ class TransformerConfigTests(unittest.TestCase):
             TrainingConfig(steps=0)
         with self.assertRaisesRegex(TransformerLabError, "learning_rate"):
             TrainingConfig(learning_rate=0)
+
+    def test_normalization_policy_builds_validated_layers(self) -> None:
+        from torch import nn
+
+        from ai_journey.batch_normalization import ScratchBatchNorm
+
+        layer = build_normalization(
+            TransformerConfig(vocab_size=7, embedding_dim=12, head_count=3)
+        )
+        self.assertIsInstance(layer, nn.LayerNorm)
+        config = TransformerConfig(
+            vocab_size=7,
+            embedding_dim=12,
+            head_count=3,
+            normalization_mode="scratch_batch_norm",
+            batch_norm_eps=2e-5,
+            batch_norm_momentum=0.25,
+        )
+        scratch = build_normalization(config)
+        self.assertIsInstance(scratch, ScratchBatchNorm)
+        self.assertEqual(scratch.eps, 2e-5)
+        self.assertEqual(scratch.momentum, 0.25)
+        with self.assertRaisesRegex(TransformerLabError, "normalization_mode"):
+            TransformerConfig(vocab_size=7, normalization_mode="group_norm")
+        for value in (0, float("inf"), True):
+            with self.subTest(value=value), self.assertRaises(TransformerLabError):
+                TransformerConfig(vocab_size=7, batch_norm_eps=value)
+        for value in (0, 1.1, float("nan"), True):
+            with self.subTest(value=value), self.assertRaises(TransformerLabError):
+                TransformerConfig(vocab_size=7, batch_norm_momentum=value)
 
 
 class CharacterCodecTests(unittest.TestCase):
