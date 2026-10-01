@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import platform
 import random
@@ -37,6 +38,8 @@ from .transformer_lab import (
     seed_everything,
     train_steps,
 )
+
+BATCHNORM_SCHEMA_VERSION = 1
 
 
 @contextmanager
@@ -94,8 +97,9 @@ class BatchNormExperimentResult:
     model_fingerprint: str
     runtime: BatchNormRuntimeMetadata
 
-    def to_dict(self) -> dict[str, Any]:
+    def _payload(self) -> dict[str, Any]:
         return {
+            "schema_version": BATCHNORM_SCHEMA_VERSION,
             "corpus_fingerprint": self.corpus_fingerprint,
             "model_config": asdict(self.model_config),
             "training_config": asdict(self.training_config),
@@ -113,6 +117,17 @@ class BatchNormExperimentResult:
             "model_fingerprint": self.model_fingerprint,
             "runtime": asdict(self.runtime),
         }
+
+    def evidence_fingerprint(self) -> str:
+        payload = json.dumps(
+            self._payload(), sort_keys=True, separators=(",", ":")
+        ).encode()
+        return sha256(payload).hexdigest()
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = self._payload()
+        payload["evidence_fingerprint"] = self.evidence_fingerprint()
+        return payload
 
 
 @torch.no_grad()

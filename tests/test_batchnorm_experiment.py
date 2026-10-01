@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import random
 import sys
 import tempfile
 import unittest
+from hashlib import sha256
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +97,15 @@ class BatchNormExperimentTests(unittest.TestCase):
                 ),
             )
         payload = result.to_dict()
+        fingerprint = payload.pop("evidence_fingerprint")
+        self.assertEqual(payload["schema_version"], 1)
+        self.assertEqual(
+            fingerprint,
+            sha256(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest(),
+        )
+        self.assertEqual(fingerprint, result.evidence_fingerprint())
         self.assertEqual(len(result.trace), 2)
         self.assertEqual(len(result.layer_state_fingerprints), 3)
         self.assertEqual(len(result.model_fingerprint), 64)
