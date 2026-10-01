@@ -15,6 +15,8 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
+from .batch_normalization import ScratchBatchNorm
+
 
 class TransformerLabError(ValueError):
     """Raised when transformer data, configuration, or state is invalid."""
@@ -44,6 +46,9 @@ class TransformerConfig:
     initialization_std: float = 0.02
     initialization_mode: str = "fixed_normal"
     initialization_gain: float = math.sqrt(2.0)
+    normalization_mode: str = "layer_norm"
+    batch_norm_eps: float = 1e-5
+    batch_norm_momentum: float = 0.1
 
     def __post_init__(self) -> None:
         for name in (
@@ -83,6 +88,24 @@ class TransformerConfig:
             or self.initialization_gain <= 0
         ):
             raise TransformerLabError("initialization_gain must be positive and finite")
+        if self.normalization_mode not in {"layer_norm", "scratch_batch_norm"}:
+            raise TransformerLabError(
+                "normalization_mode must be 'layer_norm' or 'scratch_batch_norm'"
+            )
+        if (
+            isinstance(self.batch_norm_eps, bool)
+            or not isinstance(self.batch_norm_eps, (int, float))
+            or not math.isfinite(self.batch_norm_eps)
+            or self.batch_norm_eps <= 0
+        ):
+            raise TransformerLabError("batch_norm_eps must be positive and finite")
+        if (
+            isinstance(self.batch_norm_momentum, bool)
+            or not isinstance(self.batch_norm_momentum, (int, float))
+            or not math.isfinite(self.batch_norm_momentum)
+            or not 0 < self.batch_norm_momentum <= 1
+        ):
+            raise TransformerLabError("batch_norm_momentum must be in (0, 1]")
 
     @property
     def head_dim(self) -> int:
@@ -334,14 +357,28 @@ class FeedForward(nn.Module):
         return self.network(inputs)
 
 
+def build_normalization(config: TransformerConfig) -> nn.Module:
+    """Build the configured last-dimension normalization layer."""
+
+    if not isinstance(config, TransformerConfig):
+        raise TypeError("config must be TransformerConfig")
+    if config.normalization_mode == "scratch_batch_norm":
+        return ScratchBatchNorm(
+            config.embedding_dim,
+            eps=config.batch_norm_eps,
+            momentum=config.batch_norm_momentum,
+        )
+    return nn.LayerNorm(config.embedding_dim)
+
+
 class TransformerBlock(nn.Module):
     """Pre-normalized attention and feed-forward residual block."""
 
     def __init__(self, config: TransformerConfig) -> None:
         super().__init__()
-        self.attention_norm = nn.LayerNorm(config.embedding_dim)
+        self.attention_norm = build_normalization(config)
         self.attention = CausalSelfAttention(config)
-        self.feed_forward_norm = nn.LayerNorm(config.embedding_dim)
+        self.feed_forward_norm = build_normalization(config)
         self.feed_forward = FeedForward(config)
 
     def forward(self, inputs: Tensor) -> Tensor:
@@ -371,7 +408,7 @@ class DecoderLanguageModel(nn.Module):
         self.blocks = nn.ModuleList(
             [TransformerBlock(config) for _ in range(config.layer_count)]
         )
-        self.final_norm = nn.LayerNorm(config.embedding_dim)
+        self.final_norm = build_normalization(config)
         self.lm_head = nn.Linear(config.embedding_dim, config.vocab_size, bias=False)
         self.apply(self._initialize)
 

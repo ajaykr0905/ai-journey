@@ -19,6 +19,7 @@ from ai_journey.transformer_lab import (
     TransformerBlock,
     TransformerConfig,
     TransformerLabError,
+    build_normalization,
     build_optimizer,
     evaluate_nll,
     expected_initialization_std,
@@ -155,6 +156,36 @@ class TransformerConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(TransformerLabError, "learning_rate"):
             TrainingConfig(learning_rate=0)
 
+    def test_normalization_policy_builds_validated_layers(self) -> None:
+        from torch import nn
+
+        from ai_journey.batch_normalization import ScratchBatchNorm
+
+        layer = build_normalization(
+            TransformerConfig(vocab_size=7, embedding_dim=12, head_count=3)
+        )
+        self.assertIsInstance(layer, nn.LayerNorm)
+        config = TransformerConfig(
+            vocab_size=7,
+            embedding_dim=12,
+            head_count=3,
+            normalization_mode="scratch_batch_norm",
+            batch_norm_eps=2e-5,
+            batch_norm_momentum=0.25,
+        )
+        scratch = build_normalization(config)
+        self.assertIsInstance(scratch, ScratchBatchNorm)
+        self.assertEqual(scratch.eps, 2e-5)
+        self.assertEqual(scratch.momentum, 0.25)
+        with self.assertRaisesRegex(TransformerLabError, "normalization_mode"):
+            TransformerConfig(vocab_size=7, normalization_mode="group_norm")
+        for value in (0, float("inf"), True):
+            with self.subTest(value=value), self.assertRaises(TransformerLabError):
+                TransformerConfig(vocab_size=7, batch_norm_eps=value)
+        for value in (0, 1.1, float("nan"), True):
+            with self.subTest(value=value), self.assertRaises(TransformerLabError):
+                TransformerConfig(vocab_size=7, batch_norm_momentum=value)
+
 
 class CharacterCodecTests(unittest.TestCase):
     def test_codec_round_trips_public_text(self) -> None:
@@ -258,8 +289,54 @@ class TransformerBlockTests(unittest.TestCase):
             all(parameter.grad is not None for parameter in block.parameters())
         )
 
+    def test_scratch_batchnorm_policy_updates_both_block_statistics(self) -> None:
+        import torch
+
+        from ai_journey.batch_normalization import ScratchBatchNorm
+
+        block = TransformerBlock(
+            TransformerConfig(
+                vocab_size=8,
+                block_size=4,
+                embedding_dim=8,
+                head_count=2,
+                normalization_mode="scratch_batch_norm",
+            )
+        )
+        outputs = block(torch.randn(3, 4, 8))
+        self.assertEqual(outputs.shape, (3, 4, 8))
+        layers = [
+            module for module in block.modules() if isinstance(module, ScratchBatchNorm)
+        ]
+        self.assertEqual(len(layers), 2)
+        self.assertEqual([int(layer.num_batches_tracked) for layer in layers], [1, 1])
+
 
 class DecoderLanguageModelTests(unittest.TestCase):
+    def test_scratch_batchnorm_policy_covers_blocks_and_final_stream(self) -> None:
+        import torch
+
+        from ai_journey.batch_normalization import ScratchBatchNorm
+
+        config = TransformerConfig(
+            vocab_size=9,
+            block_size=4,
+            embedding_dim=8,
+            head_count=2,
+            layer_count=2,
+            normalization_mode="scratch_batch_norm",
+        )
+        model = DecoderLanguageModel(config)
+        token_ids = torch.randint(0, config.vocab_size, (3, config.block_size))
+        logits, loss = model(token_ids, token_ids)
+        self.assertEqual(logits.shape, (3, config.block_size, config.vocab_size))
+        self.assertIsNotNone(loss)
+        layers = [
+            module for module in model.modules() if isinstance(module, ScratchBatchNorm)
+        ]
+        self.assertEqual(len(layers), 2 * config.layer_count + 1)
+        self.assertTrue(all(int(layer.num_batches_tracked) == 1 for layer in layers))
+
     def test_model_returns_token_logits_and_cross_entropy(self) -> None:
         import torch
 
@@ -315,6 +392,33 @@ class DecoderLanguageModelTests(unittest.TestCase):
         self.assertTrue(all(parameter.ndim >= 2 for parameter in groups[0.2]))
         self.assertTrue(all(parameter.ndim < 2 for parameter in groups[0.0]))
 
+    def test_optimizer_excludes_scratch_batchnorm_affine_state_from_decay(self) -> None:
+        from ai_journey.batch_normalization import ScratchBatchNorm
+
+        model = DecoderLanguageModel(
+            TransformerConfig(
+                vocab_size=5,
+                embedding_dim=8,
+                head_count=2,
+                normalization_mode="scratch_batch_norm",
+            )
+        )
+        optimizer = build_optimizer(model, TrainingConfig(weight_decay=0.3))
+        no_decay = {
+            id(parameter)
+            for group in optimizer.param_groups
+            if group["weight_decay"] == 0.0
+            for parameter in group["params"]
+        }
+        batch_norm_parameters = {
+            id(parameter)
+            for module in model.modules()
+            if isinstance(module, ScratchBatchNorm)
+            for parameter in module.parameters(recurse=False)
+        }
+        self.assertTrue(batch_norm_parameters)
+        self.assertTrue(batch_norm_parameters <= no_decay)
+
     def test_evaluation_is_finite_and_restores_training_mode(self) -> None:
         import math
 
@@ -325,6 +429,36 @@ class DecoderLanguageModelTests(unittest.TestCase):
         ).train()
         loss = evaluate_nll(model, torch.arange(30) % 5, batch_size=3)
         self.assertTrue(math.isfinite(loss))
+        self.assertTrue(model.training)
+
+    def test_inference_paths_preserve_batchnorm_running_state(self) -> None:
+        import torch
+
+        from ai_journey.batch_normalization import ScratchBatchNorm, snapshot_batch_norm
+
+        config = TransformerConfig(
+            vocab_size=5,
+            block_size=4,
+            embedding_dim=8,
+            head_count=2,
+            layer_count=1,
+            normalization_mode="scratch_batch_norm",
+        )
+        model = DecoderLanguageModel(config).train()
+        model(torch.arange(12).reshape(3, 4) % config.vocab_size)
+        layers = [
+            module for module in model.modules() if isinstance(module, ScratchBatchNorm)
+        ]
+        before = [snapshot_batch_norm(layer).fingerprint() for layer in layers]
+        evaluate_nll(model, torch.arange(30) % config.vocab_size, batch_size=3)
+        generated = model.generate(
+            torch.tensor([[0, 1, 2, 3]]),
+            new_tokens=2,
+            generator=torch.Generator().manual_seed(27),
+        )
+        after = [snapshot_batch_norm(layer).fingerprint() for layer in layers]
+        self.assertEqual(before, after)
+        self.assertEqual(generated.shape, (1, 6))
         self.assertTrue(model.training)
 
     def test_training_emits_finite_step_and_gradient_metrics(self) -> None:
@@ -391,6 +525,59 @@ class DecoderLanguageModelTests(unittest.TestCase):
         self.assertEqual(model_fingerprint(model), expected_fingerprint)
         self.assertEqual(cursor.state_dict(), expected_cursor)
 
+    def test_checkpoint_restores_scratch_batchnorm_running_statistics(self) -> None:
+        import torch
+
+        from ai_journey.batch_normalization import ScratchBatchNorm, snapshot_batch_norm
+
+        seed_everything(27)
+        model_config = TransformerConfig(
+            vocab_size=5,
+            block_size=4,
+            embedding_dim=8,
+            head_count=2,
+            layer_count=1,
+            normalization_mode="scratch_batch_norm",
+        )
+        training = TrainingConfig(steps=2, batch_size=3, seed=27)
+        model = DecoderLanguageModel(model_config)
+        optimizer = build_optimizer(model, training)
+        cursor = BatchCursor(
+            torch.arange(40) % 5,
+            block_size=4,
+            batch_size=3,
+            seed=training.seed,
+        )
+        train_steps(model, cursor, optimizer, training, step_count=2)
+        layers = [
+            module for module in model.modules() if isinstance(module, ScratchBatchNorm)
+        ]
+        expected = [snapshot_batch_norm(layer).fingerprint() for layer in layers]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "batchnorm.pt"
+            save_training_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                training_config=training,
+                corpus_fingerprint="d" * 64,
+                step=2,
+            )
+            for layer in layers:
+                layer.reset_running_stats()
+            load_training_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                training_config=training,
+                corpus_fingerprint="d" * 64,
+            )
+        actual = [snapshot_batch_norm(layer).fingerprint() for layer in layers]
+        self.assertEqual(actual, expected)
+        self.assertTrue(all(int(layer.num_batches_tracked) == 2 for layer in layers))
+
     def test_checkpoint_rejects_a_different_initialization_policy(self) -> None:
         import torch
 
@@ -447,6 +634,56 @@ class DecoderLanguageModelTests(unittest.TestCase):
                     ),
                     training_config=training,
                     corpus_fingerprint="c" * 64,
+                )
+
+    def test_checkpoint_rejects_a_different_normalization_policy(self) -> None:
+        import torch
+
+        training = TrainingConfig(steps=1, batch_size=3)
+        layer_norm_model = DecoderLanguageModel(
+            TransformerConfig(vocab_size=5, block_size=4, embedding_dim=8, head_count=2)
+        )
+        cursor = BatchCursor(
+            torch.arange(30) % 5,
+            block_size=4,
+            batch_size=3,
+            seed=training.seed,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "layer-norm.pt"
+            save_training_checkpoint(
+                path,
+                model=layer_norm_model,
+                optimizer=build_optimizer(layer_norm_model, training),
+                cursor=cursor,
+                training_config=training,
+                corpus_fingerprint="e" * 64,
+                step=0,
+            )
+            batch_norm_model = DecoderLanguageModel(
+                TransformerConfig(
+                    vocab_size=5,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    normalization_mode="scratch_batch_norm",
+                )
+            )
+            with self.assertRaisesRegex(
+                TransformerLabError, "model configuration mismatch"
+            ):
+                load_training_checkpoint(
+                    path,
+                    model=batch_norm_model,
+                    optimizer=build_optimizer(batch_norm_model, training),
+                    cursor=BatchCursor(
+                        torch.arange(30) % 5,
+                        block_size=4,
+                        batch_size=3,
+                        seed=training.seed,
+                    ),
+                    training_config=training,
+                    corpus_fingerprint="e" * 64,
                 )
 
     def test_checkpoint_restart_matches_uninterrupted_training_bit_exactly(
@@ -506,6 +743,66 @@ class DecoderLanguageModelTests(unittest.TestCase):
                 step_count=1,
             )[0]
         self.assertEqual(actual_metric, expected_metric)
+        self.assertEqual(model_fingerprint(resumed_model), expected_fingerprint)
+
+    def test_batchnorm_checkpoint_restart_is_bit_exact(self) -> None:
+        import torch
+
+        seed_everything(27)
+        model_config = TransformerConfig(
+            vocab_size=5,
+            block_size=4,
+            embedding_dim=8,
+            head_count=2,
+            layer_count=1,
+            dropout=0.1,
+            normalization_mode="scratch_batch_norm",
+            batch_norm_momentum=0.25,
+        )
+        training = TrainingConfig(steps=3, batch_size=3, learning_rate=0.005, seed=27)
+        tokens = torch.arange(48) % 5
+        model = DecoderLanguageModel(model_config)
+        optimizer = build_optimizer(model, training)
+        cursor = BatchCursor(tokens, block_size=4, batch_size=3, seed=training.seed)
+        train_steps(model, cursor, optimizer, training, step_count=1)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "batchnorm-checkpoint.pt"
+            save_training_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                training_config=training,
+                corpus_fingerprint="f" * 64,
+                step=1,
+            )
+            expected_metrics = train_steps(
+                model, cursor, optimizer, training, start_step=1, step_count=2
+            )
+            expected_fingerprint = model_fingerprint(model)
+
+            resumed_model = DecoderLanguageModel(model_config)
+            resumed_optimizer = build_optimizer(resumed_model, training)
+            resumed_cursor = BatchCursor(
+                tokens, block_size=4, batch_size=3, seed=training.seed
+            )
+            start_step = load_training_checkpoint(
+                path,
+                model=resumed_model,
+                optimizer=resumed_optimizer,
+                cursor=resumed_cursor,
+                training_config=training,
+                corpus_fingerprint="f" * 64,
+            )
+            actual_metrics = train_steps(
+                resumed_model,
+                resumed_cursor,
+                resumed_optimizer,
+                training,
+                start_step=start_step,
+                step_count=2,
+            )
+        self.assertEqual(actual_metrics, expected_metrics)
         self.assertEqual(model_fingerprint(resumed_model), expected_fingerprint)
 
 

@@ -1,7 +1,7 @@
-# AI Journey: Days 0–26
+# AI Journey: Days 0–27
 
 This repository is a public-safe, executable record of an added setup day plus the
-first twenty-six workbook days of a 90-day AI engineering learning plan. It combines
+first twenty-seven workbook days of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -52,6 +52,9 @@ then grow these exercises into production-quality training and inference project
 - A controlled fixed-normal versus fan-in Kaiming experiment with initialization
   audits, matched loss curves, held-out evaluation, and evidence gates in
   [`src/ai_journey/initialization_comparison.py`](src/ai_journey/initialization_comparison.py)
+- A scratch BatchNorm implementation with persistent running statistics,
+  checkpoint-safe transformer integration, and a controlled train/eval mode-trap
+  experiment in [`src/ai_journey/batch_normalization.py`](src/ai_journey/batch_normalization.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -114,15 +117,19 @@ python scripts/run_day_26.py \
   --output artifacts/day-26-kaiming.json \
   --loss-plot artifacts/day-26-loss-curves.svg \
   --audit-plot artifacts/day-26-initialization.svg
+python scripts/run_day_27.py \
+  --corpus data/day-19-demo-names.txt \
+  --output artifacts/day-27-batchnorm.json \
+  --plot artifacts/day-27-batchnorm.svg
 python -m unittest discover -s tests -v
 ```
 
-PyTorch is required for the Day 24–26 transformer experiments. The default verification
+PyTorch is required for the Day 24–27 transformer experiments. The default verification
 commands run on CPU and do not claim GPU or distributed execution.
 
 ## Configuration safety
 
-Days 0–26 require no credentials. Never commit `.env`, credentials, browser data,
+Days 0–27 require no credentials. Never commit `.env`, credentials, browser data,
 cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 
 ## Daily map
@@ -156,6 +163,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 24 | 2026-09-28 | Deterministic transformer training, exact restart, and overfit capacity gate |
 | 25 | 2026-09-29 | Controlled initialization, activation histograms, and gradient diagnostics |
 | 26 | 2026-09-30 | Fan-in Kaiming initialization, scale audits, and matched loss curves |
+| 27 | 2026-10-01 | Scratch BatchNorm, persistent running state, and train/eval mode diagnostics |
 
 ## License
 
