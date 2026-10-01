@@ -715,6 +715,66 @@ class DecoderLanguageModelTests(unittest.TestCase):
         self.assertEqual(actual_metric, expected_metric)
         self.assertEqual(model_fingerprint(resumed_model), expected_fingerprint)
 
+    def test_batchnorm_checkpoint_restart_is_bit_exact(self) -> None:
+        import torch
+
+        seed_everything(27)
+        model_config = TransformerConfig(
+            vocab_size=5,
+            block_size=4,
+            embedding_dim=8,
+            head_count=2,
+            layer_count=1,
+            dropout=0.1,
+            normalization_mode="scratch_batch_norm",
+            batch_norm_momentum=0.25,
+        )
+        training = TrainingConfig(steps=3, batch_size=3, learning_rate=0.005, seed=27)
+        tokens = torch.arange(48) % 5
+        model = DecoderLanguageModel(model_config)
+        optimizer = build_optimizer(model, training)
+        cursor = BatchCursor(tokens, block_size=4, batch_size=3, seed=training.seed)
+        train_steps(model, cursor, optimizer, training, step_count=1)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "batchnorm-checkpoint.pt"
+            save_training_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                training_config=training,
+                corpus_fingerprint="f" * 64,
+                step=1,
+            )
+            expected_metrics = train_steps(
+                model, cursor, optimizer, training, start_step=1, step_count=2
+            )
+            expected_fingerprint = model_fingerprint(model)
+
+            resumed_model = DecoderLanguageModel(model_config)
+            resumed_optimizer = build_optimizer(resumed_model, training)
+            resumed_cursor = BatchCursor(
+                tokens, block_size=4, batch_size=3, seed=training.seed
+            )
+            start_step = load_training_checkpoint(
+                path,
+                model=resumed_model,
+                optimizer=resumed_optimizer,
+                cursor=resumed_cursor,
+                training_config=training,
+                corpus_fingerprint="f" * 64,
+            )
+            actual_metrics = train_steps(
+                resumed_model,
+                resumed_cursor,
+                resumed_optimizer,
+                training,
+                start_step=start_step,
+                step_count=2,
+            )
+        self.assertEqual(actual_metrics, expected_metrics)
+        self.assertEqual(model_fingerprint(resumed_model), expected_fingerprint)
+
 
 class TransformerExperimentTests(unittest.TestCase):
     def test_experiment_writes_reproducible_training_evidence(self) -> None:
