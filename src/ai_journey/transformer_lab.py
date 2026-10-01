@@ -408,7 +408,7 @@ class DecoderLanguageModel(nn.Module):
         self.blocks = nn.ModuleList(
             [TransformerBlock(config) for _ in range(config.layer_count)]
         )
-        self.final_norm = nn.LayerNorm(config.embedding_dim)
+        self.final_norm = build_normalization(config)
         self.lm_head = nn.Linear(config.embedding_dim, config.vocab_size, bias=False)
         self.apply(self._initialize)
 

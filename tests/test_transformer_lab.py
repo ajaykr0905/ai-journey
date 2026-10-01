@@ -313,6 +313,30 @@ class TransformerBlockTests(unittest.TestCase):
 
 
 class DecoderLanguageModelTests(unittest.TestCase):
+    def test_scratch_batchnorm_policy_covers_blocks_and_final_stream(self) -> None:
+        import torch
+
+        from ai_journey.batch_normalization import ScratchBatchNorm
+
+        config = TransformerConfig(
+            vocab_size=9,
+            block_size=4,
+            embedding_dim=8,
+            head_count=2,
+            layer_count=2,
+            normalization_mode="scratch_batch_norm",
+        )
+        model = DecoderLanguageModel(config)
+        token_ids = torch.randint(0, config.vocab_size, (3, config.block_size))
+        logits, loss = model(token_ids, token_ids)
+        self.assertEqual(logits.shape, (3, config.block_size, config.vocab_size))
+        self.assertIsNotNone(loss)
+        layers = [
+            module for module in model.modules() if isinstance(module, ScratchBatchNorm)
+        ]
+        self.assertEqual(len(layers), 2 * config.layer_count + 1)
+        self.assertTrue(all(int(layer.num_batches_tracked) == 1 for layer in layers))
+
     def test_model_returns_token_logits_and_cross_entropy(self) -> None:
         import torch
 
