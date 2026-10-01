@@ -232,6 +232,73 @@ def write_batchnorm_report(
     temporary.replace(path)
 
 
+def render_batchnorm_diagnostics(
+    path: Path,
+    result: BatchNormExperimentResult,
+) -> None:
+    """Render deterministic SVG panels for mode NLL and batch coupling."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if not isinstance(result, BatchNormExperimentResult):
+        raise TypeError("result must be BatchNormExperimentResult")
+
+    def bars(
+        values: tuple[float, float],
+        labels: tuple[str, str],
+        *,
+        panel_x: int,
+        panel_title: str,
+        color: str,
+    ) -> list[str]:
+        maximum = max(*values, 1e-12)
+        lines = [
+            f'<text x="{panel_x}" y="52" font-size="16" font-weight="bold">{panel_title}</text>'
+        ]
+        for index, (label, value) in enumerate(zip(labels, values, strict=True)):
+            y = 92 + index * 90
+            width = 260 * value / maximum
+            lines.extend(
+                [
+                    f'<text x="{panel_x}" y="{y}" font-size="13">{label}</text>',
+                    f'<rect x="{panel_x}" y="{y + 12}" width="260" height="24" fill="#E5E7EB"/>',
+                    f'<rect x="{panel_x}" y="{y + 12}" width="{width:.6f}" height="24" fill="{color}"/>',
+                    f'<text x="{panel_x + 270}" y="{y + 30}" font-size="12">{value:.6f}</text>',
+                ]
+            )
+        return lines
+
+    lines = [
+        '<svg xmlns="http://www.w3.org/2000/svg" width="920" height="310" viewBox="0 0 920 310">',
+        '<rect width="920" height="310" fill="white"/>',
+        '<text x="24" y="26" font-size="19" font-weight="bold">Day 27 BatchNorm mode diagnostics</text>',
+        *bars(
+            (result.mode_trap.eval_nll, result.mode_trap.train_mode_nll),
+            ("correct eval() NLL", "mistaken train() NLL"),
+            panel_x=24,
+            panel_title="Validation negative log-likelihood",
+            color="#2563EB",
+        ),
+        *bars(
+            (
+                result.batch_coupling.train_max_abs_delta,
+                result.batch_coupling.eval_max_abs_delta,
+            ),
+            ("train() companion delta", "eval() companion delta"),
+            panel_x=480,
+            panel_title="Maximum batch-composition delta",
+            color="#DC2626",
+        ),
+        '<text x="24" y="292" font-size="11" fill="#4B5563">CPU-only deterministic experiment; bars scale within each panel.</text>',
+        "</svg>",
+        "",
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text("\n".join(lines), encoding="utf-8", newline="\n")
+    temporary.replace(path)
+
+
 @torch.no_grad()
 def evaluate_mode_nll(
     model: DecoderLanguageModel,

@@ -19,6 +19,7 @@ from ai_journey.batchnorm_experiment import (
     build_batchnorm_report,
     evaluate_batchnorm_experiment,
     evaluate_mode_nll,
+    render_batchnorm_diagnostics,
     run_batchnorm_experiment,
     write_batchnorm_report,
 )
@@ -304,3 +305,34 @@ class BatchNormExperimentTests(unittest.TestCase):
         expected_payload = build_batchnorm_report(result, criteria)
         expected_payload.pop("report_fingerprint")
         self.assertEqual(payload, json.loads(json.dumps(expected_payload)))
+
+    def test_diagnostic_renderer_writes_stable_atomic_svg(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus_path = root / "corpus.txt"
+            corpus_path.write_text("anna\naria\namara\n" * 8, encoding="utf-8")
+            corpus = TokenCorpus.from_path(corpus_path, block_size=4)
+            result = run_batchnorm_experiment(
+                corpus,
+                model_config=TransformerConfig(
+                    vocab_size=corpus.vocab_size,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=1,
+                    normalization_mode="scratch_batch_norm",
+                ),
+                training_config=TrainingConfig(steps=1, batch_size=4, seed=27),
+            )
+            path = root / "nested" / "diagnostics.svg"
+            render_batchnorm_diagnostics(path, result)
+            first = path.read_bytes()
+            render_batchnorm_diagnostics(path, result)
+            second = path.read_bytes()
+            rendered = second.decode()
+            self.assertFalse(path.with_name(".diagnostics.svg.tmp").exists())
+        self.assertEqual(first, second)
+        self.assertIn("correct eval() NLL", rendered)
+        self.assertIn("mistaken train() NLL", rendered)
+        self.assertIn("train() companion delta", rendered)
+        self.assertIn("CPU-only deterministic experiment", rendered)
