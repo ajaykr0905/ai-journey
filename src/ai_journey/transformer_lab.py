@@ -5,7 +5,9 @@ from __future__ import annotations
 import copy
 import json
 import math
+import os
 import random
+import tempfile
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -652,9 +654,23 @@ def save_training_checkpoint(
         "torch_rng_state": torch.get_rng_state(),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    torch.save(payload, temporary)
-    temporary.replace(path)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            torch.save(payload, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def load_training_checkpoint(
