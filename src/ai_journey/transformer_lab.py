@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import random
@@ -668,15 +669,26 @@ def load_training_checkpoint(
         raise TransformerLabError("checkpoint training configuration mismatch")
     if payload.get("corpus_fingerprint") != corpus_fingerprint:
         raise TransformerLabError("checkpoint corpus fingerprint mismatch")
-    model.load_state_dict(payload["model_state"])
-    if model_fingerprint(model) != payload.get("model_fingerprint"):
-        raise TransformerLabError("checkpoint model fingerprint mismatch")
-    optimizer.load_state_dict(payload["optimizer_state"])
-    cursor.load_state_dict(payload["cursor_state"])
-    torch.set_rng_state(payload["torch_rng_state"])
     step = payload.get("step")
     if isinstance(step, bool) or not isinstance(step, int) or step < 0:
         raise TransformerLabError("checkpoint step is invalid")
+    original_model = copy.deepcopy(model.state_dict())
+    original_optimizer = copy.deepcopy(optimizer.state_dict())
+    original_cursor = cursor.state_dict()
+    original_rng = torch.get_rng_state().clone()
+    try:
+        model.load_state_dict(payload["model_state"])
+        if model_fingerprint(model) != payload.get("model_fingerprint"):
+            raise TransformerLabError("checkpoint model fingerprint mismatch")
+        optimizer.load_state_dict(payload["optimizer_state"])
+        cursor.load_state_dict(payload["cursor_state"])
+        torch.set_rng_state(payload["torch_rng_state"])
+    except Exception:
+        model.load_state_dict(original_model)
+        optimizer.load_state_dict(original_optimizer)
+        cursor.load_state_dict(original_cursor)
+        torch.set_rng_state(original_rng)
+        raise
     return step
 
 
