@@ -11,6 +11,44 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Day24RunnerTests(unittest.TestCase):
+    def test_invalid_numeric_controls_cannot_replace_existing_artifacts(self) -> None:
+        for option in (
+            "initialization-std",
+            "learning-rate",
+            "gradient-clip",
+            "weight-decay",
+        ):
+            with (
+                self.subTest(option=option),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                output = root / "report.json"
+                checkpoint = root / "checkpoint.pt"
+                output.write_bytes(b"previous report")
+                checkpoint.write_bytes(b"previous checkpoint")
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        str(ROOT / "scripts" / "run_day_24.py"),
+                        "--corpus",
+                        str(ROOT / "data" / "day-19-demo-names.txt"),
+                        "--output",
+                        str(output),
+                        "--checkpoint",
+                        str(checkpoint),
+                        f"--{option}=nan",
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn(f"{option.replace('-', '_')} must be", completed.stderr)
+                self.assertIn("finite", completed.stderr)
+                self.assertEqual(output.read_bytes(), b"previous report")
+                self.assertEqual(checkpoint.read_bytes(), b"previous checkpoint")
+
     def test_runner_creates_checkpoint_and_json_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
