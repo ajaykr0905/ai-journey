@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import copy
 import tempfile
 import threading
 import unittest
@@ -119,6 +120,127 @@ class CheckpointPublicationTests(unittest.TestCase):
         self.assertIn(payload["step"], (1, 2))
         self.assertEqual(payload["model_fingerprint"], model_fingerprint(self.model))
         self.assertEqual(list(self.path.parent.iterdir()), [self.path])
+
+    def populate_optimizer(self) -> None:
+        for parameter in self.model.parameters():
+            parameter.grad = torch.ones_like(parameter)
+        self.optimizer.step()
+
+    def test_nonfinite_model_state_cannot_replace_a_valid_checkpoint(self) -> None:
+        self.save()
+        original = self.path.read_bytes()
+        for value in (float("nan"), float("inf"), -float("inf")):
+            parameter = next(self.model.parameters())
+            before = parameter.detach().clone()
+            with torch.no_grad():
+                parameter.view(-1)[0] = value
+            with self.subTest(value=value), self.assertRaisesRegex(
+                ValueError, "finite"
+            ):
+                self.save(2)
+            self.assertEqual(self.path.read_bytes(), original)
+            self.assertEqual(list(self.path.parent.iterdir()), [self.path])
+            with torch.no_grad():
+                parameter.copy_(before)
+
+    def test_nonfinite_optimizer_state_cannot_replace_a_valid_checkpoint(self) -> None:
+        self.populate_optimizer()
+        self.save()
+        original = self.path.read_bytes()
+        parameter = next(self.model.parameters())
+        for field in ("exp_avg", "exp_avg_sq", "step"):
+            tensor = self.optimizer.state[parameter][field]
+            before = tensor.clone()
+            tensor.view(-1)[0] = float("nan")
+            with self.subTest(field=field), self.assertRaisesRegex(
+                ValueError, "finite"
+            ):
+                self.save(2)
+            self.assertEqual(self.path.read_bytes(), original)
+            tensor.copy_(before)
+        self.optimizer.param_groups[0]["lr"] = float("inf")
+        with self.assertRaisesRegex(ValueError, "finite"):
+            self.save(2)
+        self.assertEqual(self.path.read_bytes(), original)
+
+    def test_corrupt_optimizer_moments_are_rejected_before_resume(self) -> None:
+        self.populate_optimizer()
+        self.save()
+        valid = torch.load(self.path, weights_only=True)
+        model_before = model_fingerprint(self.model)
+        optimizer_before = copy.deepcopy(self.optimizer.state_dict())
+        cursor_before = self.cursor.state_dict()
+        rng_before = torch.get_rng_state().clone()
+        for field in ("exp_avg", "exp_avg_sq", "step"):
+            payload = copy.deepcopy(valid)
+            state = next(iter(payload["optimizer_state"]["state"].values()))
+            state[field].view(-1)[0] = float("inf")
+            torch.save(payload, self.path)
+            with self.subTest(field=field), self.assertRaisesRegex(
+                ValueError, "finite"
+            ):
+                load_training_checkpoint(
+                    self.path,
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    cursor=self.cursor,
+                    training_config=self.training,
+                    corpus_fingerprint="a" * 64,
+                )
+            self.assertEqual(model_fingerprint(self.model), model_before)
+            self.assertEqual(self.cursor.state_dict(), cursor_before)
+            self.assertTrue(torch.equal(torch.get_rng_state(), rng_before))
+            for key, expected in optimizer_before["state"].items():
+                for name, tensor in expected.items():
+                    self.assertTrue(
+                        torch.equal(
+                            self.optimizer.state_dict()["state"][key][name], tensor
+                        )
+                    )
+
+    def test_nonfinite_model_with_matching_hash_is_rejected_before_resume(self) -> None:
+        self.save()
+        payload = torch.load(self.path, weights_only=True)
+        corrupt = copy.deepcopy(self.model)
+        with torch.no_grad():
+            next(corrupt.parameters()).view(-1)[0] = float("nan")
+        payload["model_state"] = corrupt.state_dict()
+        payload["model_fingerprint"] = model_fingerprint(corrupt)
+        torch.save(payload, self.path)
+        before = model_fingerprint(self.model)
+        with self.assertRaisesRegex(ValueError, "finite"):
+            load_training_checkpoint(
+                self.path,
+                model=self.model,
+                optimizer=self.optimizer,
+                cursor=self.cursor,
+                training_config=self.training,
+                corpus_fingerprint="a" * 64,
+            )
+        self.assertEqual(model_fingerprint(self.model), before)
+
+    def test_optimizer_cast_overflow_rolls_back_the_restore(self) -> None:
+        self.populate_optimizer()
+        self.save()
+        payload = torch.load(self.path, weights_only=True)
+        state = next(iter(payload["optimizer_state"]["state"].values()))
+        state["exp_avg"] = torch.full_like(state["exp_avg"], 1e100, dtype=torch.float64)
+        torch.save(payload, self.path)
+        optimizer_before = copy.deepcopy(self.optimizer.state_dict())
+        with self.assertRaisesRegex(ValueError, "finite"):
+            load_training_checkpoint(
+                self.path,
+                model=self.model,
+                optimizer=self.optimizer,
+                cursor=self.cursor,
+                training_config=self.training,
+                corpus_fingerprint="a" * 64,
+            )
+        for key, expected in optimizer_before["state"].items():
+            for name, tensor in expected.items():
+                self.assertTrue(
+                    torch.equal(self.optimizer.state_dict()["state"][key][name], tensor)
+                )
 
 
 if __name__ == "__main__":

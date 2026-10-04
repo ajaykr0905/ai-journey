@@ -8,6 +8,7 @@ import math
 import os
 import random
 import tempfile
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -610,6 +611,25 @@ def train_steps(
 CHECKPOINT_SCHEMA_VERSION = 1
 
 
+def _require_finite_checkpoint_state(value: Any, name: str) -> None:
+    """Reject unusable numeric state before publication or optimizer resume."""
+
+    if isinstance(value, Tensor):
+        if (value.is_floating_point() or value.is_complex()) and not bool(
+            torch.isfinite(value).all()
+        ):
+            raise TransformerLabError(f"{name} must be finite")
+    elif isinstance(value, float):
+        if not math.isfinite(value):
+            raise TransformerLabError(f"{name} must be finite")
+    elif isinstance(value, Mapping):
+        for key, item in value.items():
+            _require_finite_checkpoint_state(item, f"{name}.{key}")
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _require_finite_checkpoint_state(item, f"{name}[{index}]")
+
+
 def model_fingerprint(model: DecoderLanguageModel) -> str:
     """Hash model state names, dtypes, shapes, and values."""
 
@@ -653,6 +673,8 @@ def save_training_checkpoint(
         "cursor_state": cursor.state_dict(),
         "torch_rng_state": torch.get_rng_state(),
     }
+    for name in ("model_state", "optimizer_state", "model_config", "training_config"):
+        _require_finite_checkpoint_state(payload[name], name)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -696,6 +718,8 @@ def load_training_checkpoint(
     step = payload.get("step")
     if isinstance(step, bool) or not isinstance(step, int) or step < 0:
         raise TransformerLabError("checkpoint step is invalid")
+    for name in ("model_state", "optimizer_state"):
+        _require_finite_checkpoint_state(payload[name], name)
     original_model = copy.deepcopy(model.state_dict())
     original_optimizer = copy.deepcopy(optimizer.state_dict())
     original_cursor = cursor.state_dict()
@@ -705,6 +729,7 @@ def load_training_checkpoint(
         if model_fingerprint(model) != payload.get("model_fingerprint"):
             raise TransformerLabError("checkpoint model fingerprint mismatch")
         optimizer.load_state_dict(payload["optimizer_state"])
+        _require_finite_checkpoint_state(optimizer.state_dict(), "optimizer_state")
         cursor.load_state_dict(payload["cursor_state"])
         torch.set_rng_state(payload["torch_rng_state"])
     except Exception:
