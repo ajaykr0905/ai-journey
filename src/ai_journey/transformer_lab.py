@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import random
@@ -472,23 +473,28 @@ class DecoderLanguageModel(nn.Module):
             isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0
         ):
             raise TransformerLabError("top_k must be a positive integer")
-        was_training = self.training
-        self.eval()
-        generated = token_ids.clone()
-        for _ in range(new_tokens):
-            context = generated[:, -self.config.block_size :]
-            logits, _ = self(context)
-            next_logits = logits[:, -1] / temperature
-            if top_k is not None:
-                values, _ = torch.topk(next_logits, min(top_k, next_logits.shape[-1]))
-                next_logits[next_logits < values[:, [-1]]] = float("-inf")
-            probabilities = F.softmax(next_logits, dim=-1)
-            next_token = torch.multinomial(
-                probabilities, num_samples=1, generator=generator
-            )
-            generated = torch.cat((generated, next_token), dim=1)
-        self.train(was_training)
-        return generated
+        modes = [(module, module.training) for module in self.modules()]
+        try:
+            self.eval()
+            generated = token_ids.clone()
+            for _ in range(new_tokens):
+                context = generated[:, -self.config.block_size :]
+                logits, _ = self(context)
+                next_logits = logits[:, -1] / temperature
+                if top_k is not None:
+                    values, _ = torch.topk(
+                        next_logits, min(top_k, next_logits.shape[-1])
+                    )
+                    next_logits[next_logits < values[:, [-1]]] = float("-inf")
+                probabilities = F.softmax(next_logits, dim=-1)
+                next_token = torch.multinomial(
+                    probabilities, num_samples=1, generator=generator
+                )
+                generated = torch.cat((generated, next_token), dim=1)
+            return generated
+        finally:
+            for module, training in modes:
+                module.training = training
 
 
 def build_optimizer(
@@ -523,27 +529,30 @@ def evaluate_nll(
         or batch_size <= 0
     ):
         raise TransformerLabError("batch_size must be a positive integer")
-    was_training = model.training
-    model.eval()
-    losses: list[Tensor] = []
-    for start in range(0, len(tokens) - model.config.block_size, batch_size):
-        indexes = range(
-            start,
-            min(start + batch_size, len(tokens) - model.config.block_size),
-        )
-        x = torch.stack([tokens[i : i + model.config.block_size] for i in indexes])
-        y = torch.stack(
-            [tokens[i + 1 : i + model.config.block_size + 1] for i in indexes]
-        )
-        logits, _ = model(x)
-        per_token = F.cross_entropy(
-            logits.reshape(-1, model.config.vocab_size),
-            y.reshape(-1),
-            reduction="none",
-        )
-        losses.append(per_token)
-    model.train(was_training)
-    return float(torch.cat(losses).mean())
+    modes = [(module, module.training) for module in model.modules()]
+    try:
+        model.eval()
+        losses: list[Tensor] = []
+        for start in range(0, len(tokens) - model.config.block_size, batch_size):
+            indexes = range(
+                start,
+                min(start + batch_size, len(tokens) - model.config.block_size),
+            )
+            x = torch.stack([tokens[i : i + model.config.block_size] for i in indexes])
+            y = torch.stack(
+                [tokens[i + 1 : i + model.config.block_size + 1] for i in indexes]
+            )
+            logits, _ = model(x)
+            per_token = F.cross_entropy(
+                logits.reshape(-1, model.config.vocab_size),
+                y.reshape(-1),
+                reduction="none",
+            )
+            losses.append(per_token)
+        return float(torch.cat(losses).mean())
+    finally:
+        for module, training in modes:
+            module.training = training
 
 
 @dataclass(frozen=True)
@@ -668,15 +677,26 @@ def load_training_checkpoint(
         raise TransformerLabError("checkpoint training configuration mismatch")
     if payload.get("corpus_fingerprint") != corpus_fingerprint:
         raise TransformerLabError("checkpoint corpus fingerprint mismatch")
-    model.load_state_dict(payload["model_state"])
-    if model_fingerprint(model) != payload.get("model_fingerprint"):
-        raise TransformerLabError("checkpoint model fingerprint mismatch")
-    optimizer.load_state_dict(payload["optimizer_state"])
-    cursor.load_state_dict(payload["cursor_state"])
-    torch.set_rng_state(payload["torch_rng_state"])
     step = payload.get("step")
     if isinstance(step, bool) or not isinstance(step, int) or step < 0:
         raise TransformerLabError("checkpoint step is invalid")
+    original_model = copy.deepcopy(model.state_dict())
+    original_optimizer = copy.deepcopy(optimizer.state_dict())
+    original_cursor = cursor.state_dict()
+    original_rng = torch.get_rng_state().clone()
+    try:
+        model.load_state_dict(payload["model_state"])
+        if model_fingerprint(model) != payload.get("model_fingerprint"):
+            raise TransformerLabError("checkpoint model fingerprint mismatch")
+        optimizer.load_state_dict(payload["optimizer_state"])
+        cursor.load_state_dict(payload["cursor_state"])
+        torch.set_rng_state(payload["torch_rng_state"])
+    except Exception:
+        model.load_state_dict(original_model)
+        optimizer.load_state_dict(original_optimizer)
+        cursor.load_state_dict(original_cursor)
+        torch.set_rng_state(original_rng)
+        raise
     return step
 
 

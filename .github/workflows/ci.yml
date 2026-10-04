@@ -155,6 +155,10 @@ jobs:
         run: >-
           python scripts/run_day_28.py
           --output /tmp/ai-journey-artifacts/day-28-gradient-audit.json
+      - name: Verify manual BatchNorm backward gradients
+        run: >-
+          python scripts/check_batchnorm_backward.py
+          --output /tmp/ai-journey-artifacts/batchnorm-backward.json
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py

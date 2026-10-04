@@ -127,6 +127,21 @@ python scripts/run_day_27.py \
 python -m unittest discover -s tests -v
 ```
 
+## Verify the BatchNorm reverse pass
+
+```bash
+python scripts/check_batchnorm_backward.py --output artifacts/batchnorm-backward.json
+```
+
+The handwritten reverse pass exposes ten intermediate/leaf gradients, compared
+with CPU float64 autograd. Inputs, scale and bias also pass centered finite
+differences. Tests compare against native PyTorch BatchNorm and cover constant
+features, negative/zero scales and arbitrary upstream gradients. This checks
+training-mode biased variance; it does not model running-statistic updates or
+claim that the learner completed the manual derivation. Exit codes are 0 for a
+passing audit, 1 for failed tolerances and 2 for invalid arguments. Invalid inputs
+leave an existing report untouched.
+
 ## Verify the loss derivative
 
 ```bash
