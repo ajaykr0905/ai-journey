@@ -127,6 +127,20 @@ python scripts/run_day_27.py \
 python -m unittest discover -s tests -v
 ```
 
+## Resume transformer checkpoints safely
+
+The Day 24 training command accepts `--resume` with the same corpus and
+configuration. Saves flush a unique temporary archive before replacing the
+checkpoint; serialization, flush and replacement errors preserve the previous
+file. Concurrent saves publish a complete archive from one writer, with no
+ordering guarantee. These checks cover filesystem errors, not power-loss recovery.
+
+Save and restore reject nonfinite model and optimizer state. AdamW moments must
+match their parameters, variance estimates must be non-negative, and step
+counters must be non-negative integers. A rejected restore preserves the caller's
+model, optimizer, batch position and CPU RNG. No running training thread may
+mutate these objects during save or restore.
+
 ## Verify the BatchNorm reverse pass
 
 ```bash
