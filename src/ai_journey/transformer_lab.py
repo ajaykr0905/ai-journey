@@ -630,6 +630,51 @@ def _require_finite_checkpoint_state(value: Any, name: str) -> None:
             _require_finite_checkpoint_state(item, f"{name}[{index}]")
 
 
+def _validate_adamw_checkpoint_state(optimizer: torch.optim.Optimizer) -> None:
+    """Catch moments that PyTorch accepts on load but cannot safely update."""
+
+    if not isinstance(optimizer, torch.optim.AdamW):
+        return
+    for group in optimizer.param_groups:
+        moments = ["exp_avg", "exp_avg_sq"]
+        if group.get("amsgrad", False):
+            moments.append("max_exp_avg_sq")
+        for parameter in group["params"]:
+            state = optimizer.state.get(parameter, {})
+            if not state:
+                continue  # AdamW allocates state lazily on the first update.
+            if not {"step", *moments}.issubset(state):
+                raise TransformerLabError("AdamW checkpoint is missing optimizer state")
+            step = state["step"]
+            if (
+                not isinstance(step, Tensor)
+                or step.ndim != 0
+                or step.dtype == torch.bool
+                or step.is_complex()
+                or not math.isfinite(float(step))
+                or float(step) < 0
+                or not float(step).is_integer()
+            ):
+                raise TransformerLabError(
+                    "AdamW checkpoint step must be a non-negative integer"
+                )
+            for name in moments:
+                moment = state[name]
+                if (
+                    not isinstance(moment, Tensor)
+                    or moment.shape != parameter.shape
+                    or moment.dtype != parameter.dtype
+                    or moment.device != parameter.device
+                ):
+                    raise TransformerLabError(
+                        f"AdamW checkpoint {name} must match its parameter"
+                    )
+                if name != "exp_avg" and bool((moment < 0).any()):
+                    raise TransformerLabError(
+                        f"AdamW checkpoint {name} must be non-negative"
+                    )
+
+
 def model_fingerprint(model: DecoderLanguageModel) -> str:
     """Hash model state names, dtypes, shapes, and values."""
 
@@ -675,6 +720,7 @@ def save_training_checkpoint(
     }
     for name in ("model_state", "optimizer_state", "model_config", "training_config"):
         _require_finite_checkpoint_state(payload[name], name)
+    _validate_adamw_checkpoint_state(optimizer)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -730,6 +776,7 @@ def load_training_checkpoint(
             raise TransformerLabError("checkpoint model fingerprint mismatch")
         optimizer.load_state_dict(payload["optimizer_state"])
         _require_finite_checkpoint_state(optimizer.state_dict(), "optimizer_state")
+        _validate_adamw_checkpoint_state(optimizer)
         cursor.load_state_dict(payload["cursor_state"])
         torch.set_rng_state(payload["torch_rng_state"])
     except Exception:

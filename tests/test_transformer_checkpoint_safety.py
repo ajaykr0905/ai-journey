@@ -242,6 +242,83 @@ class CheckpointPublicationTests(unittest.TestCase):
                     torch.equal(self.optimizer.state_dict()["state"][key][name], tensor)
                 )
 
+    def test_malformed_adamw_state_is_rejected_before_the_next_training_step(self):
+        self.populate_optimizer()
+        self.save()
+        valid = torch.load(self.path, weights_only=True)
+        optimizer_before = copy.deepcopy(self.optimizer.state_dict())
+        for defect in ("moment_shape", "missing_moment", "negative_variance", "step"):
+            payload = copy.deepcopy(valid)
+            state = next(iter(payload["optimizer_state"]["state"].values()))
+            if defect == "moment_shape":
+                state["exp_avg"] = torch.zeros(1)
+            elif defect == "missing_moment":
+                del state["exp_avg_sq"]
+            elif defect == "negative_variance":
+                state["exp_avg_sq"].view(-1)[0] = -1
+            else:
+                state["step"] = torch.tensor(1.5)
+            torch.save(payload, self.path)
+            with self.subTest(defect=defect), self.assertRaises(ValueError):
+                load_training_checkpoint(
+                    self.path,
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    cursor=self.cursor,
+                    training_config=self.training,
+                    corpus_fingerprint="a" * 64,
+                )
+            for key, expected in optimizer_before["state"].items():
+                for name, tensor in expected.items():
+                    self.assertTrue(
+                        torch.equal(
+                            self.optimizer.state_dict()["state"][key][name], tensor
+                        )
+                    )
+
+    def test_malformed_live_adamw_state_cannot_replace_a_checkpoint(self) -> None:
+        self.populate_optimizer()
+        self.save()
+        original = self.path.read_bytes()
+        state = self.optimizer.state[next(self.model.parameters())]
+        state["exp_avg"] = torch.zeros(1)
+        with self.assertRaises(ValueError):
+            self.save(2)
+        self.assertEqual(self.path.read_bytes(), original)
+
+    def test_amsgrad_state_restores_and_performs_a_valid_update(self) -> None:
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), amsgrad=True)
+        self.populate_optimizer()
+        self.save()
+        load_training_checkpoint(
+            self.path,
+            model=self.model,
+            optimizer=self.optimizer,
+            cursor=self.cursor,
+            training_config=self.training,
+            corpus_fingerprint="a" * 64,
+        )
+        self.populate_optimizer()
+        self.assertTrue(all(torch.isfinite(p).all() for p in self.model.parameters()))
+
+    def test_amsgrad_missing_maximum_is_rejected_before_resume(self) -> None:
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), amsgrad=True)
+        self.populate_optimizer()
+        self.save()
+        payload = torch.load(self.path, weights_only=True)
+        state = next(iter(payload["optimizer_state"]["state"].values()))
+        del state["max_exp_avg_sq"]
+        torch.save(payload, self.path)
+        with self.assertRaises(ValueError):
+            load_training_checkpoint(
+                self.path,
+                model=self.model,
+                optimizer=self.optimizer,
+                cursor=self.cursor,
+                training_config=self.training,
+                corpus_fingerprint="a" * 64,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
