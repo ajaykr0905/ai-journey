@@ -78,9 +78,10 @@ class TransformerConfig:
         if (
             isinstance(self.initialization_std, bool)
             or not isinstance(self.initialization_std, (int, float))
+            or not math.isfinite(self.initialization_std)
             or self.initialization_std <= 0
         ):
-            raise TransformerLabError("initialization_std must be positive")
+            raise TransformerLabError("initialization_std must be positive and finite")
         if self.initialization_mode not in {"fixed_normal", "kaiming_normal"}:
             raise TransformerLabError(
                 "initialization_mode must be 'fixed_normal' or 'kaiming_normal'"
@@ -142,10 +143,20 @@ class TrainingConfig:
             raise TypeError("seed must be an integer")
         for name in ("learning_rate", "gradient_clip"):
             value = getattr(self, name)
-            if not isinstance(value, (int, float)) or value <= 0:
-                raise TransformerLabError(f"{name} must be positive")
-        if not isinstance(self.weight_decay, (int, float)) or self.weight_decay < 0:
-            raise TransformerLabError("weight_decay must be non-negative")
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise TransformerLabError(f"{name} must be positive and finite")
+        if (
+            isinstance(self.weight_decay, bool)
+            or not isinstance(self.weight_decay, (int, float))
+            or not math.isfinite(self.weight_decay)
+            or self.weight_decay < 0
+        ):
+            raise TransformerLabError("weight_decay must be non-negative and finite")
 
 
 @dataclass(frozen=True)

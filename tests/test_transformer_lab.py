@@ -48,6 +48,16 @@ class TransformerConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(TransformerLabError, "initialization_std"):
             TransformerConfig(vocab_size=27, initialization_std=0)
 
+    def test_initialization_scale_rejects_nonfinite_values_before_model_creation(
+        self,
+    ) -> None:
+        for value in (float("nan"), float("inf"), -float("inf"), True, False):
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(TransformerLabError, "initialization_std"),
+            ):
+                TransformerConfig(vocab_size=7, initialization_std=value)
+
     def test_config_rejects_invalid_initialization_policy(self) -> None:
         with self.assertRaisesRegex(TransformerLabError, "initialization_mode"):
             TransformerConfig(vocab_size=27, initialization_mode="xavier")
@@ -155,6 +165,30 @@ class TransformerConfigTests(unittest.TestCase):
             TrainingConfig(steps=0)
         with self.assertRaisesRegex(TransformerLabError, "learning_rate"):
             TrainingConfig(learning_rate=0)
+
+    def test_training_controls_reject_nonfinite_values_and_booleans(self) -> None:
+        for name in ("learning_rate", "gradient_clip", "weight_decay"):
+            for value in (float("nan"), float("inf"), -float("inf"), True, False):
+                with (
+                    self.subTest(name=name, value=value),
+                    self.assertRaisesRegex(TransformerLabError, name),
+                ):
+                    TrainingConfig(**{name: value})
+
+    def test_finite_training_control_boundaries_remain_supported(self) -> None:
+        for value in (1, 1e-12):
+            with self.subTest(value=value):
+                config = TrainingConfig(
+                    learning_rate=value, gradient_clip=value, weight_decay=value
+                )
+                self.assertEqual(config.learning_rate, value)
+                self.assertEqual(config.gradient_clip, value)
+                self.assertEqual(config.weight_decay, value)
+        self.assertEqual(TrainingConfig(weight_decay=0).weight_decay, 0)
+        self.assertEqual(
+            TransformerConfig(vocab_size=7, initialization_std=1).initialization_std,
+            1,
+        )
 
     def test_normalization_policy_builds_validated_layers(self) -> None:
         from torch import nn
