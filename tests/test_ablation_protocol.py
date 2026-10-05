@@ -2,9 +2,19 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from ai_journey.ablation_protocol import AblationArm, ControlledAblation
+import numpy as np
+import torch
+
+from ai_journey.ablation_protocol import (
+    AblationArm,
+    ControlledAblation,
+    run_ablation,
+)
 from ai_journey.transformer_lab import (
+    TokenCorpus,
     TrainingConfig,
     TransformerConfig,
     TransformerLabError,
@@ -126,6 +136,114 @@ class ControlledAblationTests(unittest.TestCase):
                 self.assertRaisesRegex(TransformerLabError, message),
             ):
                 self.protocol(**overrides)
+
+
+class AblationRunnerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.model = TransformerConfig(
+            vocab_size=12,
+            block_size=4,
+            embedding_dim=8,
+            head_count=2,
+            layer_count=1,
+        )
+        self.training = TrainingConfig(
+            steps=1,
+            batch_size=2,
+            learning_rate=3e-3,
+            seed=31,
+        )
+
+    def corpus(self, directory: str) -> TokenCorpus:
+        path = Path(directory) / "corpus.txt"
+        path.write_text("alpha\nbeta\ngamma\ndelta\n" * 8, encoding="utf-8")
+        return TokenCorpus.from_path(path, validation_fraction=0.2, block_size=4)
+
+    def compact_protocol(self, vocab_size: int) -> ControlledAblation:
+        model = replace(self.model, vocab_size=vocab_size)
+        training = self.training
+        return ControlledAblation(
+            name="learning-rate-sweep",
+            hypothesis="The baseline rate minimizes validation NLL.",
+            independent_variable="training.learning_rate",
+            primary_metric="validation_nll",
+            expected_direction="lower",
+            minimum_effect=0.01,
+            baseline_label="baseline",
+            arms=(
+                AblationArm("baseline", model, training),
+                AblationArm(
+                    "low-rate",
+                    model,
+                    replace(training, learning_rate=1e-3),
+                ),
+            ),
+            trial_seeds=(31, 32),
+        )
+
+    def test_runner_pairs_seeds_and_produces_deterministic_evidence(self) -> None:
+        with TemporaryDirectory() as directory:
+            corpus = self.corpus(directory)
+            protocol = self.compact_protocol(corpus.vocab_size)
+            first = run_ablation(corpus, protocol)
+            second = run_ablation(corpus, protocol)
+
+        self.assertEqual(first.evidence_fingerprint(), second.evidence_fingerprint())
+        self.assertEqual(len(first.trials), 4)
+        self.assertEqual(len(first.summaries), 2)
+        self.assertEqual(len(first.contrasts), 1)
+        for seed in protocol.trial_seeds:
+            paired = [trial for trial in first.trials if trial.seed == seed]
+            self.assertEqual(
+                len({trial.initial_model_fingerprint for trial in paired}), 1
+            )
+            self.assertEqual(
+                len({trial.first_batch_fingerprint for trial in paired}), 1
+            )
+        contrast = first.contrasts[0]
+        baseline = {
+            trial.seed: trial.validation_nll
+            for trial in first.trials
+            if trial.arm_label == "baseline"
+        }
+        variant = {
+            trial.seed: trial.validation_nll
+            for trial in first.trials
+            if trial.arm_label == "low-rate"
+        }
+        self.assertEqual(
+            contrast.paired_deltas,
+            tuple(variant[seed] - baseline[seed] for seed in protocol.trial_seeds),
+        )
+        self.assertEqual(
+            first.to_dict()["evidence_fingerprint"], first.evidence_fingerprint()
+        )
+
+    def test_runner_restores_caller_random_state(self) -> None:
+        with TemporaryDirectory() as directory:
+            corpus = self.corpus(directory)
+            protocol = self.compact_protocol(corpus.vocab_size)
+            torch.manual_seed(901)
+            np.random.seed(902)
+            torch_state = torch.get_rng_state().clone()
+            numpy_state = np.random.get_state()
+            deterministic = torch.are_deterministic_algorithms_enabled()
+
+            run_ablation(corpus, protocol)
+
+        self.assertTrue(torch.equal(torch.get_rng_state(), torch_state))
+        after_numpy = np.random.get_state()
+        self.assertEqual(numpy_state[0], after_numpy[0])
+        self.assertTrue(np.array_equal(numpy_state[1], after_numpy[1]))
+        self.assertEqual(numpy_state[2:], after_numpy[2:])
+        self.assertEqual(torch.are_deterministic_algorithms_enabled(), deterministic)
+
+    def test_runner_rejects_a_corpus_vocabulary_mismatch(self) -> None:
+        with TemporaryDirectory() as directory:
+            corpus = self.corpus(directory)
+            protocol = self.compact_protocol(corpus.vocab_size + 1)
+            with self.assertRaisesRegex(TransformerLabError, "vocabulary"):
+                run_ablation(corpus, protocol)
 
 
 if __name__ == "__main__":
