@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import platform
 import random
 import re
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, fields, replace
@@ -615,16 +617,35 @@ def verify_ablation_report(payload: dict[str, Any]) -> None:
 
 
 def write_ablation_report(path: Path, result: AblationResult) -> None:
-    """Atomically publish a canonical JSON report."""
+    """Atomically replace a report using a private same-directory temporary.
+
+    Concurrent writers each publish complete JSON; the last replacement wins.
+    Flush the temporary before replacement, without claiming power-loss safety.
+    """
 
     if not isinstance(path, Path):
         raise TypeError("path must be pathlib.Path")
     payload = build_ablation_report(result)
-    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    rendered = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(rendered, encoding="utf-8", newline="\n")
-    temporary.replace(path)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=path.parent,
+            prefix=f".{path.name}.tmp-",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(rendered)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _require_exact_keys(payload: dict[str, Any], expected: set[str], name: str) -> None:
