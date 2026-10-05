@@ -1,0 +1,48 @@
+{
+  "arms": [
+    {
+      "label": "baseline",
+      "value": 0.003
+    },
+    {
+      "label": "low-rate",
+      "value": 0.001
+    },
+    {
+      "label": "high-rate",
+      "value": 0.006
+    }
+  ],
+  "baseline_label": "baseline",
+  "expected_direction": "higher",
+  "hypothesis": "Changing the baseline learning rate from 0.003 to 0.001 or 0.006 will increase mean validation NLL by at least 0.001 after four matched CPU training steps.",
+  "independent_variable": "training.learning_rate",
+  "minimum_effect": 0.001,
+  "model_config": {
+    "batch_norm_eps": 1e-05,
+    "batch_norm_momentum": 0.1,
+    "block_size": 4,
+    "dropout": 0.0,
+    "embedding_dim": 8,
+    "head_count": 2,
+    "initialization_gain": 1.4142135623730951,
+    "initialization_mode": "fixed_normal",
+    "initialization_std": 0.02,
+    "layer_count": 1,
+    "normalization_mode": "layer_norm"
+  },
+  "name": "day-31-learning-rate",
+  "primary_metric": "validation_nll",
+  "schema_version": 1,
+  "training_config": {
+    "batch_size": 4,
+    "gradient_clip": 1.0,
+    "learning_rate": 0.003,
+    "steps": 4,
+    "weight_decay": 0.01
+  },
+  "trial_seeds": [
+    31,
+    32
+  ]
+}

@@ -9,7 +9,7 @@ import random
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from hashlib import sha256
 from pathlib import Path
 from statistics import fmean, stdev
@@ -625,3 +625,131 @@ def write_ablation_report(path: Path, result: AblationResult) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(rendered, encoding="utf-8", newline="\n")
     temporary.replace(path)
+
+
+def _require_exact_keys(payload: dict[str, Any], expected: set[str], name: str) -> None:
+    actual = set(payload)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        extra = sorted(actual - expected)
+        raise TransformerLabError(
+            f"{name} fields do not match schema; missing={missing}, extra={extra}"
+        )
+
+
+def _reject_duplicate_json_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in payload:
+            raise TransformerLabError(f"duplicate JSON field: {key}")
+        payload[key] = value
+    return payload
+
+
+def load_ablation_protocol(path: Path, *, vocab_size: int) -> ControlledAblation:
+    """Load a strict JSON protocol and bind it to the observed vocabulary."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if isinstance(vocab_size, bool) or not isinstance(vocab_size, int):
+        raise TypeError("vocab_size must be an integer")
+    if vocab_size <= 0:
+        raise TransformerLabError("vocab_size must be positive")
+    try:
+        payload = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_json_pairs,
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise TransformerLabError(f"cannot read ablation protocol: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise TransformerLabError("ablation protocol root must be an object")
+    top_fields = {
+        "schema_version",
+        "name",
+        "hypothesis",
+        "independent_variable",
+        "primary_metric",
+        "expected_direction",
+        "minimum_effect",
+        "baseline_label",
+        "trial_seeds",
+        "model_config",
+        "training_config",
+        "arms",
+    }
+    _require_exact_keys(payload, top_fields, "protocol")
+    if payload["schema_version"] != ABLATION_SCHEMA_VERSION:
+        raise TransformerLabError("unsupported ablation schema_version")
+    model_payload = payload["model_config"]
+    training_payload = payload["training_config"]
+    if not isinstance(model_payload, dict) or not isinstance(training_payload, dict):
+        raise TransformerLabError("model_config and training_config must be objects")
+    model_fields = {field.name for field in fields(TransformerConfig)} - {"vocab_size"}
+    training_fields = {field.name for field in fields(TrainingConfig)} - {"seed"}
+    _require_exact_keys(model_payload, model_fields, "model_config")
+    _require_exact_keys(training_payload, training_fields, "training_config")
+    seeds = payload["trial_seeds"]
+    if not isinstance(seeds, list):
+        raise TransformerLabError("trial_seeds must be an array")
+    trial_seeds = tuple(seeds)
+    seed = trial_seeds[0] if trial_seeds else 0
+    base_model = TransformerConfig(vocab_size=vocab_size, **model_payload)
+    base_training = TrainingConfig(seed=seed, **training_payload)
+    independent_variable = payload["independent_variable"]
+    if not isinstance(independent_variable, str):
+        raise TypeError("independent_variable must be a string")
+    namespace, separator, field_name = independent_variable.partition(".")
+    if separator != ".":
+        raise TransformerLabError("independent_variable must include a namespace")
+    arm_payloads = payload["arms"]
+    if not isinstance(arm_payloads, list):
+        raise TransformerLabError("arms must be an array")
+    arms: list[AblationArm] = []
+    for index, raw_arm in enumerate(arm_payloads):
+        if not isinstance(raw_arm, dict):
+            raise TransformerLabError(f"arms[{index}] must be an object")
+        _require_exact_keys(raw_arm, {"label", "value"}, f"arms[{index}]")
+        model = base_model
+        training = base_training
+        try:
+            if namespace == "model":
+                model = replace(base_model, **{field_name: raw_arm["value"]})
+            elif namespace == "training":
+                training = replace(base_training, **{field_name: raw_arm["value"]})
+            else:
+                raise TransformerLabError(
+                    "independent_variable namespace must be model or training"
+                )
+        except TypeError as exc:
+            raise TransformerLabError(
+                f"invalid independent_variable field: {independent_variable}"
+            ) from exc
+        arms.append(AblationArm(raw_arm["label"], model, training))
+    baseline_label = payload["baseline_label"]
+    baseline_arm = next(
+        (arm for arm in arms if arm.label == baseline_label),
+        None,
+    )
+    if baseline_arm is not None:
+        configured_value = _flatten_config(base_model, base_training).get(
+            independent_variable
+        )
+        observed_value = _flatten_config(
+            baseline_arm.model_config, baseline_arm.training_config
+        ).get(independent_variable)
+        if configured_value != observed_value:
+            raise TransformerLabError(
+                "baseline arm value must match the base configuration"
+            )
+    return ControlledAblation(
+        name=payload["name"],
+        hypothesis=payload["hypothesis"],
+        independent_variable=independent_variable,
+        primary_metric=payload["primary_metric"],
+        expected_direction=payload["expected_direction"],
+        minimum_effect=payload["minimum_effect"],
+        baseline_label=baseline_label,
+        trial_seeds=trial_seeds,
+        arms=tuple(arms),
+    )
