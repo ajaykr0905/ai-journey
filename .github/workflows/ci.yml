@@ -159,6 +159,12 @@ jobs:
         run: >-
           python scripts/check_batchnorm_backward.py
           --output /tmp/ai-journey-artifacts/batchnorm-backward.json
+      - name: Run the predeclared transformer ablation
+        run: >-
+          python scripts/run_ablation.py
+          --protocol config/day-31-learning-rate-ablation.json
+          --corpus data/day-19-demo-names.txt
+          --output /tmp/ai-journey-artifacts/day-31-ablation.json
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py
