@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, fields
 from hashlib import sha256
+from pathlib import Path
 from statistics import fmean, stdev
 from typing import Any
 
@@ -483,3 +484,144 @@ def run_ablation(corpus: TokenCorpus, protocol: ControlledAblation) -> AblationR
 
     with _preserve_random_state():
         return _run_ablation(corpus, protocol)
+
+
+@dataclass(frozen=True)
+class AblationConclusion:
+    """Direction-aware interpretation of one baseline contrast."""
+
+    arm_label: str
+    mean_delta: float
+    oriented_effect: float
+    outcome: str
+
+
+@dataclass(frozen=True)
+class AblationEvaluation:
+    """Protocol-control checks and hypothesis outcomes."""
+
+    outcome: str
+    complete_pairs: bool
+    matched_initial_models: bool | None
+    matched_first_batches: bool | None
+    conclusions: tuple[AblationConclusion, ...]
+
+
+def _matched_within_seed(result: AblationResult, attribute: str) -> bool:
+    return all(
+        len(
+            {getattr(trial, attribute) for trial in result.trials if trial.seed == seed}
+        )
+        == 1
+        for seed in result.protocol.trial_seeds
+    )
+
+
+def evaluate_ablation(result: AblationResult) -> AblationEvaluation:
+    """Interpret predeclared effects without hiding negative findings."""
+
+    if not isinstance(result, AblationResult):
+        raise TypeError("result must be AblationResult")
+    protocol = result.protocol
+    expected_pairs = {
+        (arm.label, seed) for arm in protocol.arms for seed in protocol.trial_seeds
+    }
+    observed_pairs = {(trial.arm_label, trial.seed) for trial in result.trials}
+    complete_pairs = observed_pairs == expected_pairs and len(result.trials) == len(
+        expected_pairs
+    )
+    model_start_should_match = not protocol.independent_variable.startswith("model.")
+    batch_should_match = protocol.independent_variable not in {
+        "model.block_size",
+        "training.batch_size",
+    }
+    matched_models = (
+        _matched_within_seed(result, "initial_model_fingerprint")
+        if model_start_should_match
+        else None
+    )
+    matched_batches = (
+        _matched_within_seed(result, "first_batch_fingerprint")
+        if batch_should_match
+        else None
+    )
+    conclusions: list[AblationConclusion] = []
+    for contrast in result.contrasts:
+        oriented_effect = (
+            -contrast.mean_delta
+            if protocol.expected_direction == "lower"
+            else contrast.mean_delta
+        )
+        if oriented_effect > 0 and oriented_effect >= protocol.minimum_effect:
+            outcome = "supports"
+        elif oriented_effect < 0 and -oriented_effect >= protocol.minimum_effect:
+            outcome = "contradicts"
+        else:
+            outcome = "inconclusive"
+        conclusions.append(
+            AblationConclusion(
+                arm_label=contrast.arm_label,
+                mean_delta=contrast.mean_delta,
+                oriented_effect=oriented_effect,
+                outcome=outcome,
+            )
+        )
+    outcomes = {conclusion.outcome for conclusion in conclusions}
+    if outcomes == {"supports"}:
+        overall = "supports"
+    elif outcomes == {"contradicts"}:
+        overall = "contradicts"
+    elif outcomes == {"inconclusive"}:
+        overall = "inconclusive"
+    else:
+        overall = "mixed"
+    return AblationEvaluation(
+        outcome=overall,
+        complete_pairs=complete_pairs,
+        matched_initial_models=matched_models,
+        matched_first_batches=matched_batches,
+        conclusions=tuple(conclusions),
+    )
+
+
+def build_ablation_report(result: AblationResult) -> dict[str, Any]:
+    """Build a canonical report with measurement and interpretation fingerprints."""
+
+    evaluation = evaluate_ablation(result)
+    payload: dict[str, Any] = {
+        "result": result.to_dict(),
+        "evaluation": asdict(evaluation),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    payload["report_fingerprint"] = sha256(encoded).hexdigest()
+    return payload
+
+
+def verify_ablation_report(payload: dict[str, Any]) -> None:
+    """Reject report payloads whose canonical fingerprint does not match."""
+
+    if not isinstance(payload, dict):
+        raise TypeError("payload must be a dictionary")
+    supplied = payload.get("report_fingerprint")
+    if not isinstance(supplied, str) or len(supplied) != 64:
+        raise TransformerLabError("report_fingerprint must be a SHA-256 digest")
+    unsigned = {
+        key: value for key, value in payload.items() if key != "report_fingerprint"
+    }
+    encoded = json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode()
+    expected = sha256(encoded).hexdigest()
+    if supplied != expected:
+        raise TransformerLabError("ablation report fingerprint does not match")
+
+
+def write_ablation_report(path: Path, result: AblationResult) -> None:
+    """Atomically publish a canonical JSON report."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    payload = build_ablation_report(result)
+    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(rendered, encoding="utf-8", newline="\n")
+    temporary.replace(path)

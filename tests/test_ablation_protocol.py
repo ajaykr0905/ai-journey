@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -11,7 +12,11 @@ import torch
 from ai_journey.ablation_protocol import (
     AblationArm,
     ControlledAblation,
+    build_ablation_report,
+    evaluate_ablation,
     run_ablation,
+    verify_ablation_report,
+    write_ablation_report,
 )
 from ai_journey.transformer_lab import (
     TokenCorpus,
@@ -244,6 +249,41 @@ class AblationRunnerTests(unittest.TestCase):
             protocol = self.compact_protocol(corpus.vocab_size + 1)
             with self.assertRaisesRegex(TransformerLabError, "vocabulary"):
                 run_ablation(corpus, protocol)
+
+    def test_report_preserves_controls_outcome_and_negative_evidence(self) -> None:
+        with TemporaryDirectory() as directory:
+            corpus = self.corpus(directory)
+            protocol = replace(
+                self.compact_protocol(corpus.vocab_size), trial_seeds=(31,)
+            )
+            result = run_ablation(corpus, protocol)
+            report = build_ablation_report(result)
+            output = Path(directory) / "ablation.json"
+            output.write_text("old report", encoding="utf-8")
+            write_ablation_report(output, result)
+            saved = json.loads(output.read_text(encoding="utf-8"))
+            self.assertNotEqual(output.read_text(encoding="utf-8"), "old report")
+
+        verify_ablation_report(report)
+        verify_ablation_report(saved)
+        evaluation = evaluate_ablation(result)
+        self.assertTrue(evaluation.complete_pairs)
+        self.assertTrue(evaluation.matched_initial_models)
+        self.assertTrue(evaluation.matched_first_batches)
+        self.assertIn(evaluation.outcome, {"supports", "contradicts", "inconclusive"})
+        self.assertEqual(saved["evaluation"]["outcome"], evaluation.outcome)
+        self.assertEqual(saved["report_fingerprint"], report["report_fingerprint"])
+
+    def test_report_verification_rejects_tampering(self) -> None:
+        with TemporaryDirectory() as directory:
+            corpus = self.corpus(directory)
+            protocol = replace(
+                self.compact_protocol(corpus.vocab_size), trial_seeds=(31,)
+            )
+            report = build_ablation_report(run_ablation(corpus, protocol))
+        report["evaluation"]["outcome"] = "supports"
+        with self.assertRaisesRegex(TransformerLabError, "does not match"):
+            verify_ablation_report(report)
 
 
 if __name__ == "__main__":
