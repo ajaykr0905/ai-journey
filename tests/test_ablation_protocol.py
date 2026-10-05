@@ -14,6 +14,7 @@ from ai_journey.ablation_protocol import (
     ControlledAblation,
     build_ablation_report,
     evaluate_ablation,
+    load_ablation_protocol,
     run_ablation,
     verify_ablation_report,
     write_ablation_report,
@@ -126,6 +127,41 @@ class ControlledAblationTests(unittest.TestCase):
             self.protocol(arms=(arms[0], replace(arms[1], label="baseline")))
         with self.assertRaisesRegex(TransformerLabError, "trial_seeds must be unique"):
             self.protocol(trial_seeds=(31, 31))
+
+    def test_rejects_trial_seeds_that_numpy_cannot_execute(self) -> None:
+        # A predeclared protocol must be usable before any arm begins training.
+        for seed in (-1, 2**32):
+            with (
+                self.subTest(seed=seed),
+                self.assertRaisesRegex(TransformerLabError, "trial_seeds.*range"),
+            ):
+                self.protocol(trial_seeds=(seed,))
+
+    def test_accepts_both_executable_seed_boundaries(self) -> None:
+        protocol = self.protocol(trial_seeds=(0, 2**32 - 1))
+        self.assertEqual(protocol.trial_seeds, (0, 2**32 - 1))
+
+    def test_loader_requires_an_integer_schema_version_not_boolean_or_float(
+        self,
+    ) -> None:
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "config"
+            / "day-31-learning-rate-ablation.json"
+        )
+        payload = json.loads(source.read_text(encoding="utf-8"))
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "protocol.json"
+            for version in (True, 1.0):
+                with (
+                    self.subTest(version=version),
+                    self.assertRaisesRegex(TransformerLabError, "schema_version"),
+                ):
+                    path.write_text(
+                        json.dumps({**payload, "schema_version": version}),
+                        encoding="utf-8",
+                    )
+                    load_ablation_protocol(path, vocab_size=12)
 
     def test_rejects_invalid_text_thresholds_and_categories(self) -> None:
         cases = (

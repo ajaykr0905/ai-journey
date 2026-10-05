@@ -164,6 +164,8 @@ class ControlledAblation:
             for seed in self.trial_seeds
         ):
             raise TypeError("trial_seeds must contain integers")
+        if any(not 0 <= seed < 2**32 for seed in self.trial_seeds):
+            raise TransformerLabError("trial_seeds must be in NumPy's range [0, 2**32)")
         if len(set(self.trial_seeds)) != len(self.trial_seeds):
             raise TransformerLabError("trial_seeds must be unique")
         if not isinstance(self.arms, tuple):
@@ -700,7 +702,12 @@ def load_ablation_protocol(path: Path, *, vocab_size: int) -> ControlledAblation
         "arms",
     }
     _require_exact_keys(payload, top_fields, "protocol")
-    if payload["schema_version"] != ABLATION_SCHEMA_VERSION:
+    version = payload["schema_version"]
+    if (
+        isinstance(version, bool)
+        or not isinstance(version, int)
+        or version != ABLATION_SCHEMA_VERSION
+    ):
         raise TransformerLabError("unsupported ablation schema_version")
     model_payload = payload["model_config"]
     training_payload = payload["training_config"]
