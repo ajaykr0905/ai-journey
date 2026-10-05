@@ -58,6 +58,9 @@ then grow these exercises into production-quality training and inference project
 - A stable manual categorical loss, finite-difference and PyTorch gradient checks,
   and a parameter-wide transformer audit in
   [`scripts/run_day_28.py`](scripts/run_day_28.py)
+- A strict one-variable ablation protocol with paired deterministic trials,
+  negative-result-preserving interpretation, and self-verifying evidence in
+  [`scripts/run_ablation.py`](scripts/run_ablation.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -124,6 +127,10 @@ python scripts/run_day_27.py \
   --corpus data/day-19-demo-names.txt \
   --output artifacts/day-27-batchnorm.json \
   --plot artifacts/day-27-batchnorm.svg
+python scripts/run_ablation.py \
+  --protocol config/day-31-learning-rate-ablation.json \
+  --corpus data/day-19-demo-names.txt \
+  --output artifacts/day-31-ablation.json
 python -m unittest discover -s tests -v
 ```
 
@@ -178,9 +185,25 @@ published with an atomic file replacement. Set `--seed`, `--epsilon`,
 PyTorch is required for the Day 24–28 transformer experiments. The default verification
 commands run on CPU and do not claim GPU or distributed execution.
 
+## Run a controlled ablation
+
+The checked-in Day 31 protocol declares its hypothesis, primary metric, minimum
+effect, fixed model/training controls, three learning-rate arms, and paired seeds
+before execution. The loader rejects unknown or duplicate fields and any arm that
+changes more than the named independent variable. Reports retain supporting,
+contradicting, and inconclusive outcomes rather than turning a negative result into
+a failed run. Canonical fingerprints bind the protocol, corpus, measurements, and
+interpretation; they detect accidental or manual report changes but are not digital
+signatures.
+
+The default protocol is a small CPU reproducibility gate over the public demo corpus.
+It is not evidence of GPU performance, model quality, statistical significance, or
+the learner's blank-file backward-pass completion. Increase steps and seed count in
+a new predeclared protocol before drawing research conclusions.
+
 ## Configuration safety
 
-Days 0–27 require no credentials. Never commit `.env`, credentials, browser data,
+Repository experiments require no credentials. Never commit `.env`, credentials, browser data,
 cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 
 ## Daily map
@@ -215,6 +238,8 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 25 | 2026-09-29 | Controlled initialization, activation histograms, and gradient diagnostics |
 | 26 | 2026-09-30 | Fan-in Kaiming initialization, scale audits, and matched loss curves |
 | 27 | 2026-10-01 | Scratch BatchNorm, persistent running state, and train/eval mode diagnostics |
+| 28 | 2026-10-02 | Manual cross-entropy and transformer parameter-gradient audit |
+| 31 | 2026-10-05 | Predeclared paired transformer ablation protocol and evidence gate |
 
 ## License
 
