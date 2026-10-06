@@ -14,6 +14,7 @@ from ai_journey.wavenet import (
     WaveNetDataset,
     WaveNetError,
     build_wavenet_dataset_split,
+    trace_hierarchical_shapes,
 )
 
 
@@ -242,6 +243,38 @@ class HierarchicalLanguageModelTests(unittest.TestCase):
             model(
                 torch.zeros(2, 8, dtype=torch.long), torch.zeros(2, 1, dtype=torch.long)
             )
+
+    def test_shape_trace_matches_the_registered_hierarchy(self) -> None:
+        model = HierarchicalLanguageModel(self.config)
+        model.train()
+        model.stages[1].eval()
+        original_modes = tuple(module.training for module in model.modules())
+
+        trace = trace_hierarchical_shapes(model, batch_size=3)
+
+        self.assertEqual(
+            [step.name for step in trace],
+            ["embedding", "stage_1", "stage_2", "stage_3", "output"],
+        )
+        self.assertEqual(
+            [step.output_shape for step in trace],
+            [(3, 8, 4), (3, 4, 12), (3, 2, 12), (3, 1, 12), (3, 11)],
+        )
+        self.assertEqual(
+            tuple(module.training for module in model.modules()), original_modes
+        )
+        self.assertEqual(
+            sum(step.parameter_count for step in trace), model.parameter_count
+        )
+
+    def test_shape_trace_validates_batch_size(self) -> None:
+        model = HierarchicalLanguageModel(self.config)
+        for batch_size in (True, 0):
+            with (
+                self.subTest(batch_size=batch_size),
+                self.assertRaises((TypeError, WaveNetError)),
+            ):
+                trace_hierarchical_shapes(model, batch_size=batch_size)
 
 
 if __name__ == "__main__":

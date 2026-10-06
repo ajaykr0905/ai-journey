@@ -331,3 +331,69 @@ class HierarchicalLanguageModel(nn.Module):
     @property
     def parameter_count(self) -> int:
         return sum(parameter.numel() for parameter in self.parameters())
+
+
+@dataclass(frozen=True)
+class ShapeTraceStep:
+    """One named transformation in the hierarchical model."""
+
+    name: str
+    input_shape: tuple[int, ...]
+    output_shape: tuple[int, ...]
+    parameter_count: int
+
+
+def trace_hierarchical_shapes(
+    model: HierarchicalLanguageModel, *, batch_size: int = 2
+) -> tuple[ShapeTraceStep, ...]:
+    """Execute every registered stage and record its actual tensor contract."""
+
+    if not isinstance(model, HierarchicalLanguageModel):
+        raise TypeError("model must be HierarchicalLanguageModel")
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int):
+        raise TypeError("batch_size must be an integer")
+    if batch_size <= 0:
+        raise WaveNetError("batch_size must be positive")
+
+    modes = tuple((module, module.training) for module in model.modules())
+    steps: list[ShapeTraceStep] = []
+    try:
+        model.eval()
+        with torch.no_grad():
+            token_ids = torch.zeros(
+                batch_size, model.config.context_size, dtype=torch.long
+            )
+            hidden = model.embedding(token_ids)
+            steps.append(
+                ShapeTraceStep(
+                    "embedding",
+                    tuple(token_ids.shape),
+                    tuple(hidden.shape),
+                    model.embedding.weight.numel(),
+                )
+            )
+            for index, stage in enumerate(model.stages):
+                inputs = hidden
+                hidden = stage(hidden)
+                steps.append(
+                    ShapeTraceStep(
+                        f"stage_{index + 1}",
+                        tuple(inputs.shape),
+                        tuple(hidden.shape),
+                        sum(parameter.numel() for parameter in stage.parameters()),
+                    )
+                )
+            head_inputs = hidden[:, 0, :]
+            logits = model.output(head_inputs)
+            steps.append(
+                ShapeTraceStep(
+                    "output",
+                    tuple(head_inputs.shape),
+                    tuple(logits.shape),
+                    sum(parameter.numel() for parameter in model.output.parameters()),
+                )
+            )
+    finally:
+        for module, training in modes:
+            module.training = training
+    return tuple(steps)
