@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 from collections.abc import Iterable
@@ -9,6 +10,7 @@ from dataclasses import asdict, dataclass
 from functools import reduce
 from hashlib import sha256
 from operator import mul
+from typing import Any
 
 import numpy as np
 import torch
@@ -437,6 +439,102 @@ class WaveNetMetrics:
     nll: float
     perplexity: float
     sample_count: int
+
+
+@dataclass(frozen=True)
+class WaveNetTrainingStep:
+    """One optimization step with its pre-update loss and clipped gradient norm."""
+
+    step: int
+    loss: float
+    gradient_norm: float
+
+
+@dataclass(frozen=True)
+class WaveNetTrainingResult:
+    """Model, metrics, trace, and resumable state from one training run."""
+
+    model: HierarchicalLanguageModel
+    initial_train: WaveNetMetrics
+    initial_validation: WaveNetMetrics
+    final_train: WaveNetMetrics
+    final_validation: WaveNetMetrics
+    trace: tuple[WaveNetTrainingStep, ...]
+    optimizer_state: dict[str, Any]
+    cursor_state: dict[str, int]
+
+
+def fit_wavenet(
+    datasets: WaveNetDatasetSplit,
+    *,
+    model_config: WaveNetConfig,
+    training_config: WaveNetTrainingConfig,
+) -> WaveNetTrainingResult:
+    """Train a hierarchical model deterministically without consuming caller RNG."""
+
+    if not isinstance(datasets, WaveNetDatasetSplit):
+        raise TypeError("datasets must be WaveNetDatasetSplit")
+    if not isinstance(model_config, WaveNetConfig):
+        raise TypeError("model_config must be WaveNetConfig")
+    if not isinstance(training_config, WaveNetTrainingConfig):
+        raise TypeError("training_config must be WaveNetTrainingConfig")
+    if datasets.train.context_size != model_config.context_size:
+        raise WaveNetError("dataset context_size does not match the model")
+    if datasets.train.vocab_size != model_config.vocab_size:
+        raise WaveNetError("dataset vocabulary does not match the model")
+
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(training_config.seed)
+        model = HierarchicalLanguageModel(model_config)
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=training_config.learning_rate,
+            weight_decay=training_config.weight_decay,
+        )
+        cursor = WaveNetBatchCursor(
+            datasets.train,
+            batch_size=training_config.batch_size,
+            seed=training_config.seed,
+        )
+        initial_train = evaluate_wavenet(model, datasets.train)
+        initial_validation = evaluate_wavenet(model, datasets.validation)
+        trace: list[WaveNetTrainingStep] = []
+
+        for step in range(training_config.steps):
+            model.train()
+            contexts, targets = cursor.next()
+            optimizer.zero_grad(set_to_none=True)
+            _, loss = model(contexts, targets)
+            assert loss is not None
+            if not torch.isfinite(loss):
+                raise WaveNetError("training produced a nonfinite loss")
+            loss.backward()
+            gradient_norm = float(
+                nn.utils.clip_grad_norm_(
+                    model.parameters(), training_config.gradient_clip
+                )
+            )
+            if not math.isfinite(gradient_norm):
+                raise WaveNetError("training produced a nonfinite gradient norm")
+            optimizer.step()
+            trace.append(
+                WaveNetTrainingStep(
+                    step=step, loss=float(loss.detach()), gradient_norm=gradient_norm
+                )
+            )
+
+        final_train = evaluate_wavenet(model, datasets.train)
+        final_validation = evaluate_wavenet(model, datasets.validation)
+        return WaveNetTrainingResult(
+            model=model,
+            initial_train=initial_train,
+            initial_validation=initial_validation,
+            final_train=final_train,
+            final_validation=final_validation,
+            trace=tuple(trace),
+            optimizer_state=copy.deepcopy(optimizer.state_dict()),
+            cursor_state=cursor.state_dict(),
+        )
 
 
 def evaluate_wavenet(

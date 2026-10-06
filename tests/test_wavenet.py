@@ -16,8 +16,10 @@ from ai_journey.wavenet import (
     WaveNetError,
     WaveNetMetrics,
     WaveNetTrainingConfig,
+    WaveNetTrainingResult,
     build_wavenet_dataset_split,
     evaluate_wavenet,
+    fit_wavenet,
     initialize_wavenet,
     trace_hierarchical_shapes,
 )
@@ -405,6 +407,71 @@ class HierarchicalLanguageModelTests(unittest.TestCase):
         model = initialize_wavenet(self.config)
         with self.assertRaisesRegex(WaveNetError, "context_size"):
             evaluate_wavenet(model, dataset)
+
+
+class WaveNetTrainingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.words = ("ajay", "maya", "arun", "diya", "neel", "riya")
+        self.config = WaveNetConfig(
+            vocab_size=len({".", *"".join(self.words)}),
+            context_size=4,
+            embedding_dim=4,
+            hidden_dim=16,
+            group_factors=(2, 2),
+            dropout=0.1,
+        )
+        self.datasets = build_wavenet_dataset_split(
+            self.words, config=self.config, validation_fraction=0.33, seed=7
+        )
+        self.training = WaveNetTrainingConfig(
+            steps=30,
+            batch_size=8,
+            learning_rate=0.03,
+            gradient_clip=1.0,
+            seed=32,
+        )
+
+    def test_training_is_repeatable_reduces_loss_and_preserves_rng(self) -> None:
+        torch.manual_seed(404)
+        caller_state = torch.random.get_rng_state().clone()
+
+        first = fit_wavenet(
+            self.datasets,
+            model_config=self.config,
+            training_config=self.training,
+        )
+        self.assertTrue(torch.equal(torch.random.get_rng_state(), caller_state))
+        second = fit_wavenet(
+            self.datasets,
+            model_config=self.config,
+            training_config=self.training,
+        )
+
+        self.assertIsInstance(first, WaveNetTrainingResult)
+        self.assertLess(first.final_train.nll, first.initial_train.nll)
+        self.assertEqual(first.trace, second.trace)
+        self.assertEqual(len(first.trace), self.training.steps)
+        self.assertTrue(
+            all(
+                step.gradient_norm >= 0 and math.isfinite(step.loss)
+                for step in first.trace
+            )
+        )
+        for name, first_value in first.model.state_dict().items():
+            self.assertTrue(torch.equal(first_value, second.model.state_dict()[name]))
+
+    def test_training_rejects_dataset_model_mismatch(self) -> None:
+        wrong_config = WaveNetConfig(
+            vocab_size=self.config.vocab_size,
+            context_size=8,
+            group_factors=(2, 2, 2),
+        )
+        with self.assertRaisesRegex(WaveNetError, "context_size"):
+            fit_wavenet(
+                self.datasets,
+                model_config=wrong_config,
+                training_config=self.training,
+            )
 
 
 if __name__ == "__main__":
