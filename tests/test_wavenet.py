@@ -14,6 +14,7 @@ from ai_journey.wavenet import (
     WaveNetDataset,
     WaveNetError,
     build_wavenet_dataset_split,
+    initialize_wavenet,
     trace_hierarchical_shapes,
 )
 
@@ -275,6 +276,32 @@ class HierarchicalLanguageModelTests(unittest.TestCase):
                 self.assertRaises((TypeError, WaveNetError)),
             ):
                 trace_hierarchical_shapes(model, batch_size=batch_size)
+
+    def test_seeded_initialization_is_repeatable_and_isolated(self) -> None:
+        torch.manual_seed(901)
+        caller_state = torch.random.get_rng_state().clone()
+
+        first = initialize_wavenet(self.config, seed=32)
+        self.assertTrue(torch.equal(torch.random.get_rng_state(), caller_state))
+        second = initialize_wavenet(self.config, seed=32)
+        different = initialize_wavenet(self.config, seed=33)
+
+        for first_parameter, second_parameter in zip(
+            first.parameters(), second.parameters(), strict=True
+        ):
+            self.assertTrue(torch.equal(first_parameter, second_parameter))
+        self.assertTrue(
+            any(
+                not torch.equal(first_parameter, different_parameter)
+                for first_parameter, different_parameter in zip(
+                    first.parameters(), different.parameters(), strict=True
+                )
+            )
+        )
+
+    def test_initializer_rejects_boolean_seed(self) -> None:
+        with self.assertRaises(TypeError):
+            initialize_wavenet(self.config, seed=True)
 
 
 if __name__ == "__main__":

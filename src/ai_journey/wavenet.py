@@ -397,3 +397,17 @@ def trace_hierarchical_shapes(
         for module, training in modes:
             module.training = training
     return tuple(steps)
+
+
+def initialize_wavenet(
+    config: WaveNetConfig, *, seed: int = 32
+) -> HierarchicalLanguageModel:
+    """Initialize repeatable parameters without consuming caller RNG state."""
+
+    if not isinstance(config, WaveNetConfig):
+        raise TypeError("config must be WaveNetConfig")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise TypeError("seed must be an integer")
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(seed)
+        return HierarchicalLanguageModel(config)
