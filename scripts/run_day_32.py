@@ -38,6 +38,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--split-seed", type=int, default=32)
     parser.add_argument("--seed", type=int, default=32)
     parser.add_argument("--sample-seed", type=int, default=320)
+    parser.add_argument("--overfit-examples", type=int, default=8)
+    parser.add_argument("--overfit-steps", type=int, default=60)
+    parser.add_argument("--minimum-overfit-improvement", type=float, default=0.5)
     return parser.parse_args(argv)
 
 
@@ -72,6 +75,9 @@ def main(argv: list[str] | None = None) -> int:
             model_config=model_config,
             training_config=training_config,
             sample_seed=args.sample_seed,
+            overfit_examples=args.overfit_examples,
+            overfit_steps=args.overfit_steps,
+            minimum_overfit_improvement=args.minimum_overfit_improvement,
         )
         write_wavenet_report(args.output, result)
     except (OSError, TypeError, ValueError) as exc:

@@ -176,6 +176,9 @@ jobs:
           --embedding-dim 4
           --hidden-dim 12
           --group-factors 2 2
+          --overfit-examples 8
+          --overfit-steps 40
+          --minimum-overfit-improvement 0.5
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py

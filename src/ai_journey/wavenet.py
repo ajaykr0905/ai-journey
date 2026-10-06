@@ -739,9 +739,14 @@ class WaveNetExperimentResult:
     final_validation: WaveNetMetrics
     trace: tuple[WaveNetTrainingStep, ...]
     sample: WaveNetSample
+    gradient_audit: WaveNetGradientAudit
+    overfit_probe: WaveNetOverfitResult
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
+        payload["gradient_audit"]["passed"] = self.gradient_audit.passed
+        payload["overfit_probe"]["improvement"] = self.overfit_probe.improvement
+        payload["overfit_probe"]["passed"] = self.overfit_probe.passed
         canonical = json.dumps(
             payload, sort_keys=True, separators=(",", ":"), allow_nan=False
         )
@@ -755,6 +760,9 @@ def run_wavenet_experiment(
     model_config: WaveNetConfig,
     training_config: WaveNetTrainingConfig,
     sample_seed: int = 320,
+    overfit_examples: int = 8,
+    overfit_steps: int = 60,
+    minimum_overfit_improvement: float = 0.5,
 ) -> WaveNetExperimentResult:
     """Train, evaluate, trace, and sample one deterministic experiment."""
 
@@ -781,6 +789,19 @@ def run_wavenet_experiment(
             datasets.train.vocabulary_tokens,
             seed=sample_seed,
         ),
+        gradient_audit=audit_wavenet_gradients(
+            training.model,
+            datasets.train,
+            example_count=min(16, datasets.train.sample_count),
+        ),
+        overfit_probe=run_wavenet_overfit_probe(
+            datasets.train,
+            model_config=model_config,
+            example_count=overfit_examples,
+            steps=overfit_steps,
+            minimum_improvement=minimum_overfit_improvement,
+            seed=training_config.seed,
+        ),
     )
 
 
@@ -803,6 +824,8 @@ def verify_wavenet_report(payload: dict[str, Any]) -> None:
         "final_validation",
         "trace",
         "sample",
+        "gradient_audit",
+        "overfit_probe",
         "report_fingerprint",
     }
     if set(payload) != expected_fields:
@@ -823,6 +846,10 @@ def verify_wavenet_report(payload: dict[str, Any]) -> None:
         raise WaveNetError("report trace does not match completed_steps")
     if payload["parameter_count"] <= 0:
         raise WaveNetError("report parameter_count must be positive")
+    if payload["gradient_audit"].get("passed") is not True:
+        raise WaveNetError("report gradient audit did not pass")
+    if payload["overfit_probe"].get("passed") is not True:
+        raise WaveNetError("report overfit probe did not pass")
 
 
 def write_wavenet_report(path: Path, result: WaveNetExperimentResult) -> None:

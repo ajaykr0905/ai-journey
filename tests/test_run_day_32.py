@@ -53,6 +53,8 @@ class Day32RunnerTests(unittest.TestCase):
             ],
         )
         self.assertIn("report_fingerprint", payload)
+        self.assertTrue(payload["gradient_audit"]["passed"])
+        self.assertTrue(payload["overfit_probe"]["passed"])
         self.assertIn("train_nll=", completed.stdout)
 
     def test_invalid_hierarchy_preserves_existing_report(self) -> None:

@@ -54,8 +54,10 @@ class WaveNetConfigTests(unittest.TestCase):
             "WaveNetConfig",
             "WaveNetDataset",
             "WaveNetTrainingConfig",
+            "audit_wavenet_gradients",
             "build_wavenet_dataset_split",
             "run_wavenet_experiment",
+            "run_wavenet_overfit_probe",
         )
         for name in expected:
             with self.subTest(name=name):
@@ -748,6 +750,8 @@ class WaveNetTrainingTests(unittest.TestCase):
         self.assertEqual(first.to_dict(), second.to_dict())
         self.assertEqual(first.completed_steps, len(first.trace))
         self.assertEqual(first.dataset_fingerprint, self.datasets.fingerprint())
+        self.assertTrue(first.gradient_audit.passed)
+        self.assertTrue(first.overfit_probe.passed)
         verify_wavenet_report(first.to_dict())
 
     def test_report_verification_rejects_metric_tampering(self) -> None:

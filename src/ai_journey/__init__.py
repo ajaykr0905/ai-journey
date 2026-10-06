@@ -53,8 +53,10 @@ from .wavenet import (
     WaveNetConfig,
     WaveNetDataset,
     WaveNetTrainingConfig,
+    audit_wavenet_gradients,
     build_wavenet_dataset_split,
     run_wavenet_experiment,
+    run_wavenet_overfit_probe,
 )
 from .xor import train_xor
 
@@ -88,6 +90,7 @@ __all__ = [
     "WaveNetTrainingConfig",
     "analyze_corpus_shift",
     "assess_corpus_shift",
+    "audit_wavenet_gradients",
     "build_context_dataset",
     "build_gpt_shape_flow",
     "build_wavenet_dataset_split",
@@ -106,6 +109,7 @@ __all__ = [
     "run_mlp_experiment",
     "run_transformer_experiment",
     "run_wavenet_experiment",
+    "run_wavenet_overfit_probe",
     "train_context_mlp",
     "train_mlp",
     "train_xor",
