@@ -10,6 +10,7 @@ from ai_journey.wavenet import (
     FlattenConsecutive,
     HierarchicalLanguageModel,
     HierarchicalStage,
+    WaveNetBatchCursor,
     WaveNetConfig,
     WaveNetDataset,
     WaveNetError,
@@ -136,6 +137,52 @@ class WaveNetDatasetTests(unittest.TestCase):
         config = WaveNetConfig(vocab_size=99, context_size=4, group_factors=(2, 2))
         with self.assertRaisesRegex(WaveNetError, "vocab_size does not match"):
             build_wavenet_dataset_split(("ajay", "maya"), config=config)
+
+    def test_batch_cursor_covers_each_sample_once_per_epoch(self) -> None:
+        source = build_context_dataset(("ajay", "maya"), block_size=4)
+        dataset = WaveNetDataset.from_context_dataset(source)
+        cursor = WaveNetBatchCursor(dataset, batch_size=3, seed=32)
+        seen: list[tuple[int, ...]] = []
+
+        while cursor.epoch == 0 and cursor.offset < dataset.sample_count:
+            contexts, _ = cursor.next()
+            seen.extend(tuple(int(token) for token in row) for row in contexts)
+
+        expected = [tuple(int(token) for token in row) for row in dataset.contexts]
+        self.assertCountEqual(seen, expected)
+        self.assertEqual(len(seen), dataset.sample_count)
+
+    def test_batch_cursor_resumes_at_the_exact_next_batch(self) -> None:
+        source = build_context_dataset(("ajay", "maya"), block_size=4)
+        dataset = WaveNetDataset.from_context_dataset(source)
+        first = WaveNetBatchCursor(dataset, batch_size=3, seed=32)
+        first.next()
+        state = first.state_dict()
+        expected = first.next()
+
+        resumed = WaveNetBatchCursor(dataset, batch_size=3, seed=32)
+        resumed.load_state_dict(state)
+        actual = resumed.next()
+
+        self.assertTrue(torch.equal(expected[0], actual[0]))
+        self.assertTrue(torch.equal(expected[1], actual[1]))
+
+    def test_batch_cursor_rejects_invalid_state(self) -> None:
+        source = build_context_dataset(("ajay", "maya"), block_size=4)
+        cursor = WaveNetBatchCursor(
+            WaveNetDataset.from_context_dataset(source), batch_size=3
+        )
+        for state in (
+            {"epoch": 0},
+            {"epoch": -1, "offset": 0},
+            {"epoch": 0, "offset": True},
+            {"epoch": 0, "offset": 10_000},
+        ):
+            with (
+                self.subTest(state=state),
+                self.assertRaises((TypeError, WaveNetError)),
+            ):
+                cursor.load_state_dict(state)
 
 
 class FlattenConsecutiveTests(unittest.TestCase):

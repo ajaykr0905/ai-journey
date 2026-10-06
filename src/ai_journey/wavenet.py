@@ -203,6 +203,55 @@ class WaveNetDatasetSplit:
         return sha256(payload.encode()).hexdigest()
 
 
+class WaveNetBatchCursor:
+    """Deterministic shuffled batches with resumable epoch and offset."""
+
+    def __init__(
+        self, dataset: WaveNetDataset, *, batch_size: int, seed: int = 0
+    ) -> None:
+        if not isinstance(dataset, WaveNetDataset):
+            raise TypeError("dataset must be WaveNetDataset")
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int):
+            raise TypeError("batch_size must be an integer")
+        if batch_size <= 0:
+            raise WaveNetError("batch_size must be positive")
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            raise TypeError("seed must be an integer")
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.seed = seed
+        self.epoch = 0
+        self.offset = 0
+
+    def _order(self) -> Tensor:
+        generator = torch.Generator().manual_seed(self.seed + self.epoch)
+        return torch.randperm(self.dataset.sample_count, generator=generator)
+
+    def next(self) -> tuple[Tensor, Tensor]:
+        if self.offset >= self.dataset.sample_count:
+            self.epoch += 1
+            self.offset = 0
+        indexes = self._order()[self.offset : self.offset + self.batch_size]
+        self.offset += len(indexes)
+        return self.dataset.contexts[indexes], self.dataset.targets[indexes]
+
+    def state_dict(self) -> dict[str, int]:
+        return {"epoch": self.epoch, "offset": self.offset}
+
+    def load_state_dict(self, state: dict[str, int]) -> None:
+        if not isinstance(state, dict) or set(state) != {"epoch", "offset"}:
+            raise WaveNetError("batch cursor state has invalid fields")
+        if any(
+            isinstance(value, bool) or not isinstance(value, int)
+            for value in state.values()
+        ):
+            raise TypeError("batch cursor state values must be integers")
+        if state["epoch"] < 0 or not 0 <= state["offset"] <= self.dataset.sample_count:
+            raise WaveNetError("batch cursor state is out of range")
+        self.epoch = state["epoch"]
+        self.offset = state["offset"]
+
+
 def build_wavenet_dataset_split(
     words: Iterable[str],
     *,
