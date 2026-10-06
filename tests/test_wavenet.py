@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import torch
 
@@ -34,6 +36,7 @@ from ai_journey.wavenet import (
     train_wavenet_steps,
     verify_wavenet_report,
     wavenet_model_fingerprint,
+    write_wavenet_report,
 )
 
 
@@ -698,6 +701,42 @@ class WaveNetTrainingTests(unittest.TestCase):
 
         with self.assertRaisesRegex(WaveNetError, "fingerprint mismatch"):
             verify_wavenet_report(tampered)
+
+    def test_report_writer_is_stable_atomic_and_verified(self) -> None:
+        config = WaveNetTrainingConfig(steps=2, batch_size=4, seed=32)
+        result = run_wavenet_experiment(
+            self.datasets,
+            model_config=self.config,
+            training_config=config,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "day-32.json"
+            write_wavenet_report(path, result)
+            first = path.read_bytes()
+            write_wavenet_report(path, result)
+
+            self.assertEqual(path.read_bytes(), first)
+            verify_wavenet_report(json.loads(first))
+            self.assertEqual(list(path.parent.glob(".*.tmp")), [])
+
+    def test_report_publication_failure_preserves_previous_evidence(self) -> None:
+        config = WaveNetTrainingConfig(steps=2, batch_size=4, seed=32)
+        result = run_wavenet_experiment(
+            self.datasets,
+            model_config=self.config,
+            training_config=config,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "day-32.json"
+            path.write_bytes(b"previous evidence\n")
+            with (
+                mock.patch.object(Path, "replace", side_effect=OSError("blocked")),
+                self.assertRaisesRegex(OSError, "blocked"),
+            ):
+                write_wavenet_report(path, result)
+
+            self.assertEqual(path.read_bytes(), b"previous evidence\n")
+            self.assertEqual(list(path.parent.glob(".*.tmp")), [])
 
 
 if __name__ == "__main__":

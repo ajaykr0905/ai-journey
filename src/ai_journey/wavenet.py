@@ -658,6 +658,38 @@ def verify_wavenet_report(payload: dict[str, Any]) -> None:
         raise WaveNetError("report parameter_count must be positive")
 
 
+def write_wavenet_report(path: Path, result: WaveNetExperimentResult) -> None:
+    """Publish verified JSON evidence with same-directory atomic replacement."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if not isinstance(result, WaveNetExperimentResult):
+        raise TypeError("result must be WaveNetExperimentResult")
+    payload = result.to_dict()
+    verify_wavenet_report(payload)
+    serialized = (
+        json.dumps(payload, indent=2, sort_keys=True, allow_nan=False).encode() + b"\n"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(serialized)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def train_wavenet_steps(
     model: HierarchicalLanguageModel,
     cursor: WaveNetBatchCursor,
