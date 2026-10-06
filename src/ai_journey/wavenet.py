@@ -9,6 +9,12 @@ from functools import reduce
 from hashlib import sha256
 from operator import mul
 
+import numpy as np
+import torch
+from torch import Tensor
+
+from .context_mlp import ContextDataset
+
 
 class WaveNetError(ValueError):
     """Raised when hierarchical model data, configuration, or state is invalid."""
@@ -44,9 +50,7 @@ class WaveNetConfig:
         if any(factor < 2 for factor in self.group_factors):
             raise WaveNetError("group_factors must be at least 2")
         if self.receptive_field != self.context_size:
-            raise WaveNetError(
-                "context_size must equal the product of group_factors"
-            )
+            raise WaveNetError("context_size must equal the product of group_factors")
         if (
             isinstance(self.dropout, bool)
             or not isinstance(self.dropout, (int, float))
@@ -77,3 +81,65 @@ class WaveNetConfig:
 
         payload = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
         return sha256(payload.encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class WaveNetDataset:
+    """Fixed-width contexts and targets with a stable vocabulary binding."""
+
+    vocabulary_tokens: tuple[str, ...]
+    contexts: Tensor
+    targets: Tensor
+
+    def __post_init__(self) -> None:
+        if len(self.vocabulary_tokens) < 2 or len(set(self.vocabulary_tokens)) != len(
+            self.vocabulary_tokens
+        ):
+            raise WaveNetError("vocabulary must contain unique tokens")
+        if any(
+            not isinstance(token, str) or len(token) != 1
+            for token in self.vocabulary_tokens
+        ):
+            raise TypeError("vocabulary tokens must be single-character strings")
+        if self.contexts.ndim != 2 or self.contexts.dtype != torch.long:
+            raise TypeError("contexts must be a two-dimensional torch.long tensor")
+        if self.targets.ndim != 1 or self.targets.dtype != torch.long:
+            raise TypeError("targets must be a one-dimensional torch.long tensor")
+        if self.contexts.shape[0] != self.targets.shape[0] or not self.targets.numel():
+            raise WaveNetError("contexts and targets must contain matching samples")
+        if int(self.contexts.min()) < 0 or int(self.targets.min()) < 0:
+            raise WaveNetError("token ids must be non-negative")
+        largest = max(int(self.contexts.max()), int(self.targets.max()))
+        if largest >= self.vocab_size:
+            raise WaveNetError("token id is outside the vocabulary")
+
+    @classmethod
+    def from_context_dataset(cls, dataset: ContextDataset) -> WaveNetDataset:
+        """Convert the established boundary-safe dataset without sharing memory."""
+
+        if not isinstance(dataset, ContextDataset):
+            raise TypeError("dataset must be ContextDataset")
+        contexts = torch.from_numpy(np.array(dataset.contexts, copy=True)).long()
+        targets = torch.from_numpy(np.array(dataset.targets, copy=True)).long()
+        return cls(dataset.vocabulary.tokens, contexts, targets)
+
+    @property
+    def sample_count(self) -> int:
+        return int(self.targets.numel())
+
+    @property
+    def context_size(self) -> int:
+        return int(self.contexts.shape[1])
+
+    @property
+    def vocab_size(self) -> int:
+        return len(self.vocabulary_tokens)
+
+    def fingerprint(self) -> str:
+        """Bind vocabulary order, contexts, and targets into one digest."""
+
+        digest = sha256()
+        digest.update("".join(self.vocabulary_tokens).encode())
+        digest.update(self.contexts.contiguous().numpy().tobytes())
+        digest.update(self.targets.contiguous().numpy().tobytes())
+        return digest.hexdigest()
