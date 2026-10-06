@@ -14,8 +14,10 @@ from ai_journey.wavenet import (
     WaveNetConfig,
     WaveNetDataset,
     WaveNetError,
+    WaveNetMetrics,
     WaveNetTrainingConfig,
     build_wavenet_dataset_split,
+    evaluate_wavenet,
     initialize_wavenet,
     trace_hierarchical_shapes,
 )
@@ -368,6 +370,41 @@ class HierarchicalLanguageModelTests(unittest.TestCase):
     def test_initializer_rejects_boolean_seed(self) -> None:
         with self.assertRaises(TypeError):
             initialize_wavenet(self.config, seed=True)
+
+    def test_evaluation_covers_every_sample_and_restores_modes(self) -> None:
+        source = build_context_dataset(("ajay", "maya"), block_size=8)
+        dataset = WaveNetDataset.from_context_dataset(source)
+        config = WaveNetConfig(
+            vocab_size=dataset.vocab_size,
+            context_size=8,
+            embedding_dim=4,
+            hidden_dim=12,
+            group_factors=(2, 2, 2),
+        )
+        model = initialize_wavenet(config, seed=32)
+        model.train()
+        model.stages[1].eval()
+        original_modes = tuple(module.training for module in model.modules())
+
+        metrics = evaluate_wavenet(model, dataset, batch_size=3)
+        with torch.no_grad():
+            _, direct_loss = model(dataset.contexts, dataset.targets)
+
+        self.assertIsInstance(metrics, WaveNetMetrics)
+        self.assertEqual(metrics.sample_count, dataset.sample_count)
+        assert direct_loss is not None
+        self.assertAlmostEqual(metrics.nll, float(direct_loss), places=6)
+        self.assertAlmostEqual(metrics.perplexity, math.exp(metrics.nll))
+        self.assertEqual(
+            tuple(module.training for module in model.modules()), original_modes
+        )
+
+    def test_evaluation_rejects_dataset_contract_mismatch(self) -> None:
+        source = build_context_dataset(("ajay", "maya"), block_size=4)
+        dataset = WaveNetDataset.from_context_dataset(source)
+        model = initialize_wavenet(self.config)
+        with self.assertRaisesRegex(WaveNetError, "context_size"):
+            evaluate_wavenet(model, dataset)
 
 
 if __name__ == "__main__":

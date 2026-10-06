@@ -430,6 +430,57 @@ class ShapeTraceStep:
     parameter_count: int
 
 
+@dataclass(frozen=True)
+class WaveNetMetrics:
+    """Full-dataset negative log-likelihood and derived perplexity."""
+
+    nll: float
+    perplexity: float
+    sample_count: int
+
+
+def evaluate_wavenet(
+    model: HierarchicalLanguageModel,
+    dataset: WaveNetDataset,
+    *,
+    batch_size: int = 256,
+) -> WaveNetMetrics:
+    """Evaluate every sample once while preserving all module modes."""
+
+    if not isinstance(model, HierarchicalLanguageModel):
+        raise TypeError("model must be HierarchicalLanguageModel")
+    if not isinstance(dataset, WaveNetDataset):
+        raise TypeError("dataset must be WaveNetDataset")
+    if dataset.context_size != model.config.context_size:
+        raise WaveNetError("dataset context_size does not match the model")
+    if dataset.vocab_size != model.config.vocab_size:
+        raise WaveNetError("dataset vocabulary does not match the model")
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int):
+        raise TypeError("batch_size must be an integer")
+    if batch_size <= 0:
+        raise WaveNetError("batch_size must be positive")
+
+    modes = tuple((module, module.training) for module in model.modules())
+    total_loss = 0.0
+    try:
+        model.eval()
+        with torch.no_grad():
+            for start in range(0, dataset.sample_count, batch_size):
+                stop = min(start + batch_size, dataset.sample_count)
+                _, loss = model(
+                    dataset.contexts[start:stop], dataset.targets[start:stop]
+                )
+                assert loss is not None
+                total_loss += float(loss) * (stop - start)
+    finally:
+        for module, training in modes:
+            module.training = training
+    nll = total_loss / dataset.sample_count
+    return WaveNetMetrics(
+        nll=nll, perplexity=math.exp(nll), sample_count=dataset.sample_count
+    )
+
+
 def trace_hierarchical_shapes(
     model: HierarchicalLanguageModel, *, batch_size: int = 2
 ) -> tuple[ShapeTraceStep, ...]:
