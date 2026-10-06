@@ -41,6 +41,23 @@ from ai_journey.wavenet import (
 
 
 class WaveNetConfigTests(unittest.TestCase):
+    def test_public_package_exports_hierarchical_entry_points(self) -> None:
+        import ai_journey
+
+        expected = (
+            "FlattenConsecutive",
+            "HierarchicalLanguageModel",
+            "WaveNetConfig",
+            "WaveNetDataset",
+            "WaveNetTrainingConfig",
+            "build_wavenet_dataset_split",
+            "run_wavenet_experiment",
+        )
+        for name in expected:
+            with self.subTest(name=name):
+                self.assertIn(name, ai_journey.__all__)
+                self.assertTrue(hasattr(ai_journey, name))
+
     def test_config_exposes_receptive_field_and_stage_lengths(self) -> None:
         config = WaveNetConfig(vocab_size=27, group_factors=(2, 2, 2))
 

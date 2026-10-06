@@ -47,6 +47,15 @@ from .transformer_lab import (
     TransformerConfig as TransformerModelConfig,
 )
 from .transformer_shapes import TransformerConfig, build_gpt_shape_flow
+from .wavenet import (
+    FlattenConsecutive,
+    HierarchicalLanguageModel,
+    WaveNetConfig,
+    WaveNetDataset,
+    WaveNetTrainingConfig,
+    build_wavenet_dataset_split,
+    run_wavenet_experiment,
+)
 from .xor import train_xor
 
 __all__ = [
@@ -60,6 +69,8 @@ __all__ = [
     "ContextMLP",
     "ContextTrainingResult",
     "DecoderLanguageModel",
+    "FlattenConsecutive",
+    "HierarchicalLanguageModel",
     "KaimingComparisonResult",
     "ScratchBatchNorm",
     "ShiftAssessment",
@@ -72,10 +83,14 @@ __all__ = [
     "TransformerTrainingConfig",
     "Value",
     "Vocabulary",
+    "WaveNetConfig",
+    "WaveNetDataset",
+    "WaveNetTrainingConfig",
     "analyze_corpus_shift",
     "assess_corpus_shift",
     "build_context_dataset",
     "build_gpt_shape_flow",
+    "build_wavenet_dataset_split",
     "default_parameters",
     "forward",
     "full_backward",
@@ -90,6 +105,7 @@ __all__ = [
     "run_memory_experiment",
     "run_mlp_experiment",
     "run_transformer_experiment",
+    "run_wavenet_experiment",
     "train_context_mlp",
     "train_mlp",
     "train_xor",
