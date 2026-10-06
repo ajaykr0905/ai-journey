@@ -12,7 +12,7 @@ from operator import mul
 
 import numpy as np
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 
 from .context_mlp import ContextDataset, build_split_datasets
 
@@ -188,3 +188,39 @@ def build_wavenet_dataset_split(
     if split.train.vocab_size != config.vocab_size:
         raise WaveNetError("config vocab_size does not match the corpus vocabulary")
     return split
+
+
+class FlattenConsecutive(nn.Module):
+    """Concatenate adjacent time steps without changing their token order."""
+
+    def __init__(self, factor: int) -> None:
+        super().__init__()
+        if isinstance(factor, bool) or not isinstance(factor, int):
+            raise TypeError("factor must be an integer")
+        if factor < 2:
+            raise WaveNetError("factor must be at least 2")
+        self.factor = factor
+
+    def output_shape(self, shape: tuple[int, int, int]) -> tuple[int, int, int]:
+        """Calculate the forward shape while enforcing exact grouping."""
+
+        if (
+            not isinstance(shape, tuple)
+            or len(shape) != 3
+            or any(
+                isinstance(size, bool) or not isinstance(size, int) for size in shape
+            )
+        ):
+            raise TypeError("shape must contain three integer dimensions")
+        batch, time, channels = shape
+        if min(shape) <= 0:
+            raise WaveNetError("shape dimensions must be positive")
+        if time % self.factor:
+            raise WaveNetError("time dimension must be divisible by factor")
+        return batch, time // self.factor, channels * self.factor
+
+    def forward(self, inputs: Tensor) -> Tensor:
+        if not isinstance(inputs, Tensor) or inputs.ndim != 3:
+            raise TypeError("inputs must be a three-dimensional tensor")
+        output_shape = self.output_shape(tuple(inputs.shape))
+        return inputs.reshape(output_shape)

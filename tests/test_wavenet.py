@@ -7,6 +7,7 @@ import torch
 
 from ai_journey.context_mlp import build_context_dataset
 from ai_journey.wavenet import (
+    FlattenConsecutive,
     WaveNetConfig,
     WaveNetDataset,
     WaveNetError,
@@ -112,6 +113,35 @@ class WaveNetDatasetTests(unittest.TestCase):
         config = WaveNetConfig(vocab_size=99, context_size=4, group_factors=(2, 2))
         with self.assertRaisesRegex(WaveNetError, "vocab_size does not match"):
             build_wavenet_dataset_split(("ajay", "maya"), config=config)
+
+
+class FlattenConsecutiveTests(unittest.TestCase):
+    def test_module_preserves_adjacent_token_order_and_gradients(self) -> None:
+        inputs = torch.arange(2 * 4 * 3, dtype=torch.float64).reshape(2, 4, 3)
+        inputs.requires_grad_(True)
+        module = FlattenConsecutive(2)
+
+        output = module(inputs)
+
+        self.assertEqual(output.shape, (2, 2, 6))
+        self.assertEqual(output[0, 0].tolist(), [0, 1, 2, 3, 4, 5])
+        output.sum().backward()
+        self.assertTrue(torch.equal(inputs.grad, torch.ones_like(inputs)))
+
+    def test_module_handles_noncontiguous_inputs(self) -> None:
+        inputs = torch.arange(2 * 3 * 4).reshape(2, 3, 4).transpose(1, 2)
+        output = FlattenConsecutive(2)(inputs)
+
+        self.assertEqual(output.shape, (2, 2, 6))
+        self.assertEqual(output[0, 0].tolist(), [0, 4, 8, 1, 5, 9])
+
+    def test_module_rejects_partial_groups_and_invalid_shapes(self) -> None:
+        with self.assertRaisesRegex(WaveNetError, "divisible"):
+            FlattenConsecutive(2)(torch.zeros(3, 5, 4))
+        with self.assertRaises(TypeError):
+            FlattenConsecutive(2)(torch.zeros(3, 4))
+        with self.assertRaises((TypeError, WaveNetError)):
+            FlattenConsecutive(True)
 
 
 if __name__ == "__main__":
