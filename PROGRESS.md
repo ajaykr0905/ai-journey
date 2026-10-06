@@ -1,6 +1,6 @@
 # Progress and Evidence
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 This file separates repository-verifiable work from activities that require the
 learner's own completion evidence.
@@ -37,6 +37,7 @@ learner's own completion evidence.
 | 27 | Scratch BatchNorm, calibrated running statistics, transformer/checkpoint integration, deterministic mode-trap experiment, diagnostics, and evidence gates present | Primary and support lectures pending user confirmation | Learner BatchNorm implementation or notebook run, deliberate missing-`eval()` observation, interpretation, and support-lecture explanation pending |
 | 28 | Stable manual categorical loss, independent numerical/autograd checks, transformer parameter-gradient audit, CLI and CI evidence gate present | Primary and support lectures pending user confirmation | Hand-derived dlogits, learner type-along, audit run, and Taylor-series explanation pending |
 | 31 | Engineering-only predeclared ablation protocol, paired deterministic trials, self-verifying report, CLI, and CI gate present | No primary lecture scheduled; support lecture pending user confirmation | Blank-file manual backward rebuild, personal `cmp()` run, gap log, and explanation pending |
+| 32 | Hierarchical PyTorch module containers, runtime shape trace, deterministic training, exact restart, sampling, self-verifying report, CLI, and CI gate present | Primary and support lectures pending user confirmation | Learner type-along, module-container explanation, experiment run, and BERT comparison pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,
