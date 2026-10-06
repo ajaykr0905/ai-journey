@@ -445,6 +445,84 @@ class WaveNetMetrics:
 
 
 @dataclass(frozen=True)
+class WaveNetGradientAudit:
+    """Coverage and finiteness results for every registered parameter gradient."""
+
+    parameter_tensors: int
+    parameter_values: int
+    missing_gradients: tuple[str, ...]
+    zero_gradients: tuple[str, ...]
+    nonfinite_gradients: tuple[str, ...]
+
+    @property
+    def passed(self) -> bool:
+        return not (
+            self.missing_gradients or self.zero_gradients or self.nonfinite_gradients
+        )
+
+
+def audit_wavenet_gradients(
+    model: HierarchicalLanguageModel,
+    dataset: WaveNetDataset,
+    *,
+    example_count: int = 16,
+) -> WaveNetGradientAudit:
+    """Backpropagate one deterministic batch and audit the full module tree."""
+
+    if not isinstance(model, HierarchicalLanguageModel):
+        raise TypeError("model must be HierarchicalLanguageModel")
+    if not isinstance(dataset, WaveNetDataset):
+        raise TypeError("dataset must be WaveNetDataset")
+    if dataset.context_size != model.config.context_size:
+        raise WaveNetError("dataset context_size does not match the model")
+    if dataset.vocab_size != model.config.vocab_size:
+        raise WaveNetError("dataset vocabulary does not match the model")
+    if isinstance(example_count, bool) or not isinstance(example_count, int):
+        raise TypeError("example_count must be an integer")
+    if not 1 <= example_count <= dataset.sample_count:
+        raise WaveNetError("example_count must be within the dataset")
+
+    modes = tuple((module, module.training) for module in model.modules())
+    original_gradients = {
+        name: None if parameter.grad is None else parameter.grad.detach().clone()
+        for name, parameter in model.named_parameters()
+    }
+    missing: list[str] = []
+    zeros: list[str] = []
+    nonfinite: list[str] = []
+    try:
+        model.eval()
+        model.zero_grad(set_to_none=True)
+        _, loss = model(
+            dataset.contexts[:example_count], dataset.targets[:example_count]
+        )
+        assert loss is not None
+        loss.backward()
+        for name, parameter in model.named_parameters():
+            gradient = parameter.grad
+            if gradient is None:
+                missing.append(name)
+            elif not bool(torch.isfinite(gradient).all()):
+                nonfinite.append(name)
+            elif not bool(torch.count_nonzero(gradient)):
+                zeros.append(name)
+    finally:
+        for name, parameter in model.named_parameters():
+            previous = original_gradients[name]
+            parameter.grad = None if previous is None else previous
+        for module, training in modes:
+            module.training = training
+    parameters = tuple(model.parameters())
+    return WaveNetGradientAudit(
+        parameter_tensors=len(parameters),
+        parameter_values=sum(parameter.numel() for parameter in parameters),
+        missing_gradients=tuple(missing),
+        zero_gradients=tuple(zeros),
+        nonfinite_gradients=tuple(nonfinite),
+    )
+
+
+@dataclass(frozen=True)
 class WaveNetSample:
     """Generated text and the exact sampled token sequence."""
 

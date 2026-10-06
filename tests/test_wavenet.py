@@ -20,10 +20,12 @@ from ai_journey.wavenet import (
     WaveNetDataset,
     WaveNetError,
     WaveNetExperimentResult,
+    WaveNetGradientAudit,
     WaveNetMetrics,
     WaveNetSample,
     WaveNetTrainingConfig,
     WaveNetTrainingResult,
+    audit_wavenet_gradients,
     build_wavenet_dataset_split,
     evaluate_wavenet,
     fit_wavenet,
@@ -460,6 +462,46 @@ class HierarchicalLanguageModelTests(unittest.TestCase):
             sample_wavenet(model, tuple(".abc"))
         with self.assertRaisesRegex(WaveNetError, "temperature"):
             sample_wavenet(model, tuple(".abcdefghij"), temperature=0)
+
+    def test_gradient_audit_covers_all_registered_parameters_without_side_effects(
+        self,
+    ) -> None:
+        source = build_context_dataset(("ajay", "maya"), block_size=8)
+        dataset = WaveNetDataset.from_context_dataset(source)
+        config = WaveNetConfig(
+            vocab_size=dataset.vocab_size,
+            context_size=8,
+            embedding_dim=4,
+            hidden_dim=12,
+            group_factors=(2, 2, 2),
+        )
+        model = initialize_wavenet(config, seed=32)
+        first_parameter = next(model.parameters())
+        first_parameter.grad = torch.ones_like(first_parameter)
+        model.train()
+
+        audit = audit_wavenet_gradients(model, dataset, example_count=8)
+
+        self.assertIsInstance(audit, WaveNetGradientAudit)
+        self.assertTrue(audit.passed, audit)
+        self.assertEqual(audit.parameter_values, model.parameter_count)
+        self.assertEqual(audit.parameter_tensors, len(tuple(model.parameters())))
+        self.assertTrue(
+            torch.equal(first_parameter.grad, torch.ones_like(first_parameter))
+        )
+        self.assertTrue(model.training)
+
+    def test_gradient_audit_validates_example_count(self) -> None:
+        source = build_context_dataset(("ajay", "maya"), block_size=8)
+        dataset = WaveNetDataset.from_context_dataset(source)
+        config = WaveNetConfig(
+            vocab_size=dataset.vocab_size,
+            context_size=8,
+            group_factors=(2, 2, 2),
+        )
+        model = initialize_wavenet(config)
+        with self.assertRaisesRegex(WaveNetError, "within the dataset"):
+            audit_wavenet_gradients(model, dataset, example_count=0)
 
 
 class WaveNetTrainingTests(unittest.TestCase):
