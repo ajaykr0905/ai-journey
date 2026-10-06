@@ -461,6 +461,95 @@ class WaveNetGradientAudit:
         )
 
 
+@dataclass(frozen=True)
+class WaveNetOverfitResult:
+    """Capacity-gate result on an explicitly bounded training subset."""
+
+    example_count: int
+    steps: int
+    initial_nll: float
+    final_nll: float
+    minimum_improvement: float
+    model_fingerprint: str
+
+    @property
+    def improvement(self) -> float:
+        return self.initial_nll - self.final_nll
+
+    @property
+    def passed(self) -> bool:
+        return self.improvement >= self.minimum_improvement
+
+
+def run_wavenet_overfit_probe(
+    dataset: WaveNetDataset,
+    *,
+    model_config: WaveNetConfig,
+    example_count: int = 8,
+    steps: int = 100,
+    learning_rate: float = 0.05,
+    minimum_improvement: float = 0.5,
+    seed: int = 32,
+) -> WaveNetOverfitResult:
+    """Verify that the model can reduce NLL on a declared tiny subset."""
+
+    if not isinstance(dataset, WaveNetDataset):
+        raise TypeError("dataset must be WaveNetDataset")
+    if not isinstance(model_config, WaveNetConfig):
+        raise TypeError("model_config must be WaveNetConfig")
+    for name, value in (("example_count", example_count), ("steps", steps)):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"{name} must be an integer")
+        if value <= 0:
+            raise WaveNetError(f"{name} must be positive")
+    if example_count > dataset.sample_count:
+        raise WaveNetError("example_count must not exceed the dataset")
+    for name, value in (
+        ("learning_rate", learning_rate),
+        ("minimum_improvement", minimum_improvement),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise WaveNetError(f"{name} must be positive and finite")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise TypeError("seed must be an integer")
+    subset = WaveNetDataset(
+        dataset.vocabulary_tokens,
+        dataset.contexts[:example_count].clone(),
+        dataset.targets[:example_count].clone(),
+    )
+    training_config = WaveNetTrainingConfig(
+        steps=steps,
+        batch_size=example_count,
+        learning_rate=learning_rate,
+        weight_decay=0.0,
+        gradient_clip=5.0,
+        seed=seed,
+    )
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(seed)
+        model = HierarchicalLanguageModel(model_config)
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=learning_rate, weight_decay=0.0
+        )
+        cursor = WaveNetBatchCursor(subset, batch_size=example_count, seed=seed)
+        initial = evaluate_wavenet(model, subset)
+        train_wavenet_steps(model, cursor, optimizer, training_config)
+        final = evaluate_wavenet(model, subset)
+    return WaveNetOverfitResult(
+        example_count=example_count,
+        steps=steps,
+        initial_nll=initial.nll,
+        final_nll=final.nll,
+        minimum_improvement=minimum_improvement,
+        model_fingerprint=wavenet_model_fingerprint(model),
+    )
+
+
 def audit_wavenet_gradients(
     model: HierarchicalLanguageModel,
     dataset: WaveNetDataset,

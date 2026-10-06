@@ -22,6 +22,7 @@ from ai_journey.wavenet import (
     WaveNetExperimentResult,
     WaveNetGradientAudit,
     WaveNetMetrics,
+    WaveNetOverfitResult,
     WaveNetSample,
     WaveNetTrainingConfig,
     WaveNetTrainingResult,
@@ -32,6 +33,7 @@ from ai_journey.wavenet import (
     initialize_wavenet,
     load_wavenet_checkpoint,
     run_wavenet_experiment,
+    run_wavenet_overfit_probe,
     sample_wavenet,
     save_wavenet_checkpoint,
     trace_hierarchical_shapes,
@@ -796,6 +798,45 @@ class WaveNetTrainingTests(unittest.TestCase):
 
             self.assertEqual(path.read_bytes(), b"previous evidence\n")
             self.assertEqual(list(path.parent.glob(".*.tmp")), [])
+
+    def test_tiny_subset_overfit_probe_is_deterministic_and_passes(self) -> None:
+        first = run_wavenet_overfit_probe(
+            self.datasets.train,
+            model_config=self.config,
+            example_count=8,
+            steps=60,
+            learning_rate=0.05,
+            minimum_improvement=0.5,
+            seed=72,
+        )
+        second = run_wavenet_overfit_probe(
+            self.datasets.train,
+            model_config=self.config,
+            example_count=8,
+            steps=60,
+            learning_rate=0.05,
+            minimum_improvement=0.5,
+            seed=72,
+        )
+
+        self.assertIsInstance(first, WaveNetOverfitResult)
+        self.assertEqual(first, second)
+        self.assertTrue(first.passed, first)
+        self.assertLess(first.final_nll, first.initial_nll)
+
+    def test_overfit_probe_validates_subset_and_gate_controls(self) -> None:
+        with self.assertRaisesRegex(WaveNetError, "must not exceed"):
+            run_wavenet_overfit_probe(
+                self.datasets.train,
+                model_config=self.config,
+                example_count=self.datasets.train.sample_count + 1,
+            )
+        with self.assertRaisesRegex(WaveNetError, "minimum_improvement"):
+            run_wavenet_overfit_probe(
+                self.datasets.train,
+                model_config=self.config,
+                minimum_improvement=0.0,
+            )
 
 
 if __name__ == "__main__":
