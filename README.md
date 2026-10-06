@@ -1,7 +1,7 @@
-# AI Journey: Days 0–28
+# AI Journey: Days 0–32
 
 This repository is a public-safe, executable record of an added setup day plus the
-first twenty-eight workbook days of a 90-day AI engineering learning plan. It combines
+selected work through Day 32 of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -61,6 +61,9 @@ then grow these exercises into production-quality training and inference project
 - A strict one-variable ablation protocol with paired deterministic trials,
   negative-result-preserving interpretation, and self-verifying evidence in
   [`scripts/run_ablation.py`](scripts/run_ablation.py)
+- A hierarchical character model built from registered PyTorch module containers,
+  with runtime shape traces, exact restart checkpoints, seeded sampling, and
+  self-verifying evidence in [`scripts/run_day_32.py`](scripts/run_day_32.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -131,6 +134,9 @@ python scripts/run_ablation.py \
   --protocol config/day-31-learning-rate-ablation.json \
   --corpus data/day-19-demo-names.txt \
   --output artifacts/day-31-ablation.json
+python scripts/run_day_32.py \
+  --corpus data/day-19-demo-names.txt \
+  --output artifacts/day-32-wavenet.json
 python -m unittest discover -s tests -v
 ```
 
@@ -240,6 +246,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 27 | 2026-10-01 | Scratch BatchNorm, persistent running state, and train/eval mode diagnostics |
 | 28 | 2026-10-02 | Manual cross-entropy and transformer parameter-gradient audit |
 | 31 | 2026-10-05 | Predeclared paired transformer ablation protocol and evidence gate |
+| 32 | 2026-10-06 | Hierarchical character model, module containers, and exact restart |
 
 ## License
 

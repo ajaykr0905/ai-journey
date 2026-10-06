@@ -165,6 +165,20 @@ jobs:
           --protocol config/day-31-learning-rate-ablation.json
           --corpus data/day-19-demo-names.txt
           --output /tmp/ai-journey-artifacts/day-31-ablation.json
+      - name: Run the Day 32 hierarchical character model
+        run: >-
+          python scripts/run_day_32.py
+          --corpus data/day-19-demo-names.txt
+          --output /tmp/ai-journey-artifacts/day-32-wavenet.json
+          --steps 4
+          --batch-size 8
+          --context-size 4
+          --embedding-dim 4
+          --hidden-dim 12
+          --group-factors 2 2
+          --overfit-examples 8
+          --overfit-steps 40
+          --minimum-overfit-improvement 0.5
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py
