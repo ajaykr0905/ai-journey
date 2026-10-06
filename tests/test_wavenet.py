@@ -8,6 +8,7 @@ import torch
 from ai_journey.context_mlp import build_context_dataset
 from ai_journey.wavenet import (
     FlattenConsecutive,
+    HierarchicalStage,
     WaveNetConfig,
     WaveNetDataset,
     WaveNetError,
@@ -142,6 +143,49 @@ class FlattenConsecutiveTests(unittest.TestCase):
             FlattenConsecutive(2)(torch.zeros(3, 4))
         with self.assertRaises((TypeError, WaveNetError)):
             FlattenConsecutive(True)
+
+
+class HierarchicalStageTests(unittest.TestCase):
+    def test_stage_registers_a_complete_module_pipeline(self) -> None:
+        stage = HierarchicalStage(3, 5, factor=2)
+        inputs = torch.randn(4, 6, 3, requires_grad=True)
+
+        output = stage(inputs)
+
+        self.assertEqual(output.shape, (4, 3, 5))
+        self.assertEqual(
+            [type(module) for module in stage.network],
+            [
+                FlattenConsecutive,
+                torch.nn.Linear,
+                torch.nn.LayerNorm,
+                torch.nn.Tanh,
+                torch.nn.Dropout,
+            ],
+        )
+        output.square().sum().backward()
+        self.assertIsNotNone(inputs.grad)
+        self.assertTrue(
+            all(parameter.grad is not None for parameter in stage.parameters())
+        )
+
+    def test_stage_rejects_wrong_feature_width(self) -> None:
+        stage = HierarchicalStage(3, 5, factor=2)
+        with self.assertRaisesRegex(WaveNetError, "feature width"):
+            stage(torch.zeros(2, 4, 2))
+
+    def test_stage_validates_dimensions_and_dropout(self) -> None:
+        invalid = (
+            {"input_dim": 0, "output_dim": 3, "factor": 2},
+            {"input_dim": 3, "output_dim": True, "factor": 2},
+            {"input_dim": 3, "output_dim": 4, "factor": 2, "dropout": 1.0},
+        )
+        for values in invalid:
+            with (
+                self.subTest(values=values),
+                self.assertRaises((TypeError, WaveNetError)),
+            ):
+                HierarchicalStage(**values)
 
 
 if __name__ == "__main__":

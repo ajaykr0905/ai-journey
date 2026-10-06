@@ -224,3 +224,46 @@ class FlattenConsecutive(nn.Module):
             raise TypeError("inputs must be a three-dimensional tensor")
         output_shape = self.output_shape(tuple(inputs.shape))
         return inputs.reshape(output_shape)
+
+
+class HierarchicalStage(nn.Module):
+    """Group adjacent features, project them, normalize, and apply a nonlinearity."""
+
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        *,
+        factor: int,
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        for name, value in (("input_dim", input_dim), ("output_dim", output_dim)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+            if value <= 0:
+                raise WaveNetError(f"{name} must be positive")
+        if (
+            isinstance(dropout, bool)
+            or not isinstance(dropout, (int, float))
+            or not math.isfinite(dropout)
+            or not 0 <= dropout < 1
+        ):
+            raise WaveNetError("dropout must be finite and in [0, 1)")
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.factor = factor
+        self.network = nn.Sequential(
+            FlattenConsecutive(factor),
+            nn.Linear(factor * input_dim, output_dim, bias=False),
+            nn.LayerNorm(output_dim),
+            nn.Tanh(),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, inputs: Tensor) -> Tensor:
+        if not isinstance(inputs, Tensor) or inputs.ndim != 3:
+            raise TypeError("inputs must be a three-dimensional tensor")
+        if inputs.shape[-1] != self.input_dim:
+            raise WaveNetError("input feature width does not match the stage")
+        return self.network(inputs)
