@@ -555,6 +555,109 @@ class WaveNetTrainingResult:
     cursor_state: dict[str, int]
 
 
+@dataclass(frozen=True)
+class WaveNetExperimentResult:
+    """Self-contained, JSON-compatible evidence for one hierarchical run."""
+
+    model_config: WaveNetConfig
+    training_config: WaveNetTrainingConfig
+    dataset_fingerprint: str
+    model_fingerprint: str
+    parameter_count: int
+    completed_steps: int
+    shapes: tuple[ShapeTraceStep, ...]
+    initial_train: WaveNetMetrics
+    initial_validation: WaveNetMetrics
+    final_train: WaveNetMetrics
+    final_validation: WaveNetMetrics
+    trace: tuple[WaveNetTrainingStep, ...]
+    sample: WaveNetSample
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        canonical = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+        )
+        payload["report_fingerprint"] = sha256(canonical.encode()).hexdigest()
+        return payload
+
+
+def run_wavenet_experiment(
+    datasets: WaveNetDatasetSplit,
+    *,
+    model_config: WaveNetConfig,
+    training_config: WaveNetTrainingConfig,
+    sample_seed: int = 320,
+) -> WaveNetExperimentResult:
+    """Train, evaluate, trace, and sample one deterministic experiment."""
+
+    training = fit_wavenet(
+        datasets,
+        model_config=model_config,
+        training_config=training_config,
+    )
+    return WaveNetExperimentResult(
+        model_config=model_config,
+        training_config=training_config,
+        dataset_fingerprint=datasets.fingerprint(),
+        model_fingerprint=wavenet_model_fingerprint(training.model),
+        parameter_count=training.model.parameter_count,
+        completed_steps=training_config.steps,
+        shapes=trace_hierarchical_shapes(training.model),
+        initial_train=training.initial_train,
+        initial_validation=training.initial_validation,
+        final_train=training.final_train,
+        final_validation=training.final_validation,
+        trace=training.trace,
+        sample=sample_wavenet(
+            training.model,
+            datasets.train.vocabulary_tokens,
+            seed=sample_seed,
+        ),
+    )
+
+
+def verify_wavenet_report(payload: dict[str, Any]) -> None:
+    """Reject incomplete or modified experiment evidence."""
+
+    if not isinstance(payload, dict):
+        raise TypeError("payload must be a dictionary")
+    expected_fields = {
+        "model_config",
+        "training_config",
+        "dataset_fingerprint",
+        "model_fingerprint",
+        "parameter_count",
+        "completed_steps",
+        "shapes",
+        "initial_train",
+        "initial_validation",
+        "final_train",
+        "final_validation",
+        "trace",
+        "sample",
+        "report_fingerprint",
+    }
+    if set(payload) != expected_fields:
+        raise WaveNetError("report fields do not match the experiment schema")
+    fingerprint = payload["report_fingerprint"]
+    body = {key: value for key, value in payload.items() if key != "report_fingerprint"}
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    expected = sha256(canonical.encode()).hexdigest()
+    if fingerprint != expected:
+        raise WaveNetError("report fingerprint mismatch")
+    completed_steps = payload["completed_steps"]
+    if (
+        isinstance(completed_steps, bool)
+        or not isinstance(completed_steps, int)
+        or completed_steps <= 0
+        or len(payload["trace"]) != completed_steps
+    ):
+        raise WaveNetError("report trace does not match completed_steps")
+    if payload["parameter_count"] <= 0:
+        raise WaveNetError("report parameter_count must be positive")
+
+
 def train_wavenet_steps(
     model: HierarchicalLanguageModel,
     cursor: WaveNetBatchCursor,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import math
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ from ai_journey.wavenet import (
     WaveNetConfig,
     WaveNetDataset,
     WaveNetError,
+    WaveNetExperimentResult,
     WaveNetMetrics,
     WaveNetSample,
     WaveNetTrainingConfig,
@@ -25,10 +27,12 @@ from ai_journey.wavenet import (
     fit_wavenet,
     initialize_wavenet,
     load_wavenet_checkpoint,
+    run_wavenet_experiment,
     sample_wavenet,
     save_wavenet_checkpoint,
     trace_hierarchical_shapes,
     train_wavenet_steps,
+    verify_wavenet_report,
     wavenet_model_fingerprint,
 )
 
@@ -652,6 +656,48 @@ class WaveNetTrainingTests(unittest.TestCase):
                 )
         self.assertEqual(wavenet_model_fingerprint(model), original)
         self.assertEqual(cursor.state_dict(), {"epoch": 0, "offset": 0})
+
+    def test_experiment_report_is_complete_deterministic_and_self_verifying(
+        self,
+    ) -> None:
+        config = WaveNetTrainingConfig(
+            steps=8,
+            batch_size=6,
+            learning_rate=0.02,
+            gradient_clip=1.0,
+            seed=32,
+        )
+        first = run_wavenet_experiment(
+            self.datasets,
+            model_config=self.config,
+            training_config=config,
+            sample_seed=81,
+        )
+        second = run_wavenet_experiment(
+            self.datasets,
+            model_config=self.config,
+            training_config=config,
+            sample_seed=81,
+        )
+
+        self.assertIsInstance(first, WaveNetExperimentResult)
+        self.assertEqual(first.to_dict(), second.to_dict())
+        self.assertEqual(first.completed_steps, len(first.trace))
+        self.assertEqual(first.dataset_fingerprint, self.datasets.fingerprint())
+        verify_wavenet_report(first.to_dict())
+
+    def test_report_verification_rejects_metric_tampering(self) -> None:
+        config = WaveNetTrainingConfig(steps=2, batch_size=4, seed=32)
+        payload = run_wavenet_experiment(
+            self.datasets,
+            model_config=self.config,
+            training_config=config,
+        ).to_dict()
+        tampered = copy.deepcopy(payload)
+        tampered["final_validation"]["nll"] += 1.0
+
+        with self.assertRaisesRegex(WaveNetError, "fingerprint mismatch"):
+            verify_wavenet_report(tampered)
 
 
 if __name__ == "__main__":
