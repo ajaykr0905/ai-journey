@@ -5,11 +5,14 @@ from __future__ import annotations
 import copy
 import json
 import math
+import os
+import tempfile
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from functools import reduce
 from hashlib import sha256
 from operator import mul
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -677,3 +680,142 @@ def initialize_wavenet(
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(seed)
         return HierarchicalLanguageModel(config)
+
+
+WAVENET_CHECKPOINT_SCHEMA = 1
+
+
+def wavenet_model_fingerprint(model: HierarchicalLanguageModel) -> str:
+    """Hash all named model tensors including dtype, shape, and exact values."""
+
+    if not isinstance(model, HierarchicalLanguageModel):
+        raise TypeError("model must be HierarchicalLanguageModel")
+    digest = sha256()
+    for name, tensor in sorted(model.state_dict().items()):
+        value = tensor.detach().cpu().contiguous()
+        digest.update(name.encode())
+        digest.update(str(value.dtype).encode())
+        digest.update(str(tuple(value.shape)).encode())
+        digest.update(value.numpy().tobytes())
+    return digest.hexdigest()
+
+
+def _require_finite_state(value: Any, name: str) -> None:
+    if isinstance(value, Tensor):
+        if (value.is_floating_point() or value.is_complex()) and not bool(
+            torch.isfinite(value).all()
+        ):
+            raise WaveNetError(f"{name} must be finite")
+    elif isinstance(value, float) and not math.isfinite(value):
+        raise WaveNetError(f"{name} must be finite")
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _require_finite_state(item, f"{name}.{key}")
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _require_finite_state(item, f"{name}[{index}]")
+
+
+def save_wavenet_checkpoint(
+    path: Path,
+    *,
+    model: HierarchicalLanguageModel,
+    optimizer: torch.optim.Optimizer,
+    cursor: WaveNetBatchCursor,
+    training_config: WaveNetTrainingConfig,
+    dataset_fingerprint: str,
+    step: int,
+) -> None:
+    """Atomically publish every state component needed for exact continuation."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if isinstance(step, bool) or not isinstance(step, int):
+        raise TypeError("step must be an integer")
+    if step < 0:
+        raise WaveNetError("step must be non-negative")
+    if (
+        not isinstance(dataset_fingerprint, str)
+        or len(dataset_fingerprint) != 64
+        or any(character not in "0123456789abcdef" for character in dataset_fingerprint)
+    ):
+        raise WaveNetError("dataset_fingerprint must be a SHA-256 hex digest")
+    payload = {
+        "schema_version": WAVENET_CHECKPOINT_SCHEMA,
+        "step": step,
+        "model_config": asdict(model.config),
+        "training_config": asdict(training_config),
+        "dataset_fingerprint": dataset_fingerprint,
+        "model_fingerprint": wavenet_model_fingerprint(model),
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "cursor_state": cursor.state_dict(),
+        "torch_rng_state": torch.random.get_rng_state(),
+    }
+    _require_finite_state(payload["model_state"], "model_state")
+    _require_finite_state(payload["optimizer_state"], "optimizer_state")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            torch.save(payload, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def load_wavenet_checkpoint(
+    path: Path,
+    *,
+    model: HierarchicalLanguageModel,
+    optimizer: torch.optim.Optimizer,
+    cursor: WaveNetBatchCursor,
+    training_config: WaveNetTrainingConfig,
+    dataset_fingerprint: str,
+) -> int:
+    """Validate and restore a WaveNet checkpoint transactionally."""
+
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    if payload.get("schema_version") != WAVENET_CHECKPOINT_SCHEMA:
+        raise WaveNetError("unsupported checkpoint schema")
+    if payload.get("model_config") != asdict(model.config):
+        raise WaveNetError("checkpoint model configuration mismatch")
+    if payload.get("training_config") != asdict(training_config):
+        raise WaveNetError("checkpoint training configuration mismatch")
+    if payload.get("dataset_fingerprint") != dataset_fingerprint:
+        raise WaveNetError("checkpoint dataset fingerprint mismatch")
+    step = payload.get("step")
+    if isinstance(step, bool) or not isinstance(step, int) or step < 0:
+        raise WaveNetError("checkpoint step is invalid")
+    _require_finite_state(payload.get("model_state"), "model_state")
+    _require_finite_state(payload.get("optimizer_state"), "optimizer_state")
+
+    original_model = copy.deepcopy(model.state_dict())
+    original_optimizer = copy.deepcopy(optimizer.state_dict())
+    original_cursor = cursor.state_dict()
+    original_rng = torch.random.get_rng_state().clone()
+    try:
+        model.load_state_dict(payload["model_state"])
+        if wavenet_model_fingerprint(model) != payload.get("model_fingerprint"):
+            raise WaveNetError("checkpoint model fingerprint mismatch")
+        optimizer.load_state_dict(payload["optimizer_state"])
+        _require_finite_state(optimizer.state_dict(), "optimizer_state")
+        cursor.load_state_dict(payload["cursor_state"])
+        torch.random.set_rng_state(payload["torch_rng_state"])
+    except Exception:
+        model.load_state_dict(original_model)
+        optimizer.load_state_dict(original_optimizer)
+        cursor.load_state_dict(original_cursor)
+        torch.random.set_rng_state(original_rng)
+        raise
+    return step

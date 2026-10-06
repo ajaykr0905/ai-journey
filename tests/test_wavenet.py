@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+import tempfile
 import unittest
+from pathlib import Path
 
 import torch
 
@@ -21,8 +23,11 @@ from ai_journey.wavenet import (
     evaluate_wavenet,
     fit_wavenet,
     initialize_wavenet,
+    load_wavenet_checkpoint,
+    save_wavenet_checkpoint,
     trace_hierarchical_shapes,
     train_wavenet_steps,
+    wavenet_model_fingerprint,
 )
 
 
@@ -508,6 +513,122 @@ class WaveNetTrainingTests(unittest.TestCase):
                 self.assertRaises((TypeError, WaveNetError)),
             ):
                 train_wavenet_steps(model, cursor, optimizer, self.training, **options)
+
+    def test_checkpoint_resume_matches_uninterrupted_training_exactly(self) -> None:
+        config = WaveNetTrainingConfig(
+            steps=6,
+            batch_size=5,
+            learning_rate=0.02,
+            weight_decay=0.01,
+            gradient_clip=1.0,
+            seed=91,
+        )
+
+        with (
+            torch.random.fork_rng(devices=[]),
+            tempfile.TemporaryDirectory() as directory,
+        ):
+            torch.manual_seed(config.seed)
+            control = HierarchicalLanguageModel(self.config)
+            control_optimizer = torch.optim.AdamW(
+                control.parameters(),
+                lr=config.learning_rate,
+                weight_decay=config.weight_decay,
+            )
+            control_cursor = WaveNetBatchCursor(
+                self.datasets.train, batch_size=config.batch_size, seed=config.seed
+            )
+            control_trace = train_wavenet_steps(
+                control, control_cursor, control_optimizer, config, step_count=6
+            )
+
+            torch.manual_seed(config.seed)
+            interrupted = HierarchicalLanguageModel(self.config)
+            interrupted_optimizer = torch.optim.AdamW(
+                interrupted.parameters(),
+                lr=config.learning_rate,
+                weight_decay=config.weight_decay,
+            )
+            interrupted_cursor = WaveNetBatchCursor(
+                self.datasets.train, batch_size=config.batch_size, seed=config.seed
+            )
+            first_trace = train_wavenet_steps(
+                interrupted,
+                interrupted_cursor,
+                interrupted_optimizer,
+                config,
+                step_count=3,
+            )
+            checkpoint = Path(directory) / "wavenet.pt"
+            save_wavenet_checkpoint(
+                checkpoint,
+                model=interrupted,
+                optimizer=interrupted_optimizer,
+                cursor=interrupted_cursor,
+                training_config=config,
+                dataset_fingerprint=self.datasets.fingerprint(),
+                step=3,
+            )
+
+            resumed = HierarchicalLanguageModel(self.config)
+            resumed_optimizer = torch.optim.AdamW(
+                resumed.parameters(),
+                lr=config.learning_rate,
+                weight_decay=config.weight_decay,
+            )
+            resumed_cursor = WaveNetBatchCursor(
+                self.datasets.train, batch_size=config.batch_size, seed=config.seed
+            )
+            start_step = load_wavenet_checkpoint(
+                checkpoint,
+                model=resumed,
+                optimizer=resumed_optimizer,
+                cursor=resumed_cursor,
+                training_config=config,
+                dataset_fingerprint=self.datasets.fingerprint(),
+            )
+            second_trace = train_wavenet_steps(
+                resumed,
+                resumed_cursor,
+                resumed_optimizer,
+                config,
+                start_step=start_step,
+                step_count=3,
+            )
+
+        self.assertEqual(control_trace, (*first_trace, *second_trace))
+        self.assertEqual(
+            wavenet_model_fingerprint(control), wavenet_model_fingerprint(resumed)
+        )
+        self.assertEqual(control_cursor.state_dict(), resumed_cursor.state_dict())
+
+    def test_checkpoint_rejects_dataset_mismatch_before_mutation(self) -> None:
+        model = initialize_wavenet(self.config, seed=self.training.seed)
+        optimizer = torch.optim.AdamW(model.parameters())
+        cursor = WaveNetBatchCursor(self.datasets.train, batch_size=4)
+        original = wavenet_model_fingerprint(model)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wavenet.pt"
+            save_wavenet_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                training_config=self.training,
+                dataset_fingerprint=self.datasets.fingerprint(),
+                step=0,
+            )
+            with self.assertRaisesRegex(WaveNetError, "dataset fingerprint mismatch"):
+                load_wavenet_checkpoint(
+                    path,
+                    model=model,
+                    optimizer=optimizer,
+                    cursor=cursor,
+                    training_config=self.training,
+                    dataset_fingerprint="0" * 64,
+                )
+        self.assertEqual(wavenet_model_fingerprint(model), original)
+        self.assertEqual(cursor.state_dict(), {"epoch": 0, "offset": 0})
 
 
 if __name__ == "__main__":
