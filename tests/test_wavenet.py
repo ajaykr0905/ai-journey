@@ -22,6 +22,7 @@ from ai_journey.wavenet import (
     fit_wavenet,
     initialize_wavenet,
     trace_hierarchical_shapes,
+    train_wavenet_steps,
 )
 
 
@@ -472,6 +473,41 @@ class WaveNetTrainingTests(unittest.TestCase):
                 model_config=wrong_config,
                 training_config=self.training,
             )
+
+    def test_bounded_training_continues_step_and_batch_state(self) -> None:
+        config = WaveNetTrainingConfig(
+            steps=4,
+            batch_size=5,
+            learning_rate=0.02,
+            gradient_clip=1.0,
+            seed=19,
+        )
+        model = initialize_wavenet(self.config, seed=config.seed)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
+        cursor = WaveNetBatchCursor(
+            self.datasets.train, batch_size=config.batch_size, seed=config.seed
+        )
+
+        first = train_wavenet_steps(
+            model, cursor, optimizer, config, start_step=0, step_count=2
+        )
+        second = train_wavenet_steps(
+            model, cursor, optimizer, config, start_step=2, step_count=2
+        )
+
+        self.assertEqual([step.step for step in (*first, *second)], [0, 1, 2, 3])
+        self.assertGreater(cursor.state_dict()["offset"], 0)
+
+    def test_bounded_training_rejects_invalid_ranges(self) -> None:
+        model = initialize_wavenet(self.config)
+        optimizer = torch.optim.AdamW(model.parameters())
+        cursor = WaveNetBatchCursor(self.datasets.train, batch_size=4)
+        for options in ({"start_step": -1}, {"step_count": 0}):
+            with (
+                self.subTest(options=options),
+                self.assertRaises((TypeError, WaveNetError)),
+            ):
+                train_wavenet_steps(model, cursor, optimizer, self.training, **options)
 
 
 if __name__ == "__main__":
