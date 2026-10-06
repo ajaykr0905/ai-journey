@@ -6,7 +6,12 @@ import unittest
 import torch
 
 from ai_journey.context_mlp import build_context_dataset
-from ai_journey.wavenet import WaveNetConfig, WaveNetDataset, WaveNetError
+from ai_journey.wavenet import (
+    WaveNetConfig,
+    WaveNetDataset,
+    WaveNetError,
+    build_wavenet_dataset_split,
+)
 
 
 class WaveNetConfigTests(unittest.TestCase):
@@ -84,6 +89,29 @@ class WaveNetDatasetTests(unittest.TestCase):
                 self.assertRaises((TypeError, WaveNetError)),
             ):
                 WaveNetDataset(*values)
+
+    def test_record_split_is_deterministic_and_configuration_bound(self) -> None:
+        words = ("ajay", "maya", "arun", "diya", "neel")
+        vocab_size = len({".", *"".join(words)})
+        config = WaveNetConfig(
+            vocab_size=vocab_size, context_size=4, group_factors=(2, 2)
+        )
+
+        first = build_wavenet_dataset_split(
+            words, config=config, validation_fraction=0.4, seed=32
+        )
+        second = build_wavenet_dataset_split(
+            words, config=config, validation_fraction=0.4, seed=32
+        )
+
+        self.assertEqual(first.fingerprint(), second.fingerprint())
+        self.assertEqual(first.train.context_size, config.context_size)
+        self.assertEqual(first.validation.vocab_size, config.vocab_size)
+
+    def test_record_split_rejects_wrong_config_vocabulary(self) -> None:
+        config = WaveNetConfig(vocab_size=99, context_size=4, group_factors=(2, 2))
+        with self.assertRaisesRegex(WaveNetError, "vocab_size does not match"):
+            build_wavenet_dataset_split(("ajay", "maya"), config=config)
 
 
 if __name__ == "__main__":

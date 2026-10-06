@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from functools import reduce
 from hashlib import sha256
@@ -13,7 +14,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from .context_mlp import ContextDataset
+from .context_mlp import ContextDataset, build_split_datasets
 
 
 class WaveNetError(ValueError):
@@ -143,3 +144,47 @@ class WaveNetDataset:
         digest.update(self.contexts.contiguous().numpy().tobytes())
         digest.update(self.targets.contiguous().numpy().tobytes())
         return digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class WaveNetDatasetSplit:
+    """Record-disjoint training and validation datasets."""
+
+    train: WaveNetDataset
+    validation: WaveNetDataset
+
+    def __post_init__(self) -> None:
+        if self.train.vocabulary_tokens != self.validation.vocabulary_tokens:
+            raise WaveNetError("train and validation vocabularies must match")
+        if self.train.context_size != self.validation.context_size:
+            raise WaveNetError("train and validation context sizes must match")
+
+    def fingerprint(self) -> str:
+        payload = f"{self.train.fingerprint()}:{self.validation.fingerprint()}"
+        return sha256(payload.encode()).hexdigest()
+
+
+def build_wavenet_dataset_split(
+    words: Iterable[str],
+    *,
+    config: WaveNetConfig,
+    validation_fraction: float = 0.2,
+    seed: int = 0,
+) -> WaveNetDatasetSplit:
+    """Build deterministic record-level splits that match an architecture."""
+
+    if not isinstance(config, WaveNetConfig):
+        raise TypeError("config must be WaveNetConfig")
+    datasets = build_split_datasets(
+        words,
+        block_size=config.context_size,
+        validation_fraction=validation_fraction,
+        seed=seed,
+    )
+    split = WaveNetDatasetSplit(
+        train=WaveNetDataset.from_context_dataset(datasets.train),
+        validation=WaveNetDataset.from_context_dataset(datasets.validation),
+    )
+    if split.train.vocab_size != config.vocab_size:
+        raise WaveNetError("config vocab_size does not match the corpus vocabulary")
+    return split
