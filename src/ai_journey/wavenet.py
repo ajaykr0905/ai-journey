@@ -86,6 +86,44 @@ class WaveNetConfig:
 
 
 @dataclass(frozen=True)
+class WaveNetTrainingConfig:
+    """Validated controls for deterministic CPU optimization."""
+
+    steps: int = 100
+    batch_size: int = 32
+    learning_rate: float = 0.05
+    weight_decay: float = 0.0
+    gradient_clip: float = 1.0
+    seed: int = 32
+
+    def __post_init__(self) -> None:
+        for name in ("steps", "batch_size"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+            if value <= 0:
+                raise WaveNetError(f"{name} must be positive")
+        if isinstance(self.seed, bool) or not isinstance(self.seed, int):
+            raise TypeError("seed must be an integer")
+        for name in ("learning_rate", "gradient_clip"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise WaveNetError(f"{name} must be positive and finite")
+        if (
+            isinstance(self.weight_decay, bool)
+            or not isinstance(self.weight_decay, (int, float))
+            or not math.isfinite(self.weight_decay)
+            or self.weight_decay < 0
+        ):
+            raise WaveNetError("weight_decay must be non-negative and finite")
+
+
+@dataclass(frozen=True)
 class WaveNetDataset:
     """Fixed-width contexts and targets with a stable vocabulary binding."""
 

@@ -13,6 +13,7 @@ from ai_journey.wavenet import (
     WaveNetConfig,
     WaveNetDataset,
     WaveNetError,
+    WaveNetTrainingConfig,
     build_wavenet_dataset_split,
     initialize_wavenet,
     trace_hierarchical_shapes,
@@ -50,6 +51,24 @@ class WaveNetConfigTests(unittest.TestCase):
                 self.assertRaises((TypeError, WaveNetError)),
             ):
                 WaveNetConfig(vocab_size=27, **overrides)
+
+    def test_training_config_validates_every_optimization_control(self) -> None:
+        config = WaveNetTrainingConfig()
+        self.assertEqual(config.steps, 100)
+        invalid = (
+            {"steps": 0},
+            {"batch_size": True},
+            {"learning_rate": math.inf},
+            {"weight_decay": -0.1},
+            {"gradient_clip": 0.0},
+            {"seed": False},
+        )
+        for overrides in invalid:
+            with (
+                self.subTest(overrides=overrides),
+                self.assertRaises((TypeError, WaveNetError)),
+            ):
+                WaveNetTrainingConfig(**overrides)
 
 
 class WaveNetDatasetTests(unittest.TestCase):
