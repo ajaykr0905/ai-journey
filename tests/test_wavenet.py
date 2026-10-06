@@ -17,6 +17,7 @@ from ai_journey.wavenet import (
     WaveNetDataset,
     WaveNetError,
     WaveNetMetrics,
+    WaveNetSample,
     WaveNetTrainingConfig,
     WaveNetTrainingResult,
     build_wavenet_dataset_split,
@@ -24,6 +25,7 @@ from ai_journey.wavenet import (
     fit_wavenet,
     initialize_wavenet,
     load_wavenet_checkpoint,
+    sample_wavenet,
     save_wavenet_checkpoint,
     trace_hierarchical_shapes,
     train_wavenet_steps,
@@ -413,6 +415,27 @@ class HierarchicalLanguageModelTests(unittest.TestCase):
         model = initialize_wavenet(self.config)
         with self.assertRaisesRegex(WaveNetError, "context_size"):
             evaluate_wavenet(model, dataset)
+
+    def test_sampling_is_seeded_bounded_and_rng_isolated(self) -> None:
+        tokens = tuple(".abcdefghij")
+        model = initialize_wavenet(self.config, seed=32)
+        torch.manual_seed(812)
+        caller_state = torch.random.get_rng_state().clone()
+
+        first = sample_wavenet(model, tokens, max_new_tokens=6, seed=44, top_k=3)
+        second = sample_wavenet(model, tokens, max_new_tokens=6, seed=44, top_k=3)
+
+        self.assertIsInstance(first, WaveNetSample)
+        self.assertEqual(first, second)
+        self.assertLessEqual(len(first.token_ids), 6)
+        self.assertTrue(torch.equal(torch.random.get_rng_state(), caller_state))
+
+    def test_sampling_validates_vocabulary_and_controls(self) -> None:
+        model = initialize_wavenet(self.config)
+        with self.assertRaisesRegex(WaveNetError, "vocabulary"):
+            sample_wavenet(model, tuple(".abc"))
+        with self.assertRaisesRegex(WaveNetError, "temperature"):
+            sample_wavenet(model, tuple(".abcdefghij"), temperature=0)
 
 
 class WaveNetTrainingTests(unittest.TestCase):
