@@ -13,6 +13,7 @@ from operator import mul
 import numpy as np
 import torch
 from torch import Tensor, nn
+from torch.nn import functional as F
 
 from .context_mlp import ContextDataset, build_split_datasets
 
@@ -267,3 +268,66 @@ class HierarchicalStage(nn.Module):
         if inputs.shape[-1] != self.input_dim:
             raise WaveNetError("input feature width does not match the stage")
         return self.network(inputs)
+
+
+class HierarchicalLanguageModel(nn.Module):
+    """Tree-structured character model built from a registered stage container."""
+
+    def __init__(self, config: WaveNetConfig) -> None:
+        super().__init__()
+        if not isinstance(config, WaveNetConfig):
+            raise TypeError("config must be WaveNetConfig")
+        self.config = config
+        self.embedding = nn.Embedding(config.vocab_size, config.embedding_dim)
+        stages: list[HierarchicalStage] = []
+        input_dim = config.embedding_dim
+        for factor in config.group_factors:
+            stages.append(
+                HierarchicalStage(
+                    input_dim,
+                    config.hidden_dim,
+                    factor=factor,
+                    dropout=config.dropout,
+                )
+            )
+            input_dim = config.hidden_dim
+        self.stages = nn.ModuleList(stages)
+        self.output = nn.Linear(config.hidden_dim, config.vocab_size)
+
+    def forward(
+        self, token_ids: Tensor, targets: Tensor | None = None
+    ) -> tuple[Tensor, Tensor | None]:
+        if not isinstance(token_ids, Tensor) or token_ids.ndim != 2:
+            raise TypeError("token_ids must be a two-dimensional tensor")
+        if token_ids.dtype != torch.long:
+            raise TypeError("token_ids must use torch.long dtype")
+        if token_ids.shape[1] != self.config.context_size:
+            raise WaveNetError("token_ids must match the configured context_size")
+        if token_ids.numel() and (
+            int(token_ids.min()) < 0 or int(token_ids.max()) >= self.config.vocab_size
+        ):
+            raise WaveNetError("token id is outside the vocabulary")
+
+        hidden = self.embedding(token_ids)
+        for stage in self.stages:
+            hidden = stage(hidden)
+        if hidden.shape[1] != 1:
+            raise RuntimeError("hierarchical grouping did not reduce time to one")
+        logits = self.output(hidden[:, 0, :])
+
+        loss = None
+        if targets is not None:
+            if not isinstance(targets, Tensor) or targets.shape != token_ids.shape[:1]:
+                raise TypeError("targets must contain one token id per context")
+            if targets.dtype != torch.long:
+                raise TypeError("targets must use torch.long dtype")
+            if targets.numel() and (
+                int(targets.min()) < 0 or int(targets.max()) >= self.config.vocab_size
+            ):
+                raise WaveNetError("target token id is outside the vocabulary")
+            loss = F.cross_entropy(logits, targets)
+        return logits, loss
+
+    @property
+    def parameter_count(self) -> int:
+        return sum(parameter.numel() for parameter in self.parameters())

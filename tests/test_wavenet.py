@@ -8,6 +8,7 @@ import torch
 from ai_journey.context_mlp import build_context_dataset
 from ai_journey.wavenet import (
     FlattenConsecutive,
+    HierarchicalLanguageModel,
     HierarchicalStage,
     WaveNetConfig,
     WaveNetDataset,
@@ -186,6 +187,61 @@ class HierarchicalStageTests(unittest.TestCase):
                 self.assertRaises((TypeError, WaveNetError)),
             ):
                 HierarchicalStage(**values)
+
+
+class HierarchicalLanguageModelTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.config = WaveNetConfig(
+            vocab_size=11,
+            context_size=8,
+            embedding_dim=4,
+            hidden_dim=12,
+            group_factors=(2, 2, 2),
+        )
+
+    def test_model_reduces_full_context_and_computes_loss(self) -> None:
+        model = HierarchicalLanguageModel(self.config)
+        inputs = torch.randint(0, self.config.vocab_size, (5, 8))
+        targets = torch.randint(0, self.config.vocab_size, (5,))
+
+        logits, loss = model(inputs, targets)
+
+        self.assertEqual(logits.shape, (5, self.config.vocab_size))
+        self.assertEqual(len(model.stages), 3)
+        self.assertGreater(model.parameter_count, 0)
+        self.assertIsNotNone(loss)
+        assert loss is not None
+        loss.backward()
+        self.assertTrue(
+            all(parameter.grad is not None for parameter in model.parameters())
+        )
+
+    def test_model_parameters_include_every_registered_stage(self) -> None:
+        model = HierarchicalLanguageModel(self.config)
+        names = tuple(name for name, _ in model.named_parameters())
+
+        for index in range(len(self.config.group_factors)):
+            self.assertIn(f"stages.{index}.network.1.weight", names)
+            self.assertIn(f"stages.{index}.network.2.weight", names)
+
+    def test_model_rejects_invalid_contexts_and_targets(self) -> None:
+        model = HierarchicalLanguageModel(self.config)
+        invalid_inputs = (
+            torch.zeros(2, 7, dtype=torch.long),
+            torch.zeros(2, 8),
+            torch.full((2, 8), self.config.vocab_size, dtype=torch.long),
+        )
+        for inputs in invalid_inputs:
+            with (
+                self.subTest(shape=inputs.shape, dtype=inputs.dtype),
+                self.assertRaises((TypeError, WaveNetError)),
+            ):
+                model(inputs)
+
+        with self.assertRaises(TypeError):
+            model(
+                torch.zeros(2, 8, dtype=torch.long), torch.zeros(2, 1, dtype=torch.long)
+            )
 
 
 if __name__ == "__main__":
