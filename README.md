@@ -1,7 +1,7 @@
-# AI Journey: Days 0–32
+# AI Journey: Days 0–33
 
 This repository is a public-safe, executable record of an added setup day plus the
-selected work through Day 32 of a 90-day AI engineering learning plan. It combines
+selected work through Day 33 of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -64,6 +64,10 @@ then grow these exercises into production-quality training and inference project
 - A hierarchical character model built from registered PyTorch module containers,
   with runtime shape traces, exact restart checkpoints, seeded sampling, and
   self-verifying evidence in [`scripts/run_day_32.py`](scripts/run_day_32.py)
+- An independent rebuild of the hierarchical character model from raw parameters
+  and tensor operations, with reference equivalence, numerical gradient audits,
+  exact restart, and a bounded capacity gate in
+  [`scripts/run_day_33.py`](scripts/run_day_33.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -137,6 +141,9 @@ python scripts/run_ablation.py \
 python scripts/run_day_32.py \
   --corpus data/day-19-demo-names.txt \
   --output artifacts/day-32-wavenet.json
+python scripts/run_day_33.py \
+  --corpus data/day-19-demo-names.txt \
+  --output artifacts/day-33-wavenet-rebuild.json
 python -m unittest discover -s tests -v
 ```
 
@@ -247,6 +254,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 28 | 2026-10-02 | Manual cross-entropy and transformer parameter-gradient audit |
 | 31 | 2026-10-05 | Predeclared paired transformer ablation protocol and evidence gate |
 | 32 | 2026-10-06 | Hierarchical character model, module containers, and exact restart |
+| 33 | 2026-10-07 | Primitive WaveNet rebuild, equivalence audits, and exact resume |
 
 ## License
 
