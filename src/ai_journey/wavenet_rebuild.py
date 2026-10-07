@@ -15,7 +15,9 @@ from .wavenet import (
     HierarchicalLanguageModel,
     ShapeTraceStep,
     WaveNetConfig,
+    WaveNetDataset,
     WaveNetError,
+    WaveNetMetrics,
 )
 
 
@@ -577,3 +579,43 @@ def audit_rebuild_finite_difference(
         with torch.no_grad():
             selected[index] = original
         model.train(mode)
+
+
+def evaluate_rebuild(
+    model: RebuiltWaveNet,
+    dataset: WaveNetDataset,
+    *,
+    batch_size: int = 256,
+) -> WaveNetMetrics:
+    """Evaluate every dataset example once while preserving model mode."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    if not isinstance(dataset, WaveNetDataset):
+        raise TypeError("dataset must be WaveNetDataset")
+    if dataset.context_size != model.config.context_size:
+        raise WaveNetError("dataset context_size does not match the rebuild")
+    if dataset.vocab_size != model.config.vocab_size:
+        raise WaveNetError("dataset vocabulary does not match the rebuild")
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int):
+        raise TypeError("batch_size must be an integer")
+    if batch_size <= 0:
+        raise WaveNetError("batch_size must be positive")
+    mode = model.training
+    total_loss = 0.0
+    try:
+        model.eval()
+        with torch.no_grad():
+            for start in range(0, dataset.sample_count, batch_size):
+                stop = min(start + batch_size, dataset.sample_count)
+                _, loss = model(
+                    dataset.contexts[start:stop], dataset.targets[start:stop]
+                )
+                assert loss is not None
+                total_loss += float(loss) * (stop - start)
+    finally:
+        model.train(mode)
+    nll = total_loss / dataset.sample_count
+    return WaveNetMetrics(
+        nll=nll, perplexity=math.exp(nll), sample_count=dataset.sample_count
+    )

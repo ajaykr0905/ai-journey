@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import math
 import unittest
 
 import torch
 
-from ai_journey.wavenet import WaveNetConfig, initialize_wavenet
+from ai_journey.context_mlp import build_context_dataset
+from ai_journey.wavenet import WaveNetConfig, WaveNetDataset, initialize_wavenet
 from ai_journey.wavenet_rebuild import (
     RebuiltWaveNet,
     audit_rebuild_finite_difference,
     audit_rebuild_forward,
     audit_rebuild_gradients,
     compile_rebuild_plan,
+    evaluate_rebuild,
     initialize_rebuilt_wavenet,
     load_reference_parameters,
     rebuild_model_fingerprint,
@@ -338,6 +341,34 @@ class RebuiltWaveNetTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(TypeError, "one integer per"):
             audit_rebuild_finite_difference(model, contexts, targets, index=(0, 0))
+
+    def test_evaluation_covers_the_complete_dataset_and_preserves_mode(self) -> None:
+        source = build_context_dataset(("ajay", "maya"), block_size=4)
+        dataset = WaveNetDataset.from_context_dataset(source)
+        model = initialize_rebuilt_wavenet(
+            WaveNetConfig(
+                vocab_size=dataset.vocab_size,
+                context_size=4,
+                group_factors=(2, 2),
+            )
+        )
+        model.train()
+
+        metrics = evaluate_rebuild(model, dataset, batch_size=3)
+
+        self.assertTrue(model.training)
+        self.assertEqual(metrics.sample_count, dataset.sample_count)
+        self.assertGreater(metrics.nll, 0)
+        self.assertAlmostEqual(metrics.perplexity, math.exp(metrics.nll))
+
+    def test_evaluation_rejects_dataset_configuration_mismatch(self) -> None:
+        source = build_context_dataset(("ajay", "maya"), block_size=4)
+        dataset = WaveNetDataset.from_context_dataset(source)
+        model = initialize_rebuilt_wavenet(
+            WaveNetConfig(vocab_size=dataset.vocab_size, context_size=8)
+        )
+        with self.assertRaisesRegex(ValueError, "context_size does not match"):
+            evaluate_rebuild(model, dataset)
 
 
 if __name__ == "__main__":
