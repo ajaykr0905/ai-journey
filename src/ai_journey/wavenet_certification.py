@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import math
 from dataclasses import dataclass
 from hashlib import sha256
@@ -770,4 +771,83 @@ def audit_gradient_clipping(
         post_clip_norm=post_clip,
         max_norm=float(max_norm),
         clipped=pre_clip > max_norm,
+    )
+
+
+@dataclass(frozen=True)
+class OptimizerStepParityAudit:
+    """Parameter agreement after one matched optimizer transition."""
+
+    parameter_tensors: int
+    max_abs_parameter_error: float
+    tolerance: float
+
+    @property
+    def passed(self) -> bool:
+        return self.max_abs_parameter_error <= self.tolerance
+
+
+def audit_optimizer_step_parity(
+    reference: HierarchicalLanguageModel,
+    rebuilt: RebuiltWaveNet,
+    contexts: torch.Tensor,
+    targets: torch.Tensor,
+    *,
+    learning_rate: float = 0.01,
+    tolerance: float = 1e-6,
+) -> OptimizerStepParityAudit:
+    """Compare one SGD update and restore both caller model states."""
+
+    pairs = reference_parameter_pairs(reference, rebuilt)
+    rebuilt._validate_inputs(contexts, targets)
+    for name, value, positive in (
+        ("learning_rate", learning_rate, True),
+        ("tolerance", tolerance, False),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or (value <= 0 if positive else value < 0)
+        ):
+            qualifier = "positive" if positive else "non-negative"
+            raise WaveNetError(f"{name} must be {qualifier} and finite")
+    reference_state = copy.deepcopy(reference.state_dict())
+    rebuilt_state = copy.deepcopy(rebuilt.state_dict())
+    reference_mode, rebuilt_mode = reference.training, rebuilt.training
+    try:
+        reference.eval()
+        rebuilt.eval()
+        reference_optimizer = torch.optim.SGD(
+            reference.parameters(), lr=float(learning_rate)
+        )
+        rebuilt_optimizer = torch.optim.SGD(
+            rebuilt.parameters(), lr=float(learning_rate)
+        )
+        for model, optimizer in (
+            (reference, reference_optimizer),
+            (rebuilt, rebuilt_optimizer),
+        ):
+            optimizer.zero_grad(set_to_none=True)
+            _, loss = model(contexts, targets)
+            assert loss is not None
+            loss.backward()
+            optimizer.step()
+        maximum = max(
+            float(
+                (reference_parameter.detach() - rebuilt_parameter.detach()).abs().max()
+            )
+            for _, reference_parameter, rebuilt_parameter in pairs
+        )
+    finally:
+        reference.load_state_dict(reference_state)
+        rebuilt.load_state_dict(rebuilt_state)
+        reference.zero_grad(set_to_none=True)
+        rebuilt.zero_grad(set_to_none=True)
+        reference.train(reference_mode)
+        rebuilt.train(rebuilt_mode)
+    return OptimizerStepParityAudit(
+        parameter_tensors=len(pairs),
+        max_abs_parameter_error=maximum,
+        tolerance=float(tolerance),
     )
