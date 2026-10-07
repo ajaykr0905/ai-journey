@@ -15,6 +15,7 @@ from ai_journey.wavenet_certification import (
     audit_storage_independence,
     audit_top_k_parity,
     measure_activation_saturation,
+    measure_gradient_cosines,
     measure_gradient_statistics,
     parameter_inventory,
     parameter_statistics,
@@ -185,6 +186,19 @@ class WaveNetCertificationTests(unittest.TestCase):
         self.assertTrue(all(item.finite for item in statistics))
         self.assertTrue(all(item.l2_norm >= 0 for item in statistics))
         self.assertTrue(torch.equal(self.model.output_bias.grad, torch.ones(7)))
+
+    def test_mapped_gradient_directions_are_identical(self) -> None:
+        reference = initialize_wavenet(self.config, seed=333)
+        load_reference_parameters(self.model, reference)
+        contexts = torch.tensor([[0, 1, 2, 3], [6, 5, 4, 3]])
+        targets = torch.tensor([4, 2])
+
+        measurements = measure_gradient_cosines(
+            reference, self.model, contexts, targets
+        )
+
+        self.assertEqual(len(measurements), len(tuple(self.model.parameters())))
+        self.assertTrue(all(item.cosine_similarity > 0.999999 for item in measurements))
 
 
 if __name__ == "__main__":

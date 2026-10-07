@@ -10,7 +10,7 @@ import torch
 from torch.nn import functional as F
 
 from .wavenet import HierarchicalLanguageModel, WaveNetError
-from .wavenet_rebuild import RebuiltWaveNet
+from .wavenet_rebuild import RebuiltWaveNet, reference_parameter_pairs
 
 
 @dataclass(frozen=True)
@@ -593,3 +593,66 @@ def measure_gradient_statistics(
             parameter.grad = None if previous is None else previous
         model.train(mode)
     return statistics
+
+
+@dataclass(frozen=True)
+class GradientCosineMeasurement:
+    """Directional agreement for one mapped parameter gradient."""
+
+    name: str
+    cosine_similarity: float
+
+
+def measure_gradient_cosines(
+    reference: HierarchicalLanguageModel,
+    rebuilt: RebuiltWaveNet,
+    contexts: torch.Tensor,
+    targets: torch.Tensor,
+) -> tuple[GradientCosineMeasurement, ...]:
+    """Compare gradient direction for every mapped parameter pair."""
+
+    pairs = reference_parameter_pairs(reference, rebuilt)
+    rebuilt._validate_inputs(contexts, targets)
+    reference_parameters = tuple(reference.named_parameters())
+    rebuilt_parameters = tuple(rebuilt.named_parameters())
+    previous = {
+        id(parameter): None
+        if parameter.grad is None
+        else parameter.grad.detach().clone()
+        for _, parameter in reference_parameters + rebuilt_parameters
+    }
+    reference_mode, rebuilt_mode = reference.training, rebuilt.training
+    try:
+        reference.eval()
+        rebuilt.eval()
+        reference.zero_grad(set_to_none=True)
+        rebuilt.zero_grad(set_to_none=True)
+        _, reference_loss = reference(contexts, targets)
+        _, rebuilt_loss = rebuilt(contexts, targets)
+        assert reference_loss is not None and rebuilt_loss is not None
+        reference_loss.backward()
+        rebuilt_loss.backward()
+        measurements: list[GradientCosineMeasurement] = []
+        for name, reference_parameter, rebuilt_parameter in pairs:
+            assert reference_parameter.grad is not None
+            assert rebuilt_parameter.grad is not None
+            left = reference_parameter.grad.detach().reshape(-1).double()
+            right = rebuilt_parameter.grad.detach().reshape(-1).double()
+            left_norm = torch.linalg.vector_norm(left)
+            right_norm = torch.linalg.vector_norm(right)
+            if float(left_norm) == 0 and float(right_norm) == 0:
+                cosine = 1.0
+            elif float(left_norm) == 0 or float(right_norm) == 0:
+                cosine = 0.0
+            else:
+                cosine = float(torch.dot(left, right) / (left_norm * right_norm))
+            measurements.append(
+                GradientCosineMeasurement(name=name, cosine_similarity=cosine)
+            )
+    finally:
+        for _, parameter in reference_parameters + rebuilt_parameters:
+            stored = previous[id(parameter)]
+            parameter.grad = None if stored is None else stored
+        reference.train(reference_mode)
+        rebuilt.train(rebuilt_mode)
+    return tuple(measurements)
