@@ -545,3 +545,51 @@ def audit_probability_simplex(
         )
     finally:
         model.train(mode)
+
+
+@dataclass(frozen=True)
+class GradientStatistics:
+    """Magnitude and finite-value evidence for one parameter gradient."""
+
+    name: str
+    l2_norm: float
+    max_abs_value: float
+    finite: bool
+
+
+def measure_gradient_statistics(
+    model: RebuiltWaveNet, contexts: torch.Tensor, targets: torch.Tensor
+) -> tuple[GradientStatistics, ...]:
+    """Measure every loss gradient while restoring caller gradient state."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    model._validate_inputs(contexts, targets)
+    mode = model.training
+    parameters = tuple(model.named_parameters())
+    previous_gradients = {
+        name: None if parameter.grad is None else parameter.grad.detach().clone()
+        for name, parameter in parameters
+    }
+    try:
+        model.eval()
+        model.zero_grad(set_to_none=True)
+        _, loss = model(contexts, targets)
+        assert loss is not None
+        loss.backward()
+        statistics = tuple(
+            GradientStatistics(
+                name=name,
+                l2_norm=float(torch.linalg.vector_norm(parameter.grad.detach())),
+                max_abs_value=float(parameter.grad.detach().abs().max()),
+                finite=bool(torch.isfinite(parameter.grad).all()),
+            )
+            for name, parameter in parameters
+            if parameter.grad is not None
+        )
+    finally:
+        for name, parameter in parameters:
+            previous = previous_gradients[name]
+            parameter.grad = None if previous is None else previous
+        model.train(mode)
+    return statistics

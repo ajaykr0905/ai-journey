@@ -15,6 +15,7 @@ from ai_journey.wavenet_certification import (
     audit_storage_independence,
     audit_top_k_parity,
     measure_activation_saturation,
+    measure_gradient_statistics,
     parameter_inventory,
     parameter_statistics,
     trace_rebuild_activations,
@@ -170,6 +171,20 @@ class WaveNetCertificationTests(unittest.TestCase):
         self.assertTrue(audit.passed)
         self.assertEqual(audit.examples, 2)
         self.assertLessEqual(audit.max_row_sum_error, 1e-6)
+
+    def test_gradient_statistics_cover_parameters_without_mutating_gradients(
+        self,
+    ) -> None:
+        contexts = torch.tensor([[0, 1, 2, 3], [6, 5, 4, 3]])
+        targets = torch.tensor([4, 2])
+        self.model.output_bias.grad = torch.ones_like(self.model.output_bias)
+
+        statistics = measure_gradient_statistics(self.model, contexts, targets)
+
+        self.assertEqual(len(statistics), len(tuple(self.model.parameters())))
+        self.assertTrue(all(item.finite for item in statistics))
+        self.assertTrue(all(item.l2_norm >= 0 for item in statistics))
+        self.assertTrue(torch.equal(self.model.output_bias.grad, torch.ones(7)))
 
 
 if __name__ == "__main__":
