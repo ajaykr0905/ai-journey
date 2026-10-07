@@ -485,3 +485,63 @@ def audit_per_example_loss_parity(
         mismatched_examples=mismatches,
         tolerance=float(tolerance),
     )
+
+
+@dataclass(frozen=True)
+class ProbabilitySimplexAudit:
+    """Probability normalization and bounds for rebuild predictions."""
+
+    examples: int
+    max_row_sum_error: float
+    minimum_probability: float
+    maximum_probability: float
+    all_finite: bool
+    tolerance: float
+
+    @property
+    def passed(self) -> bool:
+        return (
+            self.all_finite
+            and self.minimum_probability >= 0
+            and self.maximum_probability <= 1
+            and self.max_row_sum_error <= self.tolerance
+        )
+
+
+def audit_probability_simplex(
+    model: RebuiltWaveNet,
+    contexts: torch.Tensor,
+    *,
+    tolerance: float = 1e-6,
+) -> ProbabilitySimplexAudit:
+    """Verify softmax outputs form one finite simplex row per example."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    model._validate_inputs(contexts, None)
+    if not contexts.shape[0]:
+        raise WaveNetError("contexts must contain at least one example")
+    if (
+        isinstance(tolerance, bool)
+        or not isinstance(tolerance, (int, float))
+        or not math.isfinite(tolerance)
+        or tolerance < 0
+    ):
+        raise WaveNetError("tolerance must be non-negative and finite")
+    mode = model.training
+    try:
+        model.eval()
+        with torch.no_grad():
+            logits, _ = model(contexts)
+            probabilities = torch.softmax(logits.double(), dim=-1)
+            row_errors = (probabilities.sum(dim=-1) - 1).abs()
+        return ProbabilitySimplexAudit(
+            examples=int(contexts.shape[0]),
+            max_row_sum_error=float(row_errors.max()),
+            minimum_probability=float(probabilities.min()),
+            maximum_probability=float(probabilities.max()),
+            all_finite=bool(torch.isfinite(probabilities).all()),
+            tolerance=float(tolerance),
+        )
+    finally:
+        model.train(mode)

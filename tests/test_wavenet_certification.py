@@ -11,6 +11,7 @@ from ai_journey.wavenet_certification import (
     audit_parameter_finiteness,
     audit_parameter_manifest,
     audit_per_example_loss_parity,
+    audit_probability_simplex,
     audit_storage_independence,
     audit_top_k_parity,
     measure_activation_saturation,
@@ -160,6 +161,15 @@ class WaveNetCertificationTests(unittest.TestCase):
 
         self.assertTrue(audit.passed)
         self.assertEqual(audit.examples, 2)
+
+    def test_prediction_probabilities_form_finite_simplex_rows(self) -> None:
+        contexts = torch.tensor([[0, 1, 2, 3], [6, 5, 4, 3]])
+
+        audit = audit_probability_simplex(self.model, contexts)
+
+        self.assertTrue(audit.passed)
+        self.assertEqual(audit.examples, 2)
+        self.assertLessEqual(audit.max_row_sum_error, 1e-6)
 
 
 if __name__ == "__main__":
