@@ -554,6 +554,91 @@ class RebuiltWaveNetTests(unittest.TestCase):
                 )
         self.assertEqual(rebuild_model_fingerprint(model), before)
 
+    def test_checkpoint_resume_matches_uninterrupted_dropout_training(self) -> None:
+        source = build_context_dataset(("ajay", "maya", "arun"), block_size=4)
+        dataset = WaveNetDataset.from_context_dataset(source)
+        config = WaveNetConfig(
+            vocab_size=dataset.vocab_size,
+            context_size=4,
+            embedding_dim=4,
+            hidden_dim=8,
+            group_factors=(2, 2),
+            dropout=0.2,
+        )
+        training = WaveNetTrainingConfig(steps=4, batch_size=3, seed=33)
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(777)
+            uninterrupted = RebuiltWaveNet(config)
+            uninterrupted_optimizer = torch.optim.AdamW(
+                uninterrupted.parameters(), lr=training.learning_rate
+            )
+            uninterrupted_cursor = WaveNetBatchCursor(
+                dataset, batch_size=training.batch_size, seed=training.seed
+            )
+            uninterrupted_trace = train_rebuild_steps(
+                uninterrupted,
+                uninterrupted_cursor,
+                uninterrupted_optimizer,
+                training,
+            )
+
+            torch.manual_seed(777)
+            interrupted = RebuiltWaveNet(config)
+            interrupted_optimizer = torch.optim.AdamW(
+                interrupted.parameters(), lr=training.learning_rate
+            )
+            interrupted_cursor = WaveNetBatchCursor(
+                dataset, batch_size=training.batch_size, seed=training.seed
+            )
+            first_trace = train_rebuild_steps(
+                interrupted,
+                interrupted_cursor,
+                interrupted_optimizer,
+                training,
+                step_count=2,
+            )
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "rebuild.pt"
+                save_rebuild_checkpoint(
+                    path,
+                    model=interrupted,
+                    optimizer=interrupted_optimizer,
+                    cursor=interrupted_cursor,
+                    training_config=training,
+                    dataset_fingerprint=dataset.fingerprint(),
+                    step=2,
+                )
+                resumed = initialize_rebuilt_wavenet(config, seed=999)
+                resumed_optimizer = torch.optim.AdamW(
+                    resumed.parameters(), lr=training.learning_rate
+                )
+                resumed_cursor = WaveNetBatchCursor(
+                    dataset, batch_size=training.batch_size, seed=training.seed
+                )
+                start = load_rebuild_checkpoint(
+                    path,
+                    model=resumed,
+                    optimizer=resumed_optimizer,
+                    cursor=resumed_cursor,
+                    training_config=training,
+                    dataset_fingerprint=dataset.fingerprint(),
+                )
+                second_trace = train_rebuild_steps(
+                    resumed,
+                    resumed_cursor,
+                    resumed_optimizer,
+                    training,
+                    start_step=start,
+                    step_count=2,
+                )
+
+        self.assertEqual(first_trace + second_trace, uninterrupted_trace)
+        self.assertEqual(
+            rebuild_model_fingerprint(resumed),
+            rebuild_model_fingerprint(uninterrupted),
+        )
+        self.assertEqual(resumed_cursor.state_dict(), uninterrupted_cursor.state_dict())
+
 
 if __name__ == "__main__":
     unittest.main()
