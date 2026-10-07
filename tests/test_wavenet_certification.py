@@ -8,6 +8,7 @@ from ai_journey.wavenet import WaveNetConfig, initialize_wavenet
 from ai_journey.wavenet_certification import (
     audit_activation_finiteness,
     audit_eval_batch_invariance,
+    audit_gradient_coverage,
     audit_parameter_finiteness,
     audit_parameter_manifest,
     audit_per_example_loss_parity,
@@ -199,6 +200,17 @@ class WaveNetCertificationTests(unittest.TestCase):
 
         self.assertEqual(len(measurements), len(tuple(self.model.parameters())))
         self.assertTrue(all(item.cosine_similarity > 0.999999 for item in measurements))
+
+    def test_gradient_coverage_detects_a_frozen_registered_parameter(self) -> None:
+        contexts = torch.tensor([[0, 1, 2, 3], [6, 5, 4, 3]])
+        targets = torch.tensor([4, 2])
+        self.assertTrue(audit_gradient_coverage(self.model, contexts, targets).passed)
+        self.model.output_bias.requires_grad_(False)
+
+        audit = audit_gradient_coverage(self.model, contexts, targets)
+
+        self.assertFalse(audit.passed)
+        self.assertEqual(audit.missing_gradients, ("output_bias",))
 
 
 if __name__ == "__main__":

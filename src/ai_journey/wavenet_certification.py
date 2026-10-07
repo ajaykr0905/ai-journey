@@ -656,3 +656,51 @@ def measure_gradient_cosines(
         reference.train(reference_mode)
         rebuilt.train(rebuilt_mode)
     return tuple(measurements)
+
+
+@dataclass(frozen=True)
+class GradientCoverageAudit:
+    """Coverage of registered parameters by one representative loss graph."""
+
+    registered_parameters: int
+    parameters_with_gradients: int
+    missing_gradients: tuple[str, ...]
+
+    @property
+    def passed(self) -> bool:
+        return not self.missing_gradients
+
+
+def audit_gradient_coverage(
+    model: RebuiltWaveNet, contexts: torch.Tensor, targets: torch.Tensor
+) -> GradientCoverageAudit:
+    """Detect registered tensors disconnected from the training loss."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    model._validate_inputs(contexts, targets)
+    parameters = tuple(model.named_parameters())
+    previous = {
+        name: None if parameter.grad is None else parameter.grad.detach().clone()
+        for name, parameter in parameters
+    }
+    mode = model.training
+    try:
+        model.eval()
+        model.zero_grad(set_to_none=True)
+        _, loss = model(contexts, targets)
+        assert loss is not None
+        loss.backward()
+        missing = tuple(
+            name for name, parameter in parameters if parameter.grad is None
+        )
+    finally:
+        for name, parameter in parameters:
+            stored = previous[name]
+            parameter.grad = None if stored is None else stored
+        model.train(mode)
+    return GradientCoverageAudit(
+        registered_parameters=len(parameters),
+        parameters_with_gradients=len(parameters) - len(missing),
+        missing_gradients=missing,
+    )
