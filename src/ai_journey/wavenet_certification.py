@@ -1009,3 +1009,45 @@ def audit_inference_rng_isolation(
         before_digest=sha256(before.numpy().tobytes()).hexdigest(),
         after_digest=sha256(after.numpy().tobytes()).hexdigest(),
     )
+
+
+@dataclass(frozen=True)
+class InputImmutabilityAudit:
+    """Mutation status for caller-owned contexts and targets."""
+
+    contexts_unchanged: bool
+    targets_unchanged: bool
+
+    @property
+    def passed(self) -> bool:
+        return self.contexts_unchanged and self.targets_unchanged
+
+
+def audit_input_immutability(
+    model: RebuiltWaveNet, contexts: torch.Tensor, targets: torch.Tensor
+) -> InputImmutabilityAudit:
+    """Run forward/backward and prove caller input tensors are untouched."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    model._validate_inputs(contexts, targets)
+    original_contexts = contexts.clone()
+    original_targets = targets.clone()
+    parameters = tuple(model.named_parameters())
+    previous = {
+        name: None if parameter.grad is None else parameter.grad.detach().clone()
+        for name, parameter in parameters
+    }
+    try:
+        model.zero_grad(set_to_none=True)
+        _, loss = model(contexts, targets)
+        assert loss is not None
+        loss.backward()
+    finally:
+        for name, parameter in parameters:
+            stored = previous[name]
+            parameter.grad = None if stored is None else stored
+    return InputImmutabilityAudit(
+        contexts_unchanged=torch.equal(contexts, original_contexts),
+        targets_unchanged=torch.equal(targets, original_targets),
+    )

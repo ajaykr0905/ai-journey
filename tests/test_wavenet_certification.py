@@ -12,6 +12,7 @@ from ai_journey.wavenet_certification import (
     audit_gradient_coverage,
     audit_gradient_reset,
     audit_inference_rng_isolation,
+    audit_input_immutability,
     audit_optimizer_step_parity,
     audit_parameter_finiteness,
     audit_parameter_manifest,
@@ -284,6 +285,14 @@ class WaveNetCertificationTests(unittest.TestCase):
 
         self.assertTrue(audit.passed)
         self.assertTrue(torch.equal(before, torch.get_rng_state()))
+
+    def test_forward_and_backward_leave_caller_inputs_unchanged(self) -> None:
+        contexts = torch.tensor([[0, 1, 2, 3], [6, 5, 4, 3]])
+        targets = torch.tensor([4, 2])
+
+        audit = audit_input_immutability(self.model, contexts, targets)
+
+        self.assertTrue(audit.passed)
 
 
 if __name__ == "__main__":
