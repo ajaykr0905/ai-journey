@@ -316,3 +316,52 @@ def measure_activation_saturation(
     finally:
         model.train(mode)
     return tuple(measurements)
+
+
+@dataclass(frozen=True)
+class BatchInvarianceAudit:
+    """Agreement for one example evaluated alone and inside a batch."""
+
+    batch_size: int
+    max_abs_logit_error: float
+    tolerance: float
+
+    @property
+    def passed(self) -> bool:
+        return self.max_abs_logit_error <= self.tolerance
+
+
+def audit_eval_batch_invariance(
+    model: RebuiltWaveNet,
+    contexts: torch.Tensor,
+    *,
+    tolerance: float = 1e-6,
+) -> BatchInvarianceAudit:
+    """Prove evaluation logits do not depend on neighboring batch examples."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    model._validate_inputs(contexts, None)
+    if not contexts.shape[0]:
+        raise WaveNetError("contexts must contain at least one example")
+    if (
+        isinstance(tolerance, bool)
+        or not isinstance(tolerance, (int, float))
+        or not math.isfinite(tolerance)
+        or tolerance < 0
+    ):
+        raise WaveNetError("tolerance must be non-negative and finite")
+    mode = model.training
+    try:
+        model.eval()
+        with torch.no_grad():
+            single_logits, _ = model(contexts[:1])
+            batch_logits, _ = model(contexts)
+        error = float((single_logits[0] - batch_logits[0]).abs().max())
+    finally:
+        model.train(mode)
+    return BatchInvarianceAudit(
+        batch_size=int(contexts.shape[0]),
+        max_abs_logit_error=error,
+        tolerance=float(tolerance),
+    )

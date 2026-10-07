@@ -7,6 +7,7 @@ import torch
 from ai_journey.wavenet import WaveNetConfig, initialize_wavenet
 from ai_journey.wavenet_certification import (
     audit_activation_finiteness,
+    audit_eval_batch_invariance,
     audit_parameter_finiteness,
     audit_parameter_manifest,
     audit_storage_independence,
@@ -122,6 +123,16 @@ class WaveNetCertificationTests(unittest.TestCase):
         self.assertTrue(all(item.elements > 0 for item in measurements))
         with self.assertRaises(ValueError):
             measure_activation_saturation(self.model, contexts, threshold=0.0)
+
+    def test_eval_prediction_is_invariant_to_batch_neighbors(self) -> None:
+        contexts = torch.tensor([[0, 1, 2, 3], [6, 5, 4, 3], [2, 2, 2, 2]])
+        self.model.train()
+
+        audit = audit_eval_batch_invariance(self.model, contexts)
+
+        self.assertTrue(audit.passed)
+        self.assertEqual(audit.batch_size, 3)
+        self.assertTrue(self.model.training)
 
 
 if __name__ == "__main__":
