@@ -28,6 +28,7 @@ from ai_journey.wavenet_rebuild import (
     load_rebuild_checkpoint,
     load_reference_parameters,
     rebuild_model_fingerprint,
+    sample_rebuild,
     save_rebuild_checkpoint,
     trace_rebuild_shapes,
     train_rebuild_steps,
@@ -638,6 +639,33 @@ class RebuiltWaveNetTests(unittest.TestCase):
             rebuild_model_fingerprint(uninterrupted),
         )
         self.assertEqual(resumed_cursor.state_dict(), uninterrupted_cursor.state_dict())
+
+    def test_sampling_is_bounded_repeatable_and_rng_isolated(self) -> None:
+        vocabulary = (".", "a", "j", "m", "y")
+        config = WaveNetConfig(
+            vocab_size=len(vocabulary), context_size=4, group_factors=(2, 2)
+        )
+        model = initialize_rebuilt_wavenet(config, seed=33)
+        model.train()
+        torch.manual_seed(123)
+        expected_next = torch.rand(4)
+        torch.manual_seed(123)
+
+        first = sample_rebuild(model, vocabulary, max_new_tokens=6, seed=99, top_k=3)
+        actual_next = torch.rand(4)
+        second = sample_rebuild(model, vocabulary, max_new_tokens=6, seed=99, top_k=3)
+
+        self.assertEqual(first, second)
+        self.assertLessEqual(len(first.token_ids), 6)
+        self.assertTrue(model.training)
+        self.assertTrue(torch.equal(expected_next, actual_next))
+
+    def test_sampling_validates_vocabulary_and_bounds(self) -> None:
+        model = initialize_rebuilt_wavenet(WaveNetConfig(vocab_size=5))
+        with self.assertRaisesRegex(ValueError, "vocabulary_tokens must match"):
+            sample_rebuild(model, (".", "a"))
+        with self.assertRaisesRegex(ValueError, "max_new_tokens must be positive"):
+            sample_rebuild(model, (".", "a", "b", "c", "d"), max_new_tokens=0)
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ from .wavenet import (
     WaveNetDatasetSplit,
     WaveNetError,
     WaveNetMetrics,
+    WaveNetSample,
     WaveNetTrainingConfig,
     WaveNetTrainingStep,
 )
@@ -869,3 +870,79 @@ def load_rebuild_checkpoint(
         torch.random.set_rng_state(original_rng)
         raise
     return step
+
+
+def sample_rebuild(
+    model: RebuiltWaveNet,
+    vocabulary_tokens: tuple[str, ...],
+    *,
+    max_new_tokens: int = 20,
+    seed: int = 33,
+    temperature: float = 1.0,
+    top_k: int | None = None,
+) -> WaveNetSample:
+    """Generate a bounded sample with an isolated random generator."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    if (
+        not isinstance(vocabulary_tokens, tuple)
+        or len(vocabulary_tokens) != model.config.vocab_size
+        or len(set(vocabulary_tokens)) != len(vocabulary_tokens)
+        or any(
+            not isinstance(token, str) or len(token) != 1 for token in vocabulary_tokens
+        )
+    ):
+        raise WaveNetError("vocabulary_tokens must match the rebuild vocabulary")
+    if vocabulary_tokens[0] != ".":
+        raise WaveNetError("boundary token must be vocabulary index 0")
+    if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int):
+        raise TypeError("max_new_tokens must be an integer")
+    if max_new_tokens <= 0:
+        raise WaveNetError("max_new_tokens must be positive")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise TypeError("seed must be an integer")
+    if (
+        isinstance(temperature, bool)
+        or not isinstance(temperature, (int, float))
+        or not math.isfinite(temperature)
+        or temperature <= 0
+    ):
+        raise WaveNetError("temperature must be positive and finite")
+    if top_k is not None and (
+        isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0
+    ):
+        raise WaveNetError("top_k must be a positive integer")
+    generator = torch.Generator().manual_seed(seed)
+    context = torch.zeros(1, model.config.context_size, dtype=torch.long)
+    sampled: list[int] = []
+    mode = model.training
+    try:
+        model.eval()
+        with torch.no_grad():
+            for _ in range(max_new_tokens):
+                logits, _ = model(context)
+                next_logits = logits[0] / temperature
+                if top_k is not None:
+                    values, _ = torch.topk(
+                        next_logits, min(top_k, model.config.vocab_size)
+                    )
+                    next_logits = next_logits.masked_fill(
+                        next_logits < values[-1], float("-inf")
+                    )
+                probabilities = F.softmax(next_logits, dim=-1)
+                token_id = int(
+                    torch.multinomial(probabilities, 1, generator=generator).item()
+                )
+                sampled.append(token_id)
+                if token_id == 0:
+                    break
+                context = torch.cat(
+                    (context[:, 1:], torch.tensor([[token_id]], dtype=torch.long)),
+                    dim=1,
+                )
+    finally:
+        model.train(mode)
+    terminated = bool(sampled and sampled[-1] == 0)
+    text = "".join(vocabulary_tokens[token_id] for token_id in sampled if token_id)
+    return WaveNetSample(text=text, token_ids=tuple(sampled), terminated=terminated)
