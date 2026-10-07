@@ -33,6 +33,7 @@ from ai_journey.wavenet_certification import (
     measure_activation_saturation,
     measure_gradient_cosines,
     measure_gradient_statistics,
+    measure_parameter_deltas,
     parameter_inventory,
     parameter_statistics,
     rebuild_batch_fingerprint,
@@ -350,6 +351,19 @@ class WaveNetCertificationTests(unittest.TestCase):
         incomplete = audit_training_trace(trace[:1], expected_start=4, expected_steps=2)
         self.assertFalse(incomplete.passed)
         self.assertEqual(incomplete.missing_or_reordered_steps, (5,))
+
+    def test_parameter_deltas_identify_exactly_which_state_changed(self) -> None:
+        candidate = initialize_rebuilt_wavenet(self.config, seed=330)
+        with torch.no_grad():
+            candidate.output_bias[0].add_(0.25)
+
+        deltas = measure_parameter_deltas(self.model, candidate)
+
+        self.assertEqual(
+            tuple(item.name for item in deltas if item.changed), ("output_bias",)
+        )
+        output_delta = next(item for item in deltas if item.name == "output_bias")
+        self.assertAlmostEqual(output_delta.max_abs_delta, 0.25)
 
 
 if __name__ == "__main__":

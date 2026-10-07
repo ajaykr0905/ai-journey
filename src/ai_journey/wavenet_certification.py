@@ -1262,3 +1262,47 @@ def audit_training_trace(
         missing_or_reordered_steps=ordering_errors,
         nonfinite_steps=nonfinite,
     )
+
+
+@dataclass(frozen=True)
+class ParameterDelta:
+    """Magnitude of one parameter change between two rebuild states."""
+
+    name: str
+    l2_delta: float
+    max_abs_delta: float
+    changed: bool
+
+
+def measure_parameter_deltas(
+    baseline: RebuiltWaveNet, candidate: RebuiltWaveNet
+) -> tuple[ParameterDelta, ...]:
+    """Compare compatible rebuild states without retaining tensor aliases."""
+
+    if not isinstance(baseline, RebuiltWaveNet) or not isinstance(
+        candidate, RebuiltWaveNet
+    ):
+        raise TypeError("baseline and candidate must be RebuiltWaveNet")
+    if baseline.config != candidate.config:
+        raise WaveNetError("baseline and candidate configurations must match")
+    baseline_parameters = dict(baseline.named_parameters())
+    candidate_parameters = dict(candidate.named_parameters())
+    if baseline_parameters.keys() != candidate_parameters.keys():
+        raise WaveNetError("baseline and candidate parameter manifests must match")
+    measurements: list[ParameterDelta] = []
+    with torch.no_grad():
+        for name, baseline_parameter in baseline_parameters.items():
+            difference = (
+                candidate_parameters[name].detach().double()
+                - baseline_parameter.detach().double()
+            )
+            maximum = float(difference.abs().max())
+            measurements.append(
+                ParameterDelta(
+                    name=name,
+                    l2_delta=float(torch.linalg.vector_norm(difference)),
+                    max_abs_delta=maximum,
+                    changed=maximum > 0,
+                )
+            )
+    return tuple(measurements)
