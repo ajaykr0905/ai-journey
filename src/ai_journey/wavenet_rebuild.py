@@ -14,10 +14,13 @@ from torch.nn import functional as F
 from .wavenet import (
     HierarchicalLanguageModel,
     ShapeTraceStep,
+    WaveNetBatchCursor,
     WaveNetConfig,
     WaveNetDataset,
     WaveNetError,
     WaveNetMetrics,
+    WaveNetTrainingConfig,
+    WaveNetTrainingStep,
 )
 
 
@@ -619,3 +622,55 @@ def evaluate_rebuild(
     return WaveNetMetrics(
         nll=nll, perplexity=math.exp(nll), sample_count=dataset.sample_count
     )
+
+
+def train_rebuild_steps(
+    model: RebuiltWaveNet,
+    cursor: WaveNetBatchCursor,
+    optimizer: torch.optim.Optimizer,
+    config: WaveNetTrainingConfig,
+    *,
+    start_step: int = 0,
+    step_count: int | None = None,
+) -> tuple[WaveNetTrainingStep, ...]:
+    """Train a bounded rebuild interval with auditable loss and gradient norms."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    if not isinstance(cursor, WaveNetBatchCursor):
+        raise TypeError("cursor must be WaveNetBatchCursor")
+    if not isinstance(optimizer, torch.optim.Optimizer):
+        raise TypeError("optimizer must be a torch optimizer")
+    if not isinstance(config, WaveNetTrainingConfig):
+        raise TypeError("config must be WaveNetTrainingConfig")
+    if isinstance(start_step, bool) or not isinstance(start_step, int):
+        raise TypeError("start_step must be an integer")
+    if start_step < 0:
+        raise WaveNetError("start_step must be non-negative")
+    count = config.steps if step_count is None else step_count
+    if isinstance(count, bool) or not isinstance(count, int):
+        raise TypeError("step_count must be an integer")
+    if count <= 0:
+        raise WaveNetError("step_count must be positive")
+    trace: list[WaveNetTrainingStep] = []
+    for step in range(start_step, start_step + count):
+        model.train()
+        contexts, targets = cursor.next()
+        optimizer.zero_grad(set_to_none=True)
+        _, loss = model(contexts, targets)
+        assert loss is not None
+        if not torch.isfinite(loss):
+            raise WaveNetError("rebuild training produced a nonfinite loss")
+        loss.backward()
+        gradient_norm = float(
+            nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clip)
+        )
+        if not math.isfinite(gradient_norm):
+            raise WaveNetError("rebuild training produced a nonfinite gradient norm")
+        optimizer.step()
+        trace.append(
+            WaveNetTrainingStep(
+                step=step, loss=float(loss.detach()), gradient_norm=gradient_norm
+            )
+        )
+    return tuple(trace)

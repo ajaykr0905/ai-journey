@@ -6,7 +6,13 @@ import unittest
 import torch
 
 from ai_journey.context_mlp import build_context_dataset
-from ai_journey.wavenet import WaveNetConfig, WaveNetDataset, initialize_wavenet
+from ai_journey.wavenet import (
+    WaveNetBatchCursor,
+    WaveNetConfig,
+    WaveNetDataset,
+    WaveNetTrainingConfig,
+    initialize_wavenet,
+)
 from ai_journey.wavenet_rebuild import (
     RebuiltWaveNet,
     audit_rebuild_finite_difference,
@@ -18,6 +24,7 @@ from ai_journey.wavenet_rebuild import (
     load_reference_parameters,
     rebuild_model_fingerprint,
     trace_rebuild_shapes,
+    train_rebuild_steps,
 )
 
 
@@ -369,6 +376,51 @@ class RebuiltWaveNetTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "context_size does not match"):
             evaluate_rebuild(model, dataset)
+
+    def test_bounded_training_records_finite_step_metrics(self) -> None:
+        source = build_context_dataset(("ajay", "maya"), block_size=4)
+        dataset = WaveNetDataset.from_context_dataset(source)
+        config = WaveNetConfig(
+            vocab_size=dataset.vocab_size,
+            context_size=4,
+            group_factors=(2, 2),
+        )
+        training = WaveNetTrainingConfig(steps=4, batch_size=3, seed=33)
+        model = initialize_rebuilt_wavenet(config, seed=training.seed)
+        cursor = WaveNetBatchCursor(
+            dataset, batch_size=training.batch_size, seed=training.seed
+        )
+        optimizer = torch.optim.AdamW(model.parameters(), lr=training.learning_rate)
+        before = rebuild_model_fingerprint(model)
+
+        trace = train_rebuild_steps(
+            model, cursor, optimizer, training, start_step=5, step_count=2
+        )
+
+        self.assertEqual([step.step for step in trace], [5, 6])
+        self.assertTrue(all(math.isfinite(step.loss) for step in trace))
+        self.assertTrue(all(math.isfinite(step.gradient_norm) for step in trace))
+        self.assertNotEqual(rebuild_model_fingerprint(model), before)
+
+    def test_bounded_training_rejects_empty_intervals(self) -> None:
+        source = build_context_dataset(("ajay", "maya"), block_size=4)
+        dataset = WaveNetDataset.from_context_dataset(source)
+        config = WaveNetConfig(
+            vocab_size=dataset.vocab_size,
+            context_size=4,
+            group_factors=(2, 2),
+        )
+        model = initialize_rebuilt_wavenet(config)
+        cursor = WaveNetBatchCursor(dataset, batch_size=3)
+        optimizer = torch.optim.AdamW(model.parameters())
+        with self.assertRaisesRegex(ValueError, "step_count must be positive"):
+            train_rebuild_steps(
+                model,
+                cursor,
+                optimizer,
+                WaveNetTrainingConfig(),
+                step_count=0,
+            )
 
 
 if __name__ == "__main__":
