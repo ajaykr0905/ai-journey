@@ -29,6 +29,7 @@ from .wavenet import (
     WaveNetSample,
     WaveNetTrainingConfig,
     WaveNetTrainingStep,
+    initialize_wavenet,
 )
 
 
@@ -1013,4 +1014,97 @@ def run_rebuild_overfit_probe(
         final_nll=final.nll,
         minimum_improvement=minimum_improvement,
         model_fingerprint=rebuild_model_fingerprint(model),
+    )
+
+
+@dataclass(frozen=True)
+class RebuildExperimentResult:
+    """Complete verified evidence from one Day 33 rebuild run."""
+
+    model_config: WaveNetConfig
+    training_config: WaveNetTrainingConfig
+    dataset_fingerprint: str
+    plan_fingerprint: str
+    parameter_count: int
+    completed_steps: int
+    shape_trace: tuple[ShapeTraceStep, ...]
+    forward_audit: RebuildForwardAudit
+    gradient_audit: RebuildGradientAudit
+    finite_difference_audit: RebuildFiniteDifferenceAudit
+    initial_train: WaveNetMetrics
+    final_train: WaveNetMetrics
+    final_validation: WaveNetMetrics
+    sample: WaveNetSample
+    overfit_probe: WaveNetOverfitResult
+    model_fingerprint: str
+
+
+def run_rebuild_experiment(
+    datasets: WaveNetDatasetSplit,
+    *,
+    model_config: WaveNetConfig,
+    training_config: WaveNetTrainingConfig,
+    sample_seed: int = 330,
+    overfit_examples: int = 8,
+    overfit_steps: int = 60,
+    minimum_overfit_improvement: float = 0.5,
+) -> RebuildExperimentResult:
+    """Run equivalence audits, independent training, sampling, and capacity checks."""
+
+    if not isinstance(datasets, WaveNetDatasetSplit):
+        raise TypeError("datasets must be WaveNetDatasetSplit")
+    reference = initialize_wavenet(model_config, seed=training_config.seed)
+    equivalent = initialize_rebuilt_wavenet(model_config, seed=training_config.seed + 1)
+    load_reference_parameters(equivalent, reference)
+    audit_count = min(8, datasets.train.sample_count)
+    contexts = datasets.train.contexts[:audit_count]
+    targets = datasets.train.targets[:audit_count]
+    forward_audit = audit_rebuild_forward(reference, equivalent, contexts, targets)
+    gradient_audit = audit_rebuild_gradients(reference, equivalent, contexts, targets)
+    finite_difference_audit = audit_rebuild_finite_difference(
+        equivalent, contexts, targets
+    )
+    if not forward_audit.passed:
+        raise WaveNetError("rebuild forward equivalence gate failed")
+    if not gradient_audit.passed:
+        raise WaveNetError("rebuild gradient equivalence gate failed")
+    if not finite_difference_audit.passed:
+        raise WaveNetError("rebuild finite-difference gate failed")
+    training = fit_rebuild(
+        datasets,
+        model_config=model_config,
+        training_config=training_config,
+    )
+    sample = sample_rebuild(
+        training.model,
+        datasets.train.vocabulary_tokens,
+        seed=sample_seed,
+    )
+    overfit = run_rebuild_overfit_probe(
+        datasets.train,
+        model_config=model_config,
+        example_count=overfit_examples,
+        steps=overfit_steps,
+        minimum_improvement=minimum_overfit_improvement,
+        seed=training_config.seed,
+    )
+    if not overfit.passed:
+        raise WaveNetError("rebuild memorization capacity gate failed")
+    return RebuildExperimentResult(
+        model_config=model_config,
+        training_config=training_config,
+        dataset_fingerprint=datasets.fingerprint(),
+        plan_fingerprint=training.model.plan.fingerprint(),
+        parameter_count=training.model.parameter_count,
+        completed_steps=len(training.trace),
+        shape_trace=trace_rebuild_shapes(training.model),
+        forward_audit=forward_audit,
+        gradient_audit=gradient_audit,
+        finite_difference_audit=finite_difference_audit,
+        initial_train=training.initial_train,
+        final_train=training.final_train,
+        final_validation=training.final_validation,
+        sample=sample,
+        overfit_probe=overfit,
+        model_fingerprint=rebuild_model_fingerprint(training.model),
     )

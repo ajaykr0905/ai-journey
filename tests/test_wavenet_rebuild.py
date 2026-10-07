@@ -28,6 +28,7 @@ from ai_journey.wavenet_rebuild import (
     load_rebuild_checkpoint,
     load_reference_parameters,
     rebuild_model_fingerprint,
+    run_rebuild_experiment,
     run_rebuild_overfit_probe,
     sample_rebuild,
     save_rebuild_checkpoint,
@@ -705,6 +706,40 @@ class RebuiltWaveNetTests(unittest.TestCase):
                 model_config=config,
                 example_count=dataset.sample_count + 1,
             )
+
+    def test_experiment_compounds_all_rebuild_evidence(self) -> None:
+        words = ("ajay", "maya", "arun", "diya", "neel")
+        vocab_size = len({".", *"".join(words)})
+        config = WaveNetConfig(
+            vocab_size=vocab_size,
+            context_size=4,
+            embedding_dim=4,
+            hidden_dim=12,
+            group_factors=(2, 2),
+        )
+        datasets = build_wavenet_dataset_split(
+            words, config=config, validation_fraction=0.4, seed=33
+        )
+
+        result = run_rebuild_experiment(
+            datasets,
+            model_config=config,
+            training_config=WaveNetTrainingConfig(steps=2, batch_size=4, seed=33),
+            overfit_examples=8,
+            overfit_steps=30,
+            minimum_overfit_improvement=0.3,
+        )
+
+        self.assertEqual(result.completed_steps, 2)
+        self.assertEqual(
+            result.parameter_count,
+            result.shape_trace[0].parameter_count
+            + sum(step.parameter_count for step in result.shape_trace[1:]),
+        )
+        self.assertTrue(result.forward_audit.passed)
+        self.assertTrue(result.gradient_audit.passed)
+        self.assertTrue(result.finite_difference_audit.passed)
+        self.assertTrue(result.overfit_probe.passed)
 
 
 if __name__ == "__main__":
