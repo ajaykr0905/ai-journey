@@ -11,6 +11,7 @@ from ai_journey.wavenet import (
     WaveNetConfig,
     WaveNetDataset,
     WaveNetTrainingConfig,
+    build_wavenet_dataset_split,
     initialize_wavenet,
 )
 from ai_journey.wavenet_rebuild import (
@@ -20,6 +21,7 @@ from ai_journey.wavenet_rebuild import (
     audit_rebuild_gradients,
     compile_rebuild_plan,
     evaluate_rebuild,
+    fit_rebuild,
     initialize_rebuilt_wavenet,
     load_reference_parameters,
     rebuild_model_fingerprint,
@@ -420,6 +422,50 @@ class RebuiltWaveNetTests(unittest.TestCase):
                 optimizer,
                 WaveNetTrainingConfig(),
                 step_count=0,
+            )
+
+    def test_full_rebuild_training_is_deterministic(self) -> None:
+        words = ("ajay", "maya", "arun", "diya", "neel")
+        vocab_size = len({".", *"".join(words)})
+        config = WaveNetConfig(
+            vocab_size=vocab_size,
+            context_size=4,
+            embedding_dim=4,
+            hidden_dim=8,
+            group_factors=(2, 2),
+        )
+        datasets = build_wavenet_dataset_split(
+            words, config=config, validation_fraction=0.4, seed=33
+        )
+        training = WaveNetTrainingConfig(steps=3, batch_size=4, seed=33)
+
+        first = fit_rebuild(datasets, model_config=config, training_config=training)
+        second = fit_rebuild(datasets, model_config=config, training_config=training)
+
+        self.assertEqual(
+            rebuild_model_fingerprint(first.model),
+            rebuild_model_fingerprint(second.model),
+        )
+        self.assertEqual(first.trace, second.trace)
+        self.assertEqual(first.cursor_state, second.cursor_state)
+        self.assertTrue(math.isfinite(first.final_validation.nll))
+
+    def test_full_rebuild_training_rejects_dataset_mismatch(self) -> None:
+        words = ("ajay", "maya", "arun")
+        vocab_size = len({".", *"".join(words)})
+        source_config = WaveNetConfig(vocab_size=vocab_size)
+        datasets = build_wavenet_dataset_split(
+            words, config=source_config, validation_fraction=0.34
+        )
+        with self.assertRaisesRegex(ValueError, "context_size does not match"):
+            fit_rebuild(
+                datasets,
+                model_config=WaveNetConfig(
+                    vocab_size=vocab_size,
+                    context_size=4,
+                    group_factors=(2, 2),
+                ),
+                training_config=WaveNetTrainingConfig(steps=1),
             )
 
 

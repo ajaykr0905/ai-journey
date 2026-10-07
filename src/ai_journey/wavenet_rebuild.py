@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 from dataclasses import asdict, dataclass
@@ -17,6 +18,7 @@ from .wavenet import (
     WaveNetBatchCursor,
     WaveNetConfig,
     WaveNetDataset,
+    WaveNetDatasetSplit,
     WaveNetError,
     WaveNetMetrics,
     WaveNetTrainingConfig,
@@ -674,3 +676,63 @@ def train_rebuild_steps(
             )
         )
     return tuple(trace)
+
+
+@dataclass(frozen=True)
+class RebuildTrainingResult:
+    """Deterministic rebuild training state and full-dataset metrics."""
+
+    model: RebuiltWaveNet
+    initial_train: WaveNetMetrics
+    initial_validation: WaveNetMetrics
+    final_train: WaveNetMetrics
+    final_validation: WaveNetMetrics
+    trace: tuple[WaveNetTrainingStep, ...]
+    optimizer_state: dict[str, object]
+    cursor_state: dict[str, int]
+
+
+def fit_rebuild(
+    datasets: WaveNetDatasetSplit,
+    *,
+    model_config: WaveNetConfig,
+    training_config: WaveNetTrainingConfig,
+) -> RebuildTrainingResult:
+    """Train the primitive rebuild deterministically without caller RNG effects."""
+
+    if not isinstance(datasets, WaveNetDatasetSplit):
+        raise TypeError("datasets must be WaveNetDatasetSplit")
+    if not isinstance(model_config, WaveNetConfig):
+        raise TypeError("model_config must be WaveNetConfig")
+    if not isinstance(training_config, WaveNetTrainingConfig):
+        raise TypeError("training_config must be WaveNetTrainingConfig")
+    if datasets.train.context_size != model_config.context_size:
+        raise WaveNetError("dataset context_size does not match the rebuild")
+    if datasets.train.vocab_size != model_config.vocab_size:
+        raise WaveNetError("dataset vocabulary does not match the rebuild")
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(training_config.seed)
+        model = RebuiltWaveNet(model_config)
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=training_config.learning_rate,
+            weight_decay=training_config.weight_decay,
+        )
+        cursor = WaveNetBatchCursor(
+            datasets.train,
+            batch_size=training_config.batch_size,
+            seed=training_config.seed,
+        )
+        initial_train = evaluate_rebuild(model, datasets.train)
+        initial_validation = evaluate_rebuild(model, datasets.validation)
+        trace = train_rebuild_steps(model, cursor, optimizer, training_config)
+        return RebuildTrainingResult(
+            model=model,
+            initial_train=initial_train,
+            initial_validation=initial_validation,
+            final_train=evaluate_rebuild(model, datasets.train),
+            final_validation=evaluate_rebuild(model, datasets.validation),
+            trace=trace,
+            optimizer_state=copy.deepcopy(optimizer.state_dict()),
+            cursor_state=cursor.state_dict(),
+        )
