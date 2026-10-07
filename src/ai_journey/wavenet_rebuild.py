@@ -25,6 +25,7 @@ from .wavenet import (
     WaveNetDatasetSplit,
     WaveNetError,
     WaveNetMetrics,
+    WaveNetOverfitResult,
     WaveNetSample,
     WaveNetTrainingConfig,
     WaveNetTrainingStep,
@@ -946,3 +947,70 @@ def sample_rebuild(
     terminated = bool(sampled and sampled[-1] == 0)
     text = "".join(vocabulary_tokens[token_id] for token_id in sampled if token_id)
     return WaveNetSample(text=text, token_ids=tuple(sampled), terminated=terminated)
+
+
+def run_rebuild_overfit_probe(
+    dataset: WaveNetDataset,
+    *,
+    model_config: WaveNetConfig,
+    example_count: int = 8,
+    steps: int = 60,
+    learning_rate: float = 0.05,
+    minimum_improvement: float = 0.5,
+    seed: int = 33,
+) -> WaveNetOverfitResult:
+    """Prove bounded memorization capacity for the primitive rebuild."""
+
+    if not isinstance(dataset, WaveNetDataset):
+        raise TypeError("dataset must be WaveNetDataset")
+    if not isinstance(model_config, WaveNetConfig):
+        raise TypeError("model_config must be WaveNetConfig")
+    for name, value in (("example_count", example_count), ("steps", steps)):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"{name} must be an integer")
+        if value <= 0:
+            raise WaveNetError(f"{name} must be positive")
+    if example_count > dataset.sample_count:
+        raise WaveNetError("example_count must not exceed the dataset")
+    for name, value in (
+        ("learning_rate", learning_rate),
+        ("minimum_improvement", minimum_improvement),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise WaveNetError(f"{name} must be positive and finite")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise TypeError("seed must be an integer")
+    subset = WaveNetDataset(
+        dataset.vocabulary_tokens,
+        dataset.contexts[:example_count].clone(),
+        dataset.targets[:example_count].clone(),
+    )
+    training = WaveNetTrainingConfig(
+        steps=steps,
+        batch_size=example_count,
+        learning_rate=learning_rate,
+        weight_decay=0.0,
+        gradient_clip=5.0,
+        seed=seed,
+    )
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(seed)
+        model = RebuiltWaveNet(model_config)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+        cursor = WaveNetBatchCursor(subset, batch_size=example_count, seed=seed)
+        initial = evaluate_rebuild(model, subset)
+        train_rebuild_steps(model, cursor, optimizer, training)
+        final = evaluate_rebuild(model, subset)
+    return WaveNetOverfitResult(
+        example_count=example_count,
+        steps=steps,
+        initial_nll=initial.nll,
+        final_nll=final.nll,
+        minimum_improvement=minimum_improvement,
+        model_fingerprint=rebuild_model_fingerprint(model),
+    )

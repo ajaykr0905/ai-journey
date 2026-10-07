@@ -28,6 +28,7 @@ from ai_journey.wavenet_rebuild import (
     load_rebuild_checkpoint,
     load_reference_parameters,
     rebuild_model_fingerprint,
+    run_rebuild_overfit_probe,
     sample_rebuild,
     save_rebuild_checkpoint,
     trace_rebuild_shapes,
@@ -666,6 +667,44 @@ class RebuiltWaveNetTests(unittest.TestCase):
             sample_rebuild(model, (".", "a"))
         with self.assertRaisesRegex(ValueError, "max_new_tokens must be positive"):
             sample_rebuild(model, (".", "a", "b", "c", "d"), max_new_tokens=0)
+
+    def test_overfit_probe_demonstrates_bounded_capacity(self) -> None:
+        source = build_context_dataset(("ajay", "maya", "arun"), block_size=4)
+        dataset = WaveNetDataset.from_context_dataset(source)
+        config = WaveNetConfig(
+            vocab_size=dataset.vocab_size,
+            context_size=4,
+            embedding_dim=4,
+            hidden_dim=12,
+            group_factors=(2, 2),
+        )
+
+        result = run_rebuild_overfit_probe(
+            dataset,
+            model_config=config,
+            example_count=8,
+            steps=40,
+            minimum_improvement=0.5,
+            seed=33,
+        )
+
+        self.assertTrue(result.passed)
+        self.assertGreaterEqual(result.improvement, 0.5)
+
+    def test_overfit_probe_rejects_oversized_subset(self) -> None:
+        source = build_context_dataset(("ajay", "maya"), block_size=4)
+        dataset = WaveNetDataset.from_context_dataset(source)
+        config = WaveNetConfig(
+            vocab_size=dataset.vocab_size,
+            context_size=4,
+            group_factors=(2, 2),
+        )
+        with self.assertRaisesRegex(ValueError, "must not exceed"):
+            run_rebuild_overfit_probe(
+                dataset,
+                model_config=config,
+                example_count=dataset.sample_count + 1,
+            )
 
 
 if __name__ == "__main__":
