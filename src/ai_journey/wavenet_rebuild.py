@@ -781,6 +781,43 @@ def _validate_sha256(value: str, name: str) -> None:
         raise WaveNetError(f"{name} must be a SHA-256 hex digest")
 
 
+@dataclass(frozen=True)
+class RebuildCheckpointMetadata:
+    """Read-only identity and progress metadata for a saved rebuild."""
+
+    schema_version: int
+    step: int
+    dataset_fingerprint: str
+    model_fingerprint: str
+    size_bytes: int
+
+
+def inspect_rebuild_checkpoint(path: Path) -> RebuildCheckpointMetadata:
+    """Validate checkpoint metadata without mutating live training objects."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    if payload.get("schema_version") != REBUILD_CHECKPOINT_SCHEMA:
+        raise WaveNetError("unsupported rebuild checkpoint schema")
+    step = payload.get("step")
+    if isinstance(step, bool) or not isinstance(step, int) or step < 0:
+        raise WaveNetError("checkpoint step is invalid")
+    dataset_fingerprint = payload.get("dataset_fingerprint")
+    model_fingerprint = payload.get("model_fingerprint")
+    _validate_sha256(dataset_fingerprint, "dataset_fingerprint")
+    _validate_sha256(model_fingerprint, "model_fingerprint")
+    _require_finite_rebuild_state(payload.get("model_state"), "model_state")
+    _require_finite_rebuild_state(payload.get("optimizer_state"), "optimizer_state")
+    return RebuildCheckpointMetadata(
+        schema_version=REBUILD_CHECKPOINT_SCHEMA,
+        step=step,
+        dataset_fingerprint=dataset_fingerprint,
+        model_fingerprint=model_fingerprint,
+        size_bytes=path.stat().st_size,
+    )
+
+
 def save_rebuild_checkpoint(
     path: Path,
     *,

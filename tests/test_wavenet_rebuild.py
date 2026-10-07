@@ -27,6 +27,7 @@ from ai_journey.wavenet_rebuild import (
     evaluate_rebuild,
     fit_rebuild,
     initialize_rebuilt_wavenet,
+    inspect_rebuild_checkpoint,
     load_rebuild_checkpoint,
     load_reference_parameters,
     rebuild_model_fingerprint,
@@ -546,6 +547,11 @@ class RebuiltWaveNetTests(unittest.TestCase):
                 step=2,
             )
             self.assertTrue(path.is_file())
+            metadata = inspect_rebuild_checkpoint(path)
+            self.assertEqual(metadata.step, 2)
+            self.assertEqual(metadata.dataset_fingerprint, dataset.fingerprint())
+            self.assertEqual(metadata.model_fingerprint, expected_fingerprint)
+            self.assertGreater(metadata.size_bytes, 0)
             with torch.no_grad():
                 model.output_bias.add_(1)
             cursor.next()
