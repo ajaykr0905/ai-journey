@@ -927,3 +927,50 @@ def rebuild_batch_fingerprint(
         digest.update(str(tuple(value.shape)).encode())
         digest.update(value.numpy().tobytes())
     return digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class RepeatInferenceAudit:
+    """Determinism evidence across repeated evaluation forwards."""
+
+    repeats: int
+    max_abs_logit_error: float
+    distinct_digests: int
+
+    @property
+    def passed(self) -> bool:
+        return self.max_abs_logit_error == 0 and self.distinct_digests == 1
+
+
+def audit_repeat_inference(
+    model: RebuiltWaveNet, contexts: torch.Tensor, *, repeats: int = 3
+) -> RepeatInferenceAudit:
+    """Require bitwise-stable logits across repeated evaluation calls."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    model._validate_inputs(contexts, None)
+    if isinstance(repeats, bool) or not isinstance(repeats, int):
+        raise TypeError("repeats must be an integer")
+    if repeats < 2:
+        raise WaveNetError("repeats must be at least two")
+    mode = model.training
+    outputs: list[torch.Tensor] = []
+    try:
+        model.eval()
+        with torch.no_grad():
+            for _ in range(repeats):
+                logits, _ = model(contexts)
+                outputs.append(logits.detach().cpu().clone())
+    finally:
+        model.train(mode)
+    baseline = outputs[0]
+    maximum = max(float((baseline - output).abs().max()) for output in outputs[1:])
+    digests = {
+        sha256(output.contiguous().numpy().tobytes()).hexdigest() for output in outputs
+    }
+    return RepeatInferenceAudit(
+        repeats=repeats,
+        max_abs_logit_error=maximum,
+        distinct_digests=len(digests),
+    )

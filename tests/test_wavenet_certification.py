@@ -16,6 +16,7 @@ from ai_journey.wavenet_certification import (
     audit_parameter_manifest,
     audit_per_example_loss_parity,
     audit_probability_simplex,
+    audit_repeat_inference,
     audit_storage_independence,
     audit_top_k_parity,
     measure_activation_saturation,
@@ -262,6 +263,16 @@ class WaveNetCertificationTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertNotEqual(first, changed)
         self.assertEqual(len(first), 64)
+
+    def test_repeated_evaluation_is_bitwise_deterministic(self) -> None:
+        contexts = torch.tensor([[0, 1, 2, 3], [6, 5, 4, 3]])
+        self.model.train()
+
+        audit = audit_repeat_inference(self.model, contexts, repeats=4)
+
+        self.assertTrue(audit.passed)
+        self.assertEqual(audit.repeats, 4)
+        self.assertTrue(self.model.training)
 
 
 if __name__ == "__main__":
