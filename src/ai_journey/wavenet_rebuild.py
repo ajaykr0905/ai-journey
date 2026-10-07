@@ -1232,6 +1232,21 @@ def verify_rebuild_report(payload: dict[str, Any]) -> None:
             raise WaveNetError(f"rebuild report gate failed: {gate}")
 
 
+def load_rebuild_report(path: Path) -> dict[str, Any]:
+    """Load a JSON evidence report and reject invalid or tampered content."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    try:
+        payload = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise WaveNetError("rebuild report is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise WaveNetError("rebuild report root must be an object")
+    verify_rebuild_report(payload)
+    return payload
+
+
 def write_rebuild_report(path: Path, result: RebuildExperimentResult) -> None:
     """Atomically publish verified Day 33 evidence as canonical JSON."""
 

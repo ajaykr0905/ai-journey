@@ -29,6 +29,7 @@ from ai_journey.wavenet_rebuild import (
     initialize_rebuilt_wavenet,
     inspect_rebuild_checkpoint,
     load_rebuild_checkpoint,
+    load_rebuild_report,
     load_reference_parameters,
     rebuild_model_fingerprint,
     rebuild_report_payload,
@@ -872,6 +873,7 @@ class RebuiltWaveNetTests(unittest.TestCase):
 
             payload = json.loads(path.read_text())
             verify_rebuild_report(payload)
+            self.assertEqual(load_rebuild_report(path), payload)
             self.assertEqual(
                 payload["evidence_fingerprint"],
                 rebuild_report_payload(result)["evidence_fingerprint"],
