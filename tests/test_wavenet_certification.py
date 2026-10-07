@@ -11,12 +11,16 @@ from ai_journey.wavenet_certification import (
     audit_parameter_finiteness,
     audit_parameter_manifest,
     audit_storage_independence,
+    audit_top_k_parity,
     measure_activation_saturation,
     parameter_inventory,
     parameter_statistics,
     trace_rebuild_activations,
 )
-from ai_journey.wavenet_rebuild import initialize_rebuilt_wavenet
+from ai_journey.wavenet_rebuild import (
+    initialize_rebuilt_wavenet,
+    load_reference_parameters,
+)
 
 
 class WaveNetCertificationTests(unittest.TestCase):
@@ -133,6 +137,17 @@ class WaveNetCertificationTests(unittest.TestCase):
         self.assertTrue(audit.passed)
         self.assertEqual(audit.batch_size, 3)
         self.assertTrue(self.model.training)
+
+    def test_reference_and_rebuild_rank_the_same_top_k_tokens(self) -> None:
+        reference = initialize_wavenet(self.config, seed=331)
+        load_reference_parameters(self.model, reference)
+        contexts = torch.tensor([[0, 1, 2, 3], [3, 4, 5, 6]])
+
+        audit = audit_top_k_parity(reference, self.model, contexts, k=3)
+
+        self.assertTrue(audit.passed)
+        self.assertEqual(audit.examples, 2)
+        self.assertEqual(audit.k, 3)
 
 
 if __name__ == "__main__":

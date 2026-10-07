@@ -365,3 +365,58 @@ def audit_eval_batch_invariance(
         max_abs_logit_error=error,
         tolerance=float(tolerance),
     )
+
+
+@dataclass(frozen=True)
+class TopKParityAudit:
+    """Ranked prediction agreement between reference and rebuild."""
+
+    examples: int
+    k: int
+    mismatched_examples: tuple[int, ...]
+
+    @property
+    def passed(self) -> bool:
+        return not self.mismatched_examples
+
+
+def audit_top_k_parity(
+    reference: HierarchicalLanguageModel,
+    rebuilt: RebuiltWaveNet,
+    contexts: torch.Tensor,
+    *,
+    k: int = 3,
+) -> TopKParityAudit:
+    """Compare ordered top-k token predictions for every supplied example."""
+
+    if not isinstance(reference, HierarchicalLanguageModel):
+        raise TypeError("reference must be HierarchicalLanguageModel")
+    if not isinstance(rebuilt, RebuiltWaveNet):
+        raise TypeError("rebuilt must be RebuiltWaveNet")
+    if reference.config != rebuilt.config:
+        raise WaveNetError("reference and rebuild configurations must match")
+    rebuilt._validate_inputs(contexts, None)
+    if isinstance(k, bool) or not isinstance(k, int):
+        raise TypeError("k must be an integer")
+    if not 1 <= k <= rebuilt.config.vocab_size:
+        raise WaveNetError("k must be within the vocabulary")
+    reference_mode, rebuilt_mode = reference.training, rebuilt.training
+    try:
+        reference.eval()
+        rebuilt.eval()
+        with torch.no_grad():
+            reference_logits, _ = reference(contexts)
+            rebuilt_logits, _ = rebuilt(contexts)
+            reference_top = reference_logits.topk(k, dim=-1).indices
+            rebuilt_top = rebuilt_logits.topk(k, dim=-1).indices
+        mismatches = tuple(
+            index
+            for index in range(contexts.shape[0])
+            if not torch.equal(reference_top[index], rebuilt_top[index])
+        )
+    finally:
+        reference.train(reference_mode)
+        rebuilt.train(rebuilt_mode)
+    return TopKParityAudit(
+        examples=int(contexts.shape[0]), k=k, mismatched_examples=mismatches
+    )
