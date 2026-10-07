@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
 import tempfile
 import unittest
@@ -37,6 +38,7 @@ from ai_journey.wavenet_rebuild import (
     trace_rebuild_shapes,
     train_rebuild_steps,
     verify_rebuild_report,
+    write_rebuild_report,
 )
 
 
@@ -799,6 +801,40 @@ class RebuiltWaveNetTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
             verify_rebuild_report(tampered)
+
+    def test_report_writer_publishes_verified_json_atomically(self) -> None:
+        words = ("ajay", "maya", "arun", "diya", "neel")
+        vocab_size = len({".", *"".join(words)})
+        config = WaveNetConfig(
+            vocab_size=vocab_size,
+            context_size=4,
+            embedding_dim=4,
+            hidden_dim=12,
+            group_factors=(2, 2),
+        )
+        datasets = build_wavenet_dataset_split(
+            words, config=config, validation_fraction=0.4, seed=33
+        )
+        result = run_rebuild_experiment(
+            datasets,
+            model_config=config,
+            training_config=WaveNetTrainingConfig(steps=1, batch_size=4, seed=33),
+            overfit_examples=8,
+            overfit_steps=20,
+            minimum_overfit_improvement=0.2,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "day-33.json"
+
+            write_rebuild_report(path, result)
+
+            payload = json.loads(path.read_text())
+            verify_rebuild_report(payload)
+            self.assertEqual(
+                payload["evidence_fingerprint"],
+                rebuild_report_payload(result)["evidence_fingerprint"],
+            )
+            self.assertEqual(list(path.parent.glob(".*.tmp")), [])
 
 
 if __name__ == "__main__":

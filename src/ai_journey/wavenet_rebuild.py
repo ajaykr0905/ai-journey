@@ -1185,3 +1185,31 @@ def verify_rebuild_report(payload: dict[str, Any]) -> None:
     ):
         if candidate.get(gate, {}).get("passed") is not True:
             raise WaveNetError(f"rebuild report gate failed: {gate}")
+
+
+def write_rebuild_report(path: Path, result: RebuildExperimentResult) -> None:
+    """Atomically publish verified Day 33 evidence as canonical JSON."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    payload = rebuild_report_payload(result)
+    verify_rebuild_report(payload)
+    serialized = (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(serialized)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
