@@ -11,6 +11,7 @@ from ai_journey.wavenet_certification import (
     audit_gradient_clipping,
     audit_gradient_coverage,
     audit_gradient_reset,
+    audit_inference_rng_isolation,
     audit_optimizer_step_parity,
     audit_parameter_finiteness,
     audit_parameter_manifest,
@@ -273,6 +274,16 @@ class WaveNetCertificationTests(unittest.TestCase):
         self.assertTrue(audit.passed)
         self.assertEqual(audit.repeats, 4)
         self.assertTrue(self.model.training)
+
+    def test_evaluation_preserves_the_caller_cpu_rng(self) -> None:
+        contexts = torch.tensor([[0, 1, 2, 3], [6, 5, 4, 3]])
+        torch.manual_seed(900)
+        before = torch.get_rng_state().clone()
+
+        audit = audit_inference_rng_isolation(self.model, contexts)
+
+        self.assertTrue(audit.passed)
+        self.assertTrue(torch.equal(before, torch.get_rng_state()))
 
 
 if __name__ == "__main__":

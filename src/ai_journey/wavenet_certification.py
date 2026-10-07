@@ -974,3 +974,38 @@ def audit_repeat_inference(
         max_abs_logit_error=maximum,
         distinct_digests=len(digests),
     )
+
+
+@dataclass(frozen=True)
+class InferenceRngAudit:
+    """Caller CPU RNG preservation across deterministic evaluation."""
+
+    before_digest: str
+    after_digest: str
+
+    @property
+    def passed(self) -> bool:
+        return self.before_digest == self.after_digest
+
+
+def audit_inference_rng_isolation(
+    model: RebuiltWaveNet, contexts: torch.Tensor
+) -> InferenceRngAudit:
+    """Prove evaluation does not consume the caller's random stream."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    model._validate_inputs(contexts, None)
+    before = torch.get_rng_state().clone()
+    mode = model.training
+    try:
+        model.eval()
+        with torch.no_grad():
+            model(contexts)
+    finally:
+        model.train(mode)
+    after = torch.get_rng_state().clone()
+    return InferenceRngAudit(
+        before_digest=sha256(before.numpy().tobytes()).hexdigest(),
+        after_digest=sha256(after.numpy().tobytes()).hexdigest(),
+    )
