@@ -4,7 +4,12 @@ import unittest
 
 import torch
 
-from ai_journey.wavenet import WaveNetConfig, WaveNetDataset, initialize_wavenet
+from ai_journey.wavenet import (
+    WaveNetConfig,
+    WaveNetDataset,
+    WaveNetTrainingStep,
+    initialize_wavenet,
+)
 from ai_journey.wavenet_certification import (
     audit_activation_finiteness,
     audit_dataset_token_coverage,
@@ -24,6 +29,7 @@ from ai_journey.wavenet_certification import (
     audit_sample_termination,
     audit_storage_independence,
     audit_top_k_parity,
+    audit_training_trace,
     measure_activation_saturation,
     measure_gradient_cosines,
     measure_gradient_statistics,
@@ -331,6 +337,19 @@ class WaveNetCertificationTests(unittest.TestCase):
         self.assertEqual(audit.samples, 4)
         self.assertLessEqual(audit.maximum_observed_tokens, 6)
         self.assertTrue(0 <= audit.termination_fraction <= 1)
+
+    def test_training_trace_requires_consecutive_finite_steps(self) -> None:
+        trace = (
+            WaveNetTrainingStep(step=4, loss=2.0, gradient_norm=0.5),
+            WaveNetTrainingStep(step=5, loss=1.8, gradient_norm=0.4),
+        )
+
+        self.assertTrue(
+            audit_training_trace(trace, expected_start=4, expected_steps=2).passed
+        )
+        incomplete = audit_training_trace(trace[:1], expected_start=4, expected_steps=2)
+        self.assertFalse(incomplete.passed)
+        self.assertEqual(incomplete.missing_or_reordered_steps, (5,))
 
 
 if __name__ == "__main__":

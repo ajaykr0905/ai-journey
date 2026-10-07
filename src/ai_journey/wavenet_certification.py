@@ -10,7 +10,12 @@ from hashlib import sha256
 import torch
 from torch.nn import functional as F
 
-from .wavenet import HierarchicalLanguageModel, WaveNetDataset, WaveNetError
+from .wavenet import (
+    HierarchicalLanguageModel,
+    WaveNetDataset,
+    WaveNetError,
+    WaveNetTrainingStep,
+)
 from .wavenet_rebuild import (
     RebuiltWaveNet,
     rebuild_model_fingerprint,
@@ -1196,4 +1201,64 @@ def audit_sample_termination(
         maximum_observed_tokens=max(lengths),
         max_new_tokens=max_new_tokens,
         out_of_bounds_samples=out_of_bounds,
+    )
+
+
+@dataclass(frozen=True)
+class TrainingTraceAudit:
+    """Continuity and finite-value status for an optimization trace."""
+
+    expected_steps: int
+    observed_steps: int
+    missing_or_reordered_steps: tuple[int, ...]
+    nonfinite_steps: tuple[int, ...]
+
+    @property
+    def passed(self) -> bool:
+        return (
+            self.observed_steps == self.expected_steps
+            and not self.missing_or_reordered_steps
+            and not self.nonfinite_steps
+        )
+
+
+def audit_training_trace(
+    trace: tuple[WaveNetTrainingStep, ...],
+    *,
+    expected_start: int,
+    expected_steps: int,
+) -> TrainingTraceAudit:
+    """Reject incomplete, reordered, or nonfinite rebuild training evidence."""
+
+    if not isinstance(trace, tuple) or any(
+        not isinstance(item, WaveNetTrainingStep) for item in trace
+    ):
+        raise TypeError("trace must be a tuple of WaveNetTrainingStep values")
+    for name, value in (
+        ("expected_start", expected_start),
+        ("expected_steps", expected_steps),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"{name} must be an integer")
+    if expected_start < 0 or expected_steps <= 0:
+        raise WaveNetError("expected_start and expected_steps are out of range")
+    expected = tuple(range(expected_start, expected_start + expected_steps))
+    observed = tuple(item.step for item in trace)
+    ordering_errors = tuple(
+        expected_step
+        for index, expected_step in enumerate(expected)
+        if index >= len(observed) or observed[index] != expected_step
+    )
+    nonfinite = tuple(
+        item.step
+        for item in trace
+        if not math.isfinite(item.loss)
+        or not math.isfinite(item.gradient_norm)
+        or item.gradient_norm < 0
+    )
+    return TrainingTraceAudit(
+        expected_steps=expected_steps,
+        observed_steps=len(trace),
+        missing_or_reordered_steps=ordering_errors,
+        nonfinite_steps=nonfinite,
     )
