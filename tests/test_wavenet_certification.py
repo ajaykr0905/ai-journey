@@ -23,6 +23,7 @@ from ai_journey.wavenet_certification import (
     measure_gradient_statistics,
     parameter_inventory,
     parameter_statistics,
+    rebuild_batch_fingerprint,
     trace_rebuild_activations,
 )
 from ai_journey.wavenet_rebuild import (
@@ -247,6 +248,20 @@ class WaveNetCertificationTests(unittest.TestCase):
             audit.populated_before_reset, len(tuple(self.model.parameters()))
         )
         self.assertEqual(audit.populated_after_reset, 0)
+
+    def test_batch_fingerprint_binds_inputs_targets_and_architecture(self) -> None:
+        contexts = torch.tensor([[0, 1, 2, 3], [6, 5, 4, 3]])
+        targets = torch.tensor([4, 2])
+
+        first = rebuild_batch_fingerprint(self.model, contexts, targets)
+        second = rebuild_batch_fingerprint(
+            self.model, contexts.clone(), targets.clone()
+        )
+        changed = rebuild_batch_fingerprint(self.model, contexts, torch.tensor([4, 3]))
+
+        self.assertEqual(first, second)
+        self.assertNotEqual(first, changed)
+        self.assertEqual(len(first), 64)
 
 
 if __name__ == "__main__":

@@ -909,3 +909,21 @@ def audit_gradient_reset(
         populated_after_reset=after,
         parameters_unchanged=unchanged,
     )
+
+
+def rebuild_batch_fingerprint(
+    model: RebuiltWaveNet, contexts: torch.Tensor, targets: torch.Tensor
+) -> str:
+    """Bind one validated input batch to stable shapes, dtypes, and values."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    model._validate_inputs(contexts, targets)
+    digest = sha256(model.plan.fingerprint().encode())
+    for name, tensor in (("contexts", contexts), ("targets", targets)):
+        value = tensor.detach().cpu().contiguous()
+        digest.update(name.encode())
+        digest.update(str(value.dtype).encode())
+        digest.update(str(tuple(value.shape)).encode())
+        digest.update(value.numpy().tobytes())
+    return digest.hexdigest()
