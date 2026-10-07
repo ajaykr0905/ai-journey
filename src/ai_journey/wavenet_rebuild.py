@@ -11,7 +11,7 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from .wavenet import WaveNetConfig, WaveNetError
+from .wavenet import ShapeTraceStep, WaveNetConfig, WaveNetError
 
 
 @dataclass(frozen=True)
@@ -142,22 +142,27 @@ class RebuiltWaveNet(nn.Module):
         self._validate_inputs(token_ids, targets)
         hidden = self.embedding_weight[token_ids]
         for index, spec in enumerate(self.plan.stages):
-            hidden = hidden.reshape(
-                token_ids.shape[0],
-                spec.output_length,
-                spec.factor * spec.input_dim,
-            )
-            hidden = hidden @ self.stage_weights[index].transpose(0, 1)
-            mean = hidden.mean(dim=-1, keepdim=True)
-            variance = (hidden - mean).square().mean(dim=-1, keepdim=True)
-            hidden = (hidden - mean) * torch.rsqrt(variance + 1e-5)
-            hidden = hidden * self.stage_scales[index] + self.stage_biases[index]
-            hidden = torch.tanh(hidden)
-            hidden = F.dropout(hidden, p=self.config.dropout, training=self.training)
+            hidden = self._stage_forward(hidden, index=index, spec=spec)
         logits = hidden[:, 0, :] @ self.output_weight.transpose(0, 1)
         logits = logits + self.output_bias
         loss = F.cross_entropy(logits, targets) if targets is not None else None
         return logits, loss
+
+    def _stage_forward(
+        self, hidden: Tensor, *, index: int, spec: RebuildStageSpec
+    ) -> Tensor:
+        hidden = hidden.reshape(
+            hidden.shape[0],
+            spec.output_length,
+            spec.factor * spec.input_dim,
+        )
+        hidden = hidden @ self.stage_weights[index].transpose(0, 1)
+        mean = hidden.mean(dim=-1, keepdim=True)
+        variance = (hidden - mean).square().mean(dim=-1, keepdim=True)
+        hidden = (hidden - mean) * torch.rsqrt(variance + 1e-5)
+        hidden = hidden * self.stage_scales[index] + self.stage_biases[index]
+        hidden = torch.tanh(hidden)
+        return F.dropout(hidden, p=self.config.dropout, training=self.training)
 
     def _validate_inputs(self, token_ids: Tensor, targets: Tensor | None) -> None:
         if not isinstance(token_ids, Tensor) or token_ids.ndim != 2:
@@ -194,3 +199,63 @@ def initialize_rebuilt_wavenet(
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(seed)
         return RebuiltWaveNet(config)
+
+
+def trace_rebuild_shapes(
+    model: RebuiltWaveNet, *, batch_size: int = 2
+) -> tuple[ShapeTraceStep, ...]:
+    """Run the primitive implementation and record every tensor boundary."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int):
+        raise TypeError("batch_size must be an integer")
+    if batch_size <= 0:
+        raise WaveNetError("batch_size must be positive")
+    mode = model.training
+    steps: list[ShapeTraceStep] = []
+    try:
+        model.eval()
+        with torch.no_grad():
+            token_ids = torch.zeros(
+                batch_size, model.config.context_size, dtype=torch.long
+            )
+            hidden = model.embedding_weight[token_ids]
+            steps.append(
+                ShapeTraceStep(
+                    "embedding",
+                    tuple(token_ids.shape),
+                    tuple(hidden.shape),
+                    model.embedding_weight.numel(),
+                )
+            )
+            for index, spec in enumerate(model.plan.stages):
+                inputs = hidden
+                hidden = model._stage_forward(hidden, index=index, spec=spec)
+                parameter_count = (
+                    model.stage_weights[index].numel()
+                    + model.stage_scales[index].numel()
+                    + model.stage_biases[index].numel()
+                )
+                steps.append(
+                    ShapeTraceStep(
+                        f"stage_{index + 1}",
+                        tuple(inputs.shape),
+                        tuple(hidden.shape),
+                        parameter_count,
+                    )
+                )
+            head_inputs = hidden[:, 0, :]
+            logits = head_inputs @ model.output_weight.transpose(0, 1)
+            logits = logits + model.output_bias
+            steps.append(
+                ShapeTraceStep(
+                    "output",
+                    tuple(head_inputs.shape),
+                    tuple(logits.shape),
+                    model.output_weight.numel() + model.output_bias.numel(),
+                )
+            )
+    finally:
+        model.train(mode)
+    return tuple(steps)

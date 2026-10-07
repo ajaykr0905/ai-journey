@@ -9,6 +9,7 @@ from ai_journey.wavenet_rebuild import (
     RebuiltWaveNet,
     compile_rebuild_plan,
     initialize_rebuilt_wavenet,
+    trace_rebuild_shapes,
 )
 
 
@@ -141,6 +142,41 @@ class RebuiltWaveNetTests(unittest.TestCase):
                 WaveNetConfig(vocab_size=7),
                 seed=True,  # type: ignore[arg-type]
             )
+
+    def test_shape_trace_records_every_primitive_boundary(self) -> None:
+        model = initialize_rebuilt_wavenet(
+            WaveNetConfig(
+                vocab_size=7,
+                context_size=4,
+                embedding_dim=3,
+                hidden_dim=5,
+                group_factors=(2, 2),
+            )
+        )
+        model.train()
+
+        trace = trace_rebuild_shapes(model, batch_size=3)
+
+        self.assertTrue(model.training)
+        self.assertEqual(
+            [(step.name, step.input_shape, step.output_shape) for step in trace],
+            [
+                ("embedding", (3, 4), (3, 4, 3)),
+                ("stage_1", (3, 4, 3), (3, 2, 5)),
+                ("stage_2", (3, 2, 5), (3, 1, 5)),
+                ("output", (3, 5), (3, 7)),
+            ],
+        )
+        self.assertEqual(
+            sum(step.parameter_count for step in trace), model.parameter_count
+        )
+
+    def test_shape_trace_validates_model_and_batch_size(self) -> None:
+        with self.assertRaisesRegex(TypeError, "model must be RebuiltWaveNet"):
+            trace_rebuild_shapes(object())  # type: ignore[arg-type]
+        model = initialize_rebuilt_wavenet(WaveNetConfig(vocab_size=7))
+        with self.assertRaisesRegex(ValueError, "batch_size must be positive"):
+            trace_rebuild_shapes(model, batch_size=0)
 
 
 if __name__ == "__main__":
