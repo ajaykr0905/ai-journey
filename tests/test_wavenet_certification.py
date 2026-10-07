@@ -10,6 +10,7 @@ from ai_journey.wavenet_certification import (
     audit_eval_batch_invariance,
     audit_parameter_finiteness,
     audit_parameter_manifest,
+    audit_per_example_loss_parity,
     audit_storage_independence,
     audit_top_k_parity,
     measure_activation_saturation,
@@ -148,6 +149,17 @@ class WaveNetCertificationTests(unittest.TestCase):
         self.assertTrue(audit.passed)
         self.assertEqual(audit.examples, 2)
         self.assertEqual(audit.k, 3)
+
+    def test_reference_and_rebuild_match_each_example_loss(self) -> None:
+        reference = initialize_wavenet(self.config, seed=332)
+        load_reference_parameters(self.model, reference)
+        contexts = torch.tensor([[0, 1, 2, 3], [3, 4, 5, 6]])
+        targets = torch.tensor([4, 0])
+
+        audit = audit_per_example_loss_parity(reference, self.model, contexts, targets)
+
+        self.assertTrue(audit.passed)
+        self.assertEqual(audit.examples, 2)
 
 
 if __name__ == "__main__":

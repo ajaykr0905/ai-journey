@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 
 import torch
+from torch.nn import functional as F
 
 from .wavenet import HierarchicalLanguageModel, WaveNetError
 from .wavenet_rebuild import RebuiltWaveNet
@@ -419,4 +420,68 @@ def audit_top_k_parity(
         rebuilt.train(rebuilt_mode)
     return TopKParityAudit(
         examples=int(contexts.shape[0]), k=k, mismatched_examples=mismatches
+    )
+
+
+@dataclass(frozen=True)
+class PerExampleLossParityAudit:
+    """Example-level loss agreement hidden by a matching batch mean."""
+
+    examples: int
+    max_abs_error: float
+    mismatched_examples: tuple[int, ...]
+    tolerance: float
+
+    @property
+    def passed(self) -> bool:
+        return not self.mismatched_examples
+
+
+def audit_per_example_loss_parity(
+    reference: HierarchicalLanguageModel,
+    rebuilt: RebuiltWaveNet,
+    contexts: torch.Tensor,
+    targets: torch.Tensor,
+    *,
+    tolerance: float = 1e-6,
+) -> PerExampleLossParityAudit:
+    """Compare unreduced cross-entropy rather than only aggregate loss."""
+
+    if not isinstance(reference, HierarchicalLanguageModel):
+        raise TypeError("reference must be HierarchicalLanguageModel")
+    if not isinstance(rebuilt, RebuiltWaveNet):
+        raise TypeError("rebuilt must be RebuiltWaveNet")
+    if reference.config != rebuilt.config:
+        raise WaveNetError("reference and rebuild configurations must match")
+    rebuilt._validate_inputs(contexts, targets)
+    if (
+        isinstance(tolerance, bool)
+        or not isinstance(tolerance, (int, float))
+        or not math.isfinite(tolerance)
+        or tolerance < 0
+    ):
+        raise WaveNetError("tolerance must be non-negative and finite")
+    reference_mode, rebuilt_mode = reference.training, rebuilt.training
+    try:
+        reference.eval()
+        rebuilt.eval()
+        with torch.no_grad():
+            reference_logits, _ = reference(contexts)
+            rebuilt_logits, _ = rebuilt(contexts)
+            errors = (
+                F.cross_entropy(reference_logits, targets, reduction="none")
+                - F.cross_entropy(rebuilt_logits, targets, reduction="none")
+            ).abs()
+        mismatches = tuple(
+            index for index, error in enumerate(errors) if float(error) > tolerance
+        )
+        maximum = float(errors.max()) if errors.numel() else 0.0
+    finally:
+        reference.train(reference_mode)
+        rebuilt.train(rebuilt_mode)
+    return PerExampleLossParityAudit(
+        examples=int(targets.numel()),
+        max_abs_error=maximum,
+        mismatched_examples=mismatches,
+        tolerance=float(tolerance),
     )
