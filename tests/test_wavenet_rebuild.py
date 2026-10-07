@@ -7,6 +7,7 @@ import torch
 from ai_journey.wavenet import WaveNetConfig, initialize_wavenet
 from ai_journey.wavenet_rebuild import (
     RebuiltWaveNet,
+    audit_rebuild_finite_difference,
     audit_rebuild_forward,
     audit_rebuild_gradients,
     compile_rebuild_plan,
@@ -312,6 +313,31 @@ class RebuiltWaveNetTests(unittest.TestCase):
 
         self.assertFalse(audit.passed)
         self.assertIn("output.bias", audit.mismatched_parameters)
+
+    def test_finite_difference_audit_checks_autograd_independently(self) -> None:
+        config = WaveNetConfig(vocab_size=7, context_size=4, group_factors=(2, 2))
+        model = initialize_rebuilt_wavenet(config, seed=33)
+        contexts = torch.tensor([[0, 1, 2, 3], [3, 2, 1, 0]])
+        targets = torch.tensor([4, 5])
+        fingerprint = rebuild_model_fingerprint(model)
+
+        audit = audit_rebuild_finite_difference(model, contexts, targets)
+
+        self.assertTrue(audit.passed)
+        self.assertEqual(audit.parameter, "output_bias")
+        self.assertEqual(rebuild_model_fingerprint(model), fingerprint)
+
+    def test_finite_difference_audit_validates_parameter_selection(self) -> None:
+        config = WaveNetConfig(vocab_size=7)
+        model = initialize_rebuilt_wavenet(config)
+        contexts = torch.zeros((2, config.context_size), dtype=torch.long)
+        targets = torch.tensor([0, 1])
+        with self.assertRaisesRegex(ValueError, "unknown rebuild parameter"):
+            audit_rebuild_finite_difference(
+                model, contexts, targets, parameter="missing"
+            )
+        with self.assertRaisesRegex(TypeError, "one integer per"):
+            audit_rebuild_finite_difference(model, contexts, targets, index=(0, 0))
 
 
 if __name__ == "__main__":

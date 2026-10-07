@@ -488,3 +488,92 @@ def audit_rebuild_gradients(
     finally:
         reference.train(reference_mode)
         rebuilt.train(rebuilt_mode)
+
+
+@dataclass(frozen=True)
+class RebuildFiniteDifferenceAudit:
+    """Independent central-difference check for one rebuild parameter value."""
+
+    parameter: str
+    index: tuple[int, ...]
+    analytic_gradient: float
+    numerical_gradient: float
+    absolute_error: float
+    tolerance: float
+
+    @property
+    def passed(self) -> bool:
+        return self.absolute_error <= self.tolerance
+
+
+def audit_rebuild_finite_difference(
+    model: RebuiltWaveNet,
+    contexts: Tensor,
+    targets: Tensor,
+    *,
+    parameter: str = "output_bias",
+    index: tuple[int, ...] = (0,),
+    epsilon: float = 1e-3,
+    tolerance: float = 1e-3,
+) -> RebuildFiniteDifferenceAudit:
+    """Compare autograd with a central difference at one selected coordinate."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    model._validate_inputs(contexts, targets)
+    named_parameters = dict(model.named_parameters())
+    if parameter not in named_parameters:
+        raise WaveNetError(f"unknown rebuild parameter: {parameter}")
+    selected = named_parameters[parameter]
+    if (
+        not isinstance(index, tuple)
+        or len(index) != selected.ndim
+        or any(isinstance(value, bool) or not isinstance(value, int) for value in index)
+    ):
+        raise TypeError("index must contain one integer per parameter dimension")
+    if any(
+        value < 0 or value >= selected.shape[axis] for axis, value in enumerate(index)
+    ):
+        raise WaveNetError("parameter index is out of bounds")
+    for name, value, positive in (
+        ("epsilon", epsilon, True),
+        ("tolerance", tolerance, False),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or (value <= 0 if positive else value < 0)
+        ):
+            qualifier = "positive" if positive else "non-negative"
+            raise WaveNetError(f"{name} must be {qualifier} and finite")
+    mode = model.training
+    original = float(selected[index].detach())
+    try:
+        model.eval()
+        model.zero_grad(set_to_none=True)
+        _, loss = model(contexts, targets)
+        assert loss is not None
+        loss.backward()
+        assert selected.grad is not None
+        analytic = float(selected.grad[index])
+        with torch.no_grad():
+            selected[index] = original + epsilon
+            _, plus_loss = model(contexts, targets)
+            selected[index] = original - epsilon
+            _, minus_loss = model(contexts, targets)
+            selected[index] = original
+        assert plus_loss is not None and minus_loss is not None
+        numerical = (float(plus_loss) - float(minus_loss)) / (2 * epsilon)
+        return RebuildFiniteDifferenceAudit(
+            parameter=parameter,
+            index=index,
+            analytic_gradient=analytic,
+            numerical_gradient=numerical,
+            absolute_error=abs(analytic - numerical),
+            tolerance=float(tolerance),
+        )
+    finally:
+        with torch.no_grad():
+            selected[index] = original
+        model.train(mode)
