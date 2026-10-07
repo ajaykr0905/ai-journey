@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass
 from hashlib import sha256
+
+import torch
+from torch import Tensor, nn
 
 from .wavenet import WaveNetConfig, WaveNetError
 
@@ -85,3 +89,53 @@ def compile_rebuild_plan(config: WaveNetConfig) -> RebuildPlan:
         dropout=float(config.dropout),
         stages=tuple(stages),
     )
+
+
+class RebuiltWaveNet(nn.Module):
+    """WaveNet parameters registered without high-level layer modules."""
+
+    def __init__(self, config: WaveNetConfig) -> None:
+        super().__init__()
+        self.config = config
+        self.plan = compile_rebuild_plan(config)
+        self.embedding_weight = nn.Parameter(
+            torch.empty(config.vocab_size, config.embedding_dim)
+        )
+        self.stage_weights = nn.ParameterList(
+            [nn.Parameter(torch.empty(spec.weight_shape)) for spec in self.plan.stages]
+        )
+        self.stage_scales = nn.ParameterList(
+            [nn.Parameter(torch.ones(spec.output_dim)) for spec in self.plan.stages]
+        )
+        self.stage_biases = nn.ParameterList(
+            [nn.Parameter(torch.zeros(spec.output_dim)) for spec in self.plan.stages]
+        )
+        self.output_weight = nn.Parameter(
+            torch.empty(config.vocab_size, config.hidden_dim)
+        )
+        self.output_bias = nn.Parameter(torch.empty(config.vocab_size))
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        nn.init.normal_(self.embedding_weight)
+        for weight in self.stage_weights:
+            nn.init.kaiming_uniform_(weight, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.output_weight, a=math.sqrt(5))
+        bound = 1 / math.sqrt(self.config.hidden_dim)
+        nn.init.uniform_(self.output_bias, -bound, bound)
+
+    @property
+    def parameter_count(self) -> int:
+        return sum(parameter.numel() for parameter in self.parameters())
+
+    def parameter_manifest(self) -> dict[str, tuple[int, ...]]:
+        """Return the exact shape of every registered trainable tensor."""
+
+        return {
+            name: tuple(parameter.shape) for name, parameter in self.named_parameters()
+        }
+
+    def forward(
+        self, token_ids: Tensor, targets: Tensor | None = None
+    ) -> tuple[Tensor, Tensor | None]:
+        raise NotImplementedError("the primitive forward pass is not installed")
