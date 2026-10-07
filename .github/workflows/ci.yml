@@ -179,6 +179,20 @@ jobs:
           --overfit-examples 8
           --overfit-steps 40
           --minimum-overfit-improvement 0.5
+      - name: Verify the Day 33 primitive WaveNet rebuild
+        run: >-
+          python scripts/run_day_33.py
+          --corpus data/day-19-demo-names.txt
+          --output /tmp/ai-journey-artifacts/day-33-wavenet-rebuild.json
+          --steps 2
+          --batch-size 8
+          --context-size 4
+          --embedding-dim 4
+          --hidden-dim 12
+          --group-factors 2 2
+          --overfit-examples 8
+          --overfit-steps 30
+          --minimum-overfit-improvement 0.3
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py
