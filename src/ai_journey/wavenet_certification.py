@@ -1146,3 +1146,54 @@ def audit_sample_reproducibility(
         terminated=first.terminated,
         identical=first == second,
     )
+
+
+@dataclass(frozen=True)
+class SampleTerminationAudit:
+    """Termination and length behavior across a fixed seed panel."""
+
+    samples: int
+    terminated_samples: int
+    termination_fraction: float
+    maximum_observed_tokens: int
+    max_new_tokens: int
+    out_of_bounds_samples: int
+
+    @property
+    def passed(self) -> bool:
+        return self.out_of_bounds_samples == 0
+
+
+def audit_sample_termination(
+    model: RebuiltWaveNet,
+    vocabulary_tokens: tuple[str, ...],
+    *,
+    seeds: tuple[int, ...],
+    max_new_tokens: int = 20,
+) -> SampleTerminationAudit:
+    """Measure boundary-token termination without allowing unbounded samples."""
+
+    if not isinstance(seeds, tuple) or not seeds:
+        raise TypeError("seeds must be a non-empty tuple of integers")
+    if any(isinstance(seed, bool) or not isinstance(seed, int) for seed in seeds):
+        raise TypeError("seeds must contain only integers")
+    samples = tuple(
+        sample_rebuild(
+            model,
+            vocabulary_tokens,
+            seed=seed,
+            max_new_tokens=max_new_tokens,
+        )
+        for seed in seeds
+    )
+    terminated = sum(sample.terminated for sample in samples)
+    lengths = tuple(len(sample.token_ids) for sample in samples)
+    out_of_bounds = sum(length > max_new_tokens for length in lengths)
+    return SampleTerminationAudit(
+        samples=len(samples),
+        terminated_samples=terminated,
+        termination_fraction=terminated / len(samples),
+        maximum_observed_tokens=max(lengths),
+        max_new_tokens=max_new_tokens,
+        out_of_bounds_samples=out_of_bounds,
+    )

@@ -21,6 +21,7 @@ from ai_journey.wavenet_certification import (
     audit_probability_simplex,
     audit_repeat_inference,
     audit_sample_reproducibility,
+    audit_sample_termination,
     audit_storage_independence,
     audit_top_k_parity,
     measure_activation_saturation,
@@ -318,6 +319,18 @@ class WaveNetCertificationTests(unittest.TestCase):
 
         self.assertTrue(audit.passed)
         self.assertLessEqual(len(audit.token_ids), 8)
+
+    def test_sample_panel_remains_bounded_and_reports_termination(self) -> None:
+        vocabulary = (".", "a", "b", "c", "d", "e", "f")
+
+        audit = audit_sample_termination(
+            self.model, vocabulary, seeds=(1, 2, 3, 4), max_new_tokens=6
+        )
+
+        self.assertTrue(audit.passed)
+        self.assertEqual(audit.samples, 4)
+        self.assertLessEqual(audit.maximum_observed_tokens, 6)
+        self.assertTrue(0 <= audit.termination_fraction <= 1)
 
 
 if __name__ == "__main__":
