@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from hashlib import sha256
 
@@ -232,3 +233,39 @@ def trace_rebuild_activations(
     finally:
         model.train(mode)
     return tuple(snapshots)
+
+
+@dataclass(frozen=True)
+class ActivationFinitenessAudit:
+    """Finite-value status at every recorded forward boundary."""
+
+    boundaries: int
+    nonfinite_boundaries: tuple[str, ...]
+
+    @property
+    def passed(self) -> bool:
+        return not self.nonfinite_boundaries
+
+
+def audit_activation_finiteness(
+    model: RebuiltWaveNet, contexts: torch.Tensor
+) -> ActivationFinitenessAudit:
+    """Locate the first and subsequent boundaries affected by nonfinite state."""
+
+    snapshots = trace_rebuild_activations(model, contexts)
+    nonfinite = tuple(
+        snapshot.name
+        for snapshot in snapshots
+        if not all(
+            math.isfinite(value)
+            for value in (
+                snapshot.minimum,
+                snapshot.maximum,
+                snapshot.mean,
+                snapshot.standard_deviation,
+            )
+        )
+    )
+    return ActivationFinitenessAudit(
+        boundaries=len(snapshots), nonfinite_boundaries=nonfinite
+    )

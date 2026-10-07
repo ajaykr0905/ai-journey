@@ -6,6 +6,7 @@ import torch
 
 from ai_journey.wavenet import WaveNetConfig, initialize_wavenet
 from ai_journey.wavenet_certification import (
+    audit_activation_finiteness,
     audit_parameter_finiteness,
     audit_parameter_manifest,
     audit_storage_independence,
@@ -94,6 +95,17 @@ class WaveNetCertificationTests(unittest.TestCase):
         self.assertEqual(snapshots[-1].shape, (2, self.config.vocab_size))
         self.assertTrue(self.model.training)
         self.assertTrue(all(len(item.digest) == 64 for item in snapshots))
+
+    def test_activation_finiteness_locates_propagated_corruption(self) -> None:
+        contexts = torch.tensor([[0, 1, 2, 3]])
+        self.assertTrue(audit_activation_finiteness(self.model, contexts).passed)
+        with torch.no_grad():
+            self.model.stage_weights[0][0, 0] = float("inf")
+
+        audit = audit_activation_finiteness(self.model, contexts)
+
+        self.assertFalse(audit.passed)
+        self.assertEqual(audit.nonfinite_boundaries, ("stage_1", "stage_2", "logits"))
 
 
 if __name__ == "__main__":
