@@ -10,6 +10,7 @@ from ai_journey.wavenet_certification import (
     audit_parameter_manifest,
     audit_storage_independence,
     parameter_inventory,
+    parameter_statistics,
 )
 from ai_journey.wavenet_rebuild import initialize_rebuilt_wavenet
 
@@ -68,6 +69,16 @@ class WaveNetCertificationTests(unittest.TestCase):
 
         self.assertFalse(audit.passed)
         self.assertEqual(audit.nonfinite_parameters, ("output_bias",))
+
+    def test_parameter_statistics_cover_each_registered_tensor(self) -> None:
+        statistics = parameter_statistics(self.model)
+
+        self.assertEqual(
+            tuple(item.name for item in statistics),
+            tuple(name for name, _ in self.model.named_parameters()),
+        )
+        self.assertTrue(all(item.l2_norm >= 0 for item in statistics))
+        self.assertTrue(all(item.minimum <= item.maximum for item in statistics))
 
 
 if __name__ == "__main__":

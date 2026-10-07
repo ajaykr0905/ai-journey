@@ -142,3 +142,39 @@ def audit_parameter_finiteness(model: RebuiltWaveNet) -> ParameterFinitenessAudi
         elements=sum(entry.elements for entry in inventory),
         nonfinite_parameters=nonfinite,
     )
+
+
+@dataclass(frozen=True)
+class ParameterStatistics:
+    """Scale diagnostics for one registered rebuild tensor."""
+
+    name: str
+    minimum: float
+    maximum: float
+    mean: float
+    standard_deviation: float
+    l2_norm: float
+
+
+def parameter_statistics(model: RebuiltWaveNet) -> tuple[ParameterStatistics, ...]:
+    """Summarize every parameter without retaining tensor references."""
+
+    inventory = parameter_inventory(model)
+    parameters = dict(model.named_parameters())
+    if not audit_parameter_finiteness(model).passed:
+        raise WaveNetError("parameter statistics require finite model state")
+    summaries: list[ParameterStatistics] = []
+    with torch.no_grad():
+        for entry in inventory:
+            values = parameters[entry.name].detach().double()
+            summaries.append(
+                ParameterStatistics(
+                    name=entry.name,
+                    minimum=float(values.min()),
+                    maximum=float(values.max()),
+                    mean=float(values.mean()),
+                    standard_deviation=float(values.std(unbiased=False)),
+                    l2_norm=float(torch.linalg.vector_norm(values)),
+                )
+            )
+    return tuple(summaries)
