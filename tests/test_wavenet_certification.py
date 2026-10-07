@@ -30,6 +30,7 @@ from ai_journey.wavenet_certification import (
     audit_storage_independence,
     audit_top_k_parity,
     audit_training_trace,
+    benchmark_rebuild_inference,
     measure_activation_saturation,
     measure_gradient_cosines,
     measure_gradient_statistics,
@@ -373,6 +374,19 @@ class WaveNetCertificationTests(unittest.TestCase):
         self.assertEqual(footprint.parameter_bytes, self.model.parameter_count * 4)
         self.assertEqual(footprint.buffer_bytes, 0)
         self.assertEqual(footprint.total_bytes, footprint.parameter_bytes)
+
+    def test_inference_benchmark_is_bounded_and_preserves_mode(self) -> None:
+        contexts = torch.tensor([[0, 1, 2, 3], [6, 5, 4, 3]])
+        self.model.train()
+
+        benchmark = benchmark_rebuild_inference(
+            self.model, contexts, warmups=1, repeats=3
+        )
+
+        self.assertEqual(benchmark.repeats, 3)
+        self.assertGreater(benchmark.median_seconds, 0)
+        self.assertGreater(benchmark.median_examples_per_second, 0)
+        self.assertTrue(self.model.training)
 
 
 if __name__ == "__main__":

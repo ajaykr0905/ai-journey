@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 import math
+import statistics
+import time
 from dataclasses import dataclass
 from hashlib import sha256
 
@@ -1334,4 +1336,57 @@ def measure_model_footprint(model: RebuiltWaveNet) -> ModelFootprint:
         buffer_bytes=buffer_bytes,
         total_bytes=parameter_bytes + buffer_bytes,
         parameter_elements=model.parameter_count,
+    )
+
+
+@dataclass(frozen=True)
+class InferenceBenchmark:
+    """Local CPU timing distribution for one fixed inference batch."""
+
+    batch_size: int
+    repeats: int
+    median_seconds: float
+    minimum_seconds: float
+    median_examples_per_second: float
+
+
+def benchmark_rebuild_inference(
+    model: RebuiltWaveNet,
+    contexts: torch.Tensor,
+    *,
+    warmups: int = 2,
+    repeats: int = 5,
+) -> InferenceBenchmark:
+    """Time bounded CPU inference without claiming cross-machine comparability."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    model._validate_inputs(contexts, None)
+    if not contexts.shape[0]:
+        raise WaveNetError("contexts must contain at least one example")
+    for name, value, minimum in (("warmups", warmups, 0), ("repeats", repeats, 1)):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"{name} must be an integer")
+        if value < minimum:
+            raise WaveNetError(f"{name} must be at least {minimum}")
+    mode = model.training
+    timings: list[float] = []
+    try:
+        model.eval()
+        with torch.no_grad():
+            for _ in range(warmups):
+                model(contexts)
+            for _ in range(repeats):
+                started = time.perf_counter()
+                model(contexts)
+                timings.append(time.perf_counter() - started)
+    finally:
+        model.train(mode)
+    median = statistics.median(timings)
+    return InferenceBenchmark(
+        batch_size=int(contexts.shape[0]),
+        repeats=repeats,
+        median_seconds=median,
+        minimum_seconds=min(timings),
+        median_examples_per_second=int(contexts.shape[0]) / median,
     )
