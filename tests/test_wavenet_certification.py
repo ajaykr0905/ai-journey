@@ -6,6 +6,7 @@ import torch
 
 from ai_journey.wavenet import WaveNetConfig, initialize_wavenet
 from ai_journey.wavenet_certification import (
+    audit_parameter_finiteness,
     audit_parameter_manifest,
     audit_storage_independence,
     parameter_inventory,
@@ -57,6 +58,16 @@ class WaveNetCertificationTests(unittest.TestCase):
 
         self.assertTrue(audit.passed)
         self.assertEqual(audit.reference_tensors, audit.rebuild_tensors)
+
+    def test_parameter_finiteness_identifies_the_corrupt_tensor(self) -> None:
+        self.assertTrue(audit_parameter_finiteness(self.model).passed)
+        with torch.no_grad():
+            self.model.output_bias[0] = float("nan")
+
+        audit = audit_parameter_finiteness(self.model)
+
+        self.assertFalse(audit.passed)
+        self.assertEqual(audit.nonfinite_parameters, ("output_bias",))
 
 
 if __name__ == "__main__":

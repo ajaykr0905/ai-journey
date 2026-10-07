@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import torch
+
 from .wavenet import HierarchicalLanguageModel, WaveNetError
 from .wavenet_rebuild import RebuiltWaveNet
 
@@ -109,4 +111,34 @@ def audit_storage_independence(
         reference_tensors=len(reference_parameters),
         rebuild_tensors=len(rebuilt_parameters),
         shared_storage_pairs=shared,
+    )
+
+
+@dataclass(frozen=True)
+class ParameterFinitenessAudit:
+    """Finite-value coverage across every rebuild parameter tensor."""
+
+    tensors: int
+    elements: int
+    nonfinite_parameters: tuple[str, ...]
+
+    @property
+    def passed(self) -> bool:
+        return not self.nonfinite_parameters
+
+
+def audit_parameter_finiteness(model: RebuiltWaveNet) -> ParameterFinitenessAudit:
+    """Identify any registered parameter containing NaN or infinity."""
+
+    inventory = parameter_inventory(model)
+    parameters = dict(model.named_parameters())
+    nonfinite = tuple(
+        entry.name
+        for entry in inventory
+        if not bool(torch.isfinite(parameters[entry.name]).all())
+    )
+    return ParameterFinitenessAudit(
+        tensors=len(inventory),
+        elements=sum(entry.elements for entry in inventory),
+        nonfinite_parameters=nonfinite,
     )
