@@ -289,3 +289,18 @@ def load_reference_parameters(
             model.stage_biases[index].copy_(normalization.bias)
         model.output_weight.copy_(reference.output.weight)
         model.output_bias.copy_(reference.output.bias)
+
+
+def rebuild_model_fingerprint(model: RebuiltWaveNet) -> str:
+    """Hash the rebuild architecture binding and every parameter byte."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    digest = sha256(model.plan.fingerprint().encode())
+    for name, parameter in sorted(model.named_parameters()):
+        value = parameter.detach().cpu().contiguous()
+        digest.update(name.encode())
+        digest.update(str(value.dtype).encode())
+        digest.update(str(tuple(value.shape)).encode())
+        digest.update(value.numpy().tobytes())
+    return digest.hexdigest()

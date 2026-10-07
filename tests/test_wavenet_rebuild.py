@@ -10,6 +10,7 @@ from ai_journey.wavenet_rebuild import (
     compile_rebuild_plan,
     initialize_rebuilt_wavenet,
     load_reference_parameters,
+    rebuild_model_fingerprint,
     trace_rebuild_shapes,
 )
 
@@ -216,6 +217,24 @@ class RebuiltWaveNetTests(unittest.TestCase):
         mismatched = initialize_wavenet(WaveNetConfig(vocab_size=8))
         with self.assertRaisesRegex(ValueError, "configurations must match"):
             load_reference_parameters(rebuilt, mismatched)
+
+    def test_model_fingerprint_binds_plan_names_and_parameter_values(self) -> None:
+        config = WaveNetConfig(vocab_size=7)
+        first = initialize_rebuilt_wavenet(config, seed=33)
+        second = initialize_rebuilt_wavenet(config, seed=33)
+
+        self.assertEqual(
+            rebuild_model_fingerprint(first), rebuild_model_fingerprint(second)
+        )
+        with torch.no_grad():
+            second.output_bias[0].add_(1)
+        self.assertNotEqual(
+            rebuild_model_fingerprint(first), rebuild_model_fingerprint(second)
+        )
+
+    def test_model_fingerprint_requires_rebuild_model(self) -> None:
+        with self.assertRaisesRegex(TypeError, "model must be RebuiltWaveNet"):
+            rebuild_model_fingerprint(object())  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":
