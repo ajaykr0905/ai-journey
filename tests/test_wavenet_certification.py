@@ -5,7 +5,10 @@ import unittest
 import torch
 
 from ai_journey.wavenet import WaveNetConfig
-from ai_journey.wavenet_certification import parameter_inventory
+from ai_journey.wavenet_certification import (
+    audit_parameter_manifest,
+    parameter_inventory,
+)
 from ai_journey.wavenet_rebuild import initialize_rebuilt_wavenet
 
 
@@ -37,6 +40,14 @@ class WaveNetCertificationTests(unittest.TestCase):
     def test_parameter_inventory_rejects_other_models(self) -> None:
         with self.assertRaises(TypeError):
             parameter_inventory(torch.nn.Linear(2, 2))  # type: ignore[arg-type]
+
+    def test_parameter_manifest_matches_the_compiled_plan(self) -> None:
+        audit = audit_parameter_manifest(self.model)
+
+        self.assertTrue(audit.passed)
+        self.assertEqual(audit.registered_elements, self.model.parameter_count)
+        self.assertEqual(audit.planned_elements, self.model.plan.parameter_count)
+        self.assertGreater(audit.tensors, 0)
 
 
 if __name__ == "__main__":
