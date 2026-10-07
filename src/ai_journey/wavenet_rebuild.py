@@ -1108,3 +1108,80 @@ def run_rebuild_experiment(
         overfit_probe=overfit,
         model_fingerprint=rebuild_model_fingerprint(training.model),
     )
+
+
+REBUILD_REPORT_SCHEMA = 1
+
+
+def _rebuild_report_digest(payload: dict[str, Any]) -> str:
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return sha256(canonical.encode()).hexdigest()
+
+
+def rebuild_report_payload(result: RebuildExperimentResult) -> dict[str, Any]:
+    """Convert one experiment into canonical self-verifying public evidence."""
+
+    if not isinstance(result, RebuildExperimentResult):
+        raise TypeError("result must be RebuildExperimentResult")
+    payload: dict[str, Any] = {
+        "schema_version": REBUILD_REPORT_SCHEMA,
+        "curriculum_day": 33,
+        "model_config": asdict(result.model_config),
+        "training_config": asdict(result.training_config),
+        "dataset_fingerprint": result.dataset_fingerprint,
+        "plan_fingerprint": result.plan_fingerprint,
+        "model_fingerprint": result.model_fingerprint,
+        "parameter_count": result.parameter_count,
+        "completed_steps": result.completed_steps,
+        "shape_trace": [asdict(step) for step in result.shape_trace],
+        "forward_audit": {
+            **asdict(result.forward_audit),
+            "passed": result.forward_audit.passed,
+        },
+        "gradient_audit": {
+            **asdict(result.gradient_audit),
+            "passed": result.gradient_audit.passed,
+        },
+        "finite_difference_audit": {
+            **asdict(result.finite_difference_audit),
+            "passed": result.finite_difference_audit.passed,
+        },
+        "initial_train": asdict(result.initial_train),
+        "final_train": asdict(result.final_train),
+        "final_validation": asdict(result.final_validation),
+        "sample": asdict(result.sample),
+        "overfit_probe": {
+            **asdict(result.overfit_probe),
+            "improvement": result.overfit_probe.improvement,
+            "passed": result.overfit_probe.passed,
+        },
+    }
+    payload["evidence_fingerprint"] = _rebuild_report_digest(payload)
+    return payload
+
+
+def verify_rebuild_report(payload: dict[str, Any]) -> None:
+    """Reject incomplete, failed, or modified rebuild evidence."""
+
+    if not isinstance(payload, dict):
+        raise TypeError("payload must be a dictionary")
+    candidate = copy.deepcopy(payload)
+    fingerprint = candidate.pop("evidence_fingerprint", None)
+    _validate_sha256(fingerprint, "evidence_fingerprint")
+    if _rebuild_report_digest(candidate) != fingerprint:
+        raise WaveNetError("rebuild evidence fingerprint mismatch")
+    if candidate.get("schema_version") != REBUILD_REPORT_SCHEMA:
+        raise WaveNetError("unsupported rebuild report schema")
+    if candidate.get("curriculum_day") != 33:
+        raise WaveNetError("rebuild report must identify curriculum Day 33")
+    training = candidate.get("training_config", {})
+    if candidate.get("completed_steps") != training.get("steps"):
+        raise WaveNetError("rebuild report did not complete every declared step")
+    for gate in (
+        "forward_audit",
+        "gradient_audit",
+        "finite_difference_audit",
+        "overfit_probe",
+    ):
+        if candidate.get(gate, {}).get("passed") is not True:
+            raise WaveNetError(f"rebuild report gate failed: {gate}")

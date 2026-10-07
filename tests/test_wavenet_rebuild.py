@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import math
 import tempfile
 import unittest
@@ -28,12 +29,14 @@ from ai_journey.wavenet_rebuild import (
     load_rebuild_checkpoint,
     load_reference_parameters,
     rebuild_model_fingerprint,
+    rebuild_report_payload,
     run_rebuild_experiment,
     run_rebuild_overfit_probe,
     sample_rebuild,
     save_rebuild_checkpoint,
     trace_rebuild_shapes,
     train_rebuild_steps,
+    verify_rebuild_report,
 )
 
 
@@ -740,6 +743,62 @@ class RebuiltWaveNetTests(unittest.TestCase):
         self.assertTrue(result.gradient_audit.passed)
         self.assertTrue(result.finite_difference_audit.passed)
         self.assertTrue(result.overfit_probe.passed)
+
+    def test_report_payload_is_canonical_and_self_verifying(self) -> None:
+        words = ("ajay", "maya", "arun", "diya", "neel")
+        vocab_size = len({".", *"".join(words)})
+        config = WaveNetConfig(
+            vocab_size=vocab_size,
+            context_size=4,
+            embedding_dim=4,
+            hidden_dim=12,
+            group_factors=(2, 2),
+        )
+        datasets = build_wavenet_dataset_split(
+            words, config=config, validation_fraction=0.4, seed=33
+        )
+        result = run_rebuild_experiment(
+            datasets,
+            model_config=config,
+            training_config=WaveNetTrainingConfig(steps=1, batch_size=4, seed=33),
+            overfit_examples=8,
+            overfit_steps=20,
+            minimum_overfit_improvement=0.2,
+        )
+
+        payload = rebuild_report_payload(result)
+
+        verify_rebuild_report(payload)
+        self.assertEqual(payload, rebuild_report_payload(result))
+        self.assertEqual(payload["curriculum_day"], 33)
+
+    def test_report_verification_detects_tampering(self) -> None:
+        words = ("ajay", "maya", "arun", "diya", "neel")
+        vocab_size = len({".", *"".join(words)})
+        config = WaveNetConfig(
+            vocab_size=vocab_size,
+            context_size=4,
+            embedding_dim=4,
+            hidden_dim=12,
+            group_factors=(2, 2),
+        )
+        datasets = build_wavenet_dataset_split(
+            words, config=config, validation_fraction=0.4, seed=33
+        )
+        result = run_rebuild_experiment(
+            datasets,
+            model_config=config,
+            training_config=WaveNetTrainingConfig(steps=1, batch_size=4, seed=33),
+            overfit_examples=8,
+            overfit_steps=20,
+            minimum_overfit_improvement=0.2,
+        )
+        payload = rebuild_report_payload(result)
+        tampered = copy.deepcopy(payload)
+        tampered["parameter_count"] += 1
+
+        with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+            verify_rebuild_report(tampered)
 
 
 if __name__ == "__main__":
