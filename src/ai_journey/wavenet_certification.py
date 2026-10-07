@@ -11,7 +11,11 @@ import torch
 from torch.nn import functional as F
 
 from .wavenet import HierarchicalLanguageModel, WaveNetError
-from .wavenet_rebuild import RebuiltWaveNet, reference_parameter_pairs
+from .wavenet_rebuild import (
+    RebuiltWaveNet,
+    rebuild_model_fingerprint,
+    reference_parameter_pairs,
+)
 
 
 @dataclass(frozen=True)
@@ -850,4 +854,58 @@ def audit_optimizer_step_parity(
         parameter_tensors=len(pairs),
         max_abs_parameter_error=maximum,
         tolerance=float(tolerance),
+    )
+
+
+@dataclass(frozen=True)
+class GradientResetAudit:
+    """Evidence that gradient clearing releases every accumulated gradient."""
+
+    populated_before_reset: int
+    populated_after_reset: int
+    parameters_unchanged: bool
+
+    @property
+    def passed(self) -> bool:
+        return (
+            self.populated_before_reset > 0
+            and self.populated_after_reset == 0
+            and self.parameters_unchanged
+        )
+
+
+def audit_gradient_reset(
+    model: RebuiltWaveNet, contexts: torch.Tensor, targets: torch.Tensor
+) -> GradientResetAudit:
+    """Backpropagate, clear with set-to-none, and preserve caller state."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    model._validate_inputs(contexts, targets)
+    parameters = tuple(model.named_parameters())
+    previous = {
+        name: None if parameter.grad is None else parameter.grad.detach().clone()
+        for name, parameter in parameters
+    }
+    mode = model.training
+    fingerprint = rebuild_model_fingerprint(model)
+    try:
+        model.eval()
+        model.zero_grad(set_to_none=True)
+        _, loss = model(contexts, targets)
+        assert loss is not None
+        loss.backward()
+        before = sum(parameter.grad is not None for _, parameter in parameters)
+        model.zero_grad(set_to_none=True)
+        after = sum(parameter.grad is not None for _, parameter in parameters)
+        unchanged = rebuild_model_fingerprint(model) == fingerprint
+    finally:
+        for name, parameter in parameters:
+            stored = previous[name]
+            parameter.grad = None if stored is None else stored
+        model.train(mode)
+    return GradientResetAudit(
+        populated_before_reset=before,
+        populated_after_reset=after,
+        parameters_unchanged=unchanged,
     )

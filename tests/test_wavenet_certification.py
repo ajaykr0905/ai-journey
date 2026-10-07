@@ -10,6 +10,7 @@ from ai_journey.wavenet_certification import (
     audit_eval_batch_invariance,
     audit_gradient_clipping,
     audit_gradient_coverage,
+    audit_gradient_reset,
     audit_optimizer_step_parity,
     audit_parameter_finiteness,
     audit_parameter_manifest,
@@ -234,6 +235,18 @@ class WaveNetCertificationTests(unittest.TestCase):
 
         self.assertTrue(audit.passed)
         self.assertEqual(audit.parameter_tensors, len(tuple(self.model.parameters())))
+
+    def test_gradient_reset_clears_buffers_without_changing_parameters(self) -> None:
+        contexts = torch.tensor([[0, 1, 2, 3], [6, 5, 4, 3]])
+        targets = torch.tensor([4, 2])
+
+        audit = audit_gradient_reset(self.model, contexts, targets)
+
+        self.assertTrue(audit.passed)
+        self.assertEqual(
+            audit.populated_before_reset, len(tuple(self.model.parameters()))
+        )
+        self.assertEqual(audit.populated_after_reset, 0)
 
 
 if __name__ == "__main__":
