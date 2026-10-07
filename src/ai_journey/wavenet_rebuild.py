@@ -180,3 +180,17 @@ class RebuiltWaveNet(nn.Module):
             int(targets.min()) < 0 or int(targets.max()) >= self.config.vocab_size
         ):
             raise WaveNetError("target token id is outside the vocabulary")
+
+
+def initialize_rebuilt_wavenet(
+    config: WaveNetConfig, *, seed: int = 33
+) -> RebuiltWaveNet:
+    """Initialize the rebuild repeatably without advancing caller RNG state."""
+
+    if not isinstance(config, WaveNetConfig):
+        raise TypeError("config must be WaveNetConfig")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise TypeError("seed must be an integer")
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(seed)
+        return RebuiltWaveNet(config)

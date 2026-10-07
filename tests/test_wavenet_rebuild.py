@@ -5,7 +5,11 @@ import unittest
 import torch
 
 from ai_journey.wavenet import WaveNetConfig
-from ai_journey.wavenet_rebuild import RebuiltWaveNet, compile_rebuild_plan
+from ai_journey.wavenet_rebuild import (
+    RebuiltWaveNet,
+    compile_rebuild_plan,
+    initialize_rebuilt_wavenet,
+)
 
 
 class RebuildPlanTests(unittest.TestCase):
@@ -110,6 +114,33 @@ class RebuiltWaveNetTests(unittest.TestCase):
         for call in invalid_calls:
             with self.subTest(call=call), self.assertRaises((TypeError, ValueError)):
                 call()
+
+    def test_seeded_initialization_is_repeatable_and_rng_isolated(self) -> None:
+        config = WaveNetConfig(vocab_size=7, context_size=4, group_factors=(2, 2))
+        torch.manual_seed(123)
+        expected_next = torch.rand(4)
+        torch.manual_seed(123)
+
+        first = initialize_rebuilt_wavenet(config, seed=33)
+        actual_next = torch.rand(4)
+        second = initialize_rebuilt_wavenet(config, seed=33)
+        changed = initialize_rebuilt_wavenet(config, seed=34)
+
+        self.assertTrue(torch.equal(expected_next, actual_next))
+        for first_parameter, second_parameter in zip(
+            first.parameters(), second.parameters(), strict=True
+        ):
+            self.assertTrue(torch.equal(first_parameter, second_parameter))
+        self.assertFalse(torch.equal(first.embedding_weight, changed.embedding_weight))
+
+    def test_seeded_initialization_validates_inputs(self) -> None:
+        with self.assertRaisesRegex(TypeError, "config must be WaveNetConfig"):
+            initialize_rebuilt_wavenet(object())  # type: ignore[arg-type]
+        with self.assertRaisesRegex(TypeError, "seed must be an integer"):
+            initialize_rebuilt_wavenet(
+                WaveNetConfig(vocab_size=7),
+                seed=True,  # type: ignore[arg-type]
+            )
 
 
 if __name__ == "__main__":
