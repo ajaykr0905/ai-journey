@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 
+import torch
+
 from ai_journey.wavenet import WaveNetConfig
 from ai_journey.wavenet_rebuild import RebuiltWaveNet, compile_rebuild_plan
 
@@ -72,6 +74,42 @@ class RebuiltWaveNetTests(unittest.TestCase):
                 "output_bias": (7,),
             },
         )
+
+    def test_forward_executes_primitive_hierarchy_and_loss(self) -> None:
+        config = WaveNetConfig(
+            vocab_size=7,
+            context_size=4,
+            embedding_dim=3,
+            hidden_dim=5,
+            group_factors=(2, 2),
+        )
+        model = RebuiltWaveNet(config)
+        contexts = torch.tensor([[0, 1, 2, 3], [3, 2, 1, 0]])
+        targets = torch.tensor([4, 5])
+
+        logits, loss = model(contexts, targets)
+
+        self.assertEqual(tuple(logits.shape), (2, 7))
+        self.assertIsNotNone(loss)
+        assert loss is not None
+        self.assertTrue(torch.isfinite(loss))
+
+    def test_forward_rejects_invalid_tokens_and_targets(self) -> None:
+        model = RebuiltWaveNet(
+            WaveNetConfig(vocab_size=7, context_size=4, group_factors=(2, 2))
+        )
+        valid = torch.zeros((2, 4), dtype=torch.long)
+        invalid_calls = (
+            lambda: model(valid.float()),
+            lambda: model(valid[:, :3]),
+            lambda: model(torch.full((2, 4), 7, dtype=torch.long)),
+            lambda: model(valid, torch.zeros((2, 1), dtype=torch.long)),
+            lambda: model(valid, torch.zeros(2)),
+            lambda: model(valid, torch.full((2,), 7, dtype=torch.long)),
+        )
+        for call in invalid_calls:
+            with self.subTest(call=call), self.assertRaises((TypeError, ValueError)):
+                call()
 
 
 if __name__ == "__main__":

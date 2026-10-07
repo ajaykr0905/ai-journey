@@ -9,6 +9,7 @@ from hashlib import sha256
 
 import torch
 from torch import Tensor, nn
+from torch.nn import functional as F
 
 from .wavenet import WaveNetConfig, WaveNetError
 
@@ -138,4 +139,44 @@ class RebuiltWaveNet(nn.Module):
     def forward(
         self, token_ids: Tensor, targets: Tensor | None = None
     ) -> tuple[Tensor, Tensor | None]:
-        raise NotImplementedError("the primitive forward pass is not installed")
+        self._validate_inputs(token_ids, targets)
+        hidden = self.embedding_weight[token_ids]
+        for index, spec in enumerate(self.plan.stages):
+            hidden = hidden.reshape(
+                token_ids.shape[0],
+                spec.output_length,
+                spec.factor * spec.input_dim,
+            )
+            hidden = hidden @ self.stage_weights[index].transpose(0, 1)
+            mean = hidden.mean(dim=-1, keepdim=True)
+            variance = (hidden - mean).square().mean(dim=-1, keepdim=True)
+            hidden = (hidden - mean) * torch.rsqrt(variance + 1e-5)
+            hidden = hidden * self.stage_scales[index] + self.stage_biases[index]
+            hidden = torch.tanh(hidden)
+            hidden = F.dropout(hidden, p=self.config.dropout, training=self.training)
+        logits = hidden[:, 0, :] @ self.output_weight.transpose(0, 1)
+        logits = logits + self.output_bias
+        loss = F.cross_entropy(logits, targets) if targets is not None else None
+        return logits, loss
+
+    def _validate_inputs(self, token_ids: Tensor, targets: Tensor | None) -> None:
+        if not isinstance(token_ids, Tensor) or token_ids.ndim != 2:
+            raise TypeError("token_ids must be a two-dimensional tensor")
+        if token_ids.dtype != torch.long:
+            raise TypeError("token_ids must use torch.long dtype")
+        if token_ids.shape[1] != self.config.context_size:
+            raise WaveNetError("token_ids must match the configured context_size")
+        if token_ids.numel() and (
+            int(token_ids.min()) < 0 or int(token_ids.max()) >= self.config.vocab_size
+        ):
+            raise WaveNetError("token id is outside the vocabulary")
+        if targets is None:
+            return
+        if not isinstance(targets, Tensor) or targets.shape != token_ids.shape[:1]:
+            raise TypeError("targets must contain one token id per context")
+        if targets.dtype != torch.long:
+            raise TypeError("targets must use torch.long dtype")
+        if targets.numel() and (
+            int(targets.min()) < 0 or int(targets.max()) >= self.config.vocab_size
+        ):
+            raise WaveNetError("target token id is outside the vocabulary")
