@@ -33,6 +33,7 @@ from ai_journey.wavenet_certification import (
     measure_activation_saturation,
     measure_gradient_cosines,
     measure_gradient_statistics,
+    measure_model_footprint,
     measure_parameter_deltas,
     parameter_inventory,
     parameter_statistics,
@@ -364,6 +365,14 @@ class WaveNetCertificationTests(unittest.TestCase):
         )
         output_delta = next(item for item in deltas if item.name == "output_bias")
         self.assertAlmostEqual(output_delta.max_abs_delta, 0.25)
+
+    def test_model_footprint_counts_exact_persistent_tensor_bytes(self) -> None:
+        footprint = measure_model_footprint(self.model)
+
+        self.assertEqual(footprint.parameter_elements, self.model.parameter_count)
+        self.assertEqual(footprint.parameter_bytes, self.model.parameter_count * 4)
+        self.assertEqual(footprint.buffer_bytes, 0)
+        self.assertEqual(footprint.total_bytes, footprint.parameter_bytes)
 
 
 if __name__ == "__main__":

@@ -1306,3 +1306,32 @@ def measure_parameter_deltas(
                 )
             )
     return tuple(measurements)
+
+
+@dataclass(frozen=True)
+class ModelFootprint:
+    """Exact persistent tensor storage owned by the rebuild module."""
+
+    parameter_bytes: int
+    buffer_bytes: int
+    total_bytes: int
+    parameter_elements: int
+
+
+def measure_model_footprint(model: RebuiltWaveNet) -> ModelFootprint:
+    """Count parameter and registered-buffer storage without estimating runtime memory."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    parameter_bytes = sum(
+        parameter.numel() * parameter.element_size() for parameter in model.parameters()
+    )
+    buffer_bytes = sum(
+        buffer.numel() * buffer.element_size() for buffer in model.buffers()
+    )
+    return ModelFootprint(
+        parameter_bytes=parameter_bytes,
+        buffer_bytes=buffer_bytes,
+        total_bytes=parameter_bytes + buffer_bytes,
+        parameter_elements=model.parameter_count,
+    )
