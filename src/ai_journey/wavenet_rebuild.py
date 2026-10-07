@@ -398,9 +398,17 @@ class RebuildGradientAudit:
         return not self.mismatched_parameters and not self.nonfinite_parameters
 
 
-def _reference_parameter_pairs(
+def reference_parameter_pairs(
     reference: HierarchicalLanguageModel, rebuilt: RebuiltWaveNet
 ) -> tuple[tuple[str, nn.Parameter, nn.Parameter], ...]:
+    """Return the stable one-to-one parameter mapping used by rebuild audits."""
+
+    if not isinstance(reference, HierarchicalLanguageModel):
+        raise TypeError("reference must be HierarchicalLanguageModel")
+    if not isinstance(rebuilt, RebuiltWaveNet):
+        raise TypeError("rebuilt must be RebuiltWaveNet")
+    if reference.config != rebuilt.config:
+        raise WaveNetError("reference and rebuild configurations must match")
     pairs: list[tuple[str, nn.Parameter, nn.Parameter]] = [
         ("embedding", reference.embedding.weight, rebuilt.embedding_weight)
     ]
@@ -476,7 +484,7 @@ def audit_rebuild_gradients(
         maximum = 0.0
         mismatched: list[str] = []
         nonfinite: list[str] = []
-        pairs = _reference_parameter_pairs(reference, rebuilt)
+        pairs = reference_parameter_pairs(reference, rebuilt)
         for name, reference_parameter, rebuilt_parameter in pairs:
             reference_gradient = reference_parameter.grad
             rebuilt_gradient = rebuilt_parameter.grad
@@ -771,6 +779,43 @@ def _validate_sha256(value: str, name: str) -> None:
         or any(character not in "0123456789abcdef" for character in value)
     ):
         raise WaveNetError(f"{name} must be a SHA-256 hex digest")
+
+
+@dataclass(frozen=True)
+class RebuildCheckpointMetadata:
+    """Read-only identity and progress metadata for a saved rebuild."""
+
+    schema_version: int
+    step: int
+    dataset_fingerprint: str
+    model_fingerprint: str
+    size_bytes: int
+
+
+def inspect_rebuild_checkpoint(path: Path) -> RebuildCheckpointMetadata:
+    """Validate checkpoint metadata without mutating live training objects."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    if payload.get("schema_version") != REBUILD_CHECKPOINT_SCHEMA:
+        raise WaveNetError("unsupported rebuild checkpoint schema")
+    step = payload.get("step")
+    if isinstance(step, bool) or not isinstance(step, int) or step < 0:
+        raise WaveNetError("checkpoint step is invalid")
+    dataset_fingerprint = payload.get("dataset_fingerprint")
+    model_fingerprint = payload.get("model_fingerprint")
+    _validate_sha256(dataset_fingerprint, "dataset_fingerprint")
+    _validate_sha256(model_fingerprint, "model_fingerprint")
+    _require_finite_rebuild_state(payload.get("model_state"), "model_state")
+    _require_finite_rebuild_state(payload.get("optimizer_state"), "optimizer_state")
+    return RebuildCheckpointMetadata(
+        schema_version=REBUILD_CHECKPOINT_SCHEMA,
+        step=step,
+        dataset_fingerprint=dataset_fingerprint,
+        model_fingerprint=model_fingerprint,
+        size_bytes=path.stat().st_size,
+    )
 
 
 def save_rebuild_checkpoint(
@@ -1185,6 +1230,21 @@ def verify_rebuild_report(payload: dict[str, Any]) -> None:
     ):
         if candidate.get(gate, {}).get("passed") is not True:
             raise WaveNetError(f"rebuild report gate failed: {gate}")
+
+
+def load_rebuild_report(path: Path) -> dict[str, Any]:
+    """Load a JSON evidence report and reject invalid or tampered content."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    try:
+        payload = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise WaveNetError("rebuild report is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise WaveNetError("rebuild report root must be an object")
+    verify_rebuild_report(payload)
+    return payload
 
 
 def write_rebuild_report(path: Path, result: RebuildExperimentResult) -> None:

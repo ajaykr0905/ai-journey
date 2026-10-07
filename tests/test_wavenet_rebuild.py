@@ -27,10 +27,13 @@ from ai_journey.wavenet_rebuild import (
     evaluate_rebuild,
     fit_rebuild,
     initialize_rebuilt_wavenet,
+    inspect_rebuild_checkpoint,
     load_rebuild_checkpoint,
+    load_rebuild_report,
     load_reference_parameters,
     rebuild_model_fingerprint,
     rebuild_report_payload,
+    reference_parameter_pairs,
     run_rebuild_experiment,
     run_rebuild_overfit_probe,
     sample_rebuild,
@@ -338,6 +341,24 @@ class RebuiltWaveNetTests(unittest.TestCase):
         self.assertEqual(audit.parameter_tensors, len(tuple(rebuilt.parameters())))
         self.assertLessEqual(audit.max_abs_error, audit.tolerance)
 
+    def test_reference_parameter_mapping_is_complete_and_stable(self) -> None:
+        config = WaveNetConfig(
+            vocab_size=7,
+            context_size=4,
+            embedding_dim=3,
+            hidden_dim=5,
+            group_factors=(2, 2),
+        )
+        reference = initialize_wavenet(config, seed=93)
+        rebuilt = initialize_rebuilt_wavenet(config, seed=94)
+
+        pairs = reference_parameter_pairs(reference, rebuilt)
+
+        self.assertEqual(len(pairs), len(tuple(rebuilt.parameters())))
+        self.assertEqual(pairs[0][0], "embedding")
+        self.assertEqual(pairs[-1][0], "output.bias")
+        self.assertTrue(all(left.shape == right.shape for _, left, right in pairs))
+
     def test_gradient_audit_detects_parameter_drift(self) -> None:
         config = WaveNetConfig(vocab_size=7)
         reference = initialize_wavenet(config, seed=17)
@@ -527,6 +548,11 @@ class RebuiltWaveNetTests(unittest.TestCase):
                 step=2,
             )
             self.assertTrue(path.is_file())
+            metadata = inspect_rebuild_checkpoint(path)
+            self.assertEqual(metadata.step, 2)
+            self.assertEqual(metadata.dataset_fingerprint, dataset.fingerprint())
+            self.assertEqual(metadata.model_fingerprint, expected_fingerprint)
+            self.assertGreater(metadata.size_bytes, 0)
             with torch.no_grad():
                 model.output_bias.add_(1)
             cursor.next()
@@ -847,6 +873,7 @@ class RebuiltWaveNetTests(unittest.TestCase):
 
             payload = json.loads(path.read_text())
             verify_rebuild_report(payload)
+            self.assertEqual(load_rebuild_report(path), payload)
             self.assertEqual(
                 payload["evidence_fingerprint"],
                 rebuild_report_payload(result)["evidence_fingerprint"],
