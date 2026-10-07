@@ -8,6 +8,7 @@ from ai_journey.wavenet import WaveNetConfig, initialize_wavenet
 from ai_journey.wavenet_rebuild import (
     RebuiltWaveNet,
     audit_rebuild_forward,
+    audit_rebuild_gradients,
     compile_rebuild_plan,
     initialize_rebuilt_wavenet,
     load_reference_parameters,
@@ -274,6 +275,43 @@ class RebuiltWaveNetTests(unittest.TestCase):
 
         self.assertFalse(audit.passed)
         self.assertGreater(audit.max_abs_logit_error, audit.tolerance)
+
+    def test_gradient_audit_covers_every_rebuild_parameter(self) -> None:
+        config = WaveNetConfig(
+            vocab_size=7,
+            context_size=4,
+            embedding_dim=3,
+            hidden_dim=5,
+            group_factors=(2, 2),
+        )
+        reference = initialize_wavenet(config, seed=17)
+        rebuilt = initialize_rebuilt_wavenet(config, seed=33)
+        load_reference_parameters(rebuilt, reference)
+        contexts = torch.tensor([[0, 1, 2, 3], [3, 2, 1, 0]])
+        targets = torch.tensor([4, 5])
+
+        audit = audit_rebuild_gradients(reference, rebuilt, contexts, targets)
+
+        self.assertTrue(audit.passed)
+        self.assertEqual(audit.parameter_tensors, len(tuple(rebuilt.parameters())))
+        self.assertLessEqual(audit.max_abs_error, audit.tolerance)
+
+    def test_gradient_audit_detects_parameter_drift(self) -> None:
+        config = WaveNetConfig(vocab_size=7)
+        reference = initialize_wavenet(config, seed=17)
+        rebuilt = initialize_rebuilt_wavenet(config, seed=33)
+        load_reference_parameters(rebuilt, reference)
+        with torch.no_grad():
+            rebuilt.output_bias[0].add_(1)
+        contexts = torch.zeros((2, config.context_size), dtype=torch.long)
+        targets = torch.tensor([0, 1])
+
+        audit = audit_rebuild_gradients(
+            reference, rebuilt, contexts, targets, tolerance=1e-8
+        )
+
+        self.assertFalse(audit.passed)
+        self.assertIn("output.bias", audit.mismatched_parameters)
 
 
 if __name__ == "__main__":

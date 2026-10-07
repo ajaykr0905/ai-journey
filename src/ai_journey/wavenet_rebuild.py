@@ -367,3 +367,124 @@ def audit_rebuild_forward(
     finally:
         reference.train(reference_mode)
         rebuilt.train(rebuilt_mode)
+
+
+@dataclass(frozen=True)
+class RebuildGradientAudit:
+    """Gradient agreement across every mapped reference and rebuild tensor."""
+
+    parameter_tensors: int
+    max_abs_error: float
+    mismatched_parameters: tuple[str, ...]
+    nonfinite_parameters: tuple[str, ...]
+    tolerance: float
+
+    @property
+    def passed(self) -> bool:
+        return not self.mismatched_parameters and not self.nonfinite_parameters
+
+
+def _reference_parameter_pairs(
+    reference: HierarchicalLanguageModel, rebuilt: RebuiltWaveNet
+) -> tuple[tuple[str, nn.Parameter, nn.Parameter], ...]:
+    pairs: list[tuple[str, nn.Parameter, nn.Parameter]] = [
+        ("embedding", reference.embedding.weight, rebuilt.embedding_weight)
+    ]
+    for index, stage in enumerate(reference.stages):
+        linear = stage.network[1]
+        normalization = stage.network[2]
+        assert isinstance(linear, nn.Linear)
+        assert isinstance(normalization, nn.LayerNorm)
+        pairs.extend(
+            (
+                (
+                    f"stage_{index + 1}.weight",
+                    linear.weight,
+                    rebuilt.stage_weights[index],
+                ),
+                (
+                    f"stage_{index + 1}.scale",
+                    normalization.weight,
+                    rebuilt.stage_scales[index],
+                ),
+                (
+                    f"stage_{index + 1}.bias",
+                    normalization.bias,
+                    rebuilt.stage_biases[index],
+                ),
+            )
+        )
+    pairs.extend(
+        (
+            ("output.weight", reference.output.weight, rebuilt.output_weight),
+            ("output.bias", reference.output.bias, rebuilt.output_bias),
+        )
+    )
+    return tuple(pairs)
+
+
+def audit_rebuild_gradients(
+    reference: HierarchicalLanguageModel,
+    rebuilt: RebuiltWaveNet,
+    contexts: Tensor,
+    targets: Tensor,
+    *,
+    tolerance: float = 1e-6,
+) -> RebuildGradientAudit:
+    """Backpropagate identical losses and compare every mapped gradient."""
+
+    if not isinstance(reference, HierarchicalLanguageModel):
+        raise TypeError("reference must be HierarchicalLanguageModel")
+    if not isinstance(rebuilt, RebuiltWaveNet):
+        raise TypeError("rebuilt must be RebuiltWaveNet")
+    if reference.config != rebuilt.config:
+        raise WaveNetError("reference and rebuild configurations must match")
+    if (
+        isinstance(tolerance, bool)
+        or not isinstance(tolerance, (int, float))
+        or not math.isfinite(tolerance)
+        or tolerance < 0
+    ):
+        raise WaveNetError("tolerance must be non-negative and finite")
+    rebuilt._validate_inputs(contexts, targets)
+    reference_mode = reference.training
+    rebuilt_mode = rebuilt.training
+    try:
+        reference.eval()
+        rebuilt.eval()
+        reference.zero_grad(set_to_none=True)
+        rebuilt.zero_grad(set_to_none=True)
+        _, reference_loss = reference(contexts, targets)
+        _, rebuilt_loss = rebuilt(contexts, targets)
+        assert reference_loss is not None and rebuilt_loss is not None
+        reference_loss.backward()
+        rebuilt_loss.backward()
+        maximum = 0.0
+        mismatched: list[str] = []
+        nonfinite: list[str] = []
+        pairs = _reference_parameter_pairs(reference, rebuilt)
+        for name, reference_parameter, rebuilt_parameter in pairs:
+            reference_gradient = reference_parameter.grad
+            rebuilt_gradient = rebuilt_parameter.grad
+            if reference_gradient is None or rebuilt_gradient is None:
+                mismatched.append(name)
+                continue
+            if not bool(torch.isfinite(reference_gradient).all()) or not bool(
+                torch.isfinite(rebuilt_gradient).all()
+            ):
+                nonfinite.append(name)
+                continue
+            error = float((reference_gradient - rebuilt_gradient).abs().max())
+            maximum = max(maximum, error)
+            if error > tolerance:
+                mismatched.append(name)
+        return RebuildGradientAudit(
+            parameter_tensors=len(pairs),
+            max_abs_error=maximum,
+            mismatched_parameters=tuple(mismatched),
+            nonfinite_parameters=tuple(nonfinite),
+            tolerance=float(tolerance),
+        )
+    finally:
+        reference.train(reference_mode)
+        rebuilt.train(rebuilt_mode)
