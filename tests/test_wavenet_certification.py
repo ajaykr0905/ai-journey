@@ -11,6 +11,7 @@ from ai_journey.wavenet_certification import (
     audit_storage_independence,
     parameter_inventory,
     parameter_statistics,
+    trace_rebuild_activations,
 )
 from ai_journey.wavenet_rebuild import initialize_rebuilt_wavenet
 
@@ -79,6 +80,20 @@ class WaveNetCertificationTests(unittest.TestCase):
         )
         self.assertTrue(all(item.l2_norm >= 0 for item in statistics))
         self.assertTrue(all(item.minimum <= item.maximum for item in statistics))
+
+    def test_activation_trace_covers_each_primitive_boundary(self) -> None:
+        contexts = torch.tensor([[0, 1, 2, 3], [3, 2, 1, 0]])
+        self.model.train()
+
+        snapshots = trace_rebuild_activations(self.model, contexts)
+
+        self.assertEqual(
+            tuple(item.name for item in snapshots),
+            ("embedding", "stage_1", "stage_2", "logits"),
+        )
+        self.assertEqual(snapshots[-1].shape, (2, self.config.vocab_size))
+        self.assertTrue(self.model.training)
+        self.assertTrue(all(len(item.digest) == 64 for item in snapshots))
 
 
 if __name__ == "__main__":

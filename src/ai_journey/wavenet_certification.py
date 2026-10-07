@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 
 import torch
 
@@ -178,3 +179,56 @@ def parameter_statistics(model: RebuiltWaveNet) -> tuple[ParameterStatistics, ..
                 )
             )
     return tuple(summaries)
+
+
+@dataclass(frozen=True)
+class ActivationSnapshot:
+    """Detached summary and digest for one primitive forward boundary."""
+
+    name: str
+    shape: tuple[int, ...]
+    minimum: float
+    maximum: float
+    mean: float
+    standard_deviation: float
+    digest: str
+
+
+def _activation_snapshot(name: str, value: torch.Tensor) -> ActivationSnapshot:
+    detached = value.detach().cpu().contiguous()
+    numeric = detached.double()
+    return ActivationSnapshot(
+        name=name,
+        shape=tuple(detached.shape),
+        minimum=float(numeric.min()),
+        maximum=float(numeric.max()),
+        mean=float(numeric.mean()),
+        standard_deviation=float(numeric.std(unbiased=False)),
+        digest=sha256(detached.numpy().tobytes()).hexdigest(),
+    )
+
+
+def trace_rebuild_activations(
+    model: RebuiltWaveNet, contexts: torch.Tensor
+) -> tuple[ActivationSnapshot, ...]:
+    """Capture every primitive activation boundary without changing model mode."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    model._validate_inputs(contexts, None)
+    mode = model.training
+    snapshots: list[ActivationSnapshot] = []
+    try:
+        model.eval()
+        with torch.no_grad():
+            hidden = model.embedding_weight[contexts]
+            snapshots.append(_activation_snapshot("embedding", hidden))
+            for index, spec in enumerate(model.plan.stages):
+                hidden = model._stage_forward(hidden, index=index, spec=spec)
+                snapshots.append(_activation_snapshot(f"stage_{index + 1}", hidden))
+            logits = hidden[:, 0, :] @ model.output_weight.transpose(0, 1)
+            logits = logits + model.output_bias
+            snapshots.append(_activation_snapshot("logits", logits))
+    finally:
+        model.train(mode)
+    return tuple(snapshots)
