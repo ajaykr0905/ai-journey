@@ -20,6 +20,7 @@ from ai_journey.wavenet_certification import (
     audit_per_example_loss_parity,
     audit_probability_simplex,
     audit_repeat_inference,
+    audit_sample_reproducibility,
     audit_storage_independence,
     audit_top_k_parity,
     measure_activation_saturation,
@@ -307,6 +308,16 @@ class WaveNetCertificationTests(unittest.TestCase):
         self.assertEqual(audit.missing_token_ids, (6,))
         self.assertTrue(audit.boundary_token_seen)
         self.assertAlmostEqual(audit.coverage_fraction, 6 / 7)
+
+    def test_seeded_sampling_is_reproducible_as_a_complete_result(self) -> None:
+        vocabulary = (".", "a", "b", "c", "d", "e", "f")
+
+        audit = audit_sample_reproducibility(
+            self.model, vocabulary, seed=335, max_new_tokens=8, top_k=3
+        )
+
+        self.assertTrue(audit.passed)
+        self.assertLessEqual(len(audit.token_ids), 8)
 
 
 if __name__ == "__main__":

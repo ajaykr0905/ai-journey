@@ -15,6 +15,7 @@ from .wavenet_rebuild import (
     RebuiltWaveNet,
     rebuild_model_fingerprint,
     reference_parameter_pairs,
+    sample_rebuild,
 )
 
 
@@ -1093,4 +1094,55 @@ def audit_dataset_token_coverage(
         observed_token_ids=observed,
         missing_token_ids=missing,
         boundary_token_seen=0 in observed,
+    )
+
+
+@dataclass(frozen=True)
+class SampleReproducibilityAudit:
+    """Equality of two isolated sampling runs with identical controls."""
+
+    seed: int
+    text: str
+    token_ids: tuple[int, ...]
+    terminated: bool
+    identical: bool
+
+    @property
+    def passed(self) -> bool:
+        return self.identical
+
+
+def audit_sample_reproducibility(
+    model: RebuiltWaveNet,
+    vocabulary_tokens: tuple[str, ...],
+    *,
+    seed: int,
+    max_new_tokens: int = 20,
+    temperature: float = 1.0,
+    top_k: int | None = None,
+) -> SampleReproducibilityAudit:
+    """Repeat a seeded bounded sample and compare the complete result."""
+
+    first = sample_rebuild(
+        model,
+        vocabulary_tokens,
+        seed=seed,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+        top_k=top_k,
+    )
+    second = sample_rebuild(
+        model,
+        vocabulary_tokens,
+        seed=seed,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+        top_k=top_k,
+    )
+    return SampleReproducibilityAudit(
+        seed=seed,
+        text=first.text,
+        token_ids=first.token_ids,
+        terminated=first.terminated,
+        identical=first == second,
     )
