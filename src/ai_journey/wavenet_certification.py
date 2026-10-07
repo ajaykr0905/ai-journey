@@ -1390,3 +1390,76 @@ def benchmark_rebuild_inference(
         minimum_seconds=min(timings),
         median_examples_per_second=int(contexts.shape[0]) / median,
     )
+
+
+@dataclass(frozen=True)
+class RebuildCertificationResult:
+    """Composed structural, numerical, and reproducibility certification."""
+
+    parameter_manifest: ParameterManifestAudit
+    storage_independence: StorageIndependenceAudit
+    parameter_finiteness: ParameterFinitenessAudit
+    activation_finiteness: ActivationFinitenessAudit
+    batch_invariance: BatchInvarianceAudit
+    top_k_parity: TopKParityAudit
+    per_example_loss_parity: PerExampleLossParityAudit
+    probability_simplex: ProbabilitySimplexAudit
+    gradient_coverage: GradientCoverageAudit
+    optimizer_step_parity: OptimizerStepParityAudit
+    repeat_inference: RepeatInferenceAudit
+    inference_rng: InferenceRngAudit
+    input_immutability: InputImmutabilityAudit
+    footprint: ModelFootprint
+
+    @property
+    def failed_gates(self) -> tuple[str, ...]:
+        gates = {
+            "parameter_manifest": self.parameter_manifest.passed,
+            "storage_independence": self.storage_independence.passed,
+            "parameter_finiteness": self.parameter_finiteness.passed,
+            "activation_finiteness": self.activation_finiteness.passed,
+            "batch_invariance": self.batch_invariance.passed,
+            "top_k_parity": self.top_k_parity.passed,
+            "per_example_loss_parity": self.per_example_loss_parity.passed,
+            "probability_simplex": self.probability_simplex.passed,
+            "gradient_coverage": self.gradient_coverage.passed,
+            "optimizer_step_parity": self.optimizer_step_parity.passed,
+            "repeat_inference": self.repeat_inference.passed,
+            "inference_rng": self.inference_rng.passed,
+            "input_immutability": self.input_immutability.passed,
+        }
+        return tuple(name for name, passed in gates.items() if not passed)
+
+    @property
+    def passed(self) -> bool:
+        return not self.failed_gates
+
+
+def certify_rebuild(
+    reference: HierarchicalLanguageModel,
+    rebuilt: RebuiltWaveNet,
+    contexts: torch.Tensor,
+    targets: torch.Tensor,
+) -> RebuildCertificationResult:
+    """Run the complete bounded reliability gate for a mapped rebuild."""
+
+    return RebuildCertificationResult(
+        parameter_manifest=audit_parameter_manifest(rebuilt),
+        storage_independence=audit_storage_independence(reference, rebuilt),
+        parameter_finiteness=audit_parameter_finiteness(rebuilt),
+        activation_finiteness=audit_activation_finiteness(rebuilt, contexts),
+        batch_invariance=audit_eval_batch_invariance(rebuilt, contexts),
+        top_k_parity=audit_top_k_parity(reference, rebuilt, contexts),
+        per_example_loss_parity=audit_per_example_loss_parity(
+            reference, rebuilt, contexts, targets
+        ),
+        probability_simplex=audit_probability_simplex(rebuilt, contexts),
+        gradient_coverage=audit_gradient_coverage(rebuilt, contexts, targets),
+        optimizer_step_parity=audit_optimizer_step_parity(
+            reference, rebuilt, contexts, targets
+        ),
+        repeat_inference=audit_repeat_inference(rebuilt, contexts),
+        inference_rng=audit_inference_rng_isolation(rebuilt, contexts),
+        input_immutability=audit_input_immutability(rebuilt, contexts, targets),
+        footprint=measure_model_footprint(rebuilt),
+    )

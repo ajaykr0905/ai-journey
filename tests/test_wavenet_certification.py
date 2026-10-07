@@ -31,6 +31,7 @@ from ai_journey.wavenet_certification import (
     audit_top_k_parity,
     audit_training_trace,
     benchmark_rebuild_inference,
+    certify_rebuild,
     measure_activation_saturation,
     measure_gradient_cosines,
     measure_gradient_statistics,
@@ -387,6 +388,20 @@ class WaveNetCertificationTests(unittest.TestCase):
         self.assertGreater(benchmark.median_seconds, 0)
         self.assertGreater(benchmark.median_examples_per_second, 0)
         self.assertTrue(self.model.training)
+
+    def test_composed_certification_passes_for_an_exact_rebuild(self) -> None:
+        reference = initialize_wavenet(self.config, seed=336)
+        load_reference_parameters(self.model, reference)
+        contexts = torch.tensor([[0, 1, 2, 3], [6, 5, 4, 3]])
+        targets = torch.tensor([4, 2])
+
+        result = certify_rebuild(reference, self.model, contexts, targets)
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.failed_gates, ())
+        self.assertEqual(
+            result.footprint.parameter_elements, self.model.parameter_count
+        )
 
 
 if __name__ == "__main__":
