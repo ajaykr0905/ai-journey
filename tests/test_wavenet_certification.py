@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 import torch
 
@@ -31,7 +33,9 @@ from ai_journey.wavenet_certification import (
     audit_top_k_parity,
     audit_training_trace,
     benchmark_rebuild_inference,
+    certification_report_payload,
     certify_rebuild,
+    load_certification_report,
     measure_activation_saturation,
     measure_gradient_cosines,
     measure_gradient_statistics,
@@ -41,6 +45,8 @@ from ai_journey.wavenet_certification import (
     parameter_statistics,
     rebuild_batch_fingerprint,
     trace_rebuild_activations,
+    verify_certification_report,
+    write_certification_report,
 )
 from ai_journey.wavenet_rebuild import (
     initialize_rebuilt_wavenet,
@@ -402,6 +408,27 @@ class WaveNetCertificationTests(unittest.TestCase):
         self.assertEqual(
             result.footprint.parameter_elements, self.model.parameter_count
         )
+
+    def test_certification_report_is_atomic_and_tamper_evident(self) -> None:
+        reference = initialize_wavenet(self.config, seed=337)
+        load_reference_parameters(self.model, reference)
+        contexts = torch.tensor([[0, 1, 2, 3], [6, 5, 4, 3]])
+        targets = torch.tensor([4, 2])
+        result = certify_rebuild(reference, self.model, contexts, targets)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "certification.json"
+            write_certification_report(path, result)
+            payload = load_certification_report(path)
+
+            self.assertEqual(
+                payload["evidence_fingerprint"],
+                certification_report_payload(result)["evidence_fingerprint"],
+            )
+            self.assertEqual(list(path.parent.glob(".*.tmp")), [])
+            payload["gates"]["batch_invariance"] = False
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                verify_certification_report(payload)
 
 
 if __name__ == "__main__":

@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
+import os
 import statistics
+import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from hashlib import sha256
+from pathlib import Path
+from typing import Any
 
 import torch
 from torch.nn import functional as F
@@ -1396,6 +1401,8 @@ def benchmark_rebuild_inference(
 class RebuildCertificationResult:
     """Composed structural, numerical, and reproducibility certification."""
 
+    model_fingerprint: str
+    batch_fingerprint: str
     parameter_manifest: ParameterManifestAudit
     storage_independence: StorageIndependenceAudit
     parameter_finiteness: ParameterFinitenessAudit
@@ -1444,6 +1451,8 @@ def certify_rebuild(
     """Run the complete bounded reliability gate for a mapped rebuild."""
 
     return RebuildCertificationResult(
+        model_fingerprint=rebuild_model_fingerprint(rebuilt),
+        batch_fingerprint=rebuild_batch_fingerprint(rebuilt, contexts, targets),
         parameter_manifest=audit_parameter_manifest(rebuilt),
         storage_independence=audit_storage_independence(reference, rebuilt),
         parameter_finiteness=audit_parameter_finiteness(rebuilt),
@@ -1463,3 +1472,109 @@ def certify_rebuild(
         input_immutability=audit_input_immutability(rebuilt, contexts, targets),
         footprint=measure_model_footprint(rebuilt),
     )
+
+
+CERTIFICATION_REPORT_SCHEMA = 1
+
+
+def _certification_digest(payload: dict[str, Any]) -> str:
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return sha256(serialized.encode()).hexdigest()
+
+
+def certification_report_payload(result: RebuildCertificationResult) -> dict[str, Any]:
+    """Build canonical, tamper-evident certification evidence."""
+
+    if not isinstance(result, RebuildCertificationResult):
+        raise TypeError("result must be RebuildCertificationResult")
+    payload: dict[str, Any] = {
+        "schema_version": CERTIFICATION_REPORT_SCHEMA,
+        "curriculum_day": 33,
+        "model_fingerprint": result.model_fingerprint,
+        "batch_fingerprint": result.batch_fingerprint,
+        "result": asdict(result),
+        "gates": {
+            "parameter_manifest": result.parameter_manifest.passed,
+            "storage_independence": result.storage_independence.passed,
+            "parameter_finiteness": result.parameter_finiteness.passed,
+            "activation_finiteness": result.activation_finiteness.passed,
+            "batch_invariance": result.batch_invariance.passed,
+            "top_k_parity": result.top_k_parity.passed,
+            "per_example_loss_parity": result.per_example_loss_parity.passed,
+            "probability_simplex": result.probability_simplex.passed,
+            "gradient_coverage": result.gradient_coverage.passed,
+            "optimizer_step_parity": result.optimizer_step_parity.passed,
+            "repeat_inference": result.repeat_inference.passed,
+            "inference_rng": result.inference_rng.passed,
+            "input_immutability": result.input_immutability.passed,
+        },
+    }
+    payload["evidence_fingerprint"] = _certification_digest(payload)
+    return payload
+
+
+def verify_certification_report(payload: dict[str, Any]) -> None:
+    """Reject incomplete, failed, or modified certification evidence."""
+
+    if not isinstance(payload, dict):
+        raise TypeError("payload must be a dictionary")
+    candidate = copy.deepcopy(payload)
+    fingerprint = candidate.pop("evidence_fingerprint", None)
+    if (
+        not isinstance(fingerprint, str)
+        or len(fingerprint) != 64
+        or any(character not in "0123456789abcdef" for character in fingerprint)
+    ):
+        raise WaveNetError("evidence_fingerprint must be a SHA-256 hex digest")
+    if _certification_digest(candidate) != fingerprint:
+        raise WaveNetError("certification evidence fingerprint mismatch")
+    if candidate.get("schema_version") != CERTIFICATION_REPORT_SCHEMA:
+        raise WaveNetError("unsupported certification report schema")
+    if candidate.get("curriculum_day") != 33:
+        raise WaveNetError("certification report must identify curriculum Day 33")
+    gates = candidate.get("gates")
+    if not isinstance(gates, dict) or not gates or not all(gates.values()):
+        raise WaveNetError("certification report contains a failed gate")
+
+
+def write_certification_report(path: Path, result: RebuildCertificationResult) -> None:
+    """Atomically publish verified rebuild certification evidence."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    payload = certification_report_payload(result)
+    verify_certification_report(payload)
+    serialized = (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(serialized)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def load_certification_report(path: Path) -> dict[str, Any]:
+    """Load and verify persisted rebuild certification evidence."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    try:
+        payload = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise WaveNetError("certification report is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise WaveNetError("certification report root must be an object")
+    verify_certification_report(payload)
+    return payload
