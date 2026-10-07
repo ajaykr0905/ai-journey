@@ -4,9 +4,10 @@ import unittest
 
 import torch
 
-from ai_journey.wavenet import WaveNetConfig, initialize_wavenet
+from ai_journey.wavenet import WaveNetConfig, WaveNetDataset, initialize_wavenet
 from ai_journey.wavenet_certification import (
     audit_activation_finiteness,
+    audit_dataset_token_coverage,
     audit_eval_batch_invariance,
     audit_gradient_clipping,
     audit_gradient_coverage,
@@ -293,6 +294,19 @@ class WaveNetCertificationTests(unittest.TestCase):
         audit = audit_input_immutability(self.model, contexts, targets)
 
         self.assertTrue(audit.passed)
+
+    def test_dataset_coverage_reports_unexercised_vocabulary_entries(self) -> None:
+        dataset = WaveNetDataset(
+            vocabulary_tokens=(".", "a", "b", "c", "d", "e", "f"),
+            contexts=torch.tensor([[0, 1, 2, 3], [3, 2, 1, 0]]),
+            targets=torch.tensor([4, 5]),
+        )
+
+        audit = audit_dataset_token_coverage(self.model, dataset)
+
+        self.assertEqual(audit.missing_token_ids, (6,))
+        self.assertTrue(audit.boundary_token_seen)
+        self.assertAlmostEqual(audit.coverage_fraction, 6 / 7)
 
 
 if __name__ == "__main__":

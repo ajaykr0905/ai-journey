@@ -10,7 +10,7 @@ from hashlib import sha256
 import torch
 from torch.nn import functional as F
 
-from .wavenet import HierarchicalLanguageModel, WaveNetError
+from .wavenet import HierarchicalLanguageModel, WaveNetDataset, WaveNetError
 from .wavenet_rebuild import (
     RebuiltWaveNet,
     rebuild_model_fingerprint,
@@ -1050,4 +1050,47 @@ def audit_input_immutability(
     return InputImmutabilityAudit(
         contexts_unchanged=torch.equal(contexts, original_contexts),
         targets_unchanged=torch.equal(targets, original_targets),
+    )
+
+
+@dataclass(frozen=True)
+class DatasetTokenCoverageAudit:
+    """Vocabulary coverage observed across dataset inputs and targets."""
+
+    vocabulary_size: int
+    observed_token_ids: tuple[int, ...]
+    missing_token_ids: tuple[int, ...]
+    boundary_token_seen: bool
+
+    @property
+    def coverage_fraction(self) -> float:
+        return len(self.observed_token_ids) / self.vocabulary_size
+
+
+def audit_dataset_token_coverage(
+    model: RebuiltWaveNet, dataset: WaveNetDataset
+) -> DatasetTokenCoverageAudit:
+    """Report unexercised vocabulary entries before model certification."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    if not isinstance(dataset, WaveNetDataset):
+        raise TypeError("dataset must be WaveNetDataset")
+    if dataset.context_size != model.config.context_size:
+        raise WaveNetError("dataset context_size does not match the rebuild")
+    if dataset.vocab_size != model.config.vocab_size:
+        raise WaveNetError("dataset vocabulary does not match the rebuild")
+    observed = tuple(
+        sorted(
+            set(dataset.contexts.reshape(-1).tolist()) | set(dataset.targets.tolist())
+        )
+    )
+    missing = tuple(
+        index for index in range(dataset.vocab_size) if index not in observed
+    )
+    return DatasetTokenCoverageAudit(
+        vocabulary_size=dataset.vocab_size,
+        observed_token_ids=observed,
+        missing_token_ids=missing,
+        boundary_token_seen=0 in observed,
     )
