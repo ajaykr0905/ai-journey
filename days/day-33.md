@@ -39,6 +39,20 @@ For the faster CI profile, add `--steps 2 --batch-size 4 --context-size 4`,
 `--minimum-overfit-improvement 0.1`. Invalid input or a failed evidence gate
 cannot replace an existing valid report.
 
+Run the independent reliability certification:
+
+```bash
+python scripts/certify_day_33.py \
+  --corpus data/day-19-demo-names.txt \
+  --output artifacts/day-33-certification.json
+```
+
+The certification adds structural parameter and storage checks, activation and
+gradient diagnostics, per-example prediction parity, optimizer-transition
+parity, input/RNG/repeatability controls, bounded sampling checks, an exact model
+footprint, and atomic tamper-evident evidence. Its local CPU timing measurement
+is diagnostic only and is not included as a cross-machine pass threshold.
+
 ## Evidence boundary
 
 This is a small deterministic CPU experiment over public demo names. It verifies

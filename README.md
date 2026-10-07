@@ -68,6 +68,10 @@ then grow these exercises into production-quality training and inference project
   and tensor operations, with reference equivalence, numerical gradient audits,
   exact restart, and a bounded capacity gate in
   [`scripts/run_day_33.py`](scripts/run_day_33.py)
+- A bounded reliability certification for the rebuild covering parameter,
+  activation, gradient, update, reproducibility, sampling, footprint, and
+  tamper-evident report contracts in
+  [`scripts/certify_day_33.py`](scripts/certify_day_33.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -144,6 +148,9 @@ python scripts/run_day_32.py \
 python scripts/run_day_33.py \
   --corpus data/day-19-demo-names.txt \
   --output artifacts/day-33-wavenet-rebuild.json
+python scripts/certify_day_33.py \
+  --corpus data/day-19-demo-names.txt \
+  --output artifacts/day-33-certification.json
 python -m unittest discover -s tests -v
 ```
 

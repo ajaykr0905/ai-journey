@@ -193,6 +193,12 @@ jobs:
           --overfit-examples 8
           --overfit-steps 30
           --minimum-overfit-improvement 0.3
+      - name: Certify the Day 33 rebuild reliability contract
+        run: >-
+          python scripts/certify_day_33.py
+          --corpus data/day-19-demo-names.txt
+          --output /tmp/ai-journey-artifacts/day-33-certification.json
+          --examples 4
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py

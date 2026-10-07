@@ -58,6 +58,13 @@ from .wavenet import (
     run_wavenet_experiment,
     run_wavenet_overfit_probe,
 )
+from .wavenet_certification import (
+    RebuildCertificationResult,
+    certify_rebuild,
+    load_certification_report,
+    verify_certification_report,
+    write_certification_report,
+)
 from .wavenet_rebuild import (
     RebuildExperimentResult,
     RebuiltWaveNet,
@@ -83,6 +90,7 @@ __all__ = [
     "FlattenConsecutive",
     "HierarchicalLanguageModel",
     "KaimingComparisonResult",
+    "RebuildCertificationResult",
     "RebuildExperimentResult",
     "RebuiltWaveNet",
     "ScratchBatchNorm",
@@ -107,11 +115,13 @@ __all__ = [
     "build_context_dataset",
     "build_gpt_shape_flow",
     "build_wavenet_dataset_split",
+    "certify_rebuild",
     "compile_rebuild_plan",
     "default_parameters",
     "forward",
     "full_backward",
     "gradient_descent_x_squared",
+    "load_certification_report",
     "manual_backward",
     "run_attention_experiment",
     "run_autodiff_experiment",
@@ -128,5 +138,7 @@ __all__ = [
     "train_context_mlp",
     "train_mlp",
     "train_xor",
+    "verify_certification_report",
     "verify_rebuild_report",
+    "write_certification_report",
 ]
