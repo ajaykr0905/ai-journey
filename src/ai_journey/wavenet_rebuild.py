@@ -398,9 +398,17 @@ class RebuildGradientAudit:
         return not self.mismatched_parameters and not self.nonfinite_parameters
 
 
-def _reference_parameter_pairs(
+def reference_parameter_pairs(
     reference: HierarchicalLanguageModel, rebuilt: RebuiltWaveNet
 ) -> tuple[tuple[str, nn.Parameter, nn.Parameter], ...]:
+    """Return the stable one-to-one parameter mapping used by rebuild audits."""
+
+    if not isinstance(reference, HierarchicalLanguageModel):
+        raise TypeError("reference must be HierarchicalLanguageModel")
+    if not isinstance(rebuilt, RebuiltWaveNet):
+        raise TypeError("rebuilt must be RebuiltWaveNet")
+    if reference.config != rebuilt.config:
+        raise WaveNetError("reference and rebuild configurations must match")
     pairs: list[tuple[str, nn.Parameter, nn.Parameter]] = [
         ("embedding", reference.embedding.weight, rebuilt.embedding_weight)
     ]
@@ -476,7 +484,7 @@ def audit_rebuild_gradients(
         maximum = 0.0
         mismatched: list[str] = []
         nonfinite: list[str] = []
-        pairs = _reference_parameter_pairs(reference, rebuilt)
+        pairs = reference_parameter_pairs(reference, rebuilt)
         for name, reference_parameter, rebuilt_parameter in pairs:
             reference_gradient = reference_parameter.grad
             rebuilt_gradient = rebuilt_parameter.grad
