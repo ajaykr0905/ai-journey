@@ -5,8 +5,12 @@ from __future__ import annotations
 import copy
 import json
 import math
+import os
+import tempfile
 from dataclasses import asdict, dataclass
 from hashlib import sha256
+from pathlib import Path
+from typing import Any
 
 import torch
 from torch import Tensor, nn
@@ -736,3 +740,132 @@ def fit_rebuild(
             optimizer_state=copy.deepcopy(optimizer.state_dict()),
             cursor_state=cursor.state_dict(),
         )
+
+
+REBUILD_CHECKPOINT_SCHEMA = 1
+
+
+def _require_finite_rebuild_state(value: Any, name: str) -> None:
+    if isinstance(value, Tensor):
+        if (value.is_floating_point() or value.is_complex()) and not bool(
+            torch.isfinite(value).all()
+        ):
+            raise WaveNetError(f"{name} must be finite")
+    elif isinstance(value, float) and not math.isfinite(value):
+        raise WaveNetError(f"{name} must be finite")
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _require_finite_rebuild_state(item, f"{name}.{key}")
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _require_finite_rebuild_state(item, f"{name}[{index}]")
+
+
+def _validate_sha256(value: str, name: str) -> None:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise WaveNetError(f"{name} must be a SHA-256 hex digest")
+
+
+def save_rebuild_checkpoint(
+    path: Path,
+    *,
+    model: RebuiltWaveNet,
+    optimizer: torch.optim.Optimizer,
+    cursor: WaveNetBatchCursor,
+    training_config: WaveNetTrainingConfig,
+    dataset_fingerprint: str,
+    step: int,
+) -> None:
+    """Atomically publish all state needed to continue rebuild training."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    if isinstance(step, bool) or not isinstance(step, int):
+        raise TypeError("step must be an integer")
+    if step < 0:
+        raise WaveNetError("step must be non-negative")
+    _validate_sha256(dataset_fingerprint, "dataset_fingerprint")
+    payload = {
+        "schema_version": REBUILD_CHECKPOINT_SCHEMA,
+        "step": step,
+        "model_config": asdict(model.config),
+        "training_config": asdict(training_config),
+        "dataset_fingerprint": dataset_fingerprint,
+        "model_fingerprint": rebuild_model_fingerprint(model),
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "cursor_state": cursor.state_dict(),
+        "torch_rng_state": torch.random.get_rng_state(),
+    }
+    _require_finite_rebuild_state(payload["model_state"], "model_state")
+    _require_finite_rebuild_state(payload["optimizer_state"], "optimizer_state")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            torch.save(payload, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def load_rebuild_checkpoint(
+    path: Path,
+    *,
+    model: RebuiltWaveNet,
+    optimizer: torch.optim.Optimizer,
+    cursor: WaveNetBatchCursor,
+    training_config: WaveNetTrainingConfig,
+    dataset_fingerprint: str,
+) -> int:
+    """Validate and restore a rebuild checkpoint transactionally."""
+
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    if payload.get("schema_version") != REBUILD_CHECKPOINT_SCHEMA:
+        raise WaveNetError("unsupported rebuild checkpoint schema")
+    if payload.get("model_config") != asdict(model.config):
+        raise WaveNetError("checkpoint model configuration mismatch")
+    if payload.get("training_config") != asdict(training_config):
+        raise WaveNetError("checkpoint training configuration mismatch")
+    if payload.get("dataset_fingerprint") != dataset_fingerprint:
+        raise WaveNetError("checkpoint dataset fingerprint mismatch")
+    step = payload.get("step")
+    if isinstance(step, bool) or not isinstance(step, int) or step < 0:
+        raise WaveNetError("checkpoint step is invalid")
+    _require_finite_rebuild_state(payload.get("model_state"), "model_state")
+    _require_finite_rebuild_state(payload.get("optimizer_state"), "optimizer_state")
+    original_model = copy.deepcopy(model.state_dict())
+    original_optimizer = copy.deepcopy(optimizer.state_dict())
+    original_cursor = cursor.state_dict()
+    original_rng = torch.random.get_rng_state().clone()
+    try:
+        model.load_state_dict(payload["model_state"])
+        if rebuild_model_fingerprint(model) != payload.get("model_fingerprint"):
+            raise WaveNetError("checkpoint model fingerprint mismatch")
+        optimizer.load_state_dict(payload["optimizer_state"])
+        _require_finite_rebuild_state(optimizer.state_dict(), "optimizer_state")
+        cursor.load_state_dict(payload["cursor_state"])
+        torch.random.set_rng_state(payload["torch_rng_state"])
+    except Exception:
+        model.load_state_dict(original_model)
+        optimizer.load_state_dict(original_optimizer)
+        cursor.load_state_dict(original_cursor)
+        torch.random.set_rng_state(original_rng)
+        raise
+    return step

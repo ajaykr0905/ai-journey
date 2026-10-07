@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+import tempfile
 import unittest
+from pathlib import Path
 
 import torch
 
@@ -23,8 +25,10 @@ from ai_journey.wavenet_rebuild import (
     evaluate_rebuild,
     fit_rebuild,
     initialize_rebuilt_wavenet,
+    load_rebuild_checkpoint,
     load_reference_parameters,
     rebuild_model_fingerprint,
+    save_rebuild_checkpoint,
     trace_rebuild_shapes,
     train_rebuild_steps,
 )
@@ -467,6 +471,88 @@ class RebuiltWaveNetTests(unittest.TestCase):
                 ),
                 training_config=WaveNetTrainingConfig(steps=1),
             )
+
+    def test_checkpoint_round_trip_restores_every_training_state(self) -> None:
+        source = build_context_dataset(("ajay", "maya"), block_size=4)
+        dataset = WaveNetDataset.from_context_dataset(source)
+        config = WaveNetConfig(
+            vocab_size=dataset.vocab_size,
+            context_size=4,
+            group_factors=(2, 2),
+        )
+        training = WaveNetTrainingConfig(steps=4, batch_size=3, seed=33)
+        model = initialize_rebuilt_wavenet(config, seed=training.seed)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=training.learning_rate)
+        cursor = WaveNetBatchCursor(
+            dataset, batch_size=training.batch_size, seed=training.seed
+        )
+        train_rebuild_steps(model, cursor, optimizer, training, step_count=2)
+        expected_fingerprint = rebuild_model_fingerprint(model)
+        expected_cursor = cursor.state_dict()
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "rebuild.pt"
+            save_rebuild_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                training_config=training,
+                dataset_fingerprint=dataset.fingerprint(),
+                step=2,
+            )
+            self.assertTrue(path.is_file())
+            with torch.no_grad():
+                model.output_bias.add_(1)
+            cursor.next()
+
+            step = load_rebuild_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                training_config=training,
+                dataset_fingerprint=dataset.fingerprint(),
+            )
+
+        self.assertEqual(step, 2)
+        self.assertEqual(rebuild_model_fingerprint(model), expected_fingerprint)
+        self.assertEqual(cursor.state_dict(), expected_cursor)
+
+    def test_checkpoint_rejects_dataset_mismatch_without_mutation(self) -> None:
+        source = build_context_dataset(("ajay", "maya"), block_size=4)
+        dataset = WaveNetDataset.from_context_dataset(source)
+        config = WaveNetConfig(
+            vocab_size=dataset.vocab_size,
+            context_size=4,
+            group_factors=(2, 2),
+        )
+        training = WaveNetTrainingConfig(steps=1, batch_size=3)
+        model = initialize_rebuilt_wavenet(config)
+        optimizer = torch.optim.AdamW(model.parameters())
+        cursor = WaveNetBatchCursor(dataset, batch_size=3)
+        before = rebuild_model_fingerprint(model)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rebuild.pt"
+            save_rebuild_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                training_config=training,
+                dataset_fingerprint=dataset.fingerprint(),
+                step=0,
+            )
+            with self.assertRaisesRegex(ValueError, "dataset fingerprint mismatch"):
+                load_rebuild_checkpoint(
+                    path,
+                    model=model,
+                    optimizer=optimizer,
+                    cursor=cursor,
+                    training_config=training,
+                    dataset_fingerprint="0" * 64,
+                )
+        self.assertEqual(rebuild_model_fingerprint(model), before)
 
 
 if __name__ == "__main__":
