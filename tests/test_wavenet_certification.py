@@ -10,6 +10,7 @@ from ai_journey.wavenet_certification import (
     audit_parameter_finiteness,
     audit_parameter_manifest,
     audit_storage_independence,
+    measure_activation_saturation,
     parameter_inventory,
     parameter_statistics,
     trace_rebuild_activations,
@@ -106,6 +107,21 @@ class WaveNetCertificationTests(unittest.TestCase):
 
         self.assertFalse(audit.passed)
         self.assertEqual(audit.nonfinite_boundaries, ("stage_1", "stage_2", "logits"))
+
+    def test_activation_saturation_is_measured_per_tanh_stage(self) -> None:
+        contexts = torch.tensor([[0, 1, 2, 3], [3, 2, 1, 0]])
+
+        measurements = measure_activation_saturation(
+            self.model, contexts, threshold=0.9
+        )
+
+        self.assertEqual(
+            tuple(item.stage for item in measurements), ("stage_1", "stage_2")
+        )
+        self.assertTrue(all(0 <= item.saturated_fraction <= 1 for item in measurements))
+        self.assertTrue(all(item.elements > 0 for item in measurements))
+        with self.assertRaises(ValueError):
+            measure_activation_saturation(self.model, contexts, threshold=0.0)
 
 
 if __name__ == "__main__":

@@ -269,3 +269,50 @@ def audit_activation_finiteness(
     return ActivationFinitenessAudit(
         boundaries=len(snapshots), nonfinite_boundaries=nonfinite
     )
+
+
+@dataclass(frozen=True)
+class SaturationMeasurement:
+    """Fraction of one tanh stage at or beyond a declared magnitude."""
+
+    stage: str
+    elements: int
+    saturated_fraction: float
+    threshold: float
+
+
+def measure_activation_saturation(
+    model: RebuiltWaveNet, contexts: torch.Tensor, *, threshold: float = 0.95
+) -> tuple[SaturationMeasurement, ...]:
+    """Measure saturation after each hierarchical tanh activation."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    model._validate_inputs(contexts, None)
+    if (
+        isinstance(threshold, bool)
+        or not isinstance(threshold, (int, float))
+        or not math.isfinite(threshold)
+        or not 0 < threshold <= 1
+    ):
+        raise WaveNetError("threshold must be finite and in (0, 1]")
+    mode = model.training
+    measurements: list[SaturationMeasurement] = []
+    try:
+        model.eval()
+        with torch.no_grad():
+            hidden = model.embedding_weight[contexts]
+            for index, spec in enumerate(model.plan.stages):
+                hidden = model._stage_forward(hidden, index=index, spec=spec)
+                fraction = float((hidden.abs() >= threshold).double().mean())
+                measurements.append(
+                    SaturationMeasurement(
+                        stage=f"stage_{index + 1}",
+                        elements=hidden.numel(),
+                        saturated_fraction=fraction,
+                        threshold=float(threshold),
+                    )
+                )
+    finally:
+        model.train(mode)
+    return tuple(measurements)
