@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .wavenet import WaveNetError
+from .wavenet import HierarchicalLanguageModel, WaveNetError
 from .wavenet_rebuild import RebuiltWaveNet
 
 
@@ -69,4 +69,44 @@ def audit_parameter_manifest(model: RebuiltWaveNet) -> ParameterManifestAudit:
         registered_elements=sum(entry.elements for entry in inventory),
         planned_elements=model.plan.parameter_count,
         shape_mismatches=mismatches,
+    )
+
+
+@dataclass(frozen=True)
+class StorageIndependenceAudit:
+    """Evidence that reference and rebuild parameters do not alias storage."""
+
+    reference_tensors: int
+    rebuild_tensors: int
+    shared_storage_pairs: tuple[str, ...]
+
+    @property
+    def passed(self) -> bool:
+        return not self.shared_storage_pairs
+
+
+def audit_storage_independence(
+    reference: HierarchicalLanguageModel, rebuilt: RebuiltWaveNet
+) -> StorageIndependenceAudit:
+    """Reject a supposed independent rebuild that shares parameter storage."""
+
+    if not isinstance(reference, HierarchicalLanguageModel):
+        raise TypeError("reference must be HierarchicalLanguageModel")
+    if not isinstance(rebuilt, RebuiltWaveNet):
+        raise TypeError("rebuilt must be RebuiltWaveNet")
+    if reference.config != rebuilt.config:
+        raise WaveNetError("reference and rebuild configurations must match")
+    reference_parameters = tuple(reference.named_parameters())
+    rebuilt_parameters = tuple(rebuilt.named_parameters())
+    shared = tuple(
+        f"{reference_name}:{rebuilt_name}"
+        for reference_name, reference_parameter in reference_parameters
+        for rebuilt_name, rebuilt_parameter in rebuilt_parameters
+        if reference_parameter.untyped_storage().data_ptr()
+        == rebuilt_parameter.untyped_storage().data_ptr()
+    )
+    return StorageIndependenceAudit(
+        reference_tensors=len(reference_parameters),
+        rebuild_tensors=len(rebuilt_parameters),
+        shared_storage_pairs=shared,
     )

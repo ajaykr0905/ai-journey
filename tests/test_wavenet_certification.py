@@ -4,9 +4,10 @@ import unittest
 
 import torch
 
-from ai_journey.wavenet import WaveNetConfig
+from ai_journey.wavenet import WaveNetConfig, initialize_wavenet
 from ai_journey.wavenet_certification import (
     audit_parameter_manifest,
+    audit_storage_independence,
     parameter_inventory,
 )
 from ai_journey.wavenet_rebuild import initialize_rebuilt_wavenet
@@ -48,6 +49,14 @@ class WaveNetCertificationTests(unittest.TestCase):
         self.assertEqual(audit.registered_elements, self.model.parameter_count)
         self.assertEqual(audit.planned_elements, self.model.plan.parameter_count)
         self.assertGreater(audit.tensors, 0)
+
+    def test_reference_and_rebuild_do_not_share_parameter_storage(self) -> None:
+        reference = initialize_wavenet(self.config, seed=330)
+
+        audit = audit_storage_independence(reference, self.model)
+
+        self.assertTrue(audit.passed)
+        self.assertEqual(audit.reference_tensors, audit.rebuild_tensors)
 
 
 if __name__ == "__main__":
