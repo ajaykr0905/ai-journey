@@ -304,3 +304,66 @@ def rebuild_model_fingerprint(model: RebuiltWaveNet) -> str:
         digest.update(str(tuple(value.shape)).encode())
         digest.update(value.numpy().tobytes())
     return digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class RebuildForwardAudit:
+    """Numerical agreement between reference and primitive forward passes."""
+
+    examples: int
+    max_abs_logit_error: float
+    loss_abs_error: float
+    tolerance: float
+
+    @property
+    def passed(self) -> bool:
+        return (
+            self.max_abs_logit_error <= self.tolerance
+            and self.loss_abs_error <= self.tolerance
+        )
+
+
+def audit_rebuild_forward(
+    reference: HierarchicalLanguageModel,
+    rebuilt: RebuiltWaveNet,
+    contexts: Tensor,
+    targets: Tensor,
+    *,
+    tolerance: float = 1e-6,
+) -> RebuildForwardAudit:
+    """Compare logits and loss after mapping the same reference parameters."""
+
+    if not isinstance(reference, HierarchicalLanguageModel):
+        raise TypeError("reference must be HierarchicalLanguageModel")
+    if not isinstance(rebuilt, RebuiltWaveNet):
+        raise TypeError("rebuilt must be RebuiltWaveNet")
+    if reference.config != rebuilt.config:
+        raise WaveNetError("reference and rebuild configurations must match")
+    if (
+        isinstance(tolerance, bool)
+        or not isinstance(tolerance, (int, float))
+        or not math.isfinite(tolerance)
+        or tolerance < 0
+    ):
+        raise WaveNetError("tolerance must be non-negative and finite")
+    rebuilt._validate_inputs(contexts, targets)
+    reference_mode = reference.training
+    rebuilt_mode = rebuilt.training
+    try:
+        reference.eval()
+        rebuilt.eval()
+        with torch.no_grad():
+            reference_logits, reference_loss = reference(contexts, targets)
+            rebuilt_logits, rebuilt_loss = rebuilt(contexts, targets)
+            assert reference_loss is not None and rebuilt_loss is not None
+            return RebuildForwardAudit(
+                examples=int(targets.numel()),
+                max_abs_logit_error=float(
+                    (reference_logits - rebuilt_logits).abs().max()
+                ),
+                loss_abs_error=abs(float(reference_loss) - float(rebuilt_loss)),
+                tolerance=float(tolerance),
+            )
+    finally:
+        reference.train(reference_mode)
+        rebuilt.train(rebuilt_mode)

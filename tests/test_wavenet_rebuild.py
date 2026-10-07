@@ -7,6 +7,7 @@ import torch
 from ai_journey.wavenet import WaveNetConfig, initialize_wavenet
 from ai_journey.wavenet_rebuild import (
     RebuiltWaveNet,
+    audit_rebuild_forward,
     compile_rebuild_plan,
     initialize_rebuilt_wavenet,
     load_reference_parameters,
@@ -235,6 +236,44 @@ class RebuiltWaveNetTests(unittest.TestCase):
     def test_model_fingerprint_requires_rebuild_model(self) -> None:
         with self.assertRaisesRegex(TypeError, "model must be RebuiltWaveNet"):
             rebuild_model_fingerprint(object())  # type: ignore[arg-type]
+
+    def test_forward_audit_proves_reference_equivalence(self) -> None:
+        config = WaveNetConfig(
+            vocab_size=7,
+            context_size=4,
+            embedding_dim=3,
+            hidden_dim=5,
+            group_factors=(2, 2),
+        )
+        reference = initialize_wavenet(config, seed=17)
+        rebuilt = initialize_rebuilt_wavenet(config, seed=33)
+        load_reference_parameters(rebuilt, reference)
+        contexts = torch.tensor([[0, 1, 2, 3], [3, 2, 1, 0]])
+        targets = torch.tensor([4, 5])
+
+        audit = audit_rebuild_forward(reference, rebuilt, contexts, targets)
+
+        self.assertTrue(audit.passed)
+        self.assertEqual(audit.examples, 2)
+        self.assertLessEqual(audit.max_abs_logit_error, 1e-6)
+        self.assertLessEqual(audit.loss_abs_error, 1e-6)
+
+    def test_forward_audit_detects_parameter_drift(self) -> None:
+        config = WaveNetConfig(vocab_size=7)
+        reference = initialize_wavenet(config, seed=17)
+        rebuilt = initialize_rebuilt_wavenet(config, seed=33)
+        load_reference_parameters(rebuilt, reference)
+        with torch.no_grad():
+            rebuilt.output_bias[0].add_(1)
+        contexts = torch.zeros((2, config.context_size), dtype=torch.long)
+        targets = torch.tensor([0, 1])
+
+        audit = audit_rebuild_forward(
+            reference, rebuilt, contexts, targets, tolerance=1e-8
+        )
+
+        self.assertFalse(audit.passed)
+        self.assertGreater(audit.max_abs_logit_error, audit.tolerance)
 
 
 if __name__ == "__main__":
