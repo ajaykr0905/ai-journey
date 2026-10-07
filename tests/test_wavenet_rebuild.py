@@ -43,6 +43,23 @@ from ai_journey.wavenet_rebuild import (
 
 
 class RebuildPlanTests(unittest.TestCase):
+    def test_public_package_exports_rebuild_entry_points(self) -> None:
+        import ai_journey
+
+        expected = (
+            "RebuildExperimentResult",
+            "RebuiltWaveNet",
+            "audit_rebuild_forward",
+            "audit_rebuild_gradients",
+            "compile_rebuild_plan",
+            "run_rebuild_experiment",
+            "verify_rebuild_report",
+        )
+        for name in expected:
+            with self.subTest(name=name):
+                self.assertIn(name, ai_journey.__all__)
+                self.assertTrue(hasattr(ai_journey, name))
+
     def test_plan_compiles_every_stage_shape_and_parameter(self) -> None:
         config = WaveNetConfig(
             vocab_size=7,

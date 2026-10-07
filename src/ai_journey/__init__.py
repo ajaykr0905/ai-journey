@@ -58,6 +58,15 @@ from .wavenet import (
     run_wavenet_experiment,
     run_wavenet_overfit_probe,
 )
+from .wavenet_rebuild import (
+    RebuildExperimentResult,
+    RebuiltWaveNet,
+    audit_rebuild_forward,
+    audit_rebuild_gradients,
+    compile_rebuild_plan,
+    run_rebuild_experiment,
+    verify_rebuild_report,
+)
 from .xor import train_xor
 
 __all__ = [
@@ -74,6 +83,8 @@ __all__ = [
     "FlattenConsecutive",
     "HierarchicalLanguageModel",
     "KaimingComparisonResult",
+    "RebuildExperimentResult",
+    "RebuiltWaveNet",
     "ScratchBatchNorm",
     "ShiftAssessment",
     "ShiftPolicy",
@@ -90,10 +101,13 @@ __all__ = [
     "WaveNetTrainingConfig",
     "analyze_corpus_shift",
     "assess_corpus_shift",
+    "audit_rebuild_forward",
+    "audit_rebuild_gradients",
     "audit_wavenet_gradients",
     "build_context_dataset",
     "build_gpt_shape_flow",
     "build_wavenet_dataset_split",
+    "compile_rebuild_plan",
     "default_parameters",
     "forward",
     "full_backward",
@@ -107,10 +121,12 @@ __all__ = [
     "run_manual_backprop_experiment",
     "run_memory_experiment",
     "run_mlp_experiment",
+    "run_rebuild_experiment",
     "run_transformer_experiment",
     "run_wavenet_experiment",
     "run_wavenet_overfit_probe",
     "train_context_mlp",
     "train_mlp",
     "train_xor",
+    "verify_rebuild_report",
 ]
