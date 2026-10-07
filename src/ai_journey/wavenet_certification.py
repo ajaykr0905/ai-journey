@@ -704,3 +704,70 @@ def audit_gradient_coverage(
         parameters_with_gradients=len(parameters) - len(missing),
         missing_gradients=missing,
     )
+
+
+@dataclass(frozen=True)
+class GradientClippingAudit:
+    """Observed global gradient norm before and after clipping."""
+
+    pre_clip_norm: float
+    post_clip_norm: float
+    max_norm: float
+    clipped: bool
+
+    @property
+    def passed(self) -> bool:
+        return self.post_clip_norm <= self.max_norm + 1e-6
+
+
+def audit_gradient_clipping(
+    model: RebuiltWaveNet,
+    contexts: torch.Tensor,
+    targets: torch.Tensor,
+    *,
+    max_norm: float,
+) -> GradientClippingAudit:
+    """Exercise PyTorch clipping on rebuild gradients without retaining changes."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    model._validate_inputs(contexts, targets)
+    if (
+        isinstance(max_norm, bool)
+        or not isinstance(max_norm, (int, float))
+        or not math.isfinite(max_norm)
+        or max_norm <= 0
+    ):
+        raise WaveNetError("max_norm must be positive and finite")
+    parameters = tuple(model.parameters())
+    previous = [
+        None if parameter.grad is None else parameter.grad.detach().clone()
+        for parameter in parameters
+    ]
+    mode = model.training
+    try:
+        model.eval()
+        model.zero_grad(set_to_none=True)
+        _, loss = model(contexts, targets)
+        assert loss is not None
+        loss.backward()
+        pre_clip = float(torch.nn.utils.clip_grad_norm_(parameters, float(max_norm)))
+        post_clip = float(
+            torch.sqrt(
+                sum(
+                    parameter.grad.detach().double().square().sum()
+                    for parameter in parameters
+                    if parameter.grad is not None
+                )
+            )
+        )
+    finally:
+        for parameter, stored in zip(parameters, previous, strict=True):
+            parameter.grad = None if stored is None else stored
+        model.train(mode)
+    return GradientClippingAudit(
+        pre_clip_norm=pre_clip,
+        post_clip_norm=post_clip,
+        max_norm=float(max_norm),
+        clipped=pre_clip > max_norm,
+    )

@@ -8,6 +8,7 @@ from ai_journey.wavenet import WaveNetConfig, initialize_wavenet
 from ai_journey.wavenet_certification import (
     audit_activation_finiteness,
     audit_eval_batch_invariance,
+    audit_gradient_clipping,
     audit_gradient_coverage,
     audit_parameter_finiteness,
     audit_parameter_manifest,
@@ -211,6 +212,16 @@ class WaveNetCertificationTests(unittest.TestCase):
 
         self.assertFalse(audit.passed)
         self.assertEqual(audit.missing_gradients, ("output_bias",))
+
+    def test_gradient_clipping_enforces_the_declared_global_norm(self) -> None:
+        contexts = torch.tensor([[0, 1, 2, 3], [6, 5, 4, 3]])
+        targets = torch.tensor([4, 2])
+
+        audit = audit_gradient_clipping(self.model, contexts, targets, max_norm=0.01)
+
+        self.assertTrue(audit.passed)
+        self.assertTrue(audit.clipped)
+        self.assertLessEqual(audit.post_clip_norm, 0.010001)
 
 
 if __name__ == "__main__":
