@@ -11,7 +11,12 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from .wavenet import ShapeTraceStep, WaveNetConfig, WaveNetError
+from .wavenet import (
+    HierarchicalLanguageModel,
+    ShapeTraceStep,
+    WaveNetConfig,
+    WaveNetError,
+)
 
 
 @dataclass(frozen=True)
@@ -259,3 +264,28 @@ def trace_rebuild_shapes(
     finally:
         model.train(mode)
     return tuple(steps)
+
+
+def load_reference_parameters(
+    model: RebuiltWaveNet, reference: HierarchicalLanguageModel
+) -> None:
+    """Copy one reference model into the independently structured rebuild."""
+
+    if not isinstance(model, RebuiltWaveNet):
+        raise TypeError("model must be RebuiltWaveNet")
+    if not isinstance(reference, HierarchicalLanguageModel):
+        raise TypeError("reference must be HierarchicalLanguageModel")
+    if model.config != reference.config:
+        raise WaveNetError("reference and rebuild configurations must match")
+    with torch.no_grad():
+        model.embedding_weight.copy_(reference.embedding.weight)
+        for index, stage in enumerate(reference.stages):
+            linear = stage.network[1]
+            normalization = stage.network[2]
+            assert isinstance(linear, nn.Linear)
+            assert isinstance(normalization, nn.LayerNorm)
+            model.stage_weights[index].copy_(linear.weight)
+            model.stage_scales[index].copy_(normalization.weight)
+            model.stage_biases[index].copy_(normalization.bias)
+        model.output_weight.copy_(reference.output.weight)
+        model.output_bias.copy_(reference.output.bias)

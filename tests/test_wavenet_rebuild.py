@@ -4,11 +4,12 @@ import unittest
 
 import torch
 
-from ai_journey.wavenet import WaveNetConfig
+from ai_journey.wavenet import WaveNetConfig, initialize_wavenet
 from ai_journey.wavenet_rebuild import (
     RebuiltWaveNet,
     compile_rebuild_plan,
     initialize_rebuilt_wavenet,
+    load_reference_parameters,
     trace_rebuild_shapes,
 )
 
@@ -177,6 +178,44 @@ class RebuiltWaveNetTests(unittest.TestCase):
         model = initialize_rebuilt_wavenet(WaveNetConfig(vocab_size=7))
         with self.assertRaisesRegex(ValueError, "batch_size must be positive"):
             trace_rebuild_shapes(model, batch_size=0)
+
+    def test_reference_parameters_map_to_every_rebuild_tensor(self) -> None:
+        config = WaveNetConfig(
+            vocab_size=7,
+            context_size=4,
+            embedding_dim=3,
+            hidden_dim=5,
+            group_factors=(2, 2),
+        )
+        reference = initialize_wavenet(config, seed=17)
+        rebuilt = initialize_rebuilt_wavenet(config, seed=33)
+
+        load_reference_parameters(rebuilt, reference)
+
+        self.assertTrue(
+            torch.equal(rebuilt.embedding_weight, reference.embedding.weight)
+        )
+        for index, stage in enumerate(reference.stages):
+            self.assertTrue(
+                torch.equal(rebuilt.stage_weights[index], stage.network[1].weight)
+            )
+            self.assertTrue(
+                torch.equal(rebuilt.stage_scales[index], stage.network[2].weight)
+            )
+            self.assertTrue(
+                torch.equal(rebuilt.stage_biases[index], stage.network[2].bias)
+            )
+        self.assertTrue(torch.equal(rebuilt.output_weight, reference.output.weight))
+        self.assertTrue(torch.equal(rebuilt.output_bias, reference.output.bias))
+
+    def test_reference_parameter_mapping_rejects_mismatches(self) -> None:
+        config = WaveNetConfig(vocab_size=7)
+        rebuilt = initialize_rebuilt_wavenet(config)
+        with self.assertRaisesRegex(TypeError, "reference must"):
+            load_reference_parameters(rebuilt, object())  # type: ignore[arg-type]
+        mismatched = initialize_wavenet(WaveNetConfig(vocab_size=8))
+        with self.assertRaisesRegex(ValueError, "configurations must match"):
+            load_reference_parameters(rebuilt, mismatched)
 
 
 if __name__ == "__main__":
