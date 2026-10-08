@@ -11,9 +11,10 @@ from unittest.mock import patch
 import torch
 
 from ai_journey.gpt_bigram import (
-    CharacterVocabulary,
+    BigramExperiment,
     BigramLanguageModel,
     BigramTrainingConfig,
+    CharacterVocabulary,
     CorpusSource,
     GPTBigramError,
     TINY_SHAKESPEARE,
@@ -28,6 +29,7 @@ from ai_journey.gpt_bigram import (
     model_fingerprint,
     next_token_loss,
     restore_checkpoint,
+    run_bigram_experiment,
     save_checkpoint,
     tokenize_and_split,
     train_steps,
@@ -165,6 +167,12 @@ class BigramTrainingConfigTests(unittest.TestCase):
             BigramTrainingConfig(learning_rate=float("nan"))
         with self.assertRaisesRegex(TypeError, "seed must be an integer"):
             BigramTrainingConfig(seed=True)
+
+    def test_rejects_invalid_sampling_controls(self) -> None:
+        with self.assertRaisesRegex(GPTBigramError, "sample_tokens must be positive"):
+            BigramTrainingConfig(sample_tokens=0)
+        with self.assertRaisesRegex(GPTBigramError, "sample_temperature"):
+            BigramTrainingConfig(sample_temperature=float("inf"))
 
 
 class WindowBatcherTests(unittest.TestCase):
@@ -472,6 +480,30 @@ class BigramLanguageModelTests(unittest.TestCase):
         self.assertEqual(
             model_fingerprint(resumed_model), model_fingerprint(control_model)
         )
+
+    def test_complete_experiment_measures_training_and_held_out_loss(self) -> None:
+        text = ("abcabc\n" * 80) + ("cab\n" * 20)
+        source = source_for(text.encode())
+        config = BigramTrainingConfig(
+            steps=30,
+            batch_size=8,
+            block_size=4,
+            learning_rate=0.05,
+            seed=34,
+            sample_tokens=20,
+        )
+        experiment, model, optimizer, batcher, vocabulary = run_bigram_experiment(
+            text, source, config
+        )
+        self.assertIsInstance(experiment, BigramExperiment)
+        self.assertLess(experiment.final_train_nll, experiment.initial_train_nll)
+        self.assertEqual(experiment.completed_step, 30)
+        self.assertEqual(len(experiment.trace), 30)
+        self.assertEqual(len(experiment.sample), 21)
+        self.assertEqual(experiment.model_fingerprint, model_fingerprint(model))
+        self.assertIsInstance(optimizer, torch.optim.AdamW)
+        self.assertIsInstance(batcher, WindowBatcher)
+        self.assertEqual(experiment.vocabulary_size, len(vocabulary.tokens))
 
 
 if __name__ == "__main__":

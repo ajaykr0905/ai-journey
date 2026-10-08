@@ -110,6 +110,8 @@ class BigramTrainingConfig:
     seed: int = 34
     eval_interval: int = 20
     eval_batch_size: int = 64
+    sample_tokens: int = 120
+    sample_temperature: float = 1.0
 
     def __post_init__(self) -> None:
         for name in (
@@ -119,6 +121,7 @@ class BigramTrainingConfig:
             "seed",
             "eval_interval",
             "eval_batch_size",
+            "sample_tokens",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):
@@ -129,6 +132,7 @@ class BigramTrainingConfig:
             "block_size",
             "eval_interval",
             "eval_batch_size",
+            "sample_tokens",
         ):
             if getattr(self, name) <= 0:
                 raise GPTBigramError(f"{name} must be positive")
@@ -139,6 +143,13 @@ class BigramTrainingConfig:
             or self.learning_rate <= 0
         ):
             raise GPTBigramError("learning_rate must be positive and finite")
+        if (
+            isinstance(self.sample_temperature, bool)
+            or not isinstance(self.sample_temperature, (int, float))
+            or not isfinite(self.sample_temperature)
+            or self.sample_temperature <= 0
+        ):
+            raise GPTBigramError("sample_temperature must be positive and finite")
 
 
 @dataclass(frozen=True)
@@ -147,6 +158,26 @@ class TrainingStep:
 
     step: int
     loss: float
+
+
+@dataclass(frozen=True)
+class BigramExperiment:
+    """Measured Day 34 training result without runtime-only objects."""
+
+    source_sha256: str
+    character_count: int
+    vocabulary_size: int
+    train_token_count: int
+    validation_token_count: int
+    config: BigramTrainingConfig
+    initial_train_nll: float
+    initial_validation_nll: float
+    final_train_nll: float
+    final_validation_nll: float
+    trace: tuple[TrainingStep, ...]
+    sample: str
+    model_fingerprint: str
+    completed_step: int
 
 
 def tokenize_and_split(
@@ -710,3 +741,65 @@ def fetch_verified_corpus(
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
     return text
+
+
+def run_bigram_experiment(
+    text: str,
+    source: CorpusSource,
+    config: BigramTrainingConfig,
+) -> tuple[
+    BigramExperiment,
+    BigramLanguageModel,
+    torch.optim.Optimizer,
+    WindowBatcher,
+    CharacterVocabulary,
+]:
+    """Run the complete deterministic Day 34 baseline on verified text."""
+
+    validate_corpus_bytes(text.encode("utf-8"), source)
+    vocabulary = CharacterVocabulary.from_text(text)
+    split = tokenize_and_split(text, vocabulary)
+    if len(split.train) <= config.block_size:
+        raise GPTBigramError("training partition is too short for block_size")
+    model = BigramLanguageModel(len(vocabulary.tokens), seed=config.seed)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
+    batcher = WindowBatcher(
+        split.train, block_size=config.block_size, seed=config.seed + 1
+    )
+    initial_train = evaluate_partition(model, split.train)
+    initial_validation = evaluate_partition(model, split.validation)
+    trace = train_steps(
+        model,
+        optimizer,
+        batcher,
+        start_step=0,
+        steps=config.steps,
+        batch_size=config.batch_size,
+    )
+    final_train = evaluate_partition(model, split.train)
+    final_validation = evaluate_partition(model, split.validation)
+    start_token = vocabulary.encode("\n")[0] if "\n" in vocabulary.tokens else 0
+    generated = generate_tokens(
+        model,
+        start_token_id=start_token,
+        max_new_tokens=config.sample_tokens,
+        seed=config.seed + 2,
+        temperature=config.sample_temperature,
+    )
+    experiment = BigramExperiment(
+        source_sha256=source.sha256,
+        character_count=len(text),
+        vocabulary_size=len(vocabulary.tokens),
+        train_token_count=len(split.train),
+        validation_token_count=len(split.validation),
+        config=config,
+        initial_train_nll=initial_train,
+        initial_validation_nll=initial_validation,
+        final_train_nll=final_train,
+        final_validation_nll=final_validation,
+        trace=trace,
+        sample=vocabulary.decode(list(generated)),
+        model_fingerprint=model_fingerprint(model),
+        completed_step=config.steps,
+    )
+    return experiment, model, optimizer, batcher, vocabulary
