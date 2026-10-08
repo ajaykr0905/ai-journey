@@ -9,6 +9,7 @@ from pathlib import Path
 import torch
 from torch import Tensor
 from torch import nn
+from torch.nn import functional as F
 
 
 class GPTBigramError(ValueError):
@@ -211,6 +212,23 @@ class BigramLanguageModel(nn.Module):
         if int(token_ids.min()) < 0 or int(token_ids.max()) >= self.vocab_size:
             raise GPTBigramError("token_ids contain an out-of-range id")
         return self.token_embedding_table(token_ids)
+
+
+def next_token_loss(
+    model: BigramLanguageModel, inputs: Tensor, targets: Tensor
+) -> Tensor:
+    """Compute mean categorical NLL for aligned next-token targets."""
+
+    if not isinstance(model, BigramLanguageModel):
+        raise TypeError("model must be BigramLanguageModel")
+    if not isinstance(inputs, Tensor) or not isinstance(targets, Tensor):
+        raise TypeError("inputs and targets must be torch.Tensor values")
+    if inputs.shape != targets.shape or inputs.ndim != 2:
+        raise GPTBigramError("inputs and targets must have the same rank-two shape")
+    if inputs.dtype != torch.long or targets.dtype != torch.long:
+        raise GPTBigramError("inputs and targets must use torch.long")
+    logits = model(inputs)
+    return F.cross_entropy(logits.reshape(-1, model.vocab_size), targets.reshape(-1))
 
 
 TINY_SHAKESPEARE = CorpusSource(

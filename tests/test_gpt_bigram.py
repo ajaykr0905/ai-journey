@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import unittest
 from hashlib import sha256
 from pathlib import Path
@@ -15,6 +16,7 @@ from ai_journey.gpt_bigram import (
     TINY_SHAKESPEARE,
     WindowBatcher,
     load_verified_corpus,
+    next_token_loss,
     tokenize_and_split,
     validate_corpus_bytes,
 )
@@ -153,6 +155,21 @@ class BigramLanguageModelTests(unittest.TestCase):
         BigramLanguageModel(4, seed=12)
         actual = torch.rand(3)
         self.assertTrue(torch.equal(expected, actual))
+
+    def test_uniform_logits_have_log_vocabulary_loss(self) -> None:
+        model = BigramLanguageModel(4, seed=1)
+        with torch.no_grad():
+            model.token_embedding_table.weight.zero_()
+        inputs = torch.tensor([[0, 1], [2, 3]])
+        targets = torch.tensor([[1, 2], [3, 0]])
+        self.assertAlmostEqual(
+            next_token_loss(model, inputs, targets).item(), math.log(4)
+        )
+
+    def test_loss_rejects_misaligned_targets(self) -> None:
+        model = BigramLanguageModel(3, seed=1)
+        with self.assertRaisesRegex(GPTBigramError, "same rank-two shape"):
+            next_token_loss(model, torch.tensor([[0, 1]]), torch.tensor([[1]]))
 
 
 if __name__ == "__main__":
