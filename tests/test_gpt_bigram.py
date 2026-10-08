@@ -119,6 +119,22 @@ class WindowBatcherTests(unittest.TestCase):
         self.assertTrue(torch.equal(first[0], second[0]))
         self.assertTrue(torch.equal(first[1], second[1]))
 
+    def test_restores_the_next_batch_exactly(self) -> None:
+        batcher = WindowBatcher(torch.arange(30), block_size=6, seed=11)
+        batcher.sample(2)
+        state = batcher.rng_state()
+        expected = batcher.sample(5)
+        batcher.restore_rng_state(state)
+        replayed = batcher.sample(5)
+        self.assertTrue(torch.equal(expected[0], replayed[0]))
+        self.assertTrue(torch.equal(expected[1], replayed[1]))
+
+    def test_rng_state_is_returned_by_value(self) -> None:
+        batcher = WindowBatcher(torch.arange(20), block_size=4, seed=5)
+        state = batcher.rng_state()
+        state.zero_()
+        self.assertFalse(torch.equal(state, batcher.rng_state()))
+
 
 if __name__ == "__main__":
     unittest.main()

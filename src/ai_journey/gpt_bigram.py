@@ -162,6 +162,23 @@ class WindowBatcher:
         )
         return inputs, targets
 
+    def rng_state(self) -> Tensor:
+        """Return an isolated copy of the sampler RNG state."""
+
+        return self._generator.get_state().clone()
+
+    def restore_rng_state(self, state: Tensor) -> None:
+        """Restore a state produced by :meth:`rng_state`."""
+
+        if not isinstance(state, Tensor):
+            raise TypeError("state must be a torch.Tensor")
+        if state.device.type != "cpu" or state.dtype != torch.uint8 or state.ndim != 1:
+            raise GPTBigramError("state must be a one-dimensional CPU uint8 tensor")
+        try:
+            self._generator.set_state(state.detach().clone())
+        except RuntimeError as exc:
+            raise GPTBigramError("state is not a valid CPU generator state") from exc
+
 
 TINY_SHAKESPEARE = CorpusSource(
     name="Tiny Shakespeare",
