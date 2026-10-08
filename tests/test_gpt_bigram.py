@@ -17,6 +17,7 @@ from ai_journey.gpt_bigram import (
     TINY_SHAKESPEARE,
     TrainingStep,
     WindowBatcher,
+    build_checkpoint_payload,
     evaluate_partition,
     generate_tokens,
     load_verified_corpus,
@@ -261,6 +262,32 @@ class BigramLanguageModelTests(unittest.TestCase):
         with torch.no_grad():
             second.token_embedding_table.weight[0, 0] += 1
         self.assertNotEqual(model_fingerprint(first), model_fingerprint(second))
+
+    def test_checkpoint_payload_captures_complete_state_by_value(self) -> None:
+        vocabulary = CharacterVocabulary.from_text("abc")
+        model = BigramLanguageModel(3, seed=4)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=0.02)
+        batcher = WindowBatcher(torch.tensor([0, 1, 2, 0, 1]), block_size=2, seed=5)
+        payload = build_checkpoint_payload(
+            model,
+            optimizer,
+            batcher,
+            step=7,
+            vocabulary=vocabulary,
+            source=source_for(b"abc"),
+            config=BigramTrainingConfig(block_size=2),
+        )
+        self.assertEqual(payload["format_version"], 1)
+        self.assertEqual(payload["step"], 7)
+        self.assertEqual(payload["vocabulary"], ("a", "b", "c"))
+        captured = payload["model_state"]["token_embedding_table.weight"].clone()
+        with torch.no_grad():
+            model.token_embedding_table.weight.zero_()
+        self.assertTrue(
+            torch.equal(
+                captured, payload["model_state"]["token_embedding_table.weight"]
+            )
+        )
 
 
 if __name__ == "__main__":

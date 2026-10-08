@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import copy
+from dataclasses import asdict, dataclass
 from hashlib import sha256
 from math import isfinite
 from pathlib import Path
@@ -413,6 +414,50 @@ def model_fingerprint(model: BigramLanguageModel) -> str:
         digest.update(str(tuple(value.shape)).encode())
         digest.update(value.numpy().tobytes())
     return digest.hexdigest()
+
+
+def build_checkpoint_payload(
+    model: BigramLanguageModel,
+    optimizer: torch.optim.Optimizer,
+    batcher: WindowBatcher,
+    *,
+    step: int,
+    vocabulary: CharacterVocabulary,
+    source: CorpusSource,
+    config: BigramTrainingConfig,
+) -> dict[str, object]:
+    """Capture complete by-value state required for exact training continuation."""
+
+    if not isinstance(model, BigramLanguageModel):
+        raise TypeError("model must be BigramLanguageModel")
+    if not isinstance(optimizer, torch.optim.Optimizer):
+        raise TypeError("optimizer must be torch.optim.Optimizer")
+    if not isinstance(batcher, WindowBatcher):
+        raise TypeError("batcher must be WindowBatcher")
+    if not isinstance(vocabulary, CharacterVocabulary):
+        raise TypeError("vocabulary must be CharacterVocabulary")
+    if not isinstance(source, CorpusSource):
+        raise TypeError("source must be CorpusSource")
+    if not isinstance(config, BigramTrainingConfig):
+        raise TypeError("config must be BigramTrainingConfig")
+    if isinstance(step, bool) or not isinstance(step, int):
+        raise TypeError("step must be an integer")
+    if step < 0:
+        raise GPTBigramError("step must be non-negative")
+    return {
+        "format_version": 1,
+        "step": step,
+        "vocabulary": vocabulary.tokens,
+        "source_sha256": source.sha256,
+        "config": asdict(config),
+        "model_state": {
+            name: tensor.detach().cpu().clone()
+            for name, tensor in model.state_dict().items()
+        },
+        "optimizer_state": copy.deepcopy(optimizer.state_dict()),
+        "sampler_rng_state": batcher.rng_state(),
+        "model_fingerprint": model_fingerprint(model),
+    }
 
 
 TINY_SHAKESPEARE = CorpusSource(
