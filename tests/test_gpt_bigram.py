@@ -11,6 +11,7 @@ import torch
 from ai_journey.gpt_bigram import (
     CharacterVocabulary,
     BigramLanguageModel,
+    BigramTrainingConfig,
     CorpusSource,
     GPTBigramError,
     TINY_SHAKESPEARE,
@@ -105,6 +106,29 @@ class CorpusSplitTests(unittest.TestCase):
         vocabulary = CharacterVocabulary.from_text("abcd")
         with self.assertRaisesRegex(GPTBigramError, "at least two"):
             tokenize_and_split("abcd", vocabulary, validation_fraction=0.25)
+
+
+class BigramTrainingConfigTests(unittest.TestCase):
+    def test_accepts_explicit_bounded_controls(self) -> None:
+        config = BigramTrainingConfig(
+            steps=25,
+            batch_size=8,
+            block_size=4,
+            learning_rate=0.03,
+            seed=9,
+            eval_interval=5,
+            eval_batch_size=16,
+        )
+        self.assertEqual(config.steps, 25)
+        self.assertEqual(config.seed, 9)
+
+    def test_rejects_non_executable_controls(self) -> None:
+        with self.assertRaisesRegex(GPTBigramError, "steps must be positive"):
+            BigramTrainingConfig(steps=0)
+        with self.assertRaisesRegex(GPTBigramError, "positive and finite"):
+            BigramTrainingConfig(learning_rate=float("nan"))
+        with self.assertRaisesRegex(TypeError, "seed must be an integer"):
+            BigramTrainingConfig(seed=True)
 
 
 class WindowBatcherTests(unittest.TestCase):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+from math import isfinite
 from pathlib import Path
 
 import torch
@@ -90,6 +91,48 @@ class CorpusSplit:
     train: Tensor
     validation: Tensor
     split_index: int
+
+
+@dataclass(frozen=True)
+class BigramTrainingConfig:
+    """Explicit controls for a bounded CPU training run."""
+
+    steps: int = 100
+    batch_size: int = 32
+    block_size: int = 8
+    learning_rate: float = 1e-2
+    seed: int = 34
+    eval_interval: int = 20
+    eval_batch_size: int = 64
+
+    def __post_init__(self) -> None:
+        for name in (
+            "steps",
+            "batch_size",
+            "block_size",
+            "seed",
+            "eval_interval",
+            "eval_batch_size",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+        for name in (
+            "steps",
+            "batch_size",
+            "block_size",
+            "eval_interval",
+            "eval_batch_size",
+        ):
+            if getattr(self, name) <= 0:
+                raise GPTBigramError(f"{name} must be positive")
+        if (
+            isinstance(self.learning_rate, bool)
+            or not isinstance(self.learning_rate, (int, float))
+            or not isfinite(self.learning_rate)
+            or self.learning_rate <= 0
+        ):
+            raise GPTBigramError("learning_rate must be positive and finite")
 
 
 def tokenize_and_split(
