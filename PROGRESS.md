@@ -1,6 +1,6 @@
 # Progress and Evidence
 
-Last updated: 2026-10-07
+Last updated: 2026-10-08
 
 This file separates repository-verifiable work from activities that require the
 learner's own completion evidence.
@@ -39,6 +39,7 @@ learner's own completion evidence.
 | 31 | Engineering-only predeclared ablation protocol, paired deterministic trials, self-verifying report, CLI, and CI gate present | No primary lecture scheduled; support lecture pending user confirmation | Blank-file manual backward rebuild, personal `cmp()` run, gap log, and explanation pending |
 | 32 | Hierarchical PyTorch module containers, runtime shape trace, deterministic training, exact restart, sampling, self-verifying report, CLI, and CI gate present | Primary and support lectures pending user confirmation | Learner type-along, module-container explanation, experiment run, and BERT comparison pending |
 | 33 | Independent raw-parameter rebuild, forward and parameter-gradient equivalence, finite-difference audit, deterministic training, exact dropout resume, bounded memorization gate, CLI, and CI evidence present | No primary lecture scheduled; support lecture pending user confirmation | Learner blank-file WaveNet rebuild, support-video confirmation, own experiment and gap log, and personal halfway reflection pending |
+| 34 | Checksum-pinned Tiny Shakespeare loader, character bigram baseline, exhaustive held-out evaluation, exact restart, tamper-evident report, installed CLI, and CI gate present | Primary and support lectures pending user confirmation | Learner type-along, independent run with seed/output paths, logit-table explanation, and NLL interpretation pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,

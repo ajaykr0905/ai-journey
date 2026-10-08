@@ -1,7 +1,7 @@
-# AI Journey: Days 0–33
+# AI Journey: Days 0–34
 
 This repository is a public-safe, executable record of an added setup day plus the
-selected work through Day 33 of a 90-day AI engineering learning plan. It combines
+selected work through Day 34 of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -72,6 +72,9 @@ then grow these exercises into production-quality training and inference project
   activation, gradient, update, reproducibility, sampling, footprint, and
   tamper-evident report contracts in
   [`scripts/certify_day_33.py`](scripts/certify_day_33.py)
+- A checksum-pinned Tiny Shakespeare character bigram baseline with exhaustive
+  held-out evaluation, exact restart, deterministic sampling, and tamper-evident
+  evidence in [`scripts/run_day_34.py`](scripts/run_day_34.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -151,8 +154,27 @@ python scripts/run_day_33.py \
 python scripts/certify_day_33.py \
   --corpus data/day-19-demo-names.txt \
   --output artifacts/day-33-certification.json
+ai-journey-day-34 \
+  --corpus artifacts/tinyshakespeare.txt \
+  --download \
+  --output artifacts/day-34-bigram.json \
+  --checkpoint artifacts/day-34-bigram.pt
 python -m unittest discover -s tests -v
 ```
+
+## Train the Tiny Shakespeare baseline
+
+The Day 34 command fetches the exact checksum-pinned public corpus, trains a
+seeded character bigram model, evaluates every consecutive pair in the ordered
+held-out suffix, writes a complete restart checkpoint, and publishes a
+self-verifying JSON report. Re-running with the same source and controls produces
+the same update trace, sample, and model fingerprint. Interrupted training can
+restore the model, AdamW state, and sampling RNG without changing later updates.
+
+The corpus is downloaded rather than vendored. This remains a small CPU baseline,
+not a transformer-quality, GPU, distributed, or production claim. See
+[`days/day-34.md`](days/day-34.md) for the evidence contract and learner work that
+still requires Ajay's own confirmation.
 
 ## Resume transformer checkpoints safely
 
@@ -262,6 +284,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 31 | 2026-10-05 | Predeclared paired transformer ablation protocol and evidence gate |
 | 32 | 2026-10-06 | Hierarchical character model, module containers, and exact restart |
 | 33 | 2026-10-07 | Primitive WaveNet rebuild, equivalence audits, and exact resume |
+| 34 | 2026-10-08 | Tiny Shakespeare character bigram and training loop |
 
 ## License
 
