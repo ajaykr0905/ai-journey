@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import os
+import pickle
 import tempfile
 from dataclasses import asdict, dataclass
 from hashlib import sha256
@@ -490,6 +491,84 @@ def save_checkpoint(path: Path, payload: dict[str, object]) -> None:
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
+
+
+def validate_checkpoint_payload(payload: object) -> dict[str, object]:
+    """Reject incomplete, unknown, or structurally invalid restart state."""
+
+    if not isinstance(payload, dict):
+        raise GPTBigramError("checkpoint payload must be a dictionary")
+    expected = {
+        "format_version",
+        "step",
+        "vocabulary",
+        "source_sha256",
+        "config",
+        "model_state",
+        "optimizer_state",
+        "sampler_rng_state",
+        "model_fingerprint",
+    }
+    if set(payload) != expected:
+        missing = sorted(expected - set(payload))
+        unknown = sorted(set(payload) - expected)
+        raise GPTBigramError(
+            f"checkpoint fields do not match schema; missing={missing}, unknown={unknown}"
+        )
+    if payload["format_version"] != 1:
+        raise GPTBigramError("unsupported checkpoint format_version")
+    step = payload["step"]
+    if isinstance(step, bool) or not isinstance(step, int) or step < 0:
+        raise GPTBigramError("checkpoint step must be a non-negative integer")
+    vocabulary = payload["vocabulary"]
+    if not isinstance(vocabulary, tuple):
+        raise GPTBigramError("checkpoint vocabulary must be a tuple")
+    CharacterVocabulary(vocabulary)
+    source_digest = payload["source_sha256"]
+    if not isinstance(source_digest, str) or len(source_digest) != 64:
+        raise GPTBigramError("checkpoint source_sha256 is invalid")
+    config = payload["config"]
+    if not isinstance(config, dict):
+        raise GPTBigramError("checkpoint config must be a dictionary")
+    try:
+        BigramTrainingConfig(**config)
+    except (TypeError, GPTBigramError) as exc:
+        raise GPTBigramError("checkpoint config is invalid") from exc
+    model_state = payload["model_state"]
+    if not isinstance(model_state, dict) or set(model_state) != {
+        "token_embedding_table.weight"
+    }:
+        raise GPTBigramError("checkpoint model_state is invalid")
+    weight = model_state["token_embedding_table.weight"]
+    if (
+        not isinstance(weight, Tensor)
+        or weight.ndim != 2
+        or weight.shape[0] != weight.shape[1]
+        or weight.shape[0] != len(vocabulary)
+        or not bool(torch.isfinite(weight).all())
+    ):
+        raise GPTBigramError("checkpoint model weight is invalid")
+    if not isinstance(payload["optimizer_state"], dict):
+        raise GPTBigramError("checkpoint optimizer_state must be a dictionary")
+    sampler_state = payload["sampler_rng_state"]
+    if not isinstance(sampler_state, Tensor) or sampler_state.dtype != torch.uint8:
+        raise GPTBigramError("checkpoint sampler_rng_state is invalid")
+    fingerprint = payload["model_fingerprint"]
+    if not isinstance(fingerprint, str) or len(fingerprint) != 64:
+        raise GPTBigramError("checkpoint model_fingerprint is invalid")
+    return payload
+
+
+def load_checkpoint(path: Path) -> dict[str, object]:
+    """Load a local tensor-only checkpoint and validate its complete schema."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    try:
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+    except (OSError, RuntimeError, EOFError, pickle.UnpicklingError) as exc:
+        raise GPTBigramError(f"unable to load checkpoint: {path}") from exc
+    return validate_checkpoint_payload(payload)
 
 
 TINY_SHAKESPEARE = CorpusSource(

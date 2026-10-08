@@ -20,6 +20,7 @@ from ai_journey.gpt_bigram import (
     build_checkpoint_payload,
     evaluate_partition,
     generate_tokens,
+    load_checkpoint,
     load_verified_corpus,
     model_fingerprint,
     next_token_loss,
@@ -308,6 +309,20 @@ class BigramLanguageModelTests(unittest.TestCase):
             loaded = torch.load(path, map_location="cpu", weights_only=True)
             self.assertEqual(loaded["model_fingerprint"], payload["model_fingerprint"])
             self.assertEqual(list(path.parent.glob(".*.tmp")), [])
+
+    def test_checkpoint_loader_rejects_unknown_or_missing_fields(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "bad.pt")
+            torch.save({"format_version": 1, "unknown": True}, path)
+            with self.assertRaisesRegex(GPTBigramError, "fields do not match"):
+                load_checkpoint(path)
+
+    def test_checkpoint_loader_rejects_truncated_archives(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "truncated.pt")
+            path.write_bytes(b"not a torch archive")
+            with self.assertRaisesRegex(GPTBigramError, "unable to load"):
+                load_checkpoint(path)
 
 
 if __name__ == "__main__":
