@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+from pathlib import Path
 
 
 class GPTBigramError(ValueError):
@@ -72,3 +73,15 @@ def validate_corpus_bytes(payload: bytes, source: CorpusSource) -> str:
     if len(text) < 2:
         raise GPTBigramError("corpus must contain at least two characters")
     return text
+
+
+def load_verified_corpus(path: Path, source: CorpusSource) -> str:
+    """Read a local corpus snapshot and enforce its pinned source contract."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    try:
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise GPTBigramError(f"unable to read corpus snapshot: {path}") from exc
+    return validate_corpus_bytes(payload, source)

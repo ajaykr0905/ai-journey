@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import unittest
 from hashlib import sha256
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from ai_journey.gpt_bigram import (
     CorpusSource,
     GPTBigramError,
     TINY_SHAKESPEARE,
+    load_verified_corpus,
     validate_corpus_bytes,
 )
 
@@ -50,6 +53,18 @@ class CorpusBytesTests(unittest.TestCase):
             validate_corpus_bytes(payload[:-1], source)
         with self.assertRaisesRegex(GPTBigramError, "sha256 mismatch"):
             validate_corpus_bytes(b"abce", source)
+
+    def test_loads_only_a_matching_local_snapshot(self) -> None:
+        payload = b"To be, or not to be.\n"
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "input.txt")
+            path.write_bytes(payload)
+            self.assertEqual(
+                load_verified_corpus(path, source_for(payload)), payload.decode()
+            )
+            path.write_bytes(payload + b"changed")
+            with self.assertRaisesRegex(GPTBigramError, "byte count mismatch"):
+                load_verified_corpus(path, source_for(payload))
 
 
 if __name__ == "__main__":
