@@ -8,6 +8,7 @@ from pathlib import Path
 
 import torch
 from torch import Tensor
+from torch import nn
 
 
 class GPTBigramError(ValueError):
@@ -178,6 +179,38 @@ class WindowBatcher:
             self._generator.set_state(state.detach().clone())
         except RuntimeError as exc:
             raise GPTBigramError("state is not a valid CPU generator state") from exc
+
+
+class BigramLanguageModel(nn.Module):
+    """One learned logit row for every current character id."""
+
+    def __init__(self, vocab_size: int, *, seed: int) -> None:
+        super().__init__()
+        for name, value in (("vocab_size", vocab_size), ("seed", seed)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+        if vocab_size < 2:
+            raise GPTBigramError("vocab_size must be at least two")
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(seed)
+            self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+
+    @property
+    def vocab_size(self) -> int:
+        return self.token_embedding_table.num_embeddings
+
+    def forward(self, token_ids: Tensor) -> Tensor:
+        if not isinstance(token_ids, Tensor):
+            raise TypeError("token_ids must be a torch.Tensor")
+        if token_ids.dtype != torch.long:
+            raise GPTBigramError("token_ids must use torch.long")
+        if token_ids.ndim not in {1, 2}:
+            raise GPTBigramError("token_ids must have rank one or two")
+        if token_ids.numel() == 0:
+            raise GPTBigramError("token_ids must not be empty")
+        if int(token_ids.min()) < 0 or int(token_ids.max()) >= self.vocab_size:
+            raise GPTBigramError("token_ids contain an out-of-range id")
+        return self.token_embedding_table(token_ids)
 
 
 TINY_SHAKESPEARE = CorpusSource(

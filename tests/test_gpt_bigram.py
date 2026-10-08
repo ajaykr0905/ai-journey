@@ -9,6 +9,7 @@ import torch
 
 from ai_journey.gpt_bigram import (
     CharacterVocabulary,
+    BigramLanguageModel,
     CorpusSource,
     GPTBigramError,
     TINY_SHAKESPEARE,
@@ -134,6 +135,24 @@ class WindowBatcherTests(unittest.TestCase):
         state = batcher.rng_state()
         state.zero_()
         self.assertFalse(torch.equal(state, batcher.rng_state()))
+
+
+class BigramLanguageModelTests(unittest.TestCase):
+    def test_maps_each_input_id_to_one_next_token_logit_row(self) -> None:
+        model = BigramLanguageModel(5, seed=34)
+        token_ids = torch.tensor([[0, 2, 4], [4, 2, 0]])
+        logits = model(token_ids)
+        self.assertEqual(tuple(logits.shape), (2, 3, 5))
+        self.assertTrue(torch.equal(logits[0, 0], logits[1, 2]))
+        self.assertTrue(torch.equal(logits[0, 1], logits[1, 1]))
+
+    def test_seeded_initialization_does_not_mutate_global_rng(self) -> None:
+        torch.manual_seed(99)
+        expected = torch.rand(3)
+        torch.manual_seed(99)
+        BigramLanguageModel(4, seed=12)
+        actual = torch.rand(3)
+        self.assertTrue(torch.equal(expected, actual))
 
 
 if __name__ == "__main__":
