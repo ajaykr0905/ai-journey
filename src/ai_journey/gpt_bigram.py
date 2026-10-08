@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import os
 import pickle
 import tempfile
@@ -803,3 +804,94 @@ def run_bigram_experiment(
         completed_step=config.steps,
     )
     return experiment, model, optimizer, batcher, vocabulary
+
+
+def _canonical_json_bytes(payload: dict[str, object]) -> bytes:
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def build_experiment_report(experiment: BigramExperiment) -> dict[str, object]:
+    """Build a canonical, tamper-evident JSON-safe experiment report."""
+
+    if not isinstance(experiment, BigramExperiment):
+        raise TypeError("experiment must be BigramExperiment")
+    report: dict[str, object] = {
+        "schema_version": 1,
+        "source_sha256": experiment.source_sha256,
+        "character_count": experiment.character_count,
+        "vocabulary_size": experiment.vocabulary_size,
+        "train_token_count": experiment.train_token_count,
+        "validation_token_count": experiment.validation_token_count,
+        "config": asdict(experiment.config),
+        "metrics": {
+            "initial_train_nll": experiment.initial_train_nll,
+            "initial_validation_nll": experiment.initial_validation_nll,
+            "final_train_nll": experiment.final_train_nll,
+            "final_validation_nll": experiment.final_validation_nll,
+        },
+        "trace": [asdict(point) for point in experiment.trace],
+        "sample": experiment.sample,
+        "model_fingerprint": experiment.model_fingerprint,
+        "completed_step": experiment.completed_step,
+        "limitations": [
+            "CPU character-bigram baseline; not a transformer quality result",
+            "One ordered held-out split; no uncertainty or statistical significance claim",
+            "Generated text is a seeded diagnostic sample, not a quality benchmark",
+        ],
+    }
+    report["report_sha256"] = sha256(_canonical_json_bytes(report)).hexdigest()
+    return report
+
+
+def verify_experiment_report(report: object) -> None:
+    """Reject report edits that are not reflected in its canonical digest."""
+
+    if not isinstance(report, dict):
+        raise GPTBigramError("report must be a dictionary")
+    if report.get("schema_version") != 1:
+        raise GPTBigramError("unsupported report schema_version")
+    fingerprint = report.get("report_sha256")
+    if not isinstance(fingerprint, str) or len(fingerprint) != 64:
+        raise GPTBigramError("report_sha256 is invalid")
+    unsigned = dict(report)
+    del unsigned["report_sha256"]
+    expected = sha256(_canonical_json_bytes(unsigned)).hexdigest()
+    if fingerprint != expected:
+        raise GPTBigramError("report fingerprint does not match its contents")
+
+
+def write_experiment_report(path: Path, report: dict[str, object]) -> None:
+    """Verify and atomically publish one canonical JSON experiment report."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    verify_experiment_report(report)
+    payload = json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    except OSError as exc:
+        raise GPTBigramError(f"unable to publish experiment report: {path}") from exc
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)

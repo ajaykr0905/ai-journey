@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import json
 import unittest
 from hashlib import sha256
 from io import BytesIO
@@ -21,6 +22,7 @@ from ai_journey.gpt_bigram import (
     TrainingStep,
     WindowBatcher,
     build_checkpoint_payload,
+    build_experiment_report,
     evaluate_partition,
     fetch_verified_corpus,
     generate_tokens,
@@ -34,6 +36,8 @@ from ai_journey.gpt_bigram import (
     tokenize_and_split,
     train_steps,
     validate_corpus_bytes,
+    verify_experiment_report,
+    write_experiment_report,
 )
 
 
@@ -504,6 +508,18 @@ class BigramLanguageModelTests(unittest.TestCase):
         self.assertIsInstance(optimizer, torch.optim.AdamW)
         self.assertIsInstance(batcher, WindowBatcher)
         self.assertEqual(experiment.vocabulary_size, len(vocabulary.tokens))
+
+        report = build_experiment_report(experiment)
+        verify_experiment_report(report)
+        tampered = dict(report)
+        tampered["sample"] = "changed"
+        with self.assertRaisesRegex(GPTBigramError, "fingerprint"):
+            verify_experiment_report(tampered)
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "nested", "report.json")
+            write_experiment_report(path, report)
+            self.assertEqual(json.loads(path.read_text()), report)
+            self.assertEqual(list(path.parent.glob(".*.tmp")), [])
 
 
 if __name__ == "__main__":
