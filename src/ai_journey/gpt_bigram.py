@@ -356,6 +356,50 @@ def train_steps(
     return tuple(trace)
 
 
+def generate_tokens(
+    model: BigramLanguageModel,
+    *,
+    start_token_id: int,
+    max_new_tokens: int,
+    seed: int,
+    temperature: float = 1.0,
+) -> tuple[int, ...]:
+    """Sample a bounded continuation with an isolated CPU generator."""
+
+    if not isinstance(model, BigramLanguageModel):
+        raise TypeError("model must be BigramLanguageModel")
+    for name, value in (
+        ("start_token_id", start_token_id),
+        ("max_new_tokens", max_new_tokens),
+        ("seed", seed),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"{name} must be an integer")
+    if not 0 <= start_token_id < model.vocab_size:
+        raise GPTBigramError("start_token_id is out of range")
+    if max_new_tokens <= 0:
+        raise GPTBigramError("max_new_tokens must be positive")
+    if (
+        isinstance(temperature, bool)
+        or not isinstance(temperature, (int, float))
+        or not isfinite(temperature)
+        or temperature <= 0
+    ):
+        raise GPTBigramError("temperature must be positive and finite")
+    generator = torch.Generator(device="cpu").manual_seed(seed)
+    was_training = model.training
+    model.eval()
+    token_ids = [start_token_id]
+    with torch.no_grad():
+        for _ in range(max_new_tokens):
+            logits = model(torch.tensor([token_ids[-1]], dtype=torch.long))[0]
+            probabilities = F.softmax(logits / temperature, dim=-1)
+            next_id = int(torch.multinomial(probabilities, 1, generator=generator))
+            token_ids.append(next_id)
+    model.train(was_training)
+    return tuple(token_ids)
+
+
 TINY_SHAKESPEARE = CorpusSource(
     name="Tiny Shakespeare",
     url=(

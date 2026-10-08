@@ -18,6 +18,7 @@ from ai_journey.gpt_bigram import (
     TrainingStep,
     WindowBatcher,
     evaluate_partition,
+    generate_tokens,
     load_verified_corpus,
     next_token_loss,
     tokenize_and_split,
@@ -232,6 +233,25 @@ class BigramLanguageModelTests(unittest.TestCase):
         self.assertEqual(trace[-1].step, 30)
         self.assertTrue(all(isinstance(point, TrainingStep) for point in trace))
         self.assertLess(evaluate_partition(model, tokens), initial)
+
+    def test_generation_is_seeded_bounded_and_mode_preserving(self) -> None:
+        model = BigramLanguageModel(4, seed=2)
+        model.train()
+        first = generate_tokens(model, start_token_id=0, max_new_tokens=12, seed=9)
+        second = generate_tokens(model, start_token_id=0, max_new_tokens=12, seed=9)
+        self.assertEqual(first, second)
+        self.assertEqual(len(first), 13)
+        self.assertTrue(all(0 <= token_id < 4 for token_id in first))
+        self.assertTrue(model.training)
+
+    def test_generation_rejects_unbounded_or_invalid_controls(self) -> None:
+        model = BigramLanguageModel(3, seed=2)
+        with self.assertRaisesRegex(GPTBigramError, "max_new_tokens"):
+            generate_tokens(model, start_token_id=0, max_new_tokens=0, seed=1)
+        with self.assertRaisesRegex(GPTBigramError, "temperature"):
+            generate_tokens(
+                model, start_token_id=0, max_new_tokens=1, seed=1, temperature=0
+            )
 
 
 if __name__ == "__main__":
