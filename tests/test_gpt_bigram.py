@@ -11,6 +11,7 @@ from ai_journey.gpt_bigram import (
     GPTBigramError,
     TINY_SHAKESPEARE,
     load_verified_corpus,
+    tokenize_and_split,
     validate_corpus_bytes,
 )
 
@@ -82,6 +83,22 @@ class CharacterVocabularyTests(unittest.TestCase):
             vocabulary.encode("abd")
         with self.assertRaisesRegex(GPTBigramError, "out of range"):
             vocabulary.decode([3])
+
+
+class CorpusSplitTests(unittest.TestCase):
+    def test_uses_a_contiguous_held_out_suffix(self) -> None:
+        text = "abcdefghij"
+        vocabulary = CharacterVocabulary.from_text(text)
+        split = tokenize_and_split(text, vocabulary, validation_fraction=0.2)
+        self.assertEqual(split.split_index, 8)
+        self.assertEqual(vocabulary.decode(split.train.tolist()), "abcdefgh")
+        self.assertEqual(vocabulary.decode(split.validation.tolist()), "ij")
+        self.assertEqual(split.train.dtype, split.validation.dtype)
+
+    def test_rejects_partitions_too_short_for_next_token_targets(self) -> None:
+        vocabulary = CharacterVocabulary.from_text("abcd")
+        with self.assertRaisesRegex(GPTBigramError, "at least two"):
+            tokenize_and_split("abcd", vocabulary, validation_fraction=0.25)
 
 
 if __name__ == "__main__":

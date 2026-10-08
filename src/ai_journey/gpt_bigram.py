@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 
+import torch
+from torch import Tensor
+
 
 class GPTBigramError(ValueError):
     """Raised when Day 34 data, model, or evidence contracts are invalid."""
@@ -76,6 +79,44 @@ class CharacterVocabulary:
                 raise GPTBigramError(f"token id out of range: {token_id}")
             decoded.append(self.tokens[token_id])
         return "".join(decoded)
+
+
+@dataclass(frozen=True)
+class CorpusSplit:
+    """Ordered train and held-out token partitions."""
+
+    train: Tensor
+    validation: Tensor
+    split_index: int
+
+
+def tokenize_and_split(
+    text: str,
+    vocabulary: CharacterVocabulary,
+    *,
+    validation_fraction: float = 0.1,
+) -> CorpusSplit:
+    """Encode text and reserve its final contiguous portion for validation."""
+
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+    if not isinstance(vocabulary, CharacterVocabulary):
+        raise TypeError("vocabulary must be CharacterVocabulary")
+    if (
+        isinstance(validation_fraction, bool)
+        or not isinstance(validation_fraction, (int, float))
+        or not 0 < validation_fraction < 1
+    ):
+        raise GPTBigramError("validation_fraction must be between zero and one")
+    tokens = torch.tensor(vocabulary.encode(text), dtype=torch.long)
+    split_index = int(len(tokens) * (1 - validation_fraction))
+    if split_index < 2 or len(tokens) - split_index < 2:
+        raise GPTBigramError("train and validation partitions need at least two tokens")
+    return CorpusSplit(
+        train=tokens[:split_index].clone(),
+        validation=tokens[split_index:].clone(),
+        split_index=split_index,
+    )
 
 
 TINY_SHAKESPEARE = CorpusSource(
