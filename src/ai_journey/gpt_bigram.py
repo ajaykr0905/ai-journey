@@ -400,6 +400,21 @@ def generate_tokens(
     return tuple(token_ids)
 
 
+def model_fingerprint(model: BigramLanguageModel) -> str:
+    """Hash parameter names, dtypes, shapes, and exact CPU tensor bytes."""
+
+    if not isinstance(model, BigramLanguageModel):
+        raise TypeError("model must be BigramLanguageModel")
+    digest = sha256()
+    for name, tensor in sorted(model.state_dict().items()):
+        value = tensor.detach().cpu().contiguous()
+        digest.update(name.encode())
+        digest.update(str(value.dtype).encode())
+        digest.update(str(tuple(value.shape)).encode())
+        digest.update(value.numpy().tobytes())
+    return digest.hexdigest()
+
+
 TINY_SHAKESPEARE = CorpusSource(
     name="Tiny Shakespeare",
     url=(

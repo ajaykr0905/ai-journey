@@ -20,6 +20,7 @@ from ai_journey.gpt_bigram import (
     evaluate_partition,
     generate_tokens,
     load_verified_corpus,
+    model_fingerprint,
     next_token_loss,
     tokenize_and_split,
     train_steps,
@@ -252,6 +253,14 @@ class BigramLanguageModelTests(unittest.TestCase):
             generate_tokens(
                 model, start_token_id=0, max_new_tokens=1, seed=1, temperature=0
             )
+
+    def test_model_fingerprint_binds_exact_parameters(self) -> None:
+        first = BigramLanguageModel(3, seed=8)
+        second = BigramLanguageModel(3, seed=8)
+        self.assertEqual(model_fingerprint(first), model_fingerprint(second))
+        with torch.no_grad():
+            second.token_embedding_table.weight[0, 0] += 1
+        self.assertNotEqual(model_fingerprint(first), model_fingerprint(second))
 
 
 if __name__ == "__main__":
