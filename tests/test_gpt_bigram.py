@@ -16,6 +16,7 @@ from ai_journey.gpt_bigram import (
     GPTBigramError,
     TINY_SHAKESPEARE,
     WindowBatcher,
+    evaluate_partition,
     load_verified_corpus,
     next_token_loss,
     tokenize_and_split,
@@ -194,6 +195,22 @@ class BigramLanguageModelTests(unittest.TestCase):
         model = BigramLanguageModel(3, seed=1)
         with self.assertRaisesRegex(GPTBigramError, "same rank-two shape"):
             next_token_loss(model, torch.tensor([[0, 1]]), torch.tensor([[1]]))
+
+    def test_evaluation_covers_every_pair_without_sampling(self) -> None:
+        model = BigramLanguageModel(3, seed=1)
+        with torch.no_grad():
+            model.token_embedding_table.weight.zero_()
+        tokens = torch.tensor([0, 1, 2, 0, 2, 1])
+        model.train()
+        self.assertAlmostEqual(
+            evaluate_partition(model, tokens, chunk_size=2), math.log(3), places=6
+        )
+        self.assertTrue(model.training)
+
+    def test_evaluation_rejects_empty_pair_sets(self) -> None:
+        model = BigramLanguageModel(3, seed=1)
+        with self.assertRaisesRegex(GPTBigramError, "length at least two"):
+            evaluate_partition(model, torch.tensor([0]))
 
 
 if __name__ == "__main__":

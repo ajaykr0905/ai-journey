@@ -274,6 +274,38 @@ def next_token_loss(
     return F.cross_entropy(logits.reshape(-1, model.vocab_size), targets.reshape(-1))
 
 
+def evaluate_partition(
+    model: BigramLanguageModel, tokens: Tensor, *, chunk_size: int = 16_384
+) -> float:
+    """Compute deterministic NLL over every consecutive pair in a partition."""
+
+    if not isinstance(model, BigramLanguageModel):
+        raise TypeError("model must be BigramLanguageModel")
+    if not isinstance(tokens, Tensor):
+        raise TypeError("tokens must be a torch.Tensor")
+    if tokens.ndim != 1 or tokens.dtype != torch.long or len(tokens) < 2:
+        raise GPTBigramError(
+            "tokens must be one-dimensional torch.long with length at least two"
+        )
+    if isinstance(chunk_size, bool) or not isinstance(chunk_size, int):
+        raise TypeError("chunk_size must be an integer")
+    if chunk_size <= 0:
+        raise GPTBigramError("chunk_size must be positive")
+    was_training = model.training
+    model.eval()
+    total = 0.0
+    pair_count = len(tokens) - 1
+    with torch.no_grad():
+        for start in range(0, pair_count, chunk_size):
+            end = min(start + chunk_size, pair_count)
+            logits = model(tokens[start:end])
+            total += float(
+                F.cross_entropy(logits, tokens[start + 1 : end + 1], reduction="sum")
+            )
+    model.train(was_training)
+    return total / pair_count
+
+
 TINY_SHAKESPEARE = CorpusSource(
     name="Tiny Shakespeare",
     url=(
