@@ -24,6 +24,7 @@ from ai_journey.gpt_bigram import (
     load_verified_corpus,
     model_fingerprint,
     next_token_loss,
+    restore_checkpoint,
     save_checkpoint,
     tokenize_and_split,
     train_steps,
@@ -323,6 +324,50 @@ class BigramLanguageModelTests(unittest.TestCase):
             path.write_bytes(b"not a torch archive")
             with self.assertRaisesRegex(GPTBigramError, "unable to load"):
                 load_checkpoint(path)
+
+    def test_checkpoint_restore_enforces_source_and_recovers_exact_model(self) -> None:
+        vocabulary = CharacterVocabulary.from_text("abc")
+        source = source_for(b"abc")
+        config = BigramTrainingConfig(block_size=2)
+        model = BigramLanguageModel(3, seed=4)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
+        batcher = WindowBatcher(torch.tensor([0, 1, 2, 0]), block_size=2, seed=5)
+        payload = build_checkpoint_payload(
+            model,
+            optimizer,
+            batcher,
+            step=3,
+            vocabulary=vocabulary,
+            source=source,
+            config=config,
+        )
+        expected_fingerprint = model_fingerprint(model)
+        with torch.no_grad():
+            model.token_embedding_table.weight.zero_()
+        self.assertEqual(
+            restore_checkpoint(
+                payload,
+                model,
+                optimizer,
+                batcher,
+                vocabulary=vocabulary,
+                source=source,
+                config=config,
+            ),
+            3,
+        )
+        self.assertEqual(model_fingerprint(model), expected_fingerprint)
+        wrong_source = source_for(b"abd")
+        with self.assertRaisesRegex(GPTBigramError, "source digest"):
+            restore_checkpoint(
+                payload,
+                model,
+                optimizer,
+                batcher,
+                vocabulary=vocabulary,
+                source=wrong_source,
+                config=config,
+            )
 
 
 if __name__ == "__main__":

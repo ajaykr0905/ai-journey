@@ -571,6 +571,47 @@ def load_checkpoint(path: Path) -> dict[str, object]:
     return validate_checkpoint_payload(payload)
 
 
+def restore_checkpoint(
+    payload: object,
+    model: BigramLanguageModel,
+    optimizer: torch.optim.Optimizer,
+    batcher: WindowBatcher,
+    *,
+    vocabulary: CharacterVocabulary,
+    source: CorpusSource,
+    config: BigramTrainingConfig,
+) -> int:
+    """Validate compatibility before restoring model, optimizer, and sampler state."""
+
+    checkpoint = validate_checkpoint_payload(payload)
+    if checkpoint["vocabulary"] != vocabulary.tokens:
+        raise GPTBigramError("checkpoint vocabulary does not match the corpus")
+    if checkpoint["source_sha256"] != source.sha256:
+        raise GPTBigramError("checkpoint source digest does not match the corpus")
+    if checkpoint["config"] != asdict(config):
+        raise GPTBigramError("checkpoint training config does not match")
+    candidate = BigramLanguageModel(len(vocabulary.tokens), seed=0)
+    try:
+        candidate.load_state_dict(checkpoint["model_state"], strict=True)
+    except RuntimeError as exc:
+        raise GPTBigramError("checkpoint model state is incompatible") from exc
+    if model_fingerprint(candidate) != checkpoint["model_fingerprint"]:
+        raise GPTBigramError("checkpoint model fingerprint does not match its tensors")
+    original_model = copy.deepcopy(model.state_dict())
+    original_optimizer = copy.deepcopy(optimizer.state_dict())
+    original_sampler = batcher.rng_state()
+    try:
+        model.load_state_dict(checkpoint["model_state"], strict=True)
+        optimizer.load_state_dict(checkpoint["optimizer_state"])
+        batcher.restore_rng_state(checkpoint["sampler_rng_state"])
+    except (RuntimeError, ValueError, GPTBigramError) as exc:
+        model.load_state_dict(original_model, strict=True)
+        optimizer.load_state_dict(original_optimizer)
+        batcher.restore_rng_state(original_sampler)
+        raise GPTBigramError("checkpoint state could not be restored") from exc
+    return int(checkpoint["step"])
+
+
 TINY_SHAKESPEARE = CorpusSource(
     name="Tiny Shakespeare",
     url=(
