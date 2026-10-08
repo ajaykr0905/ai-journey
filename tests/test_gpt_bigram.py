@@ -369,6 +369,83 @@ class BigramLanguageModelTests(unittest.TestCase):
                 config=config,
             )
 
+    def test_interrupted_training_replays_the_uninterrupted_control(self) -> None:
+        vocabulary = CharacterVocabulary.from_text("abc")
+        tokens = torch.tensor(([0, 1, 2] * 20) + [0])
+        source = source_for(b"abc")
+        config = BigramTrainingConfig(
+            steps=10, batch_size=6, block_size=3, learning_rate=0.02, seed=17
+        )
+
+        control_model = BigramLanguageModel(3, seed=config.seed)
+        control_optimizer = torch.optim.AdamW(
+            control_model.parameters(), lr=config.learning_rate
+        )
+        control_batcher = WindowBatcher(
+            tokens, block_size=config.block_size, seed=config.seed + 1
+        )
+        control_trace = train_steps(
+            control_model,
+            control_optimizer,
+            control_batcher,
+            start_step=0,
+            steps=config.steps,
+            batch_size=config.batch_size,
+        )
+
+        first_model = BigramLanguageModel(3, seed=config.seed)
+        first_optimizer = torch.optim.AdamW(
+            first_model.parameters(), lr=config.learning_rate
+        )
+        first_batcher = WindowBatcher(
+            tokens, block_size=config.block_size, seed=config.seed + 1
+        )
+        first_trace = train_steps(
+            first_model,
+            first_optimizer,
+            first_batcher,
+            start_step=0,
+            steps=4,
+            batch_size=config.batch_size,
+        )
+        payload = build_checkpoint_payload(
+            first_model,
+            first_optimizer,
+            first_batcher,
+            step=4,
+            vocabulary=vocabulary,
+            source=source,
+            config=config,
+        )
+
+        resumed_model = BigramLanguageModel(3, seed=999)
+        resumed_optimizer = torch.optim.AdamW(
+            resumed_model.parameters(), lr=config.learning_rate
+        )
+        resumed_batcher = WindowBatcher(tokens, block_size=config.block_size, seed=999)
+        restored_step = restore_checkpoint(
+            payload,
+            resumed_model,
+            resumed_optimizer,
+            resumed_batcher,
+            vocabulary=vocabulary,
+            source=source,
+            config=config,
+        )
+        resumed_trace = train_steps(
+            resumed_model,
+            resumed_optimizer,
+            resumed_batcher,
+            start_step=restored_step,
+            steps=config.steps - restored_step,
+            batch_size=config.batch_size,
+        )
+        self.assertEqual(first_trace, control_trace[:4])
+        self.assertEqual(resumed_trace, control_trace[4:])
+        self.assertEqual(
+            model_fingerprint(resumed_model), model_fingerprint(control_model)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
