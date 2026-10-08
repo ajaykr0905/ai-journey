@@ -23,6 +23,7 @@ from ai_journey.gpt_bigram import (
     load_verified_corpus,
     model_fingerprint,
     next_token_loss,
+    save_checkpoint,
     tokenize_and_split,
     train_steps,
     validate_corpus_bytes,
@@ -288,6 +289,25 @@ class BigramLanguageModelTests(unittest.TestCase):
                 captured, payload["model_state"]["token_embedding_table.weight"]
             )
         )
+
+    def test_checkpoint_publication_is_complete_and_leaves_no_temporary(self) -> None:
+        vocabulary = CharacterVocabulary.from_text("abc")
+        model = BigramLanguageModel(3, seed=4)
+        payload = build_checkpoint_payload(
+            model,
+            torch.optim.AdamW(model.parameters()),
+            WindowBatcher(torch.tensor([0, 1, 2, 0]), block_size=2, seed=5),
+            step=0,
+            vocabulary=vocabulary,
+            source=source_for(b"abc"),
+            config=BigramTrainingConfig(block_size=2),
+        )
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "nested", "checkpoint.pt")
+            save_checkpoint(path, payload)
+            loaded = torch.load(path, map_location="cpu", weights_only=True)
+            self.assertEqual(loaded["model_fingerprint"], payload["model_fingerprint"])
+            self.assertEqual(list(path.parent.glob(".*.tmp")), [])
 
 
 if __name__ == "__main__":

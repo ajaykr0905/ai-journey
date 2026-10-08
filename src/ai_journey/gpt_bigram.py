@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import os
+import tempfile
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from math import isfinite
@@ -458,6 +460,36 @@ def build_checkpoint_payload(
         "sampler_rng_state": batcher.rng_state(),
         "model_fingerprint": model_fingerprint(model),
     }
+
+
+def save_checkpoint(path: Path, payload: dict[str, object]) -> None:
+    """Flush a complete checkpoint before atomically replacing its destination."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if not isinstance(payload, dict):
+        raise TypeError("payload must be a dictionary")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            torch.save(payload, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    except OSError as exc:
+        raise GPTBigramError(f"unable to publish checkpoint: {path}") from exc
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 TINY_SHAKESPEARE = CorpusSource(
