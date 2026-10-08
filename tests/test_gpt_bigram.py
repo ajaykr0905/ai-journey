@@ -5,11 +5,14 @@ from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import torch
+
 from ai_journey.gpt_bigram import (
     CharacterVocabulary,
     CorpusSource,
     GPTBigramError,
     TINY_SHAKESPEARE,
+    WindowBatcher,
     load_verified_corpus,
     tokenize_and_split,
     validate_corpus_bytes,
@@ -99,6 +102,22 @@ class CorpusSplitTests(unittest.TestCase):
         vocabulary = CharacterVocabulary.from_text("abcd")
         with self.assertRaisesRegex(GPTBigramError, "at least two"):
             tokenize_and_split("abcd", vocabulary, validation_fraction=0.25)
+
+
+class WindowBatcherTests(unittest.TestCase):
+    def test_samples_aligned_next_token_windows(self) -> None:
+        tokens = torch.arange(12, dtype=torch.long)
+        inputs, targets = WindowBatcher(tokens, block_size=4, seed=34).sample(3)
+        self.assertEqual(tuple(inputs.shape), (3, 4))
+        self.assertTrue(torch.equal(targets[:, :-1], inputs[:, 1:]))
+        self.assertTrue(torch.equal(targets[:, 0], inputs[:, 0] + 1))
+
+    def test_same_seed_replays_the_same_batches(self) -> None:
+        tokens = torch.arange(20, dtype=torch.long)
+        first = WindowBatcher(tokens, block_size=5, seed=7).sample(4)
+        second = WindowBatcher(tokens, block_size=5, seed=7).sample(4)
+        self.assertTrue(torch.equal(first[0], second[0]))
+        self.assertTrue(torch.equal(first[1], second[1]))
 
 
 if __name__ == "__main__":

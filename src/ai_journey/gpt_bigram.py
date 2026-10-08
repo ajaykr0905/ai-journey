@@ -119,6 +119,50 @@ def tokenize_and_split(
     )
 
 
+class WindowBatcher:
+    """Seeded random sampler for contiguous next-token windows."""
+
+    def __init__(self, tokens: Tensor, *, block_size: int, seed: int) -> None:
+        if not isinstance(tokens, Tensor):
+            raise TypeError("tokens must be a torch.Tensor")
+        if tokens.ndim != 1 or tokens.dtype != torch.long:
+            raise GPTBigramError("tokens must be a one-dimensional torch.long tensor")
+        for name, value in (("block_size", block_size), ("seed", seed)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+        if block_size <= 0:
+            raise GPTBigramError("block_size must be positive")
+        if len(tokens) <= block_size:
+            raise GPTBigramError("tokens must contain more than block_size entries")
+        self._tokens = tokens.detach().clone()
+        self.block_size = block_size
+        self._generator = torch.Generator(device="cpu").manual_seed(seed)
+
+    def sample(self, batch_size: int) -> tuple[Tensor, Tensor]:
+        """Return aligned input and next-token target windows."""
+
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int):
+            raise TypeError("batch_size must be an integer")
+        if batch_size <= 0:
+            raise GPTBigramError("batch_size must be positive")
+        starts = torch.randint(
+            0,
+            len(self._tokens) - self.block_size,
+            (batch_size,),
+            generator=self._generator,
+        )
+        inputs = torch.stack(
+            [self._tokens[index : index + self.block_size] for index in starts.tolist()]
+        )
+        targets = torch.stack(
+            [
+                self._tokens[index + 1 : index + self.block_size + 1]
+                for index in starts.tolist()
+            ]
+        )
+        return inputs, targets
+
+
 TINY_SHAKESPEARE = CorpusSource(
     name="Tiny Shakespeare",
     url=(
