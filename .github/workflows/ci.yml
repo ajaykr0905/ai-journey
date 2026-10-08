@@ -199,6 +199,17 @@ jobs:
           --corpus data/day-19-demo-names.txt
           --output /tmp/ai-journey-artifacts/day-33-certification.json
           --examples 4
+      - name: Train the pinned Tiny Shakespeare bigram baseline
+        run: >-
+          ai-journey-day-34
+          --corpus /tmp/ai-journey-artifacts/tinyshakespeare.txt
+          --download
+          --output /tmp/ai-journey-artifacts/day-34-bigram.json
+          --checkpoint /tmp/ai-journey-artifacts/day-34-bigram.pt
+          --steps 2
+          --batch-size 4
+          --block-size 8
+          --sample-tokens 16
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py
