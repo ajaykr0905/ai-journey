@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from ai_journey.gpt_bigram import (
+    CharacterVocabulary,
     CorpusSource,
     GPTBigramError,
     TINY_SHAKESPEARE,
@@ -65,6 +66,22 @@ class CorpusBytesTests(unittest.TestCase):
             path.write_bytes(payload + b"changed")
             with self.assertRaisesRegex(GPTBigramError, "byte count mismatch"):
                 load_verified_corpus(path, source_for(payload))
+
+
+class CharacterVocabularyTests(unittest.TestCase):
+    def test_round_trips_text_with_stable_sorted_ids(self) -> None:
+        vocabulary = CharacterVocabulary.from_text("cab\nca")
+        self.assertEqual(vocabulary.tokens, ("\n", "a", "b", "c"))
+        encoded = vocabulary.encode("cab\n")
+        self.assertEqual(encoded, (3, 1, 2, 0))
+        self.assertEqual(vocabulary.decode(encoded), "cab\n")
+
+    def test_rejects_unknown_characters_and_invalid_ids(self) -> None:
+        vocabulary = CharacterVocabulary.from_text("abc")
+        with self.assertRaisesRegex(GPTBigramError, "unknown character"):
+            vocabulary.encode("abd")
+        with self.assertRaisesRegex(GPTBigramError, "out of range"):
+            vocabulary.decode([3])
 
 
 if __name__ == "__main__":

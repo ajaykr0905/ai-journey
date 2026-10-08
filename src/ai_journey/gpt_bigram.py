@@ -38,6 +38,46 @@ class CorpusSource:
             raise GPTBigramError("byte_count must be positive")
 
 
+@dataclass(frozen=True)
+class CharacterVocabulary:
+    """Stable character-to-id mapping derived from one corpus."""
+
+    tokens: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.tokens) < 2:
+            raise GPTBigramError("vocabulary requires at least two characters")
+        if any(not isinstance(token, str) or len(token) != 1 for token in self.tokens):
+            raise GPTBigramError("vocabulary tokens must be single characters")
+        if self.tokens != tuple(sorted(set(self.tokens))):
+            raise GPTBigramError("vocabulary tokens must be unique and sorted")
+
+    @classmethod
+    def from_text(cls, text: str) -> CharacterVocabulary:
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        return cls(tuple(sorted(set(text))))
+
+    def encode(self, text: str) -> tuple[int, ...]:
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        indexes = {token: index for index, token in enumerate(self.tokens)}
+        try:
+            return tuple(indexes[token] for token in text)
+        except KeyError as exc:
+            raise GPTBigramError(f"unknown character: {exc.args[0]!r}") from exc
+
+    def decode(self, token_ids: tuple[int, ...] | list[int]) -> str:
+        decoded: list[str] = []
+        for token_id in token_ids:
+            if isinstance(token_id, bool) or not isinstance(token_id, int):
+                raise TypeError("token ids must be integers")
+            if not 0 <= token_id < len(self.tokens):
+                raise GPTBigramError(f"token id out of range: {token_id}")
+            decoded.append(self.tokens[token_id])
+        return "".join(decoded)
+
+
 TINY_SHAKESPEARE = CorpusSource(
     name="Tiny Shakespeare",
     url=(
