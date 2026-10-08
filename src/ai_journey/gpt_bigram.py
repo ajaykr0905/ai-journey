@@ -135,6 +135,14 @@ class BigramTrainingConfig:
             raise GPTBigramError("learning_rate must be positive and finite")
 
 
+@dataclass(frozen=True)
+class TrainingStep:
+    """One optimizer update and its measured minibatch loss."""
+
+    step: int
+    loss: float
+
+
 def tokenize_and_split(
     text: str,
     vocabulary: CharacterVocabulary,
@@ -304,6 +312,48 @@ def evaluate_partition(
             )
     model.train(was_training)
     return total / pair_count
+
+
+def train_steps(
+    model: BigramLanguageModel,
+    optimizer: torch.optim.Optimizer,
+    batcher: WindowBatcher,
+    *,
+    start_step: int,
+    steps: int,
+    batch_size: int,
+) -> tuple[TrainingStep, ...]:
+    """Apply a bounded sequence of deterministic next-token updates."""
+
+    if not isinstance(model, BigramLanguageModel):
+        raise TypeError("model must be BigramLanguageModel")
+    if not isinstance(optimizer, torch.optim.Optimizer):
+        raise TypeError("optimizer must be torch.optim.Optimizer")
+    if not isinstance(batcher, WindowBatcher):
+        raise TypeError("batcher must be WindowBatcher")
+    for name, value in (
+        ("start_step", start_step),
+        ("steps", steps),
+        ("batch_size", batch_size),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"{name} must be an integer")
+    if start_step < 0:
+        raise GPTBigramError("start_step must be non-negative")
+    if steps <= 0 or batch_size <= 0:
+        raise GPTBigramError("steps and batch_size must be positive")
+    trace: list[TrainingStep] = []
+    model.train()
+    for offset in range(steps):
+        inputs, targets = batcher.sample(batch_size)
+        optimizer.zero_grad(set_to_none=True)
+        loss = next_token_loss(model, inputs, targets)
+        if not bool(torch.isfinite(loss)):
+            raise GPTBigramError("training produced a non-finite loss")
+        loss.backward()
+        optimizer.step()
+        trace.append(TrainingStep(start_step + offset + 1, float(loss.detach())))
+    return tuple(trace)
 
 
 TINY_SHAKESPEARE = CorpusSource(

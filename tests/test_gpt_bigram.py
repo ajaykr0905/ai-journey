@@ -15,11 +15,13 @@ from ai_journey.gpt_bigram import (
     CorpusSource,
     GPTBigramError,
     TINY_SHAKESPEARE,
+    TrainingStep,
     WindowBatcher,
     evaluate_partition,
     load_verified_corpus,
     next_token_loss,
     tokenize_and_split,
+    train_steps,
     validate_corpus_bytes,
 )
 
@@ -211,6 +213,25 @@ class BigramLanguageModelTests(unittest.TestCase):
         model = BigramLanguageModel(3, seed=1)
         with self.assertRaisesRegex(GPTBigramError, "length at least two"):
             evaluate_partition(model, torch.tensor([0]))
+
+    def test_training_updates_reduce_repetitive_sequence_loss(self) -> None:
+        tokens = torch.tensor(([0, 1] * 40) + [0])
+        model = BigramLanguageModel(2, seed=3)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=0.05)
+        batcher = WindowBatcher(tokens, block_size=4, seed=4)
+        initial = evaluate_partition(model, tokens)
+        trace = train_steps(
+            model,
+            optimizer,
+            batcher,
+            start_step=0,
+            steps=30,
+            batch_size=8,
+        )
+        self.assertEqual(trace[0].step, 1)
+        self.assertEqual(trace[-1].step, 30)
+        self.assertTrue(all(isinstance(point, TrainingStep) for point in trace))
+        self.assertLess(evaluate_partition(model, tokens), initial)
 
 
 if __name__ == "__main__":
