@@ -14,5 +14,8 @@ dependencies = [
   "torch>=2.2,<3",
 ]
 
+[project.scripts]
+ai-journey-day-34 = "ai_journey.day34_cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
