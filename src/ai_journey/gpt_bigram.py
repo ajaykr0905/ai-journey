@@ -10,6 +10,8 @@ from dataclasses import asdict, dataclass
 from hashlib import sha256
 from math import isfinite
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import urlopen
 
 import torch
 from torch import Tensor
@@ -659,3 +661,52 @@ def load_verified_corpus(path: Path, source: CorpusSource) -> str:
     except OSError as exc:
         raise GPTBigramError(f"unable to read corpus snapshot: {path}") from exc
     return validate_corpus_bytes(payload, source)
+
+
+def fetch_verified_corpus(
+    path: Path,
+    source: CorpusSource = TINY_SHAKESPEARE,
+    *,
+    timeout_seconds: float = 30.0,
+) -> str:
+    """Download, verify, and atomically cache an exact public corpus snapshot."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if not isinstance(source, CorpusSource):
+        raise TypeError("source must be CorpusSource")
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not isfinite(timeout_seconds)
+        or timeout_seconds <= 0
+    ):
+        raise GPTBigramError("timeout_seconds must be positive and finite")
+    try:
+        with urlopen(source.url, timeout=timeout_seconds) as response:  # noqa: S310
+            payload = response.read(source.byte_count + 1)
+    except (OSError, URLError) as exc:
+        raise GPTBigramError(f"unable to download corpus: {source.url}") from exc
+    text = validate_corpus_bytes(payload, source)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    except OSError as exc:
+        raise GPTBigramError(f"unable to cache corpus snapshot: {path}") from exc
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+    return text

@@ -3,8 +3,10 @@ from __future__ import annotations
 import math
 import unittest
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import torch
 
@@ -19,6 +21,7 @@ from ai_journey.gpt_bigram import (
     WindowBatcher,
     build_checkpoint_payload,
     evaluate_partition,
+    fetch_verified_corpus,
     generate_tokens,
     load_checkpoint,
     load_verified_corpus,
@@ -83,6 +86,30 @@ class CorpusBytesTests(unittest.TestCase):
             path.write_bytes(payload + b"changed")
             with self.assertRaisesRegex(GPTBigramError, "byte count mismatch"):
                 load_verified_corpus(path, source_for(payload))
+
+    def test_downloads_verifies_and_atomically_caches_the_snapshot(self) -> None:
+        payload = b"First Citizen:\nSpeak.\n"
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "nested", "input.txt")
+            with patch("ai_journey.gpt_bigram.urlopen", return_value=BytesIO(payload)):
+                text = fetch_verified_corpus(
+                    path, source_for(payload), timeout_seconds=1
+                )
+            self.assertEqual(text, payload.decode())
+            self.assertEqual(path.read_bytes(), payload)
+            self.assertEqual(list(path.parent.glob(".*.tmp")), [])
+
+    def test_failed_download_does_not_replace_existing_snapshot(self) -> None:
+        payload = b"correct text"
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "input.txt")
+            path.write_bytes(b"preserve me")
+            with patch(
+                "ai_journey.gpt_bigram.urlopen", return_value=BytesIO(b"wrong bytes!")
+            ):
+                with self.assertRaisesRegex(GPTBigramError, "sha256 mismatch"):
+                    fetch_verified_corpus(path, source_for(payload))
+            self.assertEqual(path.read_bytes(), b"preserve me")
 
 
 class CharacterVocabularyTests(unittest.TestCase):
