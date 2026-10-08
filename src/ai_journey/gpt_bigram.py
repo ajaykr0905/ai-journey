@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 
 
 class GPTBigramError(ValueError):
@@ -46,3 +47,28 @@ TINY_SHAKESPEARE = CorpusSource(
     byte_count=1_115_394,
     license="Public-domain Shakespeare text; compilation distributed by Andrej Karpathy",
 )
+
+
+def validate_corpus_bytes(payload: bytes, source: CorpusSource) -> str:
+    """Validate exact source bytes before decoding them as UTF-8 text."""
+
+    if not isinstance(payload, bytes):
+        raise TypeError("payload must be bytes")
+    if not isinstance(source, CorpusSource):
+        raise TypeError("source must be CorpusSource")
+    if len(payload) != source.byte_count:
+        raise GPTBigramError(
+            f"corpus byte count mismatch: expected {source.byte_count}, got {len(payload)}"
+        )
+    digest = sha256(payload).hexdigest()
+    if digest != source.sha256:
+        raise GPTBigramError(
+            f"corpus sha256 mismatch: expected {source.sha256}, got {digest}"
+        )
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise GPTBigramError("corpus must be valid UTF-8") from exc
+    if len(text) < 2:
+        raise GPTBigramError("corpus must contain at least two characters")
+    return text
