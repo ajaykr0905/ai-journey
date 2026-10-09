@@ -7,6 +7,7 @@ import torch
 from ai_journey.causal_average import (
     CausalAverageError,
     causal_average_loop,
+    causal_average_matmul,
     causal_mask,
     triangular_average_weights,
     validate_values,
@@ -86,6 +87,22 @@ class TriangularWeightTests(unittest.TestCase):
     def test_rejects_nonfloating_weight_dtype(self) -> None:
         with self.assertRaisesRegex(CausalAverageError, "floating-point"):
             triangular_average_weights(3, dtype=torch.long)
+
+
+class MatrixAverageTests(unittest.TestCase):
+    def test_matches_the_loop_oracle_for_unbatched_values(self) -> None:
+        values = torch.Generator().manual_seed(35)
+        sample = torch.randn(7, 5, generator=values, dtype=torch.float64)
+        torch.testing.assert_close(
+            causal_average_matmul(sample), causal_average_loop(sample)
+        )
+
+    def test_broadcasts_the_same_causal_matrix_across_batches(self) -> None:
+        generator = torch.Generator().manual_seed(350)
+        values = torch.randn(3, 6, 4, generator=generator)
+        actual = causal_average_matmul(values)
+        expected = torch.stack([causal_average_loop(batch) for batch in values])
+        torch.testing.assert_close(actual, expected)
 
 
 if __name__ == "__main__":
