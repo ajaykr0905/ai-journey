@@ -5,7 +5,12 @@ import unittest
 import torch
 
 from ai_journey.causal_average import CausalAverageError, causal_average_cumsum
-from ai_journey.causal_stream import CausalAverageStream, StreamSnapshot
+from ai_journey.causal_stream import (
+    CausalAverageStream,
+    StreamSnapshot,
+    build_snapshot_payload,
+    parse_snapshot_payload,
+)
 
 
 class CausalAverageStreamTests(unittest.TestCase):
@@ -71,6 +76,26 @@ class CausalAverageStreamTests(unittest.TestCase):
         after = stream.snapshot()
         self.assertEqual(after.count, before.count)
         self.assertTrue(torch.equal(after.total, before.total))
+
+    def test_serialized_snapshot_round_trips_exactly(self) -> None:
+        snapshot = StreamSnapshot(3, torch.tensor([1.5, -2.25], dtype=torch.float64))
+        payload = build_snapshot_payload(snapshot)
+        restored = parse_snapshot_payload(payload)
+        self.assertEqual(restored.count, snapshot.count)
+        self.assertEqual(restored.total.dtype, snapshot.total.dtype)
+        self.assertTrue(torch.equal(restored.total, snapshot.total))
+
+    def test_snapshot_payload_detects_tampering(self) -> None:
+        payload = build_snapshot_payload(StreamSnapshot(2, torch.tensor([3.0, 4.0])))
+        payload["total"][0] = 999.0
+        with self.assertRaisesRegex(CausalAverageError, "fingerprint mismatch"):
+            parse_snapshot_payload(payload)
+
+    def test_snapshot_payload_rejects_unknown_fields(self) -> None:
+        payload = build_snapshot_payload(StreamSnapshot(0, torch.zeros(2)))
+        payload["unexpected"] = True
+        with self.assertRaisesRegex(CausalAverageError, "fields"):
+            parse_snapshot_payload(payload)
 
 
 if __name__ == "__main__":
