@@ -190,3 +190,23 @@ def audit_weights(weights: Tensor) -> CausalWeightAudit:
         maximum_future_weight=maximum_future_weight,
         minimum_weight=float(weights.min().item()),
     )
+
+
+def require_weight_safety(audit: CausalWeightAudit, *, tolerance: float) -> None:
+    """Reject weights that are unnormalized, non-causal, or materially negative."""
+
+    if not isinstance(audit, CausalWeightAudit):
+        raise TypeError("audit must be CausalWeightAudit")
+    if (
+        isinstance(tolerance, bool)
+        or not isinstance(tolerance, (int, float))
+        or not isfinite(tolerance)
+        or tolerance < 0
+    ):
+        raise CausalAverageError("tolerance must be finite and non-negative")
+    if audit.row_sum_error > tolerance:
+        raise CausalAverageError("causal weight rows do not sum to one")
+    if audit.maximum_future_weight > tolerance:
+        raise CausalAverageError("causal weights leak future positions")
+    if audit.minimum_weight < -tolerance:
+        raise CausalAverageError("causal weights contain negative probability mass")
