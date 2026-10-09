@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 from torch import Tensor
 
 
 class CausalAverageError(ValueError):
     """Raised when a causal-average input or evidence contract is invalid."""
+
+
+@dataclass(frozen=True)
+class CausalAverageAudit:
+    """Maximum forward differences against the explicit loop oracle."""
+
+    matmul_error: float
+    softmax_error: float
+    cumsum_error: float
 
 
 def validate_values(values: Tensor) -> None:
@@ -107,3 +118,18 @@ def causal_average_cumsum(values: Tensor) -> Tensor:
         1, length + 1, dtype=values.dtype, device=values.device
     ).unsqueeze(-1)
     return values.cumsum(dim=-2) / counts
+
+
+def audit_equivalence(values: Tensor) -> CausalAverageAudit:
+    """Measure every vectorized method against the explicit prefix loop."""
+
+    reference = causal_average_loop(values)
+
+    def maximum_error(candidate: Tensor) -> float:
+        return float((candidate - reference).abs().max().item())
+
+    return CausalAverageAudit(
+        matmul_error=maximum_error(causal_average_matmul(values)),
+        softmax_error=maximum_error(causal_average_softmax(values)),
+        cumsum_error=maximum_error(causal_average_cumsum(values)),
+    )

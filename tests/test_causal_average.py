@@ -6,6 +6,7 @@ import torch
 
 from ai_journey.causal_average import (
     CausalAverageError,
+    audit_equivalence,
     causal_average_cumsum,
     causal_average_loop,
     causal_average_matmul,
@@ -152,6 +153,18 @@ class CumulativeAverageTests(unittest.TestCase):
         causal_average_cumsum(values).sum().backward()
         self.assertIsNotNone(values.grad)
         self.assertTrue(torch.isfinite(values.grad).all())
+
+
+class EquivalenceAuditTests(unittest.TestCase):
+    def test_reports_small_deterministic_forward_errors(self) -> None:
+        generator = torch.Generator().manual_seed(353)
+        values = torch.randn(3, 13, 5, generator=generator, dtype=torch.float64)
+        first = audit_equivalence(values)
+        second = audit_equivalence(values)
+        self.assertEqual(first, second)
+        self.assertLessEqual(first.matmul_error, 3e-16)
+        self.assertLessEqual(first.softmax_error, 3e-16)
+        self.assertLessEqual(first.cumsum_error, 3e-16)
 
 
 if __name__ == "__main__":
