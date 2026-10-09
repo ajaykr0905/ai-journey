@@ -9,6 +9,7 @@ from ai_journey.causal_average import (
     causal_average_loop,
     causal_average_matmul,
     causal_mask,
+    masked_softmax_weights,
     triangular_average_weights,
     validate_values,
 )
@@ -103,6 +104,21 @@ class MatrixAverageTests(unittest.TestCase):
         actual = causal_average_matmul(values)
         expected = torch.stack([causal_average_loop(batch) for batch in values])
         torch.testing.assert_close(actual, expected)
+
+
+class MaskedSoftmaxWeightTests(unittest.TestCase):
+    def test_matches_normalized_triangular_weights(self) -> None:
+        expected = triangular_average_weights(8, dtype=torch.float64)
+        actual = masked_softmax_weights(8, dtype=torch.float64)
+        torch.testing.assert_close(actual, expected, rtol=0.0, atol=0.0)
+
+    def test_assigns_exact_zero_to_every_future_position(self) -> None:
+        weights = masked_softmax_weights(6)
+        self.assertTrue(torch.equal(weights[~causal_mask(6)], torch.zeros(15)))
+
+    def test_rejects_nonfloating_weight_dtype(self) -> None:
+        with self.assertRaisesRegex(CausalAverageError, "floating-point"):
+            masked_softmax_weights(2, dtype=torch.long)
 
 
 if __name__ == "__main__":
