@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 from torch import Tensor
 
 from .causal_average import CausalAverageError, validate_values
+
+
+@dataclass(frozen=True)
+class StreamSnapshot:
+    """Complete restart state for a causal-average stream."""
+
+    count: int
+    total: Tensor
 
 
 class CausalAverageStream:
@@ -54,3 +64,35 @@ class CausalAverageStream:
         self._sum = cumulative[-1].detach().clone()
         self._count += len(chunk)
         return output
+
+    def snapshot(self) -> StreamSnapshot:
+        """Return a storage-independent copy of the complete stream state."""
+
+        return StreamSnapshot(self._count, self._sum.detach().clone())
+
+    def restore(self, snapshot: StreamSnapshot) -> None:
+        """Validate and transactionally restore a prior snapshot."""
+
+        if not isinstance(snapshot, StreamSnapshot):
+            raise TypeError("snapshot must be StreamSnapshot")
+        if (
+            isinstance(snapshot.count, bool)
+            or not isinstance(snapshot.count, int)
+            or snapshot.count < 0
+        ):
+            raise CausalAverageError("snapshot count must be a non-negative integer")
+        total = snapshot.total
+        if not isinstance(total, Tensor):
+            raise TypeError("snapshot total must be a torch.Tensor")
+        if total.shape != self._sum.shape:
+            raise CausalAverageError(
+                "snapshot feature size does not match stream state"
+            )
+        if total.dtype != self._sum.dtype or total.device != self._sum.device:
+            raise CausalAverageError(
+                "snapshot dtype and device must match stream state"
+            )
+        if not torch.isfinite(total).all():
+            raise CausalAverageError("snapshot total must be finite")
+        self._sum = total.detach().clone()
+        self._count = snapshot.count
