@@ -8,6 +8,7 @@ from ai_journey.causal_average import (
     CausalAverageError,
     causal_average_loop,
     causal_average_matmul,
+    causal_average_softmax,
     causal_mask,
     masked_softmax_weights,
     triangular_average_weights,
@@ -119,6 +120,21 @@ class MaskedSoftmaxWeightTests(unittest.TestCase):
     def test_rejects_nonfloating_weight_dtype(self) -> None:
         with self.assertRaisesRegex(CausalAverageError, "floating-point"):
             masked_softmax_weights(2, dtype=torch.long)
+
+
+class MaskedSoftmaxAverageTests(unittest.TestCase):
+    def test_matches_loop_and_triangular_matrix_methods(self) -> None:
+        generator = torch.Generator().manual_seed(351)
+        values = torch.randn(2, 9, 7, generator=generator, dtype=torch.float64)
+        softmax_output = causal_average_softmax(values)
+        torch.testing.assert_close(softmax_output, causal_average_loop(values))
+        torch.testing.assert_close(softmax_output, causal_average_matmul(values))
+
+    def test_keeps_output_on_the_input_device_and_dtype(self) -> None:
+        values = torch.ones(3, 2, dtype=torch.float32)
+        output = causal_average_softmax(values)
+        self.assertEqual(output.device, values.device)
+        self.assertEqual(output.dtype, values.dtype)
 
 
 if __name__ == "__main__":
