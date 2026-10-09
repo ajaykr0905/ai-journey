@@ -1,7 +1,7 @@
-# AI Journey: Days 0–34
+# AI Journey: Days 0–35
 
 This repository is a public-safe, executable record of an added setup day plus the
-selected work through Day 34 of a 90-day AI engineering learning plan. It combines
+selected work through Day 35 of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -75,6 +75,9 @@ then grow these exercises into production-quality training and inference project
 - A checksum-pinned Tiny Shakespeare character bigram baseline with exhaustive
   held-out evaluation, exact restart, deterministic sampling, and tamper-evident
   evidence in [`scripts/run_day_34.py`](scripts/run_day_34.py)
+- Four equivalent causal-prefix averaging methods with gradient, no-future-leak,
+  padding, streaming, restart, and tamper-evident evidence in
+  [`scripts/run_day_35.py`](scripts/run_day_35.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -159,8 +162,24 @@ ai-journey-day-34 \
   --download \
   --output artifacts/day-34-bigram.json \
   --checkpoint artifacts/day-34-bigram.pt
+ai-journey-day-35 \
+  --output artifacts/day-35-causal-average.json
 python -m unittest discover -s tests -v
 ```
+
+## Verify causal prefix averaging
+
+The Day 35 command compares the explicit prefix loop, normalized
+lower-triangular matrix multiplication, masked softmax over zero logits, and a
+linear-memory cumulative implementation. It also checks input-gradient parity,
+weight invariants, future-token isolation, variable-length padding, chunked
+streaming, exact stream restart, and the self-verifying report contract.
+
+The experiment is a deterministic CPU float64 numerical audit. It demonstrates
+the masking mechanism that precedes learned attention, not learned query-key
+scores, language-model quality, GPU performance, or distributed execution. See
+[`days/day-35.md`](days/day-35.md) for the operating limits and learner evidence
+that still requires Ajay's own confirmation.
 
 ## Train the Tiny Shakespeare baseline
 
@@ -285,6 +304,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 32 | 2026-10-06 | Hierarchical character model, module containers, and exact restart |
 | 33 | 2026-10-07 | Primitive WaveNet rebuild, equivalence audits, and exact resume |
 | 34 | 2026-10-08 | Tiny Shakespeare character bigram and training loop |
+| 35 | 2026-10-09 | Causal prefix averaging, masked softmax, and streaming equivalence |
 
 ## License
 
