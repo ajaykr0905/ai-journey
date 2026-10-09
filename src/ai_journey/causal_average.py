@@ -61,3 +61,13 @@ def triangular_average_weights(
         raise CausalAverageError("weight dtype must be floating-point")
     weights = mask.to(dtype=dtype)
     return weights / weights.sum(dim=-1, keepdim=True)
+
+
+def causal_average_matmul(values: Tensor) -> Tensor:
+    """Apply normalized lower-triangular weights with one matrix multiply."""
+
+    validate_values(values)
+    weights = triangular_average_weights(
+        values.shape[-2], dtype=values.dtype, device=values.device
+    )
+    return torch.matmul(weights, values)
