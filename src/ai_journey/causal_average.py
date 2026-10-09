@@ -32,6 +32,15 @@ class CausalWeightAudit:
     minimum_weight: float
 
 
+@dataclass(frozen=True)
+class CausalGradientAudit:
+    """Maximum input-gradient differences against the explicit loop oracle."""
+
+    matmul_error: float
+    softmax_error: float
+    cumsum_error: float
+
+
 def validate_values(values: Tensor) -> None:
     """Validate a feature sequence shaped ``(time, channels)`` or batched equivalent."""
 
@@ -244,3 +253,34 @@ def future_influence_error(
         )
         maximum = max(maximum, error)
     return maximum
+
+
+def audit_gradient_equivalence(values: Tensor) -> CausalGradientAudit:
+    """Compare input gradients under a deterministic non-uniform upstream tensor."""
+
+    validate_values(values)
+    upstream = torch.linspace(
+        -0.75,
+        1.25,
+        values.numel(),
+        dtype=values.dtype,
+        device=values.device,
+    ).reshape(values.shape)
+
+    def gradient(method: Callable[[Tensor], Tensor]) -> Tensor:
+        candidate = values.detach().clone().requires_grad_(True)
+        (method(candidate) * upstream).sum().backward()
+        if candidate.grad is None:
+            raise CausalAverageError("method did not produce an input gradient")
+        return candidate.grad.detach()
+
+    reference = gradient(causal_average_loop)
+
+    def maximum_error(method: Callable[[Tensor], Tensor]) -> float:
+        return float((gradient(method) - reference).abs().max().item())
+
+    return CausalGradientAudit(
+        matmul_error=maximum_error(causal_average_matmul),
+        softmax_error=maximum_error(causal_average_softmax),
+        cumsum_error=maximum_error(causal_average_cumsum),
+    )

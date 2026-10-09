@@ -8,6 +8,7 @@ from ai_journey.causal_average import (
     CausalAverageAudit,
     CausalAverageError,
     audit_equivalence,
+    audit_gradient_equivalence,
     audit_weights,
     causal_average_cumsum,
     causal_average_loop,
@@ -251,6 +252,22 @@ class FutureInfluenceTests(unittest.TestCase):
             future_influence_error(values, lambda tensor: tensor[0])
         with self.assertRaisesRegex(CausalAverageError, "finite and non-zero"):
             future_influence_error(values, causal_average_loop, perturbation=0)
+
+
+class GradientAuditTests(unittest.TestCase):
+    def test_all_methods_match_the_loop_input_gradient(self) -> None:
+        values = torch.randn(
+            2, 9, 4, generator=torch.Generator().manual_seed(355), dtype=torch.float64
+        )
+        audit = audit_gradient_equivalence(values)
+        self.assertLessEqual(audit.matmul_error, 5e-16)
+        self.assertLessEqual(audit.softmax_error, 5e-16)
+        self.assertLessEqual(audit.cumsum_error, 5e-16)
+
+    def test_gradient_audit_does_not_mutate_caller_autograd_state(self) -> None:
+        values = torch.ones(5, 2, requires_grad=True)
+        audit_gradient_equivalence(values)
+        self.assertIsNone(values.grad)
 
 
 if __name__ == "__main__":
