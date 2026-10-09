@@ -13,6 +13,7 @@ from ai_journey.causal_average import (
     causal_average_cumsum,
     causal_average_loop,
     causal_average_matmul,
+    causal_average_padded,
     causal_average_softmax,
     causal_mask,
     future_influence_error,
@@ -20,6 +21,7 @@ from ai_journey.causal_average import (
     require_equivalence,
     require_weight_safety,
     triangular_average_weights,
+    validate_lengths,
     validate_values,
 )
 
@@ -268,6 +270,34 @@ class GradientAuditTests(unittest.TestCase):
         values = torch.ones(5, 2, requires_grad=True)
         audit_gradient_equivalence(values)
         self.assertIsNone(values.grad)
+
+
+class PaddedAverageTests(unittest.TestCase):
+    def test_matches_each_unpadded_sequence_and_zeros_padding(self) -> None:
+        values = torch.randn(3, 6, 4, generator=torch.Generator().manual_seed(356))
+        lengths = torch.tensor([6, 4, 1])
+        output = causal_average_padded(values, lengths)
+        for batch, length in enumerate(lengths.tolist()):
+            torch.testing.assert_close(
+                output[batch, :length], causal_average_cumsum(values[batch, :length])
+            )
+            self.assertTrue(
+                torch.equal(
+                    output[batch, length:], torch.zeros_like(output[batch, length:])
+                )
+            )
+
+    def test_rejects_misaligned_or_out_of_range_lengths(self) -> None:
+        values = torch.ones(2, 4, 3)
+        for lengths, message in (
+            (torch.tensor([4]), "one entry"),
+            (torch.tensor([4.0, 3.0]), "torch.long"),
+            (torch.tensor([4, 0]), "between one"),
+            (torch.tensor([5, 4]), "between one"),
+        ):
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(CausalAverageError, message):
+                    validate_lengths(values, lengths)
 
 
 if __name__ == "__main__":

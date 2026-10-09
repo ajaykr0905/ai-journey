@@ -284,3 +284,35 @@ def audit_gradient_equivalence(values: Tensor) -> CausalGradientAudit:
         softmax_error=maximum_error(causal_average_softmax),
         cumsum_error=maximum_error(causal_average_cumsum),
     )
+
+
+def validate_lengths(values: Tensor, lengths: Tensor) -> None:
+    """Validate per-example lengths for a padded rank-three batch."""
+
+    validate_values(values)
+    if values.ndim != 3:
+        raise CausalAverageError(
+            "padded values must have shape (batch, time, channels)"
+        )
+    if not isinstance(lengths, Tensor):
+        raise TypeError("lengths must be a torch.Tensor")
+    if lengths.device != values.device:
+        raise CausalAverageError("lengths must be on the same device as values")
+    if lengths.ndim != 1 or lengths.shape[0] != values.shape[0]:
+        raise CausalAverageError("lengths must contain one entry per batch item")
+    if lengths.dtype != torch.long:
+        raise CausalAverageError("lengths must use torch.long")
+    if torch.any(lengths <= 0) or torch.any(lengths > values.shape[1]):
+        raise CausalAverageError(
+            "lengths must be between one and the padded time dimension"
+        )
+
+
+def causal_average_padded(values: Tensor, lengths: Tensor) -> Tensor:
+    """Average valid prefixes and force padded output positions to exact zero."""
+
+    validate_lengths(values, lengths)
+    output = causal_average_cumsum(values)
+    positions = torch.arange(values.shape[1], device=values.device).unsqueeze(0)
+    valid = positions < lengths.unsqueeze(1)
+    return output.masked_fill(~valid.unsqueeze(-1), 0.0)
