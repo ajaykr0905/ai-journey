@@ -71,3 +71,18 @@ def causal_average_matmul(values: Tensor) -> Tensor:
         values.shape[-2], dtype=values.dtype, device=values.device
     )
     return torch.matmul(weights, values)
+
+
+def masked_softmax_weights(
+    length: int,
+    *,
+    dtype: torch.dtype = torch.float32,
+    device: torch.device | str | None = None,
+) -> Tensor:
+    """Build uniform causal weights as masked softmax over zero logits."""
+
+    mask = causal_mask(length, device=device)
+    if not dtype.is_floating_point:
+        raise CausalAverageError("weight dtype must be floating-point")
+    logits = torch.zeros((length, length), dtype=dtype, device=device)
+    return torch.softmax(logits.masked_fill(~mask, float("-inf")), dim=-1)
