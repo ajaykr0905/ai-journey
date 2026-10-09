@@ -8,6 +8,7 @@ from ai_journey.causal_average import (
     CausalAverageAudit,
     CausalAverageError,
     audit_equivalence,
+    audit_weights,
     causal_average_cumsum,
     causal_average_loop,
     causal_average_matmul,
@@ -181,6 +182,33 @@ class EquivalenceAuditTests(unittest.TestCase):
             require_equivalence(
                 CausalAverageAudit(0.0, 0.0, float("inf")), tolerance=1.0
             )
+
+
+class WeightAuditTests(unittest.TestCase):
+    def test_certifies_both_weight_constructions(self) -> None:
+        for weights in (
+            triangular_average_weights(7, dtype=torch.float64),
+            masked_softmax_weights(7, dtype=torch.float64),
+        ):
+            with self.subTest():
+                audit = audit_weights(weights)
+                self.assertLessEqual(audit.row_sum_error, 1e-16)
+                self.assertEqual(audit.maximum_future_weight, 0.0)
+                self.assertEqual(audit.minimum_weight, 0.0)
+
+    def test_exposes_future_leakage_and_negative_weights(self) -> None:
+        weights = triangular_average_weights(3)
+        weights[0, 2] = 0.25
+        weights[1, 0] = -0.1
+        audit = audit_weights(weights)
+        self.assertEqual(audit.maximum_future_weight, 0.25)
+        self.assertAlmostEqual(audit.minimum_weight, -0.1, places=6)
+
+    def test_rejects_malformed_weight_matrices(self) -> None:
+        with self.assertRaisesRegex(CausalAverageError, "square"):
+            audit_weights(torch.ones(2, 3))
+        with self.assertRaisesRegex(CausalAverageError, "finite floating-point"):
+            audit_weights(torch.ones(2, 2, dtype=torch.long))
 
 
 if __name__ == "__main__":

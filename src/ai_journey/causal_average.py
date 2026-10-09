@@ -22,6 +22,15 @@ class CausalAverageAudit:
     cumsum_error: float
 
 
+@dataclass(frozen=True)
+class CausalWeightAudit:
+    """Structural invariants for one square causal weight matrix."""
+
+    row_sum_error: float
+    maximum_future_weight: float
+    minimum_weight: float
+
+
 def validate_values(values: Tensor) -> None:
     """Validate a feature sequence shaped ``(time, channels)`` or batched equivalent."""
 
@@ -158,3 +167,26 @@ def require_equivalence(audit: CausalAverageAudit, *, tolerance: float) -> None:
             raise CausalAverageError(
                 f"{name} forward error {error:.3e} exceeds tolerance {tolerance:.3e}"
             )
+
+
+def audit_weights(weights: Tensor) -> CausalWeightAudit:
+    """Measure normalization, causality, and non-negativity of square weights."""
+
+    if not isinstance(weights, Tensor):
+        raise TypeError("weights must be a torch.Tensor")
+    if (
+        weights.ndim != 2
+        or weights.shape[0] != weights.shape[1]
+        or weights.shape[0] == 0
+    ):
+        raise CausalAverageError("weights must be a non-empty square matrix")
+    if not weights.is_floating_point() or not torch.isfinite(weights).all():
+        raise CausalAverageError("weights must be finite floating-point values")
+    mask = causal_mask(weights.shape[0], device=weights.device)
+    future = weights[~mask]
+    maximum_future_weight = float(future.abs().max().item()) if future.numel() else 0.0
+    return CausalWeightAudit(
+        row_sum_error=float((weights.sum(dim=-1) - 1).abs().max().item()),
+        maximum_future_weight=maximum_future_weight,
+        minimum_weight=float(weights.min().item()),
+    )
