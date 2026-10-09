@@ -5,7 +5,7 @@ import unittest
 import torch
 
 from ai_journey.causal_average import CausalAverageError, causal_average_cumsum
-from ai_journey.causal_stream import CausalAverageStream
+from ai_journey.causal_stream import CausalAverageStream, StreamSnapshot
 
 
 class CausalAverageStreamTests(unittest.TestCase):
@@ -39,6 +39,38 @@ class CausalAverageStreamTests(unittest.TestCase):
                 with self.assertRaisesRegex(CausalAverageError, message):
                     stream.update(chunk)
                 self.assertEqual(stream.count, 0)
+
+    def test_snapshot_restores_exact_continuation(self) -> None:
+        values = torch.randn(9, 3, generator=torch.Generator().manual_seed(359))
+        stream = CausalAverageStream(3)
+        stream.update(values[:4])
+        snapshot = stream.snapshot()
+        expected = stream.update(values[4:])
+        stream.restore(snapshot)
+        actual = stream.update(values[4:])
+        torch.testing.assert_close(actual, expected, rtol=0.0, atol=0.0)
+
+    def test_snapshot_is_returned_and_restored_by_value(self) -> None:
+        stream = CausalAverageStream(2)
+        stream.update(torch.tensor([[2.0, 4.0]]))
+        snapshot = stream.snapshot()
+        snapshot.total.zero_()
+        self.assertTrue(torch.equal(stream.snapshot().total, torch.tensor([2.0, 4.0])))
+        stream.restore(StreamSnapshot(1, torch.tensor([3.0, 5.0])))
+        replacement = stream.snapshot()
+        replacement.total.add_(100)
+        self.assertTrue(torch.equal(stream.snapshot().total, torch.tensor([3.0, 5.0])))
+
+    def test_invalid_snapshot_cannot_mutate_live_state(self) -> None:
+        stream = CausalAverageStream(2)
+        stream.update(torch.tensor([[1.0, 2.0]]))
+        before = stream.snapshot()
+        invalid = StreamSnapshot(4, torch.tensor([float("nan"), 0.0]))
+        with self.assertRaisesRegex(CausalAverageError, "finite"):
+            stream.restore(invalid)
+        after = stream.snapshot()
+        self.assertEqual(after.count, before.count)
+        self.assertTrue(torch.equal(after.total, before.total))
 
 
 if __name__ == "__main__":
