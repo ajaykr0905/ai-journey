@@ -46,3 +46,18 @@ def causal_average_loop(values: Tensor) -> Tensor:
         values[..., : index + 1, :].mean(dim=-2) for index in range(time_dimension)
     ]
     return torch.stack(prefixes, dim=-2)
+
+
+def triangular_average_weights(
+    length: int,
+    *,
+    dtype: torch.dtype = torch.float32,
+    device: torch.device | str | None = None,
+) -> Tensor:
+    """Return the normalized lower-triangular matrix of prefix weights."""
+
+    mask = causal_mask(length, device=device)
+    if not dtype.is_floating_point:
+        raise CausalAverageError("weight dtype must be floating-point")
+    weights = mask.to(dtype=dtype)
+    return weights / weights.sum(dim=-1, keepdim=True)

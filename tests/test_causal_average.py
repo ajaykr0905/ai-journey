@@ -8,6 +8,7 @@ from ai_journey.causal_average import (
     CausalAverageError,
     causal_average_loop,
     causal_mask,
+    triangular_average_weights,
     validate_values,
 )
 
@@ -63,6 +64,28 @@ class LoopAverageTests(unittest.TestCase):
         output.square().sum().backward()
         self.assertIsNotNone(values.grad)
         self.assertTrue(torch.isfinite(values.grad).all())
+
+
+class TriangularWeightTests(unittest.TestCase):
+    def test_normalizes_each_allowed_prefix_uniformly(self) -> None:
+        weights = triangular_average_weights(4, dtype=torch.float64)
+        expected = torch.tensor(
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.5, 0.5, 0.0, 0.0],
+                [1 / 3, 1 / 3, 1 / 3, 0.0],
+                [0.25, 0.25, 0.25, 0.25],
+            ],
+            dtype=torch.float64,
+        )
+        torch.testing.assert_close(weights, expected)
+        torch.testing.assert_close(
+            weights.sum(dim=-1), torch.ones(4, dtype=torch.float64)
+        )
+
+    def test_rejects_nonfloating_weight_dtype(self) -> None:
+        with self.assertRaisesRegex(CausalAverageError, "floating-point"):
+            triangular_average_weights(3, dtype=torch.long)
 
 
 if __name__ == "__main__":
