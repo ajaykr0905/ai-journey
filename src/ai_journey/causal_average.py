@@ -86,3 +86,13 @@ def masked_softmax_weights(
         raise CausalAverageError("weight dtype must be floating-point")
     logits = torch.zeros((length, length), dtype=dtype, device=device)
     return torch.softmax(logits.masked_fill(~mask, float("-inf")), dim=-1)
+
+
+def causal_average_softmax(values: Tensor) -> Tensor:
+    """Apply masked-softmax causal weights to a feature sequence."""
+
+    validate_values(values)
+    weights = masked_softmax_weights(
+        values.shape[-2], dtype=values.dtype, device=values.device
+    )
+    return torch.matmul(weights, values)
