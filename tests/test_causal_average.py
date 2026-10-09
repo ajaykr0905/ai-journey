@@ -18,6 +18,7 @@ from ai_journey.causal_average import (
     causal_mask,
     future_influence_error,
     masked_softmax_weights,
+    padding_influence_error,
     require_equivalence,
     require_weight_safety,
     triangular_average_weights,
@@ -298,6 +299,17 @@ class PaddedAverageTests(unittest.TestCase):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(CausalAverageError, message):
                     validate_lengths(values, lengths)
+
+    def test_valid_outputs_ignore_arbitrary_padding_values(self) -> None:
+        values = torch.randn(3, 7, 2, generator=torch.Generator().manual_seed(357))
+        lengths = torch.tensor([7, 5, 2])
+        self.assertEqual(padding_influence_error(values, lengths), 0.0)
+
+    def test_padding_audit_rejects_invalid_perturbation(self) -> None:
+        with self.assertRaisesRegex(CausalAverageError, "finite and non-zero"):
+            padding_influence_error(
+                torch.ones(1, 2, 3), torch.tensor([1]), perturbation=0
+            )
 
 
 if __name__ == "__main__":

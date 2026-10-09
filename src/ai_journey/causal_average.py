@@ -316,3 +316,25 @@ def causal_average_padded(values: Tensor, lengths: Tensor) -> Tensor:
     positions = torch.arange(values.shape[1], device=values.device).unsqueeze(0)
     valid = positions < lengths.unsqueeze(1)
     return output.masked_fill(~valid.unsqueeze(-1), 0.0)
+
+
+def padding_influence_error(
+    values: Tensor, lengths: Tensor, *, perturbation: float = 1000.0
+) -> float:
+    """Measure whether padded values can change any valid causal output."""
+
+    validate_lengths(values, lengths)
+    if (
+        isinstance(perturbation, bool)
+        or not isinstance(perturbation, (int, float))
+        or not isfinite(perturbation)
+        or perturbation == 0
+    ):
+        raise CausalAverageError("perturbation must be finite and non-zero")
+    reference = causal_average_padded(values, lengths)
+    positions = torch.arange(values.shape[1], device=values.device).unsqueeze(0)
+    valid = positions < lengths.unsqueeze(1)
+    changed = values.detach().clone()
+    changed.masked_fill_(~valid.unsqueeze(-1), perturbation)
+    candidate = causal_average_padded(changed, lengths)
+    return float((candidate[valid] - reference[valid]).abs().max().item())
