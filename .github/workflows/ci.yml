@@ -210,6 +210,13 @@ jobs:
           --batch-size 4
           --block-size 8
           --sample-tokens 16
+      - name: Verify causal averaging equivalence and streaming
+        run: >-
+          ai-journey-day-35
+          --output /tmp/ai-journey-artifacts/day-35-causal-average.json
+          --batch-size 2
+          --time 5
+          --channels 3
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py
