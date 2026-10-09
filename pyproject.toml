@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 ai-journey-day-34 = "ai_journey.day34_cli:main"
+ai-journey-day-35 = "ai_journey.day35_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
