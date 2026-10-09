@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+import os
+import tempfile
+from dataclasses import asdict, dataclass
 from hashlib import sha256
 from math import isfinite
+from pathlib import Path
+from typing import Any
 
 import torch
 
@@ -28,6 +33,9 @@ from .causal_average import (
     triangular_average_weights,
 )
 from .causal_stream import CausalAverageStream
+
+
+REPORT_SCHEMA = "ai-journey-day-35-v1"
 
 
 @dataclass(frozen=True)
@@ -151,3 +159,105 @@ def run_causal_experiment(
         if getattr(result, name) > config.tolerance:
             raise CausalAverageError(f"{name} exceeds tolerance")
     return result
+
+
+def _report_fingerprint(core: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        core, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode()
+    return sha256(encoded).hexdigest()
+
+
+def build_experiment_report(result: CausalExperimentResult) -> dict[str, Any]:
+    """Build canonical, self-verifying JSON evidence from a measured result."""
+
+    if not isinstance(result, CausalExperimentResult):
+        raise TypeError("result must be CausalExperimentResult")
+    core = {"schema": REPORT_SCHEMA, **asdict(result)}
+    return {**core, "report_sha256": _report_fingerprint(core)}
+
+
+def verify_experiment_report(report: dict[str, Any]) -> None:
+    """Reject malformed, failing, or manually changed Day 35 evidence."""
+
+    if not isinstance(report, dict):
+        raise TypeError("report must be a dictionary")
+    expected = {
+        "schema",
+        "config",
+        "input_sha256",
+        "forward",
+        "gradient",
+        "triangular_weights",
+        "softmax_weights",
+        "loop_future_error",
+        "matmul_future_error",
+        "softmax_future_error",
+        "cumsum_future_error",
+        "padding_error",
+        "streaming_error",
+        "report_sha256",
+    }
+    if set(report) != expected:
+        raise CausalAverageError("experiment report fields are invalid")
+    if report["schema"] != REPORT_SCHEMA:
+        raise CausalAverageError("experiment report schema is unsupported")
+    core = {key: report[key] for key in expected - {"report_sha256"}}
+    if report["report_sha256"] != _report_fingerprint(core):
+        raise CausalAverageError("experiment report fingerprint mismatch")
+    try:
+        config = CausalExperimentConfig(**report["config"])
+        input_sha256 = report["input_sha256"]
+        errors = [
+            *report["forward"].values(),
+            *report["gradient"].values(),
+            report["triangular_weights"]["row_sum_error"],
+            report["triangular_weights"]["maximum_future_weight"],
+            -report["triangular_weights"]["minimum_weight"],
+            report["softmax_weights"]["row_sum_error"],
+            report["softmax_weights"]["maximum_future_weight"],
+            -report["softmax_weights"]["minimum_weight"],
+            report["loop_future_error"],
+            report["matmul_future_error"],
+            report["softmax_future_error"],
+            report["cumsum_future_error"],
+            report["padding_error"],
+            report["streaming_error"],
+        ]
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise CausalAverageError("experiment report values are malformed") from exc
+    if (
+        not isinstance(input_sha256, str)
+        or len(input_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in input_sha256)
+    ):
+        raise CausalAverageError("input fingerprint is invalid")
+    if any(
+        isinstance(error, bool)
+        or not isinstance(error, (int, float))
+        or not isfinite(error)
+        or error > config.tolerance
+        for error in errors
+    ):
+        raise CausalAverageError("experiment report contains a failing error metric")
+
+
+def write_experiment_report(path: Path, report: dict[str, Any]) -> None:
+    """Atomically publish a verified experiment report."""
+
+    verify_experiment_report(report)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(report, output, sort_keys=True, indent=2, allow_nan=False)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
