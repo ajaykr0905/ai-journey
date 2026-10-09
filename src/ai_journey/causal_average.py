@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isfinite
+from typing import Callable
 
 import torch
 from torch import Tensor
@@ -210,3 +211,36 @@ def require_weight_safety(audit: CausalWeightAudit, *, tolerance: float) -> None
         raise CausalAverageError("causal weights leak future positions")
     if audit.minimum_weight < -tolerance:
         raise CausalAverageError("causal weights contain negative probability mass")
+
+
+def future_influence_error(
+    values: Tensor,
+    method: Callable[[Tensor], Tensor],
+    *,
+    perturbation: float = 1000.0,
+) -> float:
+    """Measure whether changing a suffix alters outputs that precede that suffix."""
+
+    validate_values(values)
+    if not callable(method):
+        raise TypeError("method must be callable")
+    if (
+        isinstance(perturbation, bool)
+        or not isinstance(perturbation, (int, float))
+        or not isfinite(perturbation)
+        or perturbation == 0
+    ):
+        raise CausalAverageError("perturbation must be finite and non-zero")
+    reference = method(values)
+    if not isinstance(reference, Tensor) or reference.shape != values.shape:
+        raise CausalAverageError("method must preserve the input tensor shape")
+    maximum = 0.0
+    for cutoff in range(1, values.shape[-2]):
+        changed = values.detach().clone()
+        changed[..., cutoff:, :] += perturbation
+        candidate = method(changed)
+        error = float(
+            (candidate[..., :cutoff, :] - reference[..., :cutoff, :]).abs().max()
+        )
+        maximum = max(maximum, error)
+    return maximum

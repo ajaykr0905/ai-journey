@@ -14,6 +14,7 @@ from ai_journey.causal_average import (
     causal_average_matmul,
     causal_average_softmax,
     causal_mask,
+    future_influence_error,
     masked_softmax_weights,
     require_equivalence,
     require_weight_safety,
@@ -222,6 +223,34 @@ class WeightAuditTests(unittest.TestCase):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(CausalAverageError, message):
                     require_weight_safety(audit_weights(weights), tolerance=1e-6)
+
+
+class FutureInfluenceTests(unittest.TestCase):
+    def test_every_causal_method_is_invariant_to_future_perturbations(self) -> None:
+        values = torch.randn(2, 8, 3, generator=torch.Generator().manual_seed(354))
+        for method in (
+            causal_average_loop,
+            causal_average_matmul,
+            causal_average_softmax,
+            causal_average_cumsum,
+        ):
+            with self.subTest(method=method.__name__):
+                self.assertEqual(future_influence_error(values, method), 0.0)
+
+    def test_detects_an_intentionally_noncausal_method(self) -> None:
+        values = torch.arange(12, dtype=torch.float64).reshape(4, 3)
+
+        def global_average(inputs: torch.Tensor) -> torch.Tensor:
+            return inputs.mean(dim=-2, keepdim=True).expand_as(inputs)
+
+        self.assertGreater(future_influence_error(values, global_average), 0.0)
+
+    def test_rejects_shape_changing_methods_and_invalid_perturbations(self) -> None:
+        values = torch.ones(3, 2)
+        with self.assertRaisesRegex(CausalAverageError, "preserve"):
+            future_influence_error(values, lambda tensor: tensor[0])
+        with self.assertRaisesRegex(CausalAverageError, "finite and non-zero"):
+            future_influence_error(values, causal_average_loop, perturbation=0)
 
 
 if __name__ == "__main__":
