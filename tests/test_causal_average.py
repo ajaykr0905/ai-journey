@@ -5,6 +5,7 @@ import unittest
 import torch
 
 from ai_journey.causal_average import (
+    CausalAverageAudit,
     CausalAverageError,
     audit_equivalence,
     causal_average_cumsum,
@@ -13,6 +14,7 @@ from ai_journey.causal_average import (
     causal_average_softmax,
     causal_mask,
     masked_softmax_weights,
+    require_equivalence,
     triangular_average_weights,
     validate_values,
 )
@@ -165,6 +167,20 @@ class EquivalenceAuditTests(unittest.TestCase):
         self.assertLessEqual(first.matmul_error, 3e-16)
         self.assertLessEqual(first.softmax_error, 3e-16)
         self.assertLessEqual(first.cumsum_error, 3e-16)
+
+    def test_gate_rejects_the_named_drifting_method(self) -> None:
+        audit = CausalAverageAudit(0.0, 1e-3, 0.0)
+        with self.assertRaisesRegex(CausalAverageError, "softmax forward error"):
+            require_equivalence(audit, tolerance=1e-6)
+
+    def test_gate_rejects_invalid_tolerances_and_nonfinite_errors(self) -> None:
+        audit = CausalAverageAudit(0.0, 0.0, 0.0)
+        with self.assertRaisesRegex(CausalAverageError, "finite and non-negative"):
+            require_equivalence(audit, tolerance=float("nan"))
+        with self.assertRaisesRegex(CausalAverageError, "cumsum forward error"):
+            require_equivalence(
+                CausalAverageAudit(0.0, 0.0, float("inf")), tolerance=1.0
+            )
 
 
 if __name__ == "__main__":

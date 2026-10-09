@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 import torch
 from torch import Tensor
@@ -133,3 +134,27 @@ def audit_equivalence(values: Tensor) -> CausalAverageAudit:
         softmax_error=maximum_error(causal_average_softmax(values)),
         cumsum_error=maximum_error(causal_average_cumsum(values)),
     )
+
+
+def require_equivalence(audit: CausalAverageAudit, *, tolerance: float) -> None:
+    """Reject a forward audit when any implementation exceeds its declared tolerance."""
+
+    if not isinstance(audit, CausalAverageAudit):
+        raise TypeError("audit must be CausalAverageAudit")
+    if (
+        isinstance(tolerance, bool)
+        or not isinstance(tolerance, (int, float))
+        or not isfinite(tolerance)
+        or tolerance < 0
+    ):
+        raise CausalAverageError("tolerance must be finite and non-negative")
+    errors = {
+        "matmul": audit.matmul_error,
+        "softmax": audit.softmax_error,
+        "cumsum": audit.cumsum_error,
+    }
+    for name, error in errors.items():
+        if not isfinite(error) or error > tolerance:
+            raise CausalAverageError(
+                f"{name} forward error {error:.3e} exceeds tolerance {tolerance:.3e}"
+            )
