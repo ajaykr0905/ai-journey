@@ -16,6 +16,7 @@ from ai_journey.causal_average import (
     causal_mask,
     masked_softmax_weights,
     require_equivalence,
+    require_weight_safety,
     triangular_average_weights,
     validate_values,
 )
@@ -209,6 +210,18 @@ class WeightAuditTests(unittest.TestCase):
             audit_weights(torch.ones(2, 3))
         with self.assertRaisesRegex(CausalAverageError, "finite floating-point"):
             audit_weights(torch.ones(2, 2, dtype=torch.long))
+
+    def test_gate_accepts_safe_weights_and_names_each_failure(self) -> None:
+        require_weight_safety(audit_weights(masked_softmax_weights(5)), tolerance=1e-6)
+
+        for weights, message in (
+            (torch.tensor([[0.8, 0.0], [0.5, 0.5]]), "sum to one"),
+            (torch.tensor([[0.8, 0.2], [0.5, 0.5]]), "leak future"),
+            (torch.tensor([[1.0, 0.0], [-0.1, 1.1]]), "negative"),
+        ):
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(CausalAverageError, message):
+                    require_weight_safety(audit_weights(weights), tolerance=1e-6)
 
 
 if __name__ == "__main__":
