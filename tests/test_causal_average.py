@@ -6,6 +6,7 @@ import torch
 
 from ai_journey.causal_average import (
     CausalAverageError,
+    causal_average_cumsum,
     causal_average_loop,
     causal_average_matmul,
     causal_average_softmax,
@@ -135,6 +136,22 @@ class MaskedSoftmaxAverageTests(unittest.TestCase):
         output = causal_average_softmax(values)
         self.assertEqual(output.device, values.device)
         self.assertEqual(output.dtype, values.dtype)
+
+
+class CumulativeAverageTests(unittest.TestCase):
+    def test_matches_all_curriculum_methods(self) -> None:
+        generator = torch.Generator().manual_seed(352)
+        values = torch.randn(4, 11, 6, generator=generator, dtype=torch.float64)
+        actual = causal_average_cumsum(values)
+        torch.testing.assert_close(actual, causal_average_loop(values))
+        torch.testing.assert_close(actual, causal_average_matmul(values))
+        torch.testing.assert_close(actual, causal_average_softmax(values))
+
+    def test_retains_autograd_for_linear_memory_path(self) -> None:
+        values = torch.randn(5, 3, dtype=torch.float64, requires_grad=True)
+        causal_average_cumsum(values).sum().backward()
+        self.assertIsNotNone(values.grad)
+        self.assertTrue(torch.isfinite(values.grad).all())
 
 
 if __name__ == "__main__":

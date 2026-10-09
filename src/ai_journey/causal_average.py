@@ -96,3 +96,14 @@ def causal_average_softmax(values: Tensor) -> Tensor:
         values.shape[-2], dtype=values.dtype, device=values.device
     )
     return torch.matmul(weights, values)
+
+
+def causal_average_cumsum(values: Tensor) -> Tensor:
+    """Compute prefix means in linear memory with a cumulative sum."""
+
+    validate_values(values)
+    length = values.shape[-2]
+    counts = torch.arange(
+        1, length + 1, dtype=values.dtype, device=values.device
+    ).unsqueeze(-1)
+    return values.cumsum(dim=-2) / counts
