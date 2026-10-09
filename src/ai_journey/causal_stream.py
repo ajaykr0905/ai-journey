@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass
 from hashlib import sha256
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -82,6 +85,37 @@ def parse_snapshot_payload(payload: dict[str, Any]) -> StreamSnapshot:
     snapshot = StreamSnapshot(payload["count"], total)
     build_snapshot_payload(snapshot)
     return snapshot
+
+
+def save_snapshot(path: Path, snapshot: StreamSnapshot) -> None:
+    """Atomically publish a verified stream snapshot as JSON."""
+
+    payload = build_snapshot_payload(snapshot)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(payload, output, sort_keys=True, indent=2, allow_nan=False)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def load_snapshot(path: Path) -> StreamSnapshot:
+    """Read and verify a stream snapshot without changing live state."""
+
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CausalAverageError(f"cannot read stream snapshot: {exc}") from exc
+    return parse_snapshot_payload(payload)
 
 
 class CausalAverageStream:

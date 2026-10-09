@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import torch
 
@@ -9,7 +12,9 @@ from ai_journey.causal_stream import (
     CausalAverageStream,
     StreamSnapshot,
     build_snapshot_payload,
+    load_snapshot,
     parse_snapshot_payload,
+    save_snapshot,
 )
 
 
@@ -96,6 +101,35 @@ class CausalAverageStreamTests(unittest.TestCase):
         payload["unexpected"] = True
         with self.assertRaisesRegex(CausalAverageError, "fields"):
             parse_snapshot_payload(payload)
+
+    def test_snapshot_file_round_trips_and_leaves_no_temporary(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "nested", "stream.json")
+            snapshot = StreamSnapshot(7, torch.tensor([1.25, -3.5]))
+            save_snapshot(path, snapshot)
+            restored = load_snapshot(path)
+            self.assertEqual(restored.count, snapshot.count)
+            self.assertTrue(torch.equal(restored.total, snapshot.total))
+            self.assertEqual(list(path.parent.glob(".*.tmp")), [])
+
+    def test_failed_replacement_preserves_existing_snapshot(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "stream.json")
+            path.write_text("preserve me", encoding="utf-8")
+            with patch(
+                "ai_journey.causal_stream.os.replace", side_effect=OSError("boom")
+            ):
+                with self.assertRaisesRegex(OSError, "boom"):
+                    save_snapshot(path, StreamSnapshot(1, torch.ones(2)))
+            self.assertEqual(path.read_text(encoding="utf-8"), "preserve me")
+            self.assertEqual(list(path.parent.glob(".*.tmp")), [])
+
+    def test_loader_rejects_truncated_json(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "stream.json")
+            path.write_text('{"schema":', encoding="utf-8")
+            with self.assertRaisesRegex(CausalAverageError, "cannot read"):
+                load_snapshot(path)
 
 
 if __name__ == "__main__":
