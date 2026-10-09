@@ -4,7 +4,12 @@ import unittest
 
 import torch
 
-from ai_journey.causal_average import CausalAverageError, causal_mask, validate_values
+from ai_journey.causal_average import (
+    CausalAverageError,
+    causal_average_loop,
+    causal_mask,
+    validate_values,
+)
 
 
 class CausalInputTests(unittest.TestCase):
@@ -41,6 +46,23 @@ class CausalInputTests(unittest.TestCase):
             causal_mask(True)
         with self.assertRaisesRegex(CausalAverageError, "positive"):
             causal_mask(0)
+
+
+class LoopAverageTests(unittest.TestCase):
+    def test_computes_each_prefix_mean_by_hand(self) -> None:
+        values = torch.tensor([[2.0, 4.0], [4.0, 8.0], [9.0, 3.0]])
+        expected = torch.tensor([[2.0, 4.0], [3.0, 6.0], [5.0, 5.0]])
+        torch.testing.assert_close(causal_average_loop(values), expected)
+
+    def test_preserves_batch_channel_dtype_and_gradient_flow(self) -> None:
+        values = torch.arange(24, dtype=torch.float64).reshape(2, 4, 3)
+        values.requires_grad_()
+        output = causal_average_loop(values)
+        self.assertEqual(output.shape, values.shape)
+        self.assertEqual(output.dtype, torch.float64)
+        output.square().sum().backward()
+        self.assertIsNotNone(values.grad)
+        self.assertTrue(torch.isfinite(values.grad).all())
 
 
 if __name__ == "__main__":

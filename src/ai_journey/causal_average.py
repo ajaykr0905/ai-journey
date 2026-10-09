@@ -35,3 +35,14 @@ def causal_mask(length: int, *, device: torch.device | str | None = None) -> Ten
     if length <= 0:
         raise CausalAverageError("length must be positive")
     return torch.ones((length, length), dtype=torch.bool, device=device).tril()
+
+
+def causal_average_loop(values: Tensor) -> Tensor:
+    """Average every prefix with an explicit loop that serves as the oracle."""
+
+    validate_values(values)
+    time_dimension = values.shape[-2]
+    prefixes = [
+        values[..., : index + 1, :].mean(dim=-2) for index in range(time_dimension)
+    ]
+    return torch.stack(prefixes, dim=-2)
