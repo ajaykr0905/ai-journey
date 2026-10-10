@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import re
+from hashlib import sha256
 
 import torch
 from torch import Tensor
 from torch.nn import functional as F
 
-from .transformer_lab import CausalSelfAttention, TransformerLabError
+from .transformer_lab import (
+    CausalSelfAttention,
+    DecoderLanguageModel,
+    TransformerLabError,
+)
 
 
 class LayerKV:
@@ -172,3 +177,111 @@ def cached_attention(
     weights = F.softmax(scores.masked_fill(~allowed, float("-inf")), dim=-1)
     output = (weights @ value).transpose(1, 2).contiguous().view(batch, time, channels)
     return attention.projection(output), LayerKV(key, value)
+
+
+def _model_digest(model: DecoderLanguageModel) -> str:
+    digest = sha256()
+    for name, tensor in sorted(model.state_dict().items()):
+        data = tensor.detach().cpu().contiguous()
+        digest.update(name.encode())
+        digest.update(str(data.dtype).encode())
+        digest.update(str(tuple(data.shape)).encode())
+        digest.update(data.reshape(-1).view(torch.uint8).numpy().tobytes())
+    return digest.hexdigest()
+
+
+def _validate_model_tokens(model: DecoderLanguageModel, tokens: Tensor) -> None:
+    if not isinstance(model, DecoderLanguageModel):
+        raise TypeError("model must be DecoderLanguageModel")
+    if any(module.training for module in model.modules()):
+        raise TransformerLabError("decoder cache requires evaluation mode")
+    if model.config.normalization_mode != "layer_norm":
+        raise TransformerLabError("decoder cache currently requires layer_norm")
+    if not isinstance(tokens, Tensor) or tokens.ndim != 2 or tokens.dtype != torch.long:
+        raise TypeError("tokens must be a two-dimensional torch.long tensor")
+    if (
+        any(size <= 0 for size in tokens.shape)
+        or tokens.device != model.token_embedding.weight.device
+        or torch.any(tokens < 0)
+        or torch.any(tokens >= model.config.vocab_size)
+    ):
+        raise TransformerLabError(
+            "tokens must be nonempty, in vocabulary, and on the model device"
+        )
+
+
+def _validate_binding(model: DecoderLanguageModel, cache: DecoderCache) -> None:
+    if not isinstance(cache, DecoderCache):
+        raise TypeError("cache must be DecoderCache")
+    if (
+        cache.config_digest != model.config.fingerprint()
+        or cache.model_digest != _model_digest(model)
+    ):
+        raise TransformerLabError("cache belongs to a different or modified model")
+    shape = cache._layers[0]._keys.shape
+    if (
+        len(cache._layers) != model.config.layer_count
+        or shape[1] != model.config.head_count
+        or shape[3] != model.config.head_dim
+        or shape[2] > model.config.block_size
+        or cache._layers[0]._keys.dtype != model.token_embedding.weight.dtype
+        or cache._tokens.device != model.token_embedding.weight.device
+    ):
+        raise TransformerLabError("cache architecture, dtype, or device mismatch")
+
+
+@torch.no_grad()
+def _forward_chunk(
+    model: DecoderLanguageModel, tokens: Tensor, cache: DecoderCache | None
+) -> tuple[Tensor, DecoderCache]:
+    prefix = 0 if cache is None else cache._tokens.shape[1]
+    time = tokens.shape[1]
+    if prefix + time > model.config.block_size:
+        raise TransformerLabError("decoder cache exceeds configured block_size")
+    positions = torch.arange(prefix, prefix + time, device=tokens.device)
+    hidden = model.token_embedding(tokens) + model.position_embedding(positions)
+    layers = []
+    placement = getattr(model.config, "normalization_placement", "pre")
+    for index, block in enumerate(model.blocks):
+        old = None if cache is None else cache._layers[index]
+        if placement == "pre":
+            attended, layer = cached_attention(
+                block.attention, block.attention_norm(hidden), old
+            )
+            hidden = hidden + attended
+            hidden = hidden + block.feed_forward(block.feed_forward_norm(hidden))
+        elif placement == "post":
+            attended, layer = cached_attention(block.attention, hidden, old)
+            hidden = block.attention_norm(hidden + attended)
+            hidden = block.feed_forward_norm(hidden + block.feed_forward(hidden))
+        else:
+            raise TransformerLabError("unsupported normalization placement")
+        layers.append(layer)
+    logits = model.lm_head(model.final_norm(hidden))
+    if not torch.isfinite(logits).all():
+        raise TransformerLabError("decoder produced nonfinite logits")
+    history = tokens if cache is None else torch.cat((cache._tokens, tokens), dim=1)
+    state = DecoderCache(
+        history,
+        tuple(layers),
+        config_digest=model.config.fingerprint(),
+        model_digest=_model_digest(model),
+    )
+    return logits, state
+
+
+def prefill(model: DecoderLanguageModel, tokens: Tensor) -> tuple[Tensor, DecoderCache]:
+    """Evaluate a complete prompt and retain each layer's causal prefix state."""
+    _validate_model_tokens(model, tokens)
+    return _forward_chunk(model, tokens, None)
+
+
+def decode(
+    model: DecoderLanguageModel, tokens: Tensor, cache: DecoderCache
+) -> tuple[Tensor, DecoderCache]:
+    """Evaluate a new token chunk without recomputing the cached prefix."""
+    _validate_model_tokens(model, tokens)
+    _validate_binding(model, cache)
+    if tokens.shape[0] != cache._tokens.shape[0]:
+        raise TransformerLabError("decode token batch must match cache")
+    return _forward_chunk(model, tokens, cache)

@@ -8,9 +8,16 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ai_journey.transformer_cache import DecoderCache, LayerKV, cached_attention
+from ai_journey.transformer_cache import (
+    DecoderCache,
+    LayerKV,
+    cached_attention,
+    decode,
+    prefill,
+)
 from ai_journey.transformer_lab import (
     CausalSelfAttention,
+    DecoderLanguageModel,
     TransformerConfig,
     TransformerLabError,
 )
@@ -109,6 +116,56 @@ class CachedAttentionTests(unittest.TestCase):
                 cached_attention(self.attention, invalid)
         with self.assertRaisesRegex(TransformerLabError, "mismatch"):
             cached_attention(self.attention, inputs[:1], cache)
+
+
+class CachedDecoderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        torch.set_num_threads(1)
+        self.model = DecoderLanguageModel(
+            TransformerConfig(
+                vocab_size=11,
+                block_size=8,
+                embedding_dim=12,
+                head_count=3,
+                layer_count=2,
+                dropout=0.25,
+            )
+        ).eval()
+
+    def test_full_decoder_prefill_and_chunked_logits_agree(self) -> None:
+        tokens = torch.randint(0, 11, (2, 7))
+        expected, _ = self.model(tokens)
+        first, cache = prefill(self.model, tokens[:, :2])
+        middle, cache = decode(self.model, tokens[:, 2:5], cache)
+        final, cache = decode(self.model, tokens[:, 5:], cache)
+        torch.testing.assert_close(torch.cat((first, middle, final), dim=1), expected)
+        torch.testing.assert_close(cache.tokens, tokens)
+        self.assertEqual(len(cache.layers), 2)
+        self.assertFalse(final.requires_grad)
+
+    def test_rejects_stale_model_and_invalid_decode_before_state_change(self) -> None:
+        tokens = torch.randint(0, 11, (2, 3))
+        _, cache = prefill(self.model, tokens)
+        with self.assertRaisesRegex(TransformerLabError, "batch"):
+            decode(self.model, tokens[:1, :1], cache)
+        with torch.no_grad():
+            self.model.lm_head.weight[0, 0] += 0.1
+        with self.assertRaisesRegex(TransformerLabError, "modified model"):
+            decode(self.model, tokens[:, :1], cache)
+        torch.testing.assert_close(cache.tokens, tokens)
+
+    def test_decoder_requires_eval_and_valid_prompt(self) -> None:
+        self.model.train()
+        with self.assertRaisesRegex(TransformerLabError, "evaluation"):
+            prefill(self.model, torch.ones(2, 3, dtype=torch.long))
+        self.model.eval()
+        for tokens in (
+            torch.ones(2, 3),
+            torch.ones(2, 0, dtype=torch.long),
+            torch.full((2, 1), 11, dtype=torch.long),
+        ):
+            with self.assertRaises((TransformerLabError, TypeError)):
+                prefill(self.model, tokens)
 
 
 if __name__ == "__main__":
