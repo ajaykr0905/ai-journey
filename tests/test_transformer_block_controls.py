@@ -7,6 +7,7 @@ import torch
 from ai_journey.transformer_lab import (
     DecoderLanguageModel,
     TransformerConfig,
+    TransformerBlock,
     TransformerLabError,
 )
 
@@ -84,3 +85,69 @@ class GenerationInputGuardTests(unittest.TestCase):
         torch.testing.assert_close(first, second, rtol=0, atol=0)
         torch.testing.assert_close(prompt, original, rtol=0, atol=0)
         self.assertEqual(first.shape, (1, 8))
+
+
+class NormalizationPlacementTests(unittest.TestCase):
+    def test_block_implements_each_declared_residual_equation(self) -> None:
+        for placement in ("pre", "post"):
+            with self.subTest(placement=placement):
+                config = TransformerConfig(
+                    vocab_size=7,
+                    embedding_dim=8,
+                    head_count=2,
+                    normalization_placement=placement,
+                )
+                block = TransformerBlock(config).double().eval()
+                inputs = torch.randn(2, 4, 8, dtype=torch.float64, requires_grad=True)
+                actual = block(inputs)
+                if placement == "pre":
+                    residual = inputs + block.attention(block.attention_norm(inputs))
+                    expected = residual + block.feed_forward(
+                        block.feed_forward_norm(residual)
+                    )
+                else:
+                    residual = block.attention_norm(inputs + block.attention(inputs))
+                    expected = block.feed_forward_norm(
+                        residual + block.feed_forward(residual)
+                    )
+                torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+                actual_grad = torch.autograd.grad(
+                    actual.square().sum(), inputs, retain_graph=True
+                )[0]
+                expected_grad = torch.autograd.grad(expected.square().sum(), inputs)[0]
+                torch.testing.assert_close(actual_grad, expected_grad, rtol=0, atol=0)
+
+    def test_legacy_defaults_preserve_config_fingerprint(self) -> None:
+        import json
+        from dataclasses import asdict
+        from hashlib import sha256
+
+        config = TransformerConfig(vocab_size=7)
+        legacy = asdict(config)
+        legacy.pop("normalization_placement")
+        expected = sha256(
+            json.dumps(legacy, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        self.assertEqual(config.fingerprint(), expected)
+        self.assertNotEqual(
+            config.fingerprint(),
+            TransformerConfig(
+                vocab_size=7, normalization_placement="post"
+            ).fingerprint(),
+        )
+
+    def test_post_norm_keeps_padding_zero_and_rejects_unknown_policy(self) -> None:
+        with self.assertRaisesRegex(TransformerLabError, "normalization_placement"):
+            TransformerConfig(vocab_size=7, normalization_placement="sandwich")
+        block = TransformerBlock(
+            TransformerConfig(
+                vocab_size=7,
+                block_size=4,
+                embedding_dim=8,
+                head_count=2,
+                normalization_placement="post",
+            )
+        )
+        output = block(torch.randn(2, 4, 8), lengths=torch.tensor([1, 3]))
+        self.assertEqual(torch.count_nonzero(output[0, 1:]).item(), 0)
+        self.assertEqual(torch.count_nonzero(output[1, 3:]).item(), 0)

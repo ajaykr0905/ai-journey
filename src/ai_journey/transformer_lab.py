@@ -51,6 +51,7 @@ class TransformerConfig:
     initialization_mode: str = "fixed_normal"
     initialization_gain: float = math.sqrt(2.0)
     normalization_mode: str = "layer_norm"
+    normalization_placement: str = "pre"
     batch_norm_eps: float = 1e-5
     batch_norm_momentum: float = 0.1
 
@@ -97,6 +98,8 @@ class TransformerConfig:
             raise TransformerLabError(
                 "normalization_mode must be 'layer_norm' or 'scratch_batch_norm'"
             )
+        if self.normalization_placement not in {"pre", "post"}:
+            raise TransformerLabError("normalization_placement must be 'pre' or 'post'")
         if (
             isinstance(self.batch_norm_eps, bool)
             or not isinstance(self.batch_norm_eps, (int, float))
@@ -117,7 +120,18 @@ class TransformerConfig:
         return self.embedding_dim // self.head_count
 
     def fingerprint(self) -> str:
-        payload = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
+        settings = asdict(self)
+        # Legacy defaults preserve the same equations and checkpoint identity.
+        for name, default in {
+            "normalization_placement": "pre",
+            "feed_forward_expansion": 4,
+            "feed_forward_activation": "gelu",
+            "activation_checkpointing": False,
+            "attention_backend": "manual",
+        }.items():
+            if settings.get(name) == default:
+                settings.pop(name)
+        payload = json.dumps(settings, sort_keys=True, separators=(",", ":"))
         return sha256(payload.encode()).hexdigest()
 
 
@@ -446,11 +460,12 @@ def build_normalization(config: TransformerConfig) -> nn.Module:
 
 
 class TransformerBlock(nn.Module):
-    """Pre-normalized attention and feed-forward residual block."""
+    """Configurable pre- or post-normalized attention and MLP residual block."""
 
     def __init__(self, config: TransformerConfig) -> None:
         super().__init__()
         self.normalization_mode = config.normalization_mode
+        self.normalization_placement = config.normalization_placement
         self.attention_norm = build_normalization(config)
         self.attention = CausalSelfAttention(config)
         self.feed_forward_norm = build_normalization(config)
@@ -467,8 +482,16 @@ class TransformerBlock(nn.Module):
                 time=inputs.shape[1],
                 device=inputs.device,
             )
-        inputs = inputs + self.attention(self.attention_norm(inputs), lengths=lengths)
-        output = inputs + self.feed_forward(self.feed_forward_norm(inputs))
+        if self.normalization_placement == "pre":
+            inputs = inputs + self.attention(
+                self.attention_norm(inputs), lengths=lengths
+            )
+            output = inputs + self.feed_forward(self.feed_forward_norm(inputs))
+        else:
+            inputs = self.attention_norm(
+                inputs + self.attention(inputs, lengths=lengths)
+            )
+            output = self.feed_forward_norm(inputs + self.feed_forward(inputs))
         return output if valid is None else output.masked_fill(~valid[:, :, None], 0.0)
 
 
