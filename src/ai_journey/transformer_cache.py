@@ -303,3 +303,36 @@ def decode(
             outputs.append(output)
         return torch.cat(outputs, dim=1), state
     return _forward_chunk(model, tokens, cache)
+
+
+def migrate_cache(
+    cache: DecoderCache,
+    source_model: DecoderLanguageModel,
+    target_model: DecoderLanguageModel,
+) -> DecoderCache:
+    """Rebuild inference state for an explicitly converted copy of the model.
+
+    Casting cached activations alone is unsafe because rounded parameters and
+    activations change the result. Verify conversion provenance, then prefill.
+    """
+
+    _validate_model_tokens(source_model, cache.tokens)
+    _validate_binding(source_model, cache)
+    tokens = cache.tokens.to(target_model.token_embedding.weight.device)
+    _validate_model_tokens(target_model, tokens)
+    if source_model.config != target_model.config:
+        raise TransformerLabError(
+            "cache migration requires identical model configuration"
+        )
+    source = source_model.state_dict()
+    target = target_model.state_dict()
+    if source.keys() != target.keys():
+        raise TransformerLabError("cache migration requires matching state names")
+    for name, value in source.items():
+        expected = value.to(dtype=target[name].dtype, device=target[name].device)
+        if not torch.equal(expected, target[name]):
+            raise TransformerLabError(
+                "target model is not a dtype/device conversion of source"
+            )
+    _, migrated = prefill(target_model, tokens)
+    return migrated

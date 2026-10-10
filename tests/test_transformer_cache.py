@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import copy
 import unittest
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from ai_journey.transformer_cache import (
     cached_attention,
     decode,
     prefill,
+    migrate_cache,
 )
 from ai_journey.transformer_lab import (
     CausalSelfAttention,
@@ -190,6 +192,30 @@ class CachedDecoderTests(unittest.TestCase):
             outputs.append(output)
         torch.testing.assert_close(torch.cat(outputs, dim=1), expected)
         torch.testing.assert_close(state.tokens, expected_state.tokens)
+
+    def test_explicit_dtype_migration_rebuilds_for_converted_weights(self) -> None:
+        tokens = torch.randint(0, 11, (2, 4))
+        _, cache = prefill(self.model, tokens)
+        converted = copy.deepcopy(self.model).double()
+        state = migrate_cache(cache, self.model, converted)
+        self.assertEqual(state.layers[0].keys.dtype, torch.float64)
+        next_tokens = torch.randint(0, 11, (2, 2))
+        actual, _ = decode(converted, next_tokens, state)
+        expected, _ = converted(torch.cat((tokens, next_tokens), dim=1))
+        torch.testing.assert_close(actual, expected[:, -2:])
+        self.assertEqual(cache.layers[0].keys.dtype, torch.float32)
+        with torch.no_grad():
+            converted.lm_head.weight[0, 0] += 0.1
+        with self.assertRaisesRegex(TransformerLabError, "conversion"):
+            migrate_cache(cache, self.model, converted)
+
+    def test_bfloat16_cache_binding_does_not_require_numpy_dtype_support(self) -> None:
+        model = copy.deepcopy(self.model).bfloat16()
+        tokens = torch.randint(0, 11, (1, 4))
+        _, cache = prefill(model, tokens[:, :3])
+        actual, _ = decode(model, tokens[:, 3:], cache)
+        expected, _ = model(tokens)
+        torch.testing.assert_close(actual, expected[:, -1:], rtol=0.02, atol=0.002)
 
 
 if __name__ == "__main__":
