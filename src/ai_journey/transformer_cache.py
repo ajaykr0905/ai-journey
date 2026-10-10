@@ -279,9 +279,27 @@ def prefill(model: DecoderLanguageModel, tokens: Tensor) -> tuple[Tensor, Decode
 def decode(
     model: DecoderLanguageModel, tokens: Tensor, cache: DecoderCache
 ) -> tuple[Tensor, DecoderCache]:
-    """Evaluate a new token chunk without recomputing the cached prefix."""
+    """Decode a chunk, rebuilding cropped contexts when learned positions reset.
+
+    Dropping only the oldest keys is incorrect: every retained token changes
+    position and its layer activations may still depend on the evicted prefix.
+    """
     _validate_model_tokens(model, tokens)
     _validate_binding(model, cache)
     if tokens.shape[0] != cache._tokens.shape[0]:
         raise TransformerLabError("decode token batch must match cache")
+    if cache._tokens.shape[1] + tokens.shape[1] > model.config.block_size:
+        outputs = []
+        state = cache
+        for token in tokens.split(1, dim=1):
+            if state._tokens.shape[1] < model.config.block_size:
+                output, state = _forward_chunk(model, token, state)
+            else:
+                cropped = torch.cat((state._tokens, token), dim=1)[
+                    :, -model.config.block_size :
+                ]
+                rebuilt, state = _forward_chunk(model, cropped, None)
+                output = rebuilt[:, -1:]
+            outputs.append(output)
+        return torch.cat(outputs, dim=1), state
     return _forward_chunk(model, tokens, cache)

@@ -167,6 +167,30 @@ class CachedDecoderTests(unittest.TestCase):
             with self.assertRaises((TransformerLabError, TypeError)):
                 prefill(self.model, tokens)
 
+    def test_rollover_resets_positions_and_matches_cropped_model(self) -> None:
+        tokens = torch.randint(0, 11, (2, 17))
+        _, cache = prefill(self.model, tokens[:, :6])
+        actual, final = decode(self.model, tokens[:, 6:], cache)
+        expected = []
+        for end in range(7, 18):
+            logits, _ = self.model(tokens[:, max(0, end - 8) : end])
+            expected.append(logits[:, -1:])
+        torch.testing.assert_close(actual, torch.cat(expected, dim=1))
+        torch.testing.assert_close(final.tokens, tokens[:, -8:])
+        torch.testing.assert_close(cache.tokens, tokens[:, :6])
+
+    def test_single_token_rollover_agrees_with_chunk_rollover(self) -> None:
+        tokens = torch.randint(0, 11, (1, 13))
+        _, initial = prefill(self.model, tokens[:, :8])
+        expected, expected_state = decode(self.model, tokens[:, 8:], initial)
+        outputs = []
+        state = initial
+        for token in tokens[:, 8:].split(1, dim=1):
+            output, state = decode(self.model, token, state)
+            outputs.append(output)
+        torch.testing.assert_close(torch.cat(outputs, dim=1), expected)
+        torch.testing.assert_close(state.tokens, expected_state.tokens)
+
 
 if __name__ == "__main__":
     unittest.main()
