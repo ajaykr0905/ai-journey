@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import torch
 from torch import Tensor
@@ -36,6 +37,55 @@ class AttentionCausalityAudit:
     prefix_error: float
     future_gradient: float
     boundaries_checked: int
+
+
+@dataclass(frozen=True)
+class AttentionWeightDiagnostics:
+    maximum_row_sum_error: float
+    maximum_future_weight: float
+    minimum_probability: float
+    mean_entropy_by_head: tuple[float, ...]
+    mean_normalized_entropy_by_head: tuple[float, ...]
+
+
+def diagnose_attention_weights(weights: Tensor) -> AttentionWeightDiagnostics:
+    """Summarize per-head concentration and reject invalid causal distributions."""
+    if not isinstance(weights, Tensor) or weights.ndim != 4:
+        raise TypeError("weights must have shape (batch, heads, time, time)")
+    batch, heads, time, keys = weights.shape
+    if min(batch, heads, time) <= 0 or time != keys or not weights.is_floating_point():
+        raise TransformerLabError(
+            "weights must be nonempty square floating distributions"
+        )
+    if not torch.isfinite(weights).all() or (weights < 0).any():
+        raise TransformerLabError("probabilities must be finite and nonnegative")
+    values = weights.detach().double()
+    row_error = float((values.sum(-1) - 1).abs().max())
+    future = float(values.triu(1).max())
+    tolerance = 8 * torch.finfo(weights.dtype).eps
+    if row_error > tolerance or future > tolerance:
+        raise TransformerLabError("weights violate causal probability invariants")
+    logarithms = values.clamp_min(torch.finfo(torch.float64).tiny).log()
+    entropy = -(values * logarithms).sum(-1)
+    maximum_entropy = torch.tensor(
+        [math.log(position + 1) for position in range(time)], device=values.device
+    )
+    # Singleton rows have zero entropy and no meaningful concentration scale.
+    normalized = entropy[..., 1:] / maximum_entropy[1:]
+    return AttentionWeightDiagnostics(
+        row_error,
+        future,
+        float(values.min()),
+        tuple(float(value) for value in entropy.mean(dim=(0, 2))),
+        tuple(
+            float(value)
+            for value in (
+                normalized.mean(dim=(0, 2))
+                if time > 1
+                else torch.zeros(heads, device=values.device)
+            )
+        ),
+    )
 
 
 def audit_attention_causality(

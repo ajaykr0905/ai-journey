@@ -7,6 +7,7 @@ import torch
 from ai_journey.attention_audit import (
     audit_attention_causality,
     audit_attention_gradients,
+    diagnose_attention_weights,
     per_head_reference,
 )
 from ai_journey.transformer_lab import CausalSelfAttention, TransformerConfig
@@ -102,6 +103,32 @@ class AttentionReferenceTests(unittest.TestCase):
         result = audit_attention_causality(module, inputs)
         self.assertGreater(result.prefix_error, 1)
         self.assertGreater(result.future_gradient, 0)
+
+    def test_entropy_distinguishes_uniform_and_one_hot_heads(self):
+        weights = torch.zeros(1, 2, 4, 4, dtype=torch.float64)
+        for position in range(4):
+            weights[0, 0, position, : position + 1] = 1 / (position + 1)
+            weights[0, 1, position, position] = 1
+        result = diagnose_attention_weights(weights)
+        self.assertAlmostEqual(result.mean_normalized_entropy_by_head[0], 1)
+        self.assertEqual(result.mean_normalized_entropy_by_head[1], 0)
+        self.assertEqual(result.maximum_future_weight, 0)
+        self.assertEqual(
+            diagnose_attention_weights(torch.ones(2, 3, 1, 1)).mean_entropy_by_head,
+            (0, 0, 0),
+        )
+
+    def test_diagnostics_reject_invalid_probability_matrices(self):
+        module, inputs = self.make_problem()
+        weights = per_head_reference(module, inputs).weights.detach()
+        for bad in (
+            weights * 2,
+            weights * float("nan"),
+            -weights,
+            weights.transpose(-1, -2),
+        ):
+            with self.subTest(), self.assertRaises(ValueError):
+                diagnose_attention_weights(bad)
 
 
 if __name__ == "__main__":
