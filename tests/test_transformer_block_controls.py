@@ -210,3 +210,55 @@ class FeedForwardExpansionTests(unittest.TestCase):
             default.fingerprint(),
             TransformerConfig(vocab_size=7, feed_forward_expansion=2).fingerprint(),
         )
+
+
+class FeedForwardActivationTests(unittest.TestCase):
+    def test_activation_outputs_and_input_gradients_match_explicit_equations(
+        self,
+    ) -> None:
+        for activation in ("gelu", "relu"):
+            with self.subTest(activation=activation):
+                config = TransformerConfig(
+                    vocab_size=7,
+                    embedding_dim=8,
+                    head_count=2,
+                    feed_forward_activation=activation,
+                )
+                mlp = FeedForward(config).double().eval()
+                inputs = torch.randn(2, 3, 8, dtype=torch.float64, requires_grad=True)
+                actual = mlp(inputs)
+                projected = mlp.network[0](inputs)
+                activated = (
+                    torch.nn.functional.gelu(projected)
+                    if activation == "gelu"
+                    else torch.relu(projected)
+                )
+                expected = mlp.network[2](activated)
+                torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+                actual_grad = torch.autograd.grad(
+                    actual.square().sum(), inputs, retain_graph=True
+                )[0]
+                expected_grad = torch.autograd.grad(expected.square().sum(), inputs)[0]
+                torch.testing.assert_close(actual_grad, expected_grad, rtol=0, atol=0)
+
+    def test_activation_policy_changes_identity_but_not_seeded_parameters(self) -> None:
+        gelu = TransformerConfig(vocab_size=7, embedding_dim=8, head_count=2)
+        relu = TransformerConfig(
+            vocab_size=7, embedding_dim=8, head_count=2, feed_forward_activation="relu"
+        )
+        torch.manual_seed(37)
+        first = DecoderLanguageModel(gelu)
+        torch.manual_seed(37)
+        second = DecoderLanguageModel(relu)
+        self.assertNotEqual(gelu.fingerprint(), relu.fingerprint())
+        for left, right in zip(first.parameters(), second.parameters(), strict=True):
+            torch.testing.assert_close(left, right, rtol=0, atol=0)
+        self.assertIsInstance(first.blocks[0].feed_forward.network[1], torch.nn.GELU)
+        self.assertIsInstance(second.blocks[0].feed_forward.network[1], torch.nn.ReLU)
+
+    def test_rejects_unsupported_activation(self) -> None:
+        for activation in ("tanh", "swish", "GELU", True):
+            with self.subTest(activation=activation), self.assertRaisesRegex(
+                TransformerLabError, "feed_forward_activation"
+            ):
+                TransformerConfig(vocab_size=7, feed_forward_activation=activation)

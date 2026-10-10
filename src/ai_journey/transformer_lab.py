@@ -53,6 +53,7 @@ class TransformerConfig:
     normalization_mode: str = "layer_norm"
     normalization_placement: str = "pre"
     feed_forward_expansion: int = 4
+    feed_forward_activation: str = "gelu"
     batch_norm_eps: float = 1e-5
     batch_norm_momentum: float = 0.1
 
@@ -102,6 +103,10 @@ class TransformerConfig:
             )
         if self.normalization_placement not in {"pre", "post"}:
             raise TransformerLabError("normalization_placement must be 'pre' or 'post'")
+        if self.feed_forward_activation not in {"gelu", "relu"}:
+            raise TransformerLabError(
+                "feed_forward_activation must be 'gelu' or 'relu'"
+            )
         if (
             isinstance(self.batch_norm_eps, bool)
             or not isinstance(self.batch_norm_eps, (int, float))
@@ -438,7 +443,7 @@ class FeedForward(nn.Module):
         hidden_dim = config.feed_forward_expansion * config.embedding_dim
         self.network = nn.Sequential(
             nn.Linear(config.embedding_dim, hidden_dim),
-            nn.GELU(),
+            nn.GELU() if config.feed_forward_activation == "gelu" else nn.ReLU(),
             nn.Linear(hidden_dim, config.embedding_dim),
             nn.Dropout(config.dropout),
         )
