@@ -18,6 +18,7 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
+from torch.utils.checkpoint import checkpoint as activation_checkpoint
 
 from .batch_normalization import ScratchBatchNorm
 
@@ -54,6 +55,7 @@ class TransformerConfig:
     normalization_placement: str = "pre"
     feed_forward_expansion: int = 4
     feed_forward_activation: str = "gelu"
+    activation_checkpointing: bool = False
     batch_norm_eps: float = 1e-5
     batch_norm_momentum: float = 0.1
 
@@ -106,6 +108,12 @@ class TransformerConfig:
         if self.feed_forward_activation not in {"gelu", "relu"}:
             raise TransformerLabError(
                 "feed_forward_activation must be 'gelu' or 'relu'"
+            )
+        if not isinstance(self.activation_checkpointing, bool):
+            raise TypeError("activation_checkpointing must be a boolean")
+        if self.activation_checkpointing and self.normalization_mode != "layer_norm":
+            raise TransformerLabError(
+                "activation checkpointing requires stateless layer_norm"
             )
         if (
             isinstance(self.batch_norm_eps, bool)
@@ -578,7 +586,20 @@ class DecoderLanguageModel(nn.Module):
         positions = torch.arange(time, device=token_ids.device)
         hidden = self.token_embedding(token_ids) + self.position_embedding(positions)
         for block in self.blocks:
-            hidden = block(hidden, lengths=lengths)
+            if (
+                self.config.activation_checkpointing
+                and self.training
+                and torch.is_grad_enabled()
+            ):
+                hidden = activation_checkpoint(
+                    block,
+                    hidden,
+                    lengths=lengths,
+                    use_reentrant=False,
+                    preserve_rng_state=True,
+                )
+            else:
+                hidden = block(hidden, lengths=lengths)
         logits = self.lm_head(self.final_norm(hidden))
         if valid is not None:
             logits = logits.masked_fill(~valid[:, :, None], 0.0)

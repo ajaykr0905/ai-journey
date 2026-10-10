@@ -262,3 +262,95 @@ class FeedForwardActivationTests(unittest.TestCase):
                 TransformerLabError, "feed_forward_activation"
             ):
                 TransformerConfig(vocab_size=7, feed_forward_activation=activation)
+
+
+class ActivationCheckpointTests(unittest.TestCase):
+    def test_checkpoint_training_preserves_dropout_rng_loss_and_all_gradients(
+        self,
+    ) -> None:
+        from dataclasses import replace
+
+        for placement in ("pre", "post"):
+            with self.subTest(placement=placement):
+                config = TransformerConfig(
+                    vocab_size=11,
+                    block_size=4,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=2,
+                    dropout=0.3,
+                    normalization_placement=placement,
+                )
+                torch.manual_seed(37)
+                eager = DecoderLanguageModel(config).double().train()
+                checkpointed = (
+                    DecoderLanguageModel(replace(config, activation_checkpointing=True))
+                    .double()
+                    .train()
+                )
+                checkpointed.load_state_dict(eager.state_dict())
+                tokens = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]])
+                targets = torch.tensor([[2, 3, -100, -100], [6, 7, 8, 9]])
+                lengths = torch.tensor([2, 4])
+                torch.manual_seed(737)
+                eager_logits, eager_loss = eager(tokens, targets, lengths=lengths)
+                eager_loss.backward()
+                eager_rng = torch.random.get_rng_state().clone()
+                torch.manual_seed(737)
+                actual_logits, actual_loss = checkpointed(
+                    tokens, targets, lengths=lengths
+                )
+                actual_loss.backward()
+                torch.testing.assert_close(actual_logits, eager_logits, rtol=0, atol=0)
+                torch.testing.assert_close(actual_loss, eager_loss, rtol=0, atol=0)
+                torch.testing.assert_close(
+                    torch.random.get_rng_state(), eager_rng, rtol=0, atol=0
+                )
+                for actual, expected in zip(
+                    checkpointed.parameters(), eager.parameters(), strict=True
+                ):
+                    torch.testing.assert_close(
+                        actual.grad, expected.grad, rtol=0, atol=0
+                    )
+
+    def test_checkpointing_is_used_only_in_training_with_gradients(self) -> None:
+        from unittest.mock import patch
+        from ai_journey.transformer_lab import activation_checkpoint
+
+        model = DecoderLanguageModel(
+            TransformerConfig(
+                vocab_size=7,
+                embedding_dim=8,
+                head_count=2,
+                layer_count=2,
+                activation_checkpointing=True,
+            )
+        )
+        tokens = torch.tensor([[1, 2, 3]])
+        with patch(
+            "ai_journey.transformer_lab.activation_checkpoint",
+            wraps=activation_checkpoint,
+        ) as checkpoint_call:
+            model.train()
+            model(tokens)
+            self.assertEqual(checkpoint_call.call_count, 2)
+            checkpoint_call.reset_mock()
+            model.eval()
+            model(tokens)
+            model.train()
+            with torch.no_grad():
+                model(tokens)
+            self.assertEqual(checkpoint_call.call_count, 0)
+
+    def test_rejects_nonboolean_controls_and_stateful_normalization(self) -> None:
+        for value in (0, 1, "true", None):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                TypeError, "activation_checkpointing"
+            ):
+                TransformerConfig(vocab_size=7, activation_checkpointing=value)
+        with self.assertRaisesRegex(TransformerLabError, "stateless"):
+            TransformerConfig(
+                vocab_size=7,
+                activation_checkpointing=True,
+                normalization_mode="scratch_batch_norm",
+            )
