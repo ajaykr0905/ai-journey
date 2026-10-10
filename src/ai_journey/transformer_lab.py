@@ -450,14 +450,26 @@ class TransformerBlock(nn.Module):
 
     def __init__(self, config: TransformerConfig) -> None:
         super().__init__()
+        self.normalization_mode = config.normalization_mode
         self.attention_norm = build_normalization(config)
         self.attention = CausalSelfAttention(config)
         self.feed_forward_norm = build_normalization(config)
         self.feed_forward = FeedForward(config)
 
-    def forward(self, inputs: Tensor) -> Tensor:
-        inputs = inputs + self.attention(self.attention_norm(inputs))
-        return inputs + self.feed_forward(self.feed_forward_norm(inputs))
+    def forward(self, inputs: Tensor, *, lengths: Tensor | None = None) -> Tensor:
+        valid = None
+        if lengths is not None:
+            if self.normalization_mode != "layer_norm":
+                raise TransformerLabError("padded blocks require layer_norm")
+            valid = valid_sequence_positions(
+                lengths,
+                batch=inputs.shape[0],
+                time=inputs.shape[1],
+                device=inputs.device,
+            )
+        inputs = inputs + self.attention(self.attention_norm(inputs), lengths=lengths)
+        output = inputs + self.feed_forward(self.feed_forward_norm(inputs))
+        return output if valid is None else output.masked_fill(~valid[:, :, None], 0.0)
 
 
 def expected_initialization_std(module: nn.Module, config: TransformerConfig) -> float:
@@ -497,22 +509,41 @@ class DecoderLanguageModel(nn.Module):
                 nn.init.zeros_(module.bias)
 
     def forward(
-        self, token_ids: Tensor, targets: Tensor | None = None
+        self,
+        token_ids: Tensor,
+        targets: Tensor | None = None,
+        *,
+        lengths: Tensor | None = None,
     ) -> tuple[Tensor, Tensor | None]:
         if token_ids.ndim != 2 or token_ids.dtype != torch.long:
             raise TypeError("token_ids must be a two-dimensional torch.long tensor")
-        _, time = token_ids.shape
+        batch, time = token_ids.shape
+        if batch == 0 or time == 0:
+            raise TransformerLabError(
+                "token batch and time dimensions must be non-empty"
+            )
+        if token_ids.device != self.token_embedding.weight.device:
+            raise TransformerLabError("token_ids must match the model device")
         if time > self.config.block_size:
             raise TransformerLabError("sequence exceeds configured block_size")
         if token_ids.numel() and (
             int(token_ids.min()) < 0 or int(token_ids.max()) >= self.config.vocab_size
         ):
             raise TransformerLabError("token id is outside the vocabulary")
+        valid = None
+        if lengths is not None:
+            if self.config.normalization_mode != "layer_norm":
+                raise TransformerLabError("padded decoder batches require layer_norm")
+            valid = valid_sequence_positions(
+                lengths, batch=batch, time=time, device=token_ids.device
+            )
         positions = torch.arange(time, device=token_ids.device)
         hidden = self.token_embedding(token_ids) + self.position_embedding(positions)
         for block in self.blocks:
-            hidden = block(hidden)
+            hidden = block(hidden, lengths=lengths)
         logits = self.lm_head(self.final_norm(hidden))
+        if valid is not None:
+            logits = logits.masked_fill(~valid[:, :, None], 0.0)
         loss = None
         if targets is not None:
             if targets.shape != token_ids.shape or targets.dtype != torch.long:
