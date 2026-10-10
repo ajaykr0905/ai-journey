@@ -20,6 +20,15 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: python -m pip install -e .
+      - name: Install pinned static checker
+        run: python -m pip install ruff==0.6.9
+      - name: Check transformer reliability source and tests
+        run: |
+          ruff check src/ai_journey/transformer_lab.py src/ai_journey/transformer_cache.py src/ai_journey/attention_audit.py src/ai_journey/transformer_certification.py src/ai_journey/transformer_evidence.py src/ai_journey/day37_cli.py src/ai_journey/ablation_protocol.py scripts/run_day_37.py tests/test_transformer_attention_contracts.py tests/test_transformer_block_controls.py tests/test_transformer_cache.py tests/test_transformer_cache_restart.py tests/test_attention_audit.py tests/test_transformer_certification.py tests/test_transformer_evidence.py tests/test_run_day_37.py tests/test_day37_head_ablation.py tests/test_ablation_config_compatibility.py
+          ruff format --check src/ai_journey/transformer_lab.py src/ai_journey/transformer_cache.py src/ai_journey/attention_audit.py src/ai_journey/transformer_certification.py src/ai_journey/transformer_evidence.py src/ai_journey/day37_cli.py src/ai_journey/ablation_protocol.py scripts/run_day_37.py tests/test_transformer_attention_contracts.py tests/test_transformer_block_controls.py tests/test_transformer_cache.py tests/test_transformer_cache_restart.py tests/test_attention_audit.py tests/test_transformer_certification.py tests/test_transformer_evidence.py tests/test_run_day_37.py tests/test_day37_head_ablation.py tests/test_ablation_config_compatibility.py
+          python -m compileall -q src scripts tests tools
+          ruff check tests/test_transformer_padded_batches.py
+          ruff format --check tests/test_transformer_padded_batches.py
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Run Days 0-11
@@ -223,3 +232,16 @@ jobs:
           --root .
           --config config/deployment_readiness.json
           --output /tmp/deployment-readiness.json
+      - name: Certify manual attention and matched head-count trials
+        run: >-
+          ai-journey-day-37
+          --output /tmp/ai-journey-artifacts/day-37-certification.json
+          --protocol config/day-37-head-count-ablation.json
+          --corpus data/day-19-demo-names.txt
+          --ablation-output /tmp/ai-journey-artifacts/day-37-head-count.json
+      - name: Certify post-norm scaled dot-product attention
+        run: >-
+          ai-journey-day-37
+          --output /tmp/ai-journey-artifacts/day-37-post-sdpa.json
+          --backend sdpa
+          --norm-placement post
