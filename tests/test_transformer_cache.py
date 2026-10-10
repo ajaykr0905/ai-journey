@@ -4,6 +4,7 @@ import sys
 import copy
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import torch
 
@@ -120,6 +121,26 @@ class CachedAttentionTests(unittest.TestCase):
                 cached_attention(self.attention, invalid)
         with self.assertRaisesRegex(TransformerLabError, "mismatch"):
             cached_attention(self.attention, inputs[:1], cache)
+
+    def test_numerical_overflow_and_nonfinite_projection_reject_without_mutating_prefix(
+        self,
+    ) -> None:
+        inputs = torch.ones(2, 2, 12)
+        _, cache = cached_attention(self.attention, inputs[:, :1])
+        original_keys = cache.keys
+        for scale, failure in ((1e38, "QKV projections"), (1e20, "scores")):
+            attention = copy.deepcopy(self.attention)
+            with torch.no_grad():
+                attention.query_key_value.weight.fill_(scale)
+            with self.assertRaisesRegex(TransformerLabError, f"{failure}.*finite"):
+                cached_attention(attention, inputs[:, :1], cache)
+            torch.testing.assert_close(cache.keys, original_keys)
+        attention = copy.deepcopy(self.attention)
+        with torch.no_grad():
+            attention.projection.weight.fill_(float("nan"))
+        with self.assertRaisesRegex(TransformerLabError, "output.*finite"):
+            cached_attention(attention, inputs[:, :1], cache)
+        torch.testing.assert_close(cache.keys, original_keys)
 
 
 class CachedDecoderTests(unittest.TestCase):
@@ -316,6 +337,23 @@ class CachedDecoderTests(unittest.TestCase):
             logits, _ = model(tokens[:, max(0, end - 4) : end])
             expected.append(logits[:, -1:])
         torch.testing.assert_close(actual, torch.cat(expected, dim=1))
+
+    def test_temperature_underflow_rejects_before_sampling_and_preserves_modes_and_rng(
+        self,
+    ) -> None:
+        self.model.train()
+        self.model.blocks[0].eval()
+        modes = [module.training for module in self.model.modules()]
+        tokens = torch.randint(0, 11, (2, 3))
+        rng = torch.get_rng_state().clone()
+        with mock.patch("ai_journey.transformer_cache.torch.multinomial") as sampler:
+            with self.assertRaisesRegex(TransformerLabError, "sampling logits.*finite"):
+                generate_cached(
+                    self.model, tokens, new_tokens=3, temperature=1e-320, seed=73
+                )
+            sampler.assert_not_called()
+        torch.testing.assert_close(torch.get_rng_state(), rng)
+        self.assertEqual([module.training for module in self.model.modules()], modes)
 
 
 if __name__ == "__main__":

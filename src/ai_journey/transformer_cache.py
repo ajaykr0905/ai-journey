@@ -153,7 +153,10 @@ def cached_attention(
             "attention inputs must be finite and match model shape, dtype, and device"
         )
     batch, time, channels = inputs.shape
-    query, key, value = attention.query_key_value(inputs).chunk(3, dim=-1)
+    projected = attention.query_key_value(inputs)
+    if not torch.isfinite(projected).all():
+        raise TransformerLabError("cached attention QKV projections must remain finite")
+    query, key, value = projected.chunk(3, dim=-1)
     shape = (batch, time, attention.head_count, attention.head_dim)
     query = query.view(shape).transpose(1, 2)
     key = key.view(shape).transpose(1, 2)
@@ -181,9 +184,14 @@ def cached_attention(
     key_positions = torch.arange(prefix + time, device=inputs.device)
     allowed = key_positions[None, :] <= query_positions[:, None]
     scores = query @ key.transpose(-2, -1) * attention.head_dim**-0.5
+    if not torch.isfinite(scores).all():
+        raise TransformerLabError("cached attention scores must remain finite")
     weights = F.softmax(scores.masked_fill(~allowed, float("-inf")), dim=-1)
     output = (weights @ value).transpose(1, 2).contiguous().view(batch, time, channels)
-    return attention.projection(output), LayerKV(key, value)
+    output = attention.projection(output)
+    if not torch.isfinite(output).all():
+        raise TransformerLabError("cached attention output must remain finite")
+    return output, LayerKV(key, value)
 
 
 def _model_digest(model: DecoderLanguageModel) -> str:
@@ -647,6 +655,10 @@ def generate_cached(
         logits, cache = prefill(model, generated[:, -model.config.block_size :])
         for step in range(new_tokens):
             next_logits = logits[:, -1] / temperature
+            if not torch.isfinite(next_logits).all():
+                raise TransformerLabError(
+                    "sampling logits must remain finite after temperature scaling"
+                )
             if top_k is not None:
                 values, _ = torch.topk(next_logits, min(top_k, next_logits.shape[-1]))
                 next_logits = next_logits.masked_fill(
