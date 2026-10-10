@@ -27,6 +27,15 @@ class TransformerLabError(ValueError):
     """Raised when transformer data, configuration, or state is invalid."""
 
 
+_LEGACY_TRANSFORMER_CONTROLS = {
+    "normalization_placement": "pre",
+    "feed_forward_expansion": 4,
+    "feed_forward_activation": "gelu",
+    "activation_checkpointing": False,
+    "attention_backend": "manual",
+}
+
+
 def seed_everything(seed: int) -> None:
     """Seed Python, NumPy, and PyTorch and request deterministic kernels."""
 
@@ -140,13 +149,7 @@ class TransformerConfig:
     def fingerprint(self) -> str:
         settings = asdict(self)
         # Legacy defaults preserve the same equations and checkpoint identity.
-        for name, default in {
-            "normalization_placement": "pre",
-            "feed_forward_expansion": 4,
-            "feed_forward_activation": "gelu",
-            "activation_checkpointing": False,
-            "attention_backend": "manual",
-        }.items():
+        for name, default in _LEGACY_TRANSFORMER_CONTROLS.items():
             if settings.get(name) == default:
                 settings.pop(name)
         payload = json.dumps(settings, sort_keys=True, separators=(",", ":"))
@@ -951,7 +954,19 @@ def load_training_checkpoint(
     payload = torch.load(path, map_location="cpu", weights_only=True)
     if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
         raise TransformerLabError("unsupported checkpoint schema")
-    if payload.get("model_config") != asdict(model.config):
+    saved_config = payload.get("model_config")
+    if not isinstance(saved_config, Mapping):
+        raise TransformerLabError("checkpoint model configuration mismatch")
+    normalized_config = dict(saved_config)
+    for name, default in _LEGACY_TRANSFORMER_CONTROLS.items():
+        normalized_config.setdefault(name, default)
+    if normalized_config.keys() != asdict(model.config).keys():
+        raise TransformerLabError("checkpoint model configuration mismatch")
+    try:
+        restored_config = TransformerConfig(**normalized_config)
+    except (TypeError, ValueError) as exc:
+        raise TransformerLabError("checkpoint model configuration is invalid") from exc
+    if restored_config != model.config:
         raise TransformerLabError("checkpoint model configuration mismatch")
     if payload.get("training_config") != asdict(training_config):
         raise TransformerLabError("checkpoint training configuration mismatch")

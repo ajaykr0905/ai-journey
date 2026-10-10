@@ -354,3 +354,172 @@ class ActivationCheckpointTests(unittest.TestCase):
                 activation_checkpointing=True,
                 normalization_mode="scratch_batch_norm",
             )
+
+
+class LegacyCheckpointCompatibilityTests(unittest.TestCase):
+    def _save_legacy_archive(self, path):
+        from ai_journey.transformer_lab import (
+            BatchCursor,
+            TrainingConfig,
+            build_optimizer,
+            save_training_checkpoint,
+            train_steps,
+        )
+
+        torch.manual_seed(37)
+        config = TransformerConfig(
+            vocab_size=7,
+            block_size=3,
+            embedding_dim=8,
+            head_count=2,
+            layer_count=1,
+            dropout=0.2,
+        )
+        model = DecoderLanguageModel(config)
+        training = TrainingConfig(steps=2, batch_size=2, seed=37)
+        optimizer = build_optimizer(model, training)
+        cursor = BatchCursor(torch.arange(20) % 7, block_size=3, batch_size=2, seed=37)
+        train_steps(model, cursor, optimizer, training, step_count=1)
+        save_training_checkpoint(
+            path,
+            model=model,
+            optimizer=optimizer,
+            cursor=cursor,
+            training_config=training,
+            corpus_fingerprint="a" * 64,
+            step=1,
+        )
+        payload = torch.load(path, weights_only=True)
+        for name in (
+            "normalization_placement",
+            "feed_forward_expansion",
+            "feed_forward_activation",
+            "activation_checkpointing",
+            "attention_backend",
+        ):
+            payload["model_config"].pop(name)
+        torch.save(payload, path)
+        return model, optimizer, cursor, training
+
+    def test_schema_one_legacy_defaults_restore_bit_exact_training_restart(
+        self,
+    ) -> None:
+        import tempfile
+        from pathlib import Path
+        from ai_journey.transformer_lab import (
+            BatchCursor,
+            build_optimizer,
+            load_training_checkpoint,
+            train_steps,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.pt"
+            model, optimizer, cursor, training = self._save_legacy_archive(path)
+            expected = train_steps(
+                model, cursor, optimizer, training, start_step=1, step_count=1
+            )
+            restored = DecoderLanguageModel(model.config)
+            restored_optimizer = build_optimizer(restored, training)
+            restored_cursor = BatchCursor(
+                torch.arange(20) % 7, block_size=3, batch_size=2, seed=37
+            )
+            step = load_training_checkpoint(
+                path,
+                model=restored,
+                optimizer=restored_optimizer,
+                cursor=restored_cursor,
+                training_config=training,
+                corpus_fingerprint="a" * 64,
+            )
+            actual = train_steps(
+                restored,
+                restored_cursor,
+                restored_optimizer,
+                training,
+                start_step=step,
+                step_count=1,
+            )
+            self.assertEqual(actual, expected)
+            self.assertEqual(restored_cursor.state_dict(), cursor.state_dict())
+            for actual_parameter, expected_parameter in zip(
+                restored.parameters(), model.parameters(), strict=True
+            ):
+                torch.testing.assert_close(
+                    actual_parameter, expected_parameter, rtol=0, atol=0
+                )
+
+    def test_legacy_defaults_cannot_override_nondefault_requested_model(self) -> None:
+        import tempfile
+        from dataclasses import replace
+        from pathlib import Path
+        from ai_journey.transformer_lab import build_optimizer, load_training_checkpoint
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.pt"
+            model, _, cursor, training = self._save_legacy_archive(path)
+            for change in (
+                {"normalization_placement": "post"},
+                {"feed_forward_expansion": 2},
+                {"feed_forward_activation": "relu"},
+                {"activation_checkpointing": True},
+                {"attention_backend": "sdpa"},
+            ):
+                target = DecoderLanguageModel(replace(model.config, **change))
+                optimizer = build_optimizer(target, training)
+                states = {
+                    name: tensor.clone() for name, tensor in target.state_dict().items()
+                }
+                cursor_state = cursor.state_dict().copy()
+                rng = torch.random.get_rng_state().clone()
+                with self.subTest(change=change), self.assertRaisesRegex(
+                    TransformerLabError, "configuration mismatch"
+                ):
+                    load_training_checkpoint(
+                        path,
+                        model=target,
+                        optimizer=optimizer,
+                        cursor=cursor,
+                        training_config=training,
+                        corpus_fingerprint="a" * 64,
+                    )
+                for name, tensor in target.state_dict().items():
+                    torch.testing.assert_close(tensor, states[name], rtol=0, atol=0)
+                self.assertEqual(optimizer.state_dict()["state"], {})
+                self.assertEqual(cursor.state_dict(), cursor_state)
+                torch.testing.assert_close(
+                    torch.random.get_rng_state(), rng, rtol=0, atol=0
+                )
+
+    def test_unknown_controls_missing_original_fields_and_boolean_aliases_fail(
+        self,
+    ) -> None:
+        import tempfile
+        from pathlib import Path
+        from ai_journey.transformer_lab import load_training_checkpoint
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.pt"
+            model, optimizer, cursor, training = self._save_legacy_archive(path)
+            original = torch.load(path, weights_only=True)
+            for change in ("unknown", "missing_original", "boolean_alias"):
+                payload = dict(original)
+                payload["model_config"] = dict(original["model_config"])
+                if change == "unknown":
+                    payload["model_config"]["future_backend"] = "unsafe"
+                elif change == "missing_original":
+                    payload["model_config"].pop("dropout")
+                else:
+                    payload["model_config"]["activation_checkpointing"] = 0
+                torch.save(payload, path)
+                with self.subTest(change=change), self.assertRaisesRegex(
+                    TransformerLabError, "configuration"
+                ):
+                    load_training_checkpoint(
+                        path,
+                        model=model,
+                        optimizer=optimizer,
+                        cursor=cursor,
+                        training_config=training,
+                        corpus_fingerprint="a" * 64,
+                    )
