@@ -4,7 +4,7 @@ import unittest
 
 import torch
 
-from ai_journey.attention_audit import per_head_reference
+from ai_journey.attention_audit import audit_attention_gradients, per_head_reference
 from ai_journey.transformer_lab import CausalSelfAttention, TransformerConfig
 
 
@@ -54,6 +54,33 @@ class AttentionReferenceTests(unittest.TestCase):
         ):
             with self.subTest(shape=bad.shape), self.assertRaises(ValueError):
                 per_head_reference(module, bad)
+
+    def test_input_and_every_projection_gradient_match_independent_oracle(self):
+        for heads in (1, 2, 4):
+            with self.subTest(heads=heads):
+                module, inputs = self.make_problem(heads)
+                inputs.requires_grad_()
+                inputs.grad = torch.full_like(inputs, 7)
+                for parameter in module.parameters():
+                    parameter.grad = torch.full_like(parameter, 9)
+                state = torch.get_rng_state().clone()
+                audit = audit_attention_gradients(module, inputs)
+                self.assertLess(audit.maximum_error, 1e-12)
+                self.assertTrue(torch.equal(inputs.grad, torch.full_like(inputs, 7)))
+                self.assertTrue(
+                    all(
+                        torch.equal(p.grad, torch.full_like(p, 9))
+                        for p in module.parameters()
+                    )
+                )
+                self.assertTrue(torch.equal(state, torch.get_rng_state()))
+                self.assertFalse(module.training)
+
+    def test_gradient_audit_rejects_frozen_parameters(self):
+        module, inputs = self.make_problem()
+        module.projection.weight.requires_grad_(False)
+        with self.assertRaisesRegex(ValueError, "trainable"):
+            audit_attention_gradients(module, inputs)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,57 @@ class AttentionReference:
     weights: Tensor
 
 
+@dataclass(frozen=True)
+class AttentionGradientAudit:
+    forward_error: float
+    input_gradient_error: float
+    qkv_weight_gradient_error: float
+    qkv_bias_gradient_error: float
+    projection_weight_gradient_error: float
+    projection_bias_gradient_error: float
+
+    @property
+    def maximum_error(self) -> float:
+        return max(vars(self).values())
+
+
+def audit_attention_gradients(
+    attention: CausalSelfAttention, inputs: Tensor
+) -> AttentionGradientAudit:
+    """Compare all differentiable attention paths without changing caller grads."""
+    sample = inputs.detach().clone().requires_grad_(True)
+    reference = per_head_reference(attention, sample).output
+    actual = attention(sample)
+    probe = torch.linspace(
+        0.1, 1.0, actual.numel(), dtype=actual.dtype, device=actual.device
+    ).reshape_as(actual)
+    parameters = (
+        attention.query_key_value.weight,
+        attention.query_key_value.bias,
+        attention.projection.weight,
+        attention.projection.bias,
+    )
+    if any(
+        parameter is None or not parameter.requires_grad for parameter in parameters
+    ):
+        raise TransformerLabError(
+            "gradient audit requires trainable projection weights and biases"
+        )
+    actual_gradients = torch.autograd.grad(
+        (actual * probe).sum(), (sample, *parameters)
+    )
+    reference_gradients = torch.autograd.grad(
+        (reference * probe).sum(), (sample, *parameters)
+    )
+    errors = [
+        float((left - right).detach().abs().max())
+        for left, right in zip(actual_gradients, reference_gradients, strict=True)
+    ]
+    return AttentionGradientAudit(
+        float((actual - reference).detach().abs().max()), *errors
+    )
+
+
 def per_head_reference(
     attention: CausalSelfAttention, inputs: Tensor
 ) -> AttentionReference:
