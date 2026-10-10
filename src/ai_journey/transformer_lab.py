@@ -546,11 +546,25 @@ class DecoderLanguageModel(nn.Module):
             logits = logits.masked_fill(~valid[:, :, None], 0.0)
         loss = None
         if targets is not None:
-            if targets.shape != token_ids.shape or targets.dtype != torch.long:
+            if (
+                not isinstance(targets, Tensor)
+                or targets.shape != token_ids.shape
+                or targets.dtype != torch.long
+            ):
                 raise TypeError("targets must match token_ids shape and dtype")
-            loss = F.cross_entropy(
-                logits.reshape(-1, self.config.vocab_size), targets.reshape(-1)
+            if targets.device != token_ids.device:
+                raise TransformerLabError("targets must match token_ids device")
+            loss_logits = (
+                logits.reshape(-1, self.config.vocab_size)
+                if valid is None
+                else logits[valid]
             )
+            loss_targets = targets.reshape(-1) if valid is None else targets[valid]
+            if bool(
+                ((loss_targets < 0) | (loss_targets >= self.config.vocab_size)).any()
+            ):
+                raise TransformerLabError("valid target id is outside the vocabulary")
+            loss = F.cross_entropy(loss_logits, loss_targets)
         return logits, loss
 
     @property

@@ -70,3 +70,51 @@ class PaddedDecoderTests(unittest.TestCase):
                 self.model(tokens)
         with self.assertRaisesRegex(TransformerLabError, "lengths"):
             self.model(torch.ones(2, 3, dtype=torch.long), lengths=torch.tensor([2, 4]))
+
+    def test_padded_loss_is_valid_token_weighted_not_batch_weighted(self) -> None:
+        tokens = torch.tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
+        lengths = torch.tensor([2, 5])
+        targets = torch.tensor([[2, 3, -100, -100, -100], [7, 8, 9, 10, 1]])
+        _, loss = self.model(tokens, targets, lengths=lengths)
+        losses = []
+        for row, length in enumerate(lengths.tolist()):
+            _, individual = self.model(
+                tokens[row : row + 1, :length], targets[row : row + 1, :length]
+            )
+            losses.append(individual * length)
+        torch.testing.assert_close(loss, sum(losses) / lengths.sum())
+        changed = targets.clone()
+        changed[0, 2:] = 10000
+        torch.testing.assert_close(
+            loss, self.model(tokens, changed, lengths=lengths)[1], rtol=0, atol=0
+        )
+
+    def test_padded_loss_gradients_match_separate_valid_prefixes(self) -> None:
+        import copy
+
+        separate = copy.deepcopy(self.model)
+        tokens = torch.tensor([[1, 2, 3], [4, 5, 6]])
+        targets = torch.tensor([[2, -100, -100], [5, 6, 7]])
+        _, loss = self.model(tokens, targets, lengths=torch.tensor([1, 3]))
+        loss.backward()
+        losses = [
+            separate(tokens[0:1, :1], targets[0:1, :1])[1],
+            separate(tokens[1:2], targets[1:2])[1] * 3,
+        ]
+        (sum(losses) / 4).backward()
+        for actual, expected in zip(
+            self.model.parameters(), separate.parameters(), strict=True
+        ):
+            torch.testing.assert_close(
+                actual.grad, expected.grad, rtol=1e-9, atol=1e-10
+            )
+
+    def test_rejects_invalid_valid_targets_and_target_device(self) -> None:
+        tokens = torch.tensor([[1, 2, 3]])
+        for targets in (torch.tensor([[2, -100, 4]]), torch.tensor([[2, 11, 4]])):
+            with self.assertRaisesRegex(TransformerLabError, "valid target"):
+                self.model(tokens, targets, lengths=torch.tensor([2]))
+        with self.assertRaisesRegex(TransformerLabError, "device"):
+            self.model(tokens, torch.ones(1, 3, dtype=torch.long, device="meta"))
+        with self.assertRaisesRegex(TypeError, "targets"):
+            self.model(tokens, [[2, 3, 4]])
