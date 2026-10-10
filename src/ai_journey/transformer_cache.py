@@ -336,3 +336,37 @@ def migrate_cache(
             )
     _, migrated = prefill(target_model, tokens)
     return migrated
+
+
+def reorder_cache(cache: DecoderCache, indexes: Tensor) -> DecoderCache:
+    """Select, reorder, or duplicate request rows without sharing mutable storage."""
+
+    if not isinstance(cache, DecoderCache):
+        raise TypeError("cache must be DecoderCache")
+    if (
+        not isinstance(indexes, Tensor)
+        or indexes.ndim != 1
+        or indexes.dtype != torch.long
+    ):
+        raise TypeError("indexes must be a one-dimensional torch.long tensor")
+    if (
+        indexes.numel() == 0
+        or indexes.device != cache._tokens.device
+        or torch.any(indexes < 0)
+        or torch.any(indexes >= cache._tokens.shape[0])
+    ):
+        raise TransformerLabError(
+            "cache indexes must be nonempty, in range, and on cache device"
+        )
+    layers = tuple(
+        LayerKV(
+            layer._keys.index_select(0, indexes), layer._values.index_select(0, indexes)
+        )
+        for layer in cache._layers
+    )
+    return DecoderCache(
+        cache._tokens.index_select(0, indexes),
+        layers,
+        config_digest=cache.config_digest,
+        model_digest=cache.model_digest,
+    )

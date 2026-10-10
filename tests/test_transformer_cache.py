@@ -16,6 +16,7 @@ from ai_journey.transformer_cache import (
     decode,
     prefill,
     migrate_cache,
+    reorder_cache,
 )
 from ai_journey.transformer_lab import (
     CausalSelfAttention,
@@ -216,6 +217,31 @@ class CachedDecoderTests(unittest.TestCase):
         actual, _ = decode(model, tokens[:, 3:], cache)
         expected, _ = model(tokens)
         torch.testing.assert_close(actual, expected[:, -1:], rtol=0.02, atol=0.002)
+
+    def test_reorder_and_duplicate_requests_preserve_decode_parity(self) -> None:
+        tokens = torch.randint(0, 11, (3, 4))
+        next_tokens = torch.randint(0, 11, (3, 2))
+        _, cache = prefill(self.model, tokens)
+        expected, _ = decode(self.model, next_tokens, cache)
+        indexes = torch.tensor([2, 0, 2, 1])
+        selected = reorder_cache(cache, indexes)
+        actual, _ = decode(self.model, next_tokens[indexes], selected)
+        torch.testing.assert_close(actual, expected[indexes])
+        torch.testing.assert_close(selected.tokens, tokens[indexes])
+        selected.layers[0].keys.zero_()
+        self.assertTrue(torch.any(cache.layers[0].keys != 0))
+
+    def test_reorder_rejects_bad_request_indexes(self) -> None:
+        _, cache = prefill(self.model, torch.ones(2, 3, dtype=torch.long))
+        for indexes in (
+            torch.tensor([]),
+            torch.tensor([0.0]),
+            torch.tensor([[0]]),
+            torch.tensor([-1]),
+            torch.tensor([2]),
+        ):
+            with self.assertRaises((TypeError, TransformerLabError)):
+                reorder_cache(cache, indexes)
 
 
 if __name__ == "__main__":
