@@ -31,6 +31,48 @@ class AttentionGradientAudit:
         return max(vars(self).values())
 
 
+@dataclass(frozen=True)
+class AttentionCausalityAudit:
+    prefix_error: float
+    future_gradient: float
+    boundaries_checked: int
+
+
+def audit_attention_causality(
+    attention: CausalSelfAttention, inputs: Tensor
+) -> AttentionCausalityAudit:
+    """Perturb each future suffix and differentiate every unchanged prefix."""
+    per_head_reference(attention, inputs)
+    original = attention(inputs).detach()
+    prefix_error = 0.0
+    future_gradient = 0.0
+    for boundary in range(1, inputs.shape[1]):
+        changed = inputs.detach().clone()
+        suffix = changed[:, boundary:]
+        # Channel-dependent perturbations avoid the constant-shift blind spot.
+        suffix.add_(
+            torch.arange(
+                1, inputs.shape[-1] + 1, device=inputs.device, dtype=inputs.dtype
+            )
+            * 11
+        )
+        perturbed = attention(changed).detach()
+        prefix_error = max(
+            prefix_error,
+            float((original[:, :boundary] - perturbed[:, :boundary]).abs().max()),
+        )
+        sample = inputs.detach().clone().requires_grad_(True)
+        prefix = attention(sample)[:, :boundary]
+        probe = torch.linspace(
+            0.1, 1.0, prefix.numel(), device=inputs.device, dtype=inputs.dtype
+        ).reshape_as(prefix)
+        gradient = torch.autograd.grad((prefix * probe).sum(), sample)[0]
+        future_gradient = max(
+            future_gradient, float(gradient[:, boundary:].detach().abs().max())
+        )
+    return AttentionCausalityAudit(prefix_error, future_gradient, inputs.shape[1] - 1)
+
+
 def audit_attention_gradients(
     attention: CausalSelfAttention, inputs: Tensor
 ) -> AttentionGradientAudit:

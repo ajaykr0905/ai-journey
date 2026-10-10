@@ -4,7 +4,11 @@ import unittest
 
 import torch
 
-from ai_journey.attention_audit import audit_attention_gradients, per_head_reference
+from ai_journey.attention_audit import (
+    audit_attention_causality,
+    audit_attention_gradients,
+    per_head_reference,
+)
 from ai_journey.transformer_lab import CausalSelfAttention, TransformerConfig
 
 
@@ -81,6 +85,23 @@ class AttentionReferenceTests(unittest.TestCase):
         module.projection.weight.requires_grad_(False)
         with self.assertRaisesRegex(ValueError, "trainable"):
             audit_attention_gradients(module, inputs)
+
+    def test_every_future_boundary_is_isolated_in_forward_and_backward(self):
+        module, inputs = self.make_problem()
+        result = audit_attention_causality(module, inputs)
+        self.assertEqual(result.boundaries_checked, 4)
+        self.assertEqual(result.prefix_error, 0)
+        self.assertEqual(result.future_gradient, 0)
+        singleton = audit_attention_causality(module, inputs[:, :1])
+        self.assertEqual(singleton.boundaries_checked, 0)
+
+    def test_causality_audit_detects_a_deliberate_future_leak(self):
+        module, inputs = self.make_problem()
+        original = module.forward
+        module.forward = lambda x: original(x) + x.mean(dim=1, keepdim=True)
+        result = audit_attention_causality(module, inputs)
+        self.assertGreater(result.prefix_error, 1)
+        self.assertGreater(result.future_gradient, 0)
 
 
 if __name__ == "__main__":
