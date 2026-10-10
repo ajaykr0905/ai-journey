@@ -8,8 +8,12 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ai_journey.transformer_cache import DecoderCache, LayerKV
-from ai_journey.transformer_lab import TransformerLabError
+from ai_journey.transformer_cache import DecoderCache, LayerKV, cached_attention
+from ai_journey.transformer_lab import (
+    CausalSelfAttention,
+    TransformerConfig,
+    TransformerLabError,
+)
 
 
 class CacheStateTests(unittest.TestCase):
@@ -60,6 +64,51 @@ class CacheStateTests(unittest.TestCase):
                 config_digest="bad",
                 model_digest="b" * 64,
             )
+
+
+class CachedAttentionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        torch.set_num_threads(1)
+        self.attention = CausalSelfAttention(
+            TransformerConfig(
+                vocab_size=11, block_size=8, embedding_dim=12, head_count=3, dropout=0.2
+            )
+        ).eval()
+
+    def test_prefill_and_chunks_match_full_attention(self) -> None:
+        inputs = torch.randn(2, 7, 12)
+        expected = self.attention(inputs)
+        for sizes in ((7,), (1, 1, 1, 1, 1, 1, 1), (3, 2, 2)):
+            outputs = []
+            cache = None
+            offset = 0
+            for size in sizes:
+                output, cache = cached_attention(
+                    self.attention, inputs[:, offset : offset + size], cache
+                )
+                outputs.append(output)
+                offset += size
+            torch.testing.assert_close(torch.cat(outputs, dim=1), expected)
+            self.assertEqual(cache.keys.shape, (2, 3, 7, 4))
+
+    def test_rejects_training_overflow_and_bad_inputs(self) -> None:
+        inputs = torch.randn(2, 5, 12)
+        self.attention.train()
+        with self.assertRaisesRegex(TransformerLabError, "evaluation"):
+            cached_attention(self.attention, inputs)
+        self.attention.eval()
+        _, cache = cached_attention(self.attention, inputs)
+        with self.assertRaisesRegex(TransformerLabError, "block_size"):
+            cached_attention(self.attention, inputs, cache)
+        for invalid in (
+            inputs.double(),
+            inputs[:, :, :4],
+            torch.full_like(inputs, float("nan")),
+        ):
+            with self.assertRaises(TransformerLabError):
+                cached_attention(self.attention, invalid)
+        with self.assertRaisesRegex(TransformerLabError, "mismatch"):
+            cached_attention(self.attention, inputs[:1], cache)
 
 
 if __name__ == "__main__":

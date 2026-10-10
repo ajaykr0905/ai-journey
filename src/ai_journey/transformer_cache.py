@@ -6,8 +6,9 @@ import re
 
 import torch
 from torch import Tensor
+from torch.nn import functional as F
 
-from .transformer_lab import TransformerLabError
+from .transformer_lab import CausalSelfAttention, TransformerLabError
 
 
 class LayerKV:
@@ -112,3 +113,62 @@ class DecoderCache:
     @property
     def model_digest(self) -> str:
         return self._model_digest
+
+
+@torch.no_grad()
+def cached_attention(
+    attention: CausalSelfAttention,
+    inputs: Tensor,
+    cache: LayerKV | None = None,
+) -> tuple[Tensor, LayerKV]:
+    """Evaluate a causal attention chunk against a head-major prefix cache."""
+
+    if not isinstance(attention, CausalSelfAttention):
+        raise TypeError("attention must be CausalSelfAttention")
+    if any(module.training for module in attention.modules()):
+        raise TransformerLabError("cached attention requires evaluation mode")
+    weight = attention.query_key_value.weight
+    if (
+        not isinstance(inputs, Tensor)
+        or inputs.ndim != 3
+        or any(size <= 0 for size in inputs.shape)
+        or inputs.shape[-1] != weight.shape[1]
+        or inputs.dtype != weight.dtype
+        or inputs.device != weight.device
+        or not torch.isfinite(inputs).all()
+    ):
+        raise TransformerLabError(
+            "attention inputs must be finite and match model shape, dtype, and device"
+        )
+    batch, time, channels = inputs.shape
+    query, key, value = attention.query_key_value(inputs).chunk(3, dim=-1)
+    shape = (batch, time, attention.head_count, attention.head_dim)
+    query = query.view(shape).transpose(1, 2)
+    key = key.view(shape).transpose(1, 2)
+    value = value.view(shape).transpose(1, 2)
+    prefix = 0
+    if cache is not None:
+        if not isinstance(cache, LayerKV):
+            raise TypeError("cache must be LayerKV")
+        old = cache._keys
+        if (
+            (old.shape[0], old.shape[1], old.shape[3])
+            != (batch, attention.head_count, attention.head_dim)
+            or old.dtype != inputs.dtype
+            or old.device != inputs.device
+        ):
+            raise TransformerLabError(
+                "attention cache shape, dtype, or device mismatch"
+            )
+        prefix = old.shape[2]
+        key = torch.cat((old, key), dim=2)
+        value = torch.cat((cache._values, value), dim=2)
+    if prefix + time > attention.causal_mask.shape[0]:
+        raise TransformerLabError("cached attention exceeds configured block_size")
+    query_positions = torch.arange(prefix, prefix + time, device=inputs.device)
+    key_positions = torch.arange(prefix + time, device=inputs.device)
+    allowed = key_positions[None, :] <= query_positions[:, None]
+    scores = query @ key.transpose(-2, -1) * attention.head_dim**-0.5
+    weights = F.softmax(scores.masked_fill(~allowed, float("-inf")), dim=-1)
+    output = (weights @ value).transpose(1, 2).contiguous().view(batch, time, channels)
+    return attention.projection(output), LayerKV(key, value)
