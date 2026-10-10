@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 
 import torch
 
@@ -70,3 +65,58 @@ class AttentionTensorContractTests(unittest.TestCase):
         self.attention.to("meta")
         with self.assertRaisesRegex(TransformerLabError, "dtype and device"):
             self.attention(torch.ones(2, 4, 8))
+
+
+class PaddedAttentionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        torch.manual_seed(37)
+        self.attention = (
+            CausalSelfAttention(
+                TransformerConfig(
+                    vocab_size=7, block_size=5, embedding_dim=8, head_count=2
+                )
+            )
+            .double()
+            .eval()
+        )
+
+    def test_padded_batch_matches_independent_prefixes_and_zeros_queries(self) -> None:
+        inputs = torch.randn(3, 5, 8, dtype=torch.float64)
+        lengths = torch.tensor([1, 3, 5])
+        output = self.attention(inputs, lengths=lengths)
+        self.assertTrue(torch.isfinite(output).all())
+        for index, length in enumerate(lengths.tolist()):
+            expected = self.attention(inputs[index : index + 1, :length])
+            torch.testing.assert_close(output[index : index + 1, :length], expected)
+            self.assertEqual(torch.count_nonzero(output[index, length:]).item(), 0)
+
+    def test_padding_values_and_gradients_cannot_affect_valid_outputs(self) -> None:
+        inputs = torch.randn(2, 5, 8, dtype=torch.float64, requires_grad=True)
+        lengths = torch.tensor([2, 4])
+        output = self.attention(inputs, lengths=lengths)
+        changed = inputs.detach().clone()
+        changed[0, 2:] = 1000
+        changed[1, 4:] = -1000
+        torch.testing.assert_close(
+            output, self.attention(changed, lengths=lengths), rtol=0, atol=0
+        )
+        output.square().sum().backward()
+        self.assertEqual(torch.count_nonzero(inputs.grad[0, 2:]).item(), 0)
+        self.assertEqual(torch.count_nonzero(inputs.grad[1, 4:]).item(), 0)
+
+    def test_rejects_invalid_lengths_before_attention(self) -> None:
+        inputs = torch.randn(2, 5, 8, dtype=torch.float64)
+        for lengths in (
+            torch.tensor([0, 5]),
+            torch.tensor([6, 5]),
+            torch.tensor([-1, 4]),
+        ):
+            with self.subTest(lengths=lengths), self.assertRaisesRegex(
+                TransformerLabError, "lengths"
+            ):
+                self.attention(inputs, lengths=lengths)
+        for lengths in (torch.ones(2), torch.ones(2, 1, dtype=torch.long), [2, 5]):
+            with self.subTest(lengths=lengths), self.assertRaisesRegex(
+                TypeError, "lengths"
+            ):
+                self.attention(inputs, lengths=lengths)

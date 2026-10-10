@@ -320,6 +320,26 @@ class BatchCursor:
         self.offset = offset
 
 
+def valid_sequence_positions(
+    lengths: Tensor, *, batch: int, time: int, device: torch.device
+) -> Tensor:
+    """Validate positive right-padded lengths and return the valid-token mask."""
+
+    if (
+        not isinstance(lengths, Tensor)
+        or lengths.dtype != torch.long
+        or lengths.shape != (batch,)
+    ):
+        raise TypeError("lengths must be a torch.long tensor with shape (batch,)")
+    if lengths.device != device:
+        raise TransformerLabError("lengths must match the input device")
+    if bool(((lengths <= 0) | (lengths > time)).any()):
+        raise TransformerLabError(
+            "lengths must be positive and not exceed sequence time"
+        )
+    return torch.arange(time, device=device).unsqueeze(0) < lengths.unsqueeze(1)
+
+
 class CausalSelfAttention(nn.Module):
     """Multi-head self-attention with an explicit causal mask."""
 
@@ -336,7 +356,7 @@ class CausalSelfAttention(nn.Module):
         )
         self.register_buffer("causal_mask", mask, persistent=False)
 
-    def forward(self, inputs: Tensor) -> Tensor:
+    def forward(self, inputs: Tensor, *, lengths: Tensor | None = None) -> Tensor:
         if not isinstance(inputs, Tensor):
             raise TypeError("attention inputs must be a torch.Tensor")
         if inputs.ndim != 3:
@@ -361,6 +381,13 @@ class CausalSelfAttention(nn.Module):
             raise TransformerLabError("attention inputs must be finite")
         if time > self.causal_mask.shape[0]:
             raise TransformerLabError("sequence exceeds configured block_size")
+        valid = (
+            None
+            if lengths is None
+            else valid_sequence_positions(
+                lengths, batch=batch, time=time, device=inputs.device
+            )
+        )
         qkv = self.query_key_value(inputs)
         if not bool(torch.isfinite(qkv).all()):
             raise TransformerLabError("attention projections must be finite")
@@ -373,11 +400,15 @@ class CausalSelfAttention(nn.Module):
         if not bool(torch.isfinite(scores).all()):
             raise TransformerLabError("attention scores must be finite")
         mask = self.causal_mask[:time, :time]
+        if valid is not None:
+            mask = mask[None, None, :, :] & valid[:, None, None, :]
         scores = scores.masked_fill(~mask, float("-inf"))
         weights = self.attention_dropout(F.softmax(scores, dim=-1))
         attended = weights @ value
         attended = attended.transpose(1, 2).contiguous().view(batch, time, channels)
         output = self.residual_dropout(self.projection(attended))
+        if valid is not None:
+            output = output.masked_fill(~valid[:, :, None], 0.0)
         if not bool(torch.isfinite(output).all()):
             raise TransformerLabError("attention output must be finite")
         return output
