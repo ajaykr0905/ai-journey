@@ -65,6 +65,6 @@ class HeadCountAblationTests(unittest.TestCase):
             )
         self.assertEqual(len(first.trials), 6)
         self.assertIn(
-            evaluation.outcome, {"supported", "rejected", "inconclusive", "mixed"}
+            evaluation.outcome, {"supports", "contradicts", "inconclusive", "mixed"}
         )
         verify_ablation_report(build_ablation_report(first))
