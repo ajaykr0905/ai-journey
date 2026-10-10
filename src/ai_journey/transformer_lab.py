@@ -52,6 +52,7 @@ class TransformerConfig:
     initialization_gain: float = math.sqrt(2.0)
     normalization_mode: str = "layer_norm"
     normalization_placement: str = "pre"
+    feed_forward_expansion: int = 4
     batch_norm_eps: float = 1e-5
     batch_norm_momentum: float = 0.1
 
@@ -62,6 +63,7 @@ class TransformerConfig:
             "embedding_dim",
             "head_count",
             "layer_count",
+            "feed_forward_expansion",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):
@@ -429,11 +431,11 @@ class CausalSelfAttention(nn.Module):
 
 
 class FeedForward(nn.Module):
-    """Transformer position-wise MLP with a four-times expansion."""
+    """Transformer position-wise MLP with a validated hidden expansion."""
 
     def __init__(self, config: TransformerConfig) -> None:
         super().__init__()
-        hidden_dim = 4 * config.embedding_dim
+        hidden_dim = config.feed_forward_expansion * config.embedding_dim
         self.network = nn.Sequential(
             nn.Linear(config.embedding_dim, hidden_dim),
             nn.GELU(),

@@ -6,6 +6,7 @@ import torch
 
 from ai_journey.transformer_lab import (
     DecoderLanguageModel,
+    FeedForward,
     TransformerConfig,
     TransformerBlock,
     TransformerLabError,
@@ -124,7 +125,14 @@ class NormalizationPlacementTests(unittest.TestCase):
 
         config = TransformerConfig(vocab_size=7)
         legacy = asdict(config)
-        legacy.pop("normalization_placement")
+        for name in (
+            "normalization_placement",
+            "feed_forward_expansion",
+            "feed_forward_activation",
+            "activation_checkpointing",
+            "attention_backend",
+        ):
+            legacy.pop(name, None)
         expected = sha256(
             json.dumps(legacy, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
@@ -151,3 +159,54 @@ class NormalizationPlacementTests(unittest.TestCase):
         output = block(torch.randn(2, 4, 8), lengths=torch.tensor([1, 3]))
         self.assertEqual(torch.count_nonzero(output[0, 1:]).item(), 0)
         self.assertEqual(torch.count_nonzero(output[1, 3:]).item(), 0)
+
+
+class FeedForwardExpansionTests(unittest.TestCase):
+    def test_expansion_controls_hidden_width_and_parameter_budget(self) -> None:
+        for expansion in (1, 2, 4, 7):
+            with self.subTest(expansion=expansion):
+                config = TransformerConfig(
+                    vocab_size=7,
+                    embedding_dim=8,
+                    head_count=2,
+                    feed_forward_expansion=expansion,
+                )
+                mlp = FeedForward(config).double()
+                self.assertEqual(mlp.network[0].out_features, 8 * expansion)
+                self.assertEqual(mlp.network[2].in_features, 8 * expansion)
+                self.assertEqual(
+                    sum(p.numel() for p in mlp.parameters()),
+                    2 * 8 * (8 * expansion) + 8 * expansion + 8,
+                )
+                inputs = torch.randn(2, 3, 8, dtype=torch.float64, requires_grad=True)
+                output = mlp(inputs)
+                self.assertEqual(output.shape, inputs.shape)
+                output.square().sum().backward()
+                self.assertTrue(torch.isfinite(inputs.grad).all())
+                self.assertTrue(
+                    all(
+                        p.grad is not None and torch.isfinite(p.grad).all()
+                        for p in mlp.parameters()
+                    )
+                )
+
+    def test_invalid_expansion_is_rejected_before_parameter_allocation(self) -> None:
+        for value in (True, False, 1.5, "4"):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                TypeError, "feed_forward_expansion"
+            ):
+                TransformerConfig(vocab_size=7, feed_forward_expansion=value)
+        for value in (0, -1):
+            with self.assertRaisesRegex(TransformerLabError, "feed_forward_expansion"):
+                TransformerConfig(vocab_size=7, feed_forward_expansion=value)
+
+    def test_default_expansion_preserves_architecture_identity(self) -> None:
+        default = TransformerConfig(vocab_size=7)
+        self.assertEqual(
+            default.fingerprint(),
+            TransformerConfig(vocab_size=7, feed_forward_expansion=4).fingerprint(),
+        )
+        self.assertNotEqual(
+            default.fingerprint(),
+            TransformerConfig(vocab_size=7, feed_forward_expansion=2).fingerprint(),
+        )
