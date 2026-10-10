@@ -508,14 +508,14 @@ class DecoderLanguageModel(nn.Module):
             if isinstance(module, nn.Linear) and module.bias is not None:
                 nn.init.zeros_(module.bias)
 
-    def forward(
-        self,
-        token_ids: Tensor,
-        targets: Tensor | None = None,
-        *,
-        lengths: Tensor | None = None,
-    ) -> tuple[Tensor, Tensor | None]:
-        if token_ids.ndim != 2 or token_ids.dtype != torch.long:
+    def _validate_token_ids(
+        self, token_ids: Tensor, *, limit_time: bool = True
+    ) -> tuple[int, int]:
+        if (
+            not isinstance(token_ids, Tensor)
+            or token_ids.ndim != 2
+            or token_ids.dtype != torch.long
+        ):
             raise TypeError("token_ids must be a two-dimensional torch.long tensor")
         batch, time = token_ids.shape
         if batch == 0 or time == 0:
@@ -524,12 +524,20 @@ class DecoderLanguageModel(nn.Module):
             )
         if token_ids.device != self.token_embedding.weight.device:
             raise TransformerLabError("token_ids must match the model device")
-        if time > self.config.block_size:
+        if limit_time and time > self.config.block_size:
             raise TransformerLabError("sequence exceeds configured block_size")
-        if token_ids.numel() and (
-            int(token_ids.min()) < 0 or int(token_ids.max()) >= self.config.vocab_size
-        ):
+        if int(token_ids.min()) < 0 or int(token_ids.max()) >= self.config.vocab_size:
             raise TransformerLabError("token id is outside the vocabulary")
+        return batch, time
+
+    def forward(
+        self,
+        token_ids: Tensor,
+        targets: Tensor | None = None,
+        *,
+        lengths: Tensor | None = None,
+    ) -> tuple[Tensor, Tensor | None]:
+        batch, time = self._validate_token_ids(token_ids)
         valid = None
         if lengths is not None:
             if self.config.normalization_mode != "layer_norm":
@@ -585,12 +593,18 @@ class DecoderLanguageModel(nn.Module):
             raise TypeError("new_tokens must be an integer")
         if new_tokens < 0:
             raise TransformerLabError("new_tokens must be non-negative")
-        if not isinstance(temperature, (int, float)) or temperature <= 0:
-            raise TransformerLabError("temperature must be positive")
+        if (
+            isinstance(temperature, bool)
+            or not isinstance(temperature, (int, float))
+            or not math.isfinite(temperature)
+            or temperature <= 0
+        ):
+            raise TransformerLabError("temperature must be positive and finite")
         if top_k is not None and (
             isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0
         ):
             raise TransformerLabError("top_k must be a positive integer")
+        self._validate_token_ids(token_ids, limit_time=False)
         modes = [(module, module.training) for module in self.modules()]
         try:
             self.eval()
@@ -599,6 +613,8 @@ class DecoderLanguageModel(nn.Module):
                 context = generated[:, -self.config.block_size :]
                 logits, _ = self(context)
                 next_logits = logits[:, -1] / temperature
+                if not bool(torch.isfinite(next_logits).all()):
+                    raise TransformerLabError("sampling logits must be finite")
                 if top_k is not None:
                     values, _ = torch.topk(
                         next_logits, min(top_k, next_logits.shape[-1])
