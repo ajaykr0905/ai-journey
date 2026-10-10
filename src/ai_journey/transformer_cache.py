@@ -7,7 +7,10 @@ import base64
 import binascii
 import json
 import math
+import os
+import tempfile
 from hashlib import sha256
+from pathlib import Path
 
 import torch
 from torch import Tensor
@@ -556,3 +559,46 @@ def restore_cache(model: DecoderLanguageModel, data: bytes) -> DecoderCache:
                     "snapshot layer state does not match trusted model context"
                 )
     return verified
+
+
+def save_cache(path: Path, cache: DecoderCache) -> None:
+    """Atomically replace a snapshot after flushing its bytes to disk.
+
+    A parent-directory fsync failure is reported even though replacement has
+    already occurred; the snapshot remains valid but durability is uncertain.
+    """
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    encoded = cache_to_bytes(cache)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        temporary = None
+        descriptor = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def load_cache(path: Path, model: DecoderLanguageModel) -> DecoderCache:
+    """Read bounded bytes, then validate against trusted evaluation weights."""
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    with path.open("rb") as handle:
+        data = handle.read(_MAX_SNAPSHOT_BYTES + 1)
+    return restore_cache(model, data)

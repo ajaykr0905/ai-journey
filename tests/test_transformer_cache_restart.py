@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+import tempfile
+from unittest import mock
 from hashlib import sha256
 from pathlib import Path
 
@@ -18,6 +20,8 @@ from ai_journey.transformer_cache import (
     decode,
     prefill,
     restore_cache,
+    save_cache,
+    load_cache,
 )
 from ai_journey.transformer_lab import (
     DecoderLanguageModel,
@@ -118,6 +122,41 @@ class CacheSnapshotTests(unittest.TestCase):
         envelope["sha256"] = sha256(canonical).hexdigest()
         with self.assertRaisesRegex(TransformerLabError, "size limit"):
             cache_from_bytes(json.dumps(envelope).encode())
+
+    def test_atomic_snapshot_publication_and_model_verified_load(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "inference.json"
+            save_cache(path, self.cache)
+            loaded = load_cache(path, self.model)
+            torch.testing.assert_close(loaded.tokens, self.tokens)
+            self.assertEqual(list(Path(directory).iterdir()), [path])
+
+    def test_failed_replace_or_file_flush_preserves_previous_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "inference.json"
+            save_cache(path, self.cache)
+            previous = path.read_bytes()
+            _, new_cache = decode(self.model, self.tokens[:, :1], self.cache)
+            for function in ("os.replace", "os.fsync"):
+                with mock.patch(
+                    f"ai_journey.transformer_cache.{function}",
+                    side_effect=OSError("injected publication failure"),
+                ):
+                    with self.assertRaisesRegex(OSError, "injected"):
+                        save_cache(path, new_cache)
+                self.assertEqual(path.read_bytes(), previous)
+                self.assertEqual(list(Path(directory).iterdir()), [path])
+
+    def test_directory_flush_failure_reports_uncertain_durability(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "inference.json"
+            with mock.patch(
+                "ai_journey.transformer_cache.os.fsync",
+                side_effect=[None, OSError("directory flush failed")],
+            ):
+                with self.assertRaisesRegex(OSError, "directory flush"):
+                    save_cache(path, self.cache)
+            torch.testing.assert_close(load_cache(path, self.model).tokens, self.tokens)
 
 
 if __name__ == "__main__":
