@@ -56,6 +56,7 @@ class TransformerConfig:
     feed_forward_expansion: int = 4
     feed_forward_activation: str = "gelu"
     activation_checkpointing: bool = False
+    attention_backend: str = "manual"
     batch_norm_eps: float = 1e-5
     batch_norm_momentum: float = 0.1
 
@@ -115,6 +116,8 @@ class TransformerConfig:
             raise TransformerLabError(
                 "activation checkpointing requires stateless layer_norm"
             )
+        if self.attention_backend not in {"manual", "sdpa"}:
+            raise TransformerLabError("attention_backend must be 'manual' or 'sdpa'")
         if (
             isinstance(self.batch_norm_eps, bool)
             or not isinstance(self.batch_norm_eps, (int, float))
@@ -376,6 +379,7 @@ class CausalSelfAttention(nn.Module):
         super().__init__()
         self.head_count = config.head_count
         self.head_dim = config.head_dim
+        self.attention_backend = config.attention_backend
         self.query_key_value = nn.Linear(config.embedding_dim, 3 * config.embedding_dim)
         self.projection = nn.Linear(config.embedding_dim, config.embedding_dim)
         self.attention_dropout = nn.Dropout(config.dropout)
@@ -425,15 +429,25 @@ class CausalSelfAttention(nn.Module):
         query = query.view(shape).transpose(1, 2)
         key = key.view(shape).transpose(1, 2)
         value = value.view(shape).transpose(1, 2)
-        scores = query @ key.transpose(-2, -1) * self.head_dim**-0.5
-        if not bool(torch.isfinite(scores).all()):
-            raise TransformerLabError("attention scores must be finite")
         mask = self.causal_mask[:time, :time]
         if valid is not None:
             mask = mask[None, None, :, :] & valid[:, None, None, :]
-        scores = scores.masked_fill(~mask, float("-inf"))
-        weights = self.attention_dropout(F.softmax(scores, dim=-1))
-        attended = weights @ value
+        if self.attention_backend == "sdpa":
+            attended = F.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=None if valid is None else mask,
+                dropout_p=self.attention_dropout.p if self.training else 0.0,
+                is_causal=valid is None,
+            )
+        else:
+            scores = query @ key.transpose(-2, -1) * self.head_dim**-0.5
+            if not bool(torch.isfinite(scores).all()):
+                raise TransformerLabError("attention scores must be finite")
+            scores = scores.masked_fill(~mask, float("-inf"))
+            weights = self.attention_dropout(F.softmax(scores, dim=-1))
+            attended = weights @ value
         attended = attended.transpose(1, 2).contiguous().view(batch, time, channels)
         output = self.residual_dropout(self.projection(attended))
         if valid is not None:

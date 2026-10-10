@@ -120,3 +120,105 @@ class PaddedAttentionTests(unittest.TestCase):
                 TypeError, "lengths"
             ):
                 self.attention(inputs, lengths=lengths)
+
+
+class SDPABackendTests(unittest.TestCase):
+    def test_sdpa_matches_manual_outputs_input_and_parameter_gradients(self) -> None:
+        from dataclasses import replace
+
+        config = TransformerConfig(
+            vocab_size=7, block_size=5, embedding_dim=8, head_count=2
+        )
+        for lengths in (None, torch.tensor([2, 5])):
+            with self.subTest(padded=lengths is not None):
+                manual = CausalSelfAttention(config).double()
+                sdpa = CausalSelfAttention(
+                    replace(config, attention_backend="sdpa")
+                ).double()
+                sdpa.load_state_dict(manual.state_dict())
+                inputs = torch.randn(2, 5, 8, dtype=torch.float64, requires_grad=True)
+                other = inputs.detach().clone().requires_grad_()
+                expected = manual(inputs, lengths=lengths)
+                actual = sdpa(other, lengths=lengths)
+                torch.testing.assert_close(actual, expected, rtol=1e-12, atol=1e-12)
+                expected.square().sum().backward()
+                actual.square().sum().backward()
+                torch.testing.assert_close(
+                    other.grad, inputs.grad, rtol=1e-11, atol=1e-12
+                )
+                for left, right in zip(
+                    sdpa.parameters(), manual.parameters(), strict=True
+                ):
+                    torch.testing.assert_close(
+                        left.grad, right.grad, rtol=1e-11, atol=1e-12
+                    )
+
+    def test_sdpa_mask_and_dropout_policy_are_explicit(self) -> None:
+        from unittest.mock import patch
+
+        attention = CausalSelfAttention(
+            TransformerConfig(
+                vocab_size=7,
+                embedding_dim=8,
+                head_count=2,
+                dropout=0.2,
+                attention_backend="sdpa",
+            )
+        )
+        inputs = torch.randn(2, 4, 8)
+        with patch(
+            "ai_journey.transformer_lab.F.scaled_dot_product_attention",
+            wraps=torch.nn.functional.scaled_dot_product_attention,
+        ) as call:
+            attention.eval()
+            first = attention(inputs)
+            torch.testing.assert_close(first, attention(inputs), rtol=0, atol=0)
+            self.assertEqual(call.call_args.kwargs["dropout_p"], 0.0)
+            self.assertTrue(call.call_args.kwargs["is_causal"])
+            self.assertIsNone(call.call_args.kwargs["attn_mask"])
+            attention.train()
+            attention(inputs, lengths=torch.tensor([2, 4]))
+            self.assertEqual(call.call_args.kwargs["dropout_p"], 0.2)
+            self.assertFalse(call.call_args.kwargs["is_causal"])
+            mask = call.call_args.kwargs["attn_mask"]
+            self.assertEqual(mask.dtype, torch.bool)
+            self.assertEqual(mask.shape, (2, 1, 4, 4))
+            self.assertFalse(mask[0, :, :, 2:].any())
+            self.assertFalse(mask[:, :, 0, 1:].any())
+
+    def test_sdpa_decoder_cache_matches_full_forward_and_context_rollover(self) -> None:
+        from ai_journey.transformer_cache import decode, prefill
+        from ai_journey.transformer_lab import DecoderLanguageModel
+
+        for placement in ("pre", "post"):
+            model = (
+                DecoderLanguageModel(
+                    TransformerConfig(
+                        vocab_size=11,
+                        block_size=4,
+                        embedding_dim=8,
+                        head_count=2,
+                        layer_count=2,
+                        attention_backend="sdpa",
+                        normalization_placement=placement,
+                        feed_forward_activation="relu",
+                    )
+                )
+                .double()
+                .eval()
+            )
+            tokens = torch.randint(0, 11, (2, 7))
+            _, state = prefill(model, tokens[:, :2])
+            actual, _ = decode(model, tokens[:, 2:], state)
+            expected = torch.cat(
+                [
+                    model(tokens[:, max(0, end - 4) : end])[0][:, -1:]
+                    for end in range(3, 8)
+                ],
+                dim=1,
+            )
+            torch.testing.assert_close(actual, expected, rtol=1e-10, atol=1e-12)
+
+    def test_unknown_backend_is_rejected(self) -> None:
+        with self.assertRaisesRegex(TransformerLabError, "attention_backend"):
+            TransformerConfig(vocab_size=7, attention_backend="flash")
