@@ -602,3 +602,63 @@ def load_cache(path: Path, model: DecoderLanguageModel) -> DecoderCache:
     with path.open("rb") as handle:
         data = handle.read(_MAX_SNAPSHOT_BYTES + 1)
     return restore_cache(model, data)
+
+
+@torch.no_grad()
+def generate_cached(
+    model: DecoderLanguageModel,
+    token_ids: Tensor,
+    *,
+    new_tokens: int,
+    temperature: float = 1.0,
+    top_k: int | None = None,
+    seed: int = 0,
+) -> Tensor:
+    """Sample with a local RNG and cached contexts, preserving all model modes."""
+    if not isinstance(model, DecoderLanguageModel):
+        raise TypeError("model must be DecoderLanguageModel")
+    if (
+        isinstance(new_tokens, bool)
+        or not isinstance(new_tokens, int)
+        or new_tokens < 0
+    ):
+        raise TransformerLabError("new_tokens must be a nonnegative integer")
+    if (
+        isinstance(temperature, bool)
+        or not isinstance(temperature, (int, float))
+        or not math.isfinite(temperature)
+        or temperature <= 0
+    ):
+        raise TransformerLabError("temperature must be finite and positive")
+    if top_k is not None and (
+        isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0
+    ):
+        raise TransformerLabError("top_k must be a positive integer")
+    if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**63:
+        raise TransformerLabError("seed must be an integer in [0, 2**63)")
+    modes = [(module, module.training) for module in model.modules()]
+    try:
+        model.eval()
+        _validate_model_tokens(model, token_ids)
+        generated = token_ids.clone()
+        if new_tokens == 0:
+            return generated
+        generator = torch.Generator(device=token_ids.device).manual_seed(seed)
+        logits, cache = prefill(model, generated[:, -model.config.block_size :])
+        for step in range(new_tokens):
+            next_logits = logits[:, -1] / temperature
+            if top_k is not None:
+                values, _ = torch.topk(next_logits, min(top_k, next_logits.shape[-1]))
+                next_logits = next_logits.masked_fill(
+                    next_logits < values[:, [-1]], float("-inf")
+                )
+            next_token = torch.multinomial(
+                F.softmax(next_logits, dim=-1), num_samples=1, generator=generator
+            )
+            generated = torch.cat((generated, next_token), dim=1)
+            if step + 1 < new_tokens:
+                logits, cache = decode(model, next_token, cache)
+        return generated
+    finally:
+        for module, training in modes:
+            module.training = training

@@ -17,6 +17,7 @@ from ai_journey.transformer_cache import (
     prefill,
     migrate_cache,
     reorder_cache,
+    generate_cached,
 )
 from ai_journey.transformer_lab import (
     CausalSelfAttention,
@@ -242,6 +243,79 @@ class CachedDecoderTests(unittest.TestCase):
         ):
             with self.assertRaises((TypeError, TransformerLabError)):
                 reorder_cache(cache, indexes)
+
+    def test_cached_sampling_matches_uncached_and_preserves_global_rng_and_modes(
+        self,
+    ) -> None:
+        self.model.train()
+        self.model.blocks[0].eval()
+        modes = [module.training for module in self.model.modules()]
+        tokens = torch.randint(0, 11, (2, 5))
+        rng = torch.get_rng_state().clone()
+        expected = self.model.generate(
+            tokens,
+            new_tokens=12,
+            temperature=0.8,
+            top_k=5,
+            generator=torch.Generator().manual_seed(73),
+        )
+        actual = generate_cached(
+            self.model, tokens, new_tokens=12, temperature=0.8, top_k=5, seed=73
+        )
+        torch.testing.assert_close(actual, expected)
+        torch.testing.assert_close(torch.get_rng_state(), rng)
+        self.assertEqual([module.training for module in self.model.modules()], modes)
+        torch.testing.assert_close(
+            generate_cached(
+                self.model, tokens, new_tokens=12, temperature=0.8, top_k=5, seed=73
+            ),
+            actual,
+        )
+
+    def test_sampling_validates_controls_and_restores_modes_after_failure(self) -> None:
+        tokens = torch.randint(0, 11, (2, 12))
+        torch.testing.assert_close(
+            generate_cached(self.model, tokens, new_tokens=0), tokens
+        )
+        for overrides in (
+            {"new_tokens": True},
+            {"temperature": float("nan")},
+            {"temperature": True},
+            {"top_k": 0},
+            {"seed": True},
+            {"seed": -1},
+        ):
+            kwargs = {"new_tokens": 1, **overrides}
+            with self.assertRaises(TransformerLabError):
+                generate_cached(self.model, tokens, **kwargs)
+        self.model.train()
+        self.model.blocks[0].eval()
+        modes = [module.training for module in self.model.modules()]
+        with torch.no_grad():
+            self.model.token_embedding.weight.fill_(float("inf"))
+        with self.assertRaises(TransformerLabError):
+            generate_cached(self.model, tokens, new_tokens=1)
+        self.assertEqual([module.training for module in self.model.modules()], modes)
+
+    def test_post_normalized_decoder_cache_matches_full_and_rollover(self) -> None:
+        model = DecoderLanguageModel(
+            TransformerConfig(
+                vocab_size=11,
+                block_size=4,
+                embedding_dim=12,
+                head_count=3,
+                normalization_placement="post",
+                feed_forward_expansion=2,
+            )
+        ).eval()
+        tokens = torch.randint(0, 11, (2, 7))
+        _, state = prefill(model, tokens[:, :2])
+        actual, _ = decode(model, tokens[:, 2:], state)
+        expected = []
+        for end in range(3, 8):
+            logits, _ = model(tokens[:, max(0, end - 4) : end])
+            expected.append(logits[:, -1:])
+        torch.testing.assert_close(actual, torch.cat(expected, dim=1))
 
 
 if __name__ == "__main__":
