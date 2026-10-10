@@ -516,3 +516,43 @@ def cache_from_bytes(data: bytes) -> DecoderCache:
         config_digest=payload["config_digest"],
         model_digest=payload["model_digest"],
     )
+
+
+def restore_cache(model: DecoderLanguageModel, data: bytes) -> DecoderCache:
+    """Validate a snapshot against trusted weights before publishing live state.
+
+    Recomputing the retained context is intentional: a checksum is not proof
+    that saved keys and values were produced by the stated model. All work is
+    local until validation succeeds, and neither model nor caller state changes.
+    """
+    if not isinstance(model, DecoderLanguageModel):
+        raise TypeError("model must be DecoderLanguageModel")
+    parsed = cache_from_bytes(data)
+    device = model.token_embedding.weight.device
+    tokens = parsed.tokens.to(device)
+    _validate_model_tokens(model, tokens)
+    layers = tuple(
+        LayerKV(layer._keys.to(device), layer._values.to(device))
+        for layer in parsed._layers
+    )
+    candidate = DecoderCache(
+        tokens,
+        layers,
+        config_digest=parsed.config_digest,
+        model_digest=parsed.model_digest,
+    )
+    _validate_binding(model, candidate)
+    _, verified = prefill(model, tokens)
+    for saved, expected in zip(candidate._layers, verified._layers, strict=True):
+        tolerance = torch.finfo(expected._keys.dtype).eps * 32
+        for actual_tensor, expected_tensor in (
+            (saved._keys, expected._keys),
+            (saved._values, expected._values),
+        ):
+            if not torch.allclose(
+                actual_tensor, expected_tensor, rtol=tolerance, atol=tolerance
+            ):
+                raise TransformerLabError(
+                    "snapshot layer state does not match trusted model context"
+                )
+    return verified

@@ -3,13 +3,22 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from hashlib import sha256
 from pathlib import Path
 
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ai_journey.transformer_cache import cache_from_bytes, cache_to_bytes, prefill
+from ai_journey.transformer_cache import (
+    DecoderCache,
+    LayerKV,
+    cache_from_bytes,
+    cache_to_bytes,
+    decode,
+    prefill,
+    restore_cache,
+)
 from ai_journey.transformer_lab import (
     DecoderLanguageModel,
     TransformerConfig,
@@ -68,6 +77,47 @@ class CacheSnapshotTests(unittest.TestCase):
         ):
             with self.assertRaises(TransformerLabError):
                 cache_from_bytes(invalid)
+
+    def test_verified_restore_preserves_incremental_decode_results(self) -> None:
+        _, chunked = decode(
+            self.model, self.tokens[:, -2:], prefill(self.model, self.tokens[:, :2])[1]
+        )
+        restored = restore_cache(self.model, cache_to_bytes(chunked))
+        next_tokens = torch.randint(0, 11, (2, 3))
+        actual, _ = decode(self.model, next_tokens, restored)
+        expected, _ = decode(self.model, next_tokens, chunked)
+        torch.testing.assert_close(actual, expected)
+
+    def test_restore_rejects_forged_layer_values_without_mutating_model(self) -> None:
+        layers = self.cache.layers
+        forged = DecoderCache(
+            self.tokens,
+            (LayerKV(layers[0].keys + 1, layers[0].values), *layers[1:]),
+            config_digest=self.cache.config_digest,
+            model_digest=self.cache.model_digest,
+        )
+        original = {
+            name: tensor.clone() for name, tensor in self.model.state_dict().items()
+        }
+        with self.assertRaisesRegex(TransformerLabError, "trusted model context"):
+            restore_cache(self.model, cache_to_bytes(forged))
+        for name, tensor in self.model.state_dict().items():
+            torch.testing.assert_close(tensor, original[name])
+
+    def test_restore_rejects_stale_weights_and_oversized_tensor_shape(self) -> None:
+        encoded = cache_to_bytes(self.cache)
+        with torch.no_grad():
+            self.model.lm_head.weight[0, 0] += 0.1
+        with self.assertRaisesRegex(TransformerLabError, "modified model"):
+            restore_cache(self.model, encoded)
+        envelope = json.loads(encoded)
+        envelope["payload"]["tokens"]["shape"] = [2, 10**20]
+        canonical = json.dumps(
+            envelope["payload"], sort_keys=True, separators=(",", ":")
+        ).encode()
+        envelope["sha256"] = sha256(canonical).hexdigest()
+        with self.assertRaisesRegex(TransformerLabError, "size limit"):
+            cache_from_bytes(json.dumps(envelope).encode())
 
 
 if __name__ == "__main__":
