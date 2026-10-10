@@ -337,22 +337,50 @@ class CausalSelfAttention(nn.Module):
         self.register_buffer("causal_mask", mask, persistent=False)
 
     def forward(self, inputs: Tensor) -> Tensor:
+        if not isinstance(inputs, Tensor):
+            raise TypeError("attention inputs must be a torch.Tensor")
+        if inputs.ndim != 3:
+            raise TransformerLabError(
+                "attention inputs must have shape (batch, time, channels)"
+            )
         batch, time, channels = inputs.shape
+        if batch == 0 or time == 0:
+            raise TransformerLabError(
+                "attention batch and time dimensions must be non-empty"
+            )
+        if channels != self.query_key_value.in_features:
+            raise TransformerLabError("attention input width must match embedding_dim")
+        if not inputs.is_floating_point():
+            raise TypeError("attention inputs must have a floating-point dtype")
+        weight = self.query_key_value.weight
+        if inputs.dtype != weight.dtype or inputs.device != weight.device:
+            raise TransformerLabError(
+                "attention inputs must match parameter dtype and device"
+            )
+        if not bool(torch.isfinite(inputs).all()):
+            raise TransformerLabError("attention inputs must be finite")
         if time > self.causal_mask.shape[0]:
             raise TransformerLabError("sequence exceeds configured block_size")
         qkv = self.query_key_value(inputs)
+        if not bool(torch.isfinite(qkv).all()):
+            raise TransformerLabError("attention projections must be finite")
         query, key, value = qkv.chunk(3, dim=-1)
         shape = (batch, time, self.head_count, self.head_dim)
         query = query.view(shape).transpose(1, 2)
         key = key.view(shape).transpose(1, 2)
         value = value.view(shape).transpose(1, 2)
         scores = query @ key.transpose(-2, -1) * self.head_dim**-0.5
+        if not bool(torch.isfinite(scores).all()):
+            raise TransformerLabError("attention scores must be finite")
         mask = self.causal_mask[:time, :time]
         scores = scores.masked_fill(~mask, float("-inf"))
         weights = self.attention_dropout(F.softmax(scores, dim=-1))
         attended = weights @ value
         attended = attended.transpose(1, 2).contiguous().view(batch, time, channels)
-        return self.residual_dropout(self.projection(attended))
+        output = self.residual_dropout(self.projection(attended))
+        if not bool(torch.isfinite(output).all()):
+            raise TransformerLabError("attention output must be finite")
+        return output
 
 
 class FeedForward(nn.Module):
