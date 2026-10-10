@@ -18,12 +18,22 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
+from torch.utils.checkpoint import checkpoint as activation_checkpoint
 
 from .batch_normalization import ScratchBatchNorm
 
 
 class TransformerLabError(ValueError):
     """Raised when transformer data, configuration, or state is invalid."""
+
+
+_LEGACY_TRANSFORMER_CONTROLS = {
+    "normalization_placement": "pre",
+    "feed_forward_expansion": 4,
+    "feed_forward_activation": "gelu",
+    "activation_checkpointing": False,
+    "attention_backend": "manual",
+}
 
 
 def seed_everything(seed: int) -> None:
@@ -51,6 +61,11 @@ class TransformerConfig:
     initialization_mode: str = "fixed_normal"
     initialization_gain: float = math.sqrt(2.0)
     normalization_mode: str = "layer_norm"
+    normalization_placement: str = "pre"
+    feed_forward_expansion: int = 4
+    feed_forward_activation: str = "gelu"
+    activation_checkpointing: bool = False
+    attention_backend: str = "manual"
     batch_norm_eps: float = 1e-5
     batch_norm_momentum: float = 0.1
 
@@ -61,6 +76,7 @@ class TransformerConfig:
             "embedding_dim",
             "head_count",
             "layer_count",
+            "feed_forward_expansion",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):
@@ -97,6 +113,20 @@ class TransformerConfig:
             raise TransformerLabError(
                 "normalization_mode must be 'layer_norm' or 'scratch_batch_norm'"
             )
+        if self.normalization_placement not in {"pre", "post"}:
+            raise TransformerLabError("normalization_placement must be 'pre' or 'post'")
+        if self.feed_forward_activation not in {"gelu", "relu"}:
+            raise TransformerLabError(
+                "feed_forward_activation must be 'gelu' or 'relu'"
+            )
+        if not isinstance(self.activation_checkpointing, bool):
+            raise TypeError("activation_checkpointing must be a boolean")
+        if self.activation_checkpointing and self.normalization_mode != "layer_norm":
+            raise TransformerLabError(
+                "activation checkpointing requires stateless layer_norm"
+            )
+        if self.attention_backend not in {"manual", "sdpa"}:
+            raise TransformerLabError("attention_backend must be 'manual' or 'sdpa'")
         if (
             isinstance(self.batch_norm_eps, bool)
             or not isinstance(self.batch_norm_eps, (int, float))
@@ -117,7 +147,12 @@ class TransformerConfig:
         return self.embedding_dim // self.head_count
 
     def fingerprint(self) -> str:
-        payload = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
+        settings = asdict(self)
+        # Legacy defaults preserve the same equations and checkpoint identity.
+        for name, default in _LEGACY_TRANSFORMER_CONTROLS.items():
+            if settings.get(name) == default:
+                settings.pop(name)
+        payload = json.dumps(settings, sort_keys=True, separators=(",", ":"))
         return sha256(payload.encode()).hexdigest()
 
 
@@ -320,6 +355,26 @@ class BatchCursor:
         self.offset = offset
 
 
+def valid_sequence_positions(
+    lengths: Tensor, *, batch: int, time: int, device: torch.device
+) -> Tensor:
+    """Validate positive right-padded lengths and return the valid-token mask."""
+
+    if (
+        not isinstance(lengths, Tensor)
+        or lengths.dtype != torch.long
+        or lengths.shape != (batch,)
+    ):
+        raise TypeError("lengths must be a torch.long tensor with shape (batch,)")
+    if lengths.device != device:
+        raise TransformerLabError("lengths must match the input device")
+    if bool(((lengths <= 0) | (lengths > time)).any()):
+        raise TransformerLabError(
+            "lengths must be positive and not exceed sequence time"
+        )
+    return torch.arange(time, device=device).unsqueeze(0) < lengths.unsqueeze(1)
+
+
 class CausalSelfAttention(nn.Module):
     """Multi-head self-attention with an explicit causal mask."""
 
@@ -327,6 +382,7 @@ class CausalSelfAttention(nn.Module):
         super().__init__()
         self.head_count = config.head_count
         self.head_dim = config.head_dim
+        self.attention_backend = config.attention_backend
         self.query_key_value = nn.Linear(config.embedding_dim, 3 * config.embedding_dim)
         self.projection = nn.Linear(config.embedding_dim, config.embedding_dim)
         self.attention_dropout = nn.Dropout(config.dropout)
@@ -336,34 +392,83 @@ class CausalSelfAttention(nn.Module):
         )
         self.register_buffer("causal_mask", mask, persistent=False)
 
-    def forward(self, inputs: Tensor) -> Tensor:
+    def forward(self, inputs: Tensor, *, lengths: Tensor | None = None) -> Tensor:
+        if not isinstance(inputs, Tensor):
+            raise TypeError("attention inputs must be a torch.Tensor")
+        if inputs.ndim != 3:
+            raise TransformerLabError(
+                "attention inputs must have shape (batch, time, channels)"
+            )
         batch, time, channels = inputs.shape
+        if batch == 0 or time == 0:
+            raise TransformerLabError(
+                "attention batch and time dimensions must be non-empty"
+            )
+        if channels != self.query_key_value.in_features:
+            raise TransformerLabError("attention input width must match embedding_dim")
+        if not inputs.is_floating_point():
+            raise TypeError("attention inputs must have a floating-point dtype")
+        weight = self.query_key_value.weight
+        if inputs.dtype != weight.dtype or inputs.device != weight.device:
+            raise TransformerLabError(
+                "attention inputs must match parameter dtype and device"
+            )
+        if not bool(torch.isfinite(inputs).all()):
+            raise TransformerLabError("attention inputs must be finite")
         if time > self.causal_mask.shape[0]:
             raise TransformerLabError("sequence exceeds configured block_size")
+        valid = (
+            None
+            if lengths is None
+            else valid_sequence_positions(
+                lengths, batch=batch, time=time, device=inputs.device
+            )
+        )
         qkv = self.query_key_value(inputs)
+        if not bool(torch.isfinite(qkv).all()):
+            raise TransformerLabError("attention projections must be finite")
         query, key, value = qkv.chunk(3, dim=-1)
         shape = (batch, time, self.head_count, self.head_dim)
         query = query.view(shape).transpose(1, 2)
         key = key.view(shape).transpose(1, 2)
         value = value.view(shape).transpose(1, 2)
-        scores = query @ key.transpose(-2, -1) * self.head_dim**-0.5
         mask = self.causal_mask[:time, :time]
-        scores = scores.masked_fill(~mask, float("-inf"))
-        weights = self.attention_dropout(F.softmax(scores, dim=-1))
-        attended = weights @ value
+        if valid is not None:
+            mask = mask[None, None, :, :] & valid[:, None, None, :]
+        if self.attention_backend == "sdpa":
+            attended = F.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=None if valid is None else mask,
+                dropout_p=self.attention_dropout.p if self.training else 0.0,
+                is_causal=valid is None,
+            )
+        else:
+            scores = query @ key.transpose(-2, -1) * self.head_dim**-0.5
+            if not bool(torch.isfinite(scores).all()):
+                raise TransformerLabError("attention scores must be finite")
+            scores = scores.masked_fill(~mask, float("-inf"))
+            weights = self.attention_dropout(F.softmax(scores, dim=-1))
+            attended = weights @ value
         attended = attended.transpose(1, 2).contiguous().view(batch, time, channels)
-        return self.residual_dropout(self.projection(attended))
+        output = self.residual_dropout(self.projection(attended))
+        if valid is not None:
+            output = output.masked_fill(~valid[:, :, None], 0.0)
+        if not bool(torch.isfinite(output).all()):
+            raise TransformerLabError("attention output must be finite")
+        return output
 
 
 class FeedForward(nn.Module):
-    """Transformer position-wise MLP with a four-times expansion."""
+    """Transformer position-wise MLP with a validated hidden expansion."""
 
     def __init__(self, config: TransformerConfig) -> None:
         super().__init__()
-        hidden_dim = 4 * config.embedding_dim
+        hidden_dim = config.feed_forward_expansion * config.embedding_dim
         self.network = nn.Sequential(
             nn.Linear(config.embedding_dim, hidden_dim),
-            nn.GELU(),
+            nn.GELU() if config.feed_forward_activation == "gelu" else nn.ReLU(),
             nn.Linear(hidden_dim, config.embedding_dim),
             nn.Dropout(config.dropout),
         )
@@ -387,18 +492,39 @@ def build_normalization(config: TransformerConfig) -> nn.Module:
 
 
 class TransformerBlock(nn.Module):
-    """Pre-normalized attention and feed-forward residual block."""
+    """Configurable pre- or post-normalized attention and MLP residual block."""
 
     def __init__(self, config: TransformerConfig) -> None:
         super().__init__()
+        self.normalization_mode = config.normalization_mode
+        self.normalization_placement = config.normalization_placement
         self.attention_norm = build_normalization(config)
         self.attention = CausalSelfAttention(config)
         self.feed_forward_norm = build_normalization(config)
         self.feed_forward = FeedForward(config)
 
-    def forward(self, inputs: Tensor) -> Tensor:
-        inputs = inputs + self.attention(self.attention_norm(inputs))
-        return inputs + self.feed_forward(self.feed_forward_norm(inputs))
+    def forward(self, inputs: Tensor, *, lengths: Tensor | None = None) -> Tensor:
+        valid = None
+        if lengths is not None:
+            if self.normalization_mode != "layer_norm":
+                raise TransformerLabError("padded blocks require layer_norm")
+            valid = valid_sequence_positions(
+                lengths,
+                batch=inputs.shape[0],
+                time=inputs.shape[1],
+                device=inputs.device,
+            )
+        if self.normalization_placement == "pre":
+            inputs = inputs + self.attention(
+                self.attention_norm(inputs), lengths=lengths
+            )
+            output = inputs + self.feed_forward(self.feed_forward_norm(inputs))
+        else:
+            inputs = self.attention_norm(
+                inputs + self.attention(inputs, lengths=lengths)
+            )
+            output = self.feed_forward_norm(inputs + self.feed_forward(inputs))
+        return output if valid is None else output.masked_fill(~valid[:, :, None], 0.0)
 
 
 def expected_initialization_std(module: nn.Module, config: TransformerConfig) -> float:
@@ -437,30 +563,84 @@ class DecoderLanguageModel(nn.Module):
             if isinstance(module, nn.Linear) and module.bias is not None:
                 nn.init.zeros_(module.bias)
 
-    def forward(
-        self, token_ids: Tensor, targets: Tensor | None = None
-    ) -> tuple[Tensor, Tensor | None]:
-        if token_ids.ndim != 2 or token_ids.dtype != torch.long:
-            raise TypeError("token_ids must be a two-dimensional torch.long tensor")
-        _, time = token_ids.shape
-        if time > self.config.block_size:
-            raise TransformerLabError("sequence exceeds configured block_size")
-        if token_ids.numel() and (
-            int(token_ids.min()) < 0 or int(token_ids.max()) >= self.config.vocab_size
+    def _validate_token_ids(
+        self, token_ids: Tensor, *, limit_time: bool = True
+    ) -> tuple[int, int]:
+        if (
+            not isinstance(token_ids, Tensor)
+            or token_ids.ndim != 2
+            or token_ids.dtype != torch.long
         ):
+            raise TypeError("token_ids must be a two-dimensional torch.long tensor")
+        batch, time = token_ids.shape
+        if batch == 0 or time == 0:
+            raise TransformerLabError(
+                "token batch and time dimensions must be non-empty"
+            )
+        if token_ids.device != self.token_embedding.weight.device:
+            raise TransformerLabError("token_ids must match the model device")
+        if limit_time and time > self.config.block_size:
+            raise TransformerLabError("sequence exceeds configured block_size")
+        if int(token_ids.min()) < 0 or int(token_ids.max()) >= self.config.vocab_size:
             raise TransformerLabError("token id is outside the vocabulary")
+        return batch, time
+
+    def forward(
+        self,
+        token_ids: Tensor,
+        targets: Tensor | None = None,
+        *,
+        lengths: Tensor | None = None,
+    ) -> tuple[Tensor, Tensor | None]:
+        batch, time = self._validate_token_ids(token_ids)
+        valid = None
+        if lengths is not None:
+            if self.config.normalization_mode != "layer_norm":
+                raise TransformerLabError("padded decoder batches require layer_norm")
+            valid = valid_sequence_positions(
+                lengths, batch=batch, time=time, device=token_ids.device
+            )
         positions = torch.arange(time, device=token_ids.device)
         hidden = self.token_embedding(token_ids) + self.position_embedding(positions)
         for block in self.blocks:
-            hidden = block(hidden)
+            if (
+                self.config.activation_checkpointing
+                and self.training
+                and torch.is_grad_enabled()
+            ):
+                hidden = activation_checkpoint(
+                    block,
+                    hidden,
+                    lengths=lengths,
+                    use_reentrant=False,
+                    preserve_rng_state=True,
+                )
+            else:
+                hidden = block(hidden, lengths=lengths)
         logits = self.lm_head(self.final_norm(hidden))
+        if valid is not None:
+            logits = logits.masked_fill(~valid[:, :, None], 0.0)
         loss = None
         if targets is not None:
-            if targets.shape != token_ids.shape or targets.dtype != torch.long:
+            if (
+                not isinstance(targets, Tensor)
+                or targets.shape != token_ids.shape
+                or targets.dtype != torch.long
+            ):
                 raise TypeError("targets must match token_ids shape and dtype")
-            loss = F.cross_entropy(
-                logits.reshape(-1, self.config.vocab_size), targets.reshape(-1)
+            if targets.device != token_ids.device:
+                raise TransformerLabError("targets must match token_ids device")
+            loss_logits = (
+                logits.reshape(-1, self.config.vocab_size)
+                if valid is None
+                else logits[valid]
             )
+            loss_targets = targets.reshape(-1) if valid is None else targets[valid]
+            if bool(
+                ((loss_targets < 0) | (loss_targets >= self.config.vocab_size)).any()
+            ):
+                raise TransformerLabError("valid target id is outside the vocabulary")
+            loss = F.cross_entropy(loss_logits, loss_targets)
         return logits, loss
 
     @property
@@ -481,12 +661,18 @@ class DecoderLanguageModel(nn.Module):
             raise TypeError("new_tokens must be an integer")
         if new_tokens < 0:
             raise TransformerLabError("new_tokens must be non-negative")
-        if not isinstance(temperature, (int, float)) or temperature <= 0:
-            raise TransformerLabError("temperature must be positive")
+        if (
+            isinstance(temperature, bool)
+            or not isinstance(temperature, (int, float))
+            or not math.isfinite(temperature)
+            or temperature <= 0
+        ):
+            raise TransformerLabError("temperature must be positive and finite")
         if top_k is not None and (
             isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0
         ):
             raise TransformerLabError("top_k must be a positive integer")
+        self._validate_token_ids(token_ids, limit_time=False)
         modes = [(module, module.training) for module in self.modules()]
         try:
             self.eval()
@@ -495,6 +681,8 @@ class DecoderLanguageModel(nn.Module):
                 context = generated[:, -self.config.block_size :]
                 logits, _ = self(context)
                 next_logits = logits[:, -1] / temperature
+                if not bool(torch.isfinite(next_logits).all()):
+                    raise TransformerLabError("sampling logits must be finite")
                 if top_k is not None:
                     values, _ = torch.topk(
                         next_logits, min(top_k, next_logits.shape[-1])
@@ -766,7 +954,19 @@ def load_training_checkpoint(
     payload = torch.load(path, map_location="cpu", weights_only=True)
     if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
         raise TransformerLabError("unsupported checkpoint schema")
-    if payload.get("model_config") != asdict(model.config):
+    saved_config = payload.get("model_config")
+    if not isinstance(saved_config, Mapping):
+        raise TransformerLabError("checkpoint model configuration mismatch")
+    normalized_config = dict(saved_config)
+    for name, default in _LEGACY_TRANSFORMER_CONTROLS.items():
+        normalized_config.setdefault(name, default)
+    if normalized_config.keys() != asdict(model.config).keys():
+        raise TransformerLabError("checkpoint model configuration mismatch")
+    try:
+        restored_config = TransformerConfig(**normalized_config)
+    except (TypeError, ValueError) as exc:
+        raise TransformerLabError("checkpoint model configuration is invalid") from exc
+    if restored_config != model.config:
         raise TransformerLabError("checkpoint model configuration mismatch")
     if payload.get("training_config") != asdict(training_config):
         raise TransformerLabError("checkpoint training configuration mismatch")

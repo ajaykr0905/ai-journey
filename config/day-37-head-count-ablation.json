@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "name": "day-37-head-count",
+  "hypothesis": "At fixed embedding width and matched training batches, four attention heads reduce mean held-out NLL by at least 0.001 versus one head after four CPU updates; two heads are an intermediate configuration.",
+  "independent_variable": "model.head_count",
+  "primary_metric": "validation_nll",
+  "expected_direction": "lower",
+  "minimum_effect": 0.001,
+  "baseline_label": "one-head",
+  "trial_seeds": [37, 38],
+  "model_config": {
+    "block_size": 4,
+    "embedding_dim": 8,
+    "head_count": 1,
+    "layer_count": 1,
+    "dropout": 0.0,
+    "initialization_std": 0.02,
+    "initialization_mode": "fixed_normal",
+    "initialization_gain": 1.4142135623730951,
+    "normalization_mode": "layer_norm",
+    "batch_norm_eps": 0.00001,
+    "batch_norm_momentum": 0.1
+  },
+  "training_config": {
+    "steps": 4,
+    "batch_size": 4,
+    "learning_rate": 0.003,
+    "weight_decay": 0.01,
+    "gradient_clip": 1.0
+  },
+  "arms": [
+    {"label": "one-head", "value": 1},
+    {"label": "two-heads", "value": 2},
+    {"label": "four-heads", "value": 4}
+  ]
+}

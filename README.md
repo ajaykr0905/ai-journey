@@ -1,7 +1,7 @@
 # AI Journey: Days 0–35
 
 This repository is a public-safe, executable record of an added setup day plus the
-selected work through Day 35 of a 90-day AI engineering learning plan. It combines
+selected work through Day 37 of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -181,6 +181,23 @@ scores, language-model quality, GPU performance, or distributed execution. See
 [`days/day-35.md`](days/day-35.md) for the operating limits and learner evidence
 that still requires Ajay's own confirmation.
 
+## Certify transformer attention and inference restart
+
+```bash
+ai-journey-day-37 --output artifacts/day-37-certification.json \
+  --protocol config/day-37-head-count-ablation.json \
+  --corpus data/day-19-demo-names.txt \
+  --ablation-output artifacts/day-37-head-count.json
+```
+
+Independent per-head forward/backward checks cover all attention projection
+parameters. The command also verifies padding isolation and exact cached decode
+through learned-position rollover. Three predeclared head counts use matched
+seeds and batches; four updates per trial provide a reproducibility check with
+supporting, contradicting or inconclusive findings, not a model-quality claim.
+See [the operating guide](docs/transformer-attention-serving.md) for pre/post-norm,
+SDPA, activation checkpointing, cache restart, and the CPU-only scope.
+
 ## Train the Tiny Shakespeare baseline
 
 The Day 34 command fetches the exact checksum-pinned public corpus, trains a
@@ -305,6 +322,8 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 33 | 2026-10-07 | Primitive WaveNet rebuild, equivalence audits, and exact resume |
 | 34 | 2026-10-08 | Tiny Shakespeare character bigram and training loop |
 | 35 | 2026-10-09 | Causal prefix averaging, masked softmax, and streaming equivalence |
+| 36 | 2026-10-10 | Single-head forward/backward and causal-isolation foundations verified with Day 37 |
+| 37 | 2026-10-11 | Full residual blocks, multi-head audits, controlled configurations, and inference restart |
 
 ## License
 

@@ -40,6 +40,15 @@ ABLATION_SCHEMA_VERSION = 1
 _LABEL_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 _METRICS = {"train_nll", "validation_nll"}
 _DIRECTIONS = {"lower", "higher"}
+# Schema-1 protocols predate these opt-in controls. Their absent values retain
+# the original equations; unknown fields and missing legacy controls still fail.
+_OPTIONAL_MODEL_CONTROLS = {
+    "normalization_placement",
+    "feed_forward_expansion",
+    "feed_forward_activation",
+    "activation_checkpointing",
+    "attention_backend",
+}
 
 
 @contextmanager
@@ -715,7 +724,10 @@ def load_ablation_protocol(path: Path, *, vocab_size: int) -> ControlledAblation
         raise TransformerLabError("model_config and training_config must be objects")
     model_fields = {field.name for field in fields(TransformerConfig)} - {"vocab_size"}
     training_fields = {field.name for field in fields(TrainingConfig)} - {"seed"}
-    _require_exact_keys(model_payload, model_fields, "model_config")
+    expected_model_fields = (model_fields - _OPTIONAL_MODEL_CONTROLS) | (
+        model_fields & _OPTIONAL_MODEL_CONTROLS & model_payload.keys()
+    )
+    _require_exact_keys(model_payload, expected_model_fields, "model_config")
     _require_exact_keys(training_payload, training_fields, "training_config")
     seeds = payload["trial_seeds"]
     if not isinstance(seeds, list):
