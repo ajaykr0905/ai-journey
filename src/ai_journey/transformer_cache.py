@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import re
+import base64
+import binascii
+import json
+import math
 from hashlib import sha256
 
 import torch
@@ -369,4 +373,146 @@ def reorder_cache(cache: DecoderCache, indexes: Tensor) -> DecoderCache:
         layers,
         config_digest=cache.config_digest,
         model_digest=cache.model_digest,
+    )
+
+
+_DTYPES = {
+    "torch.int64": torch.int64,
+    "torch.float16": torch.float16,
+    "torch.bfloat16": torch.bfloat16,
+    "torch.float32": torch.float32,
+    "torch.float64": torch.float64,
+}
+_MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
+
+
+def _json_bytes(value: object) -> bytes:
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+
+
+def _encode_tensor(tensor: Tensor) -> dict[str, object]:
+    data = tensor.detach().cpu().contiguous()
+    raw = data.reshape(-1).view(torch.uint8).numpy().tobytes()
+    return {
+        "dtype": str(data.dtype),
+        "shape": list(data.shape),
+        "data": base64.b64encode(raw).decode("ascii"),
+    }
+
+
+def cache_to_bytes(cache: DecoderCache) -> bytes:
+    """Serialize CPU-portable tensor bytes and checksums without pickle.
+
+    SHA-256 detects corruption, not authenticity. Restore against a trusted
+    model before accepting a snapshot for inference.
+    """
+    if not isinstance(cache, DecoderCache):
+        raise TypeError("cache must be DecoderCache")
+    payload = {
+        "tokens": _encode_tensor(cache._tokens),
+        "layers": [
+            {
+                "keys": _encode_tensor(layer._keys),
+                "values": _encode_tensor(layer._values),
+            }
+            for layer in cache._layers
+        ],
+        "config_digest": cache.config_digest,
+        "model_digest": cache.model_digest,
+    }
+    result = _json_bytes(
+        {
+            "version": 1,
+            "sha256": sha256(_json_bytes(payload)).hexdigest(),
+            "payload": payload,
+        }
+    )
+    if len(result) > _MAX_SNAPSHOT_BYTES:
+        raise TransformerLabError("cache snapshot exceeds 64 MiB limit")
+    return result
+
+
+def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise TransformerLabError("duplicate cache snapshot field")
+        result[key] = value
+    return result
+
+
+def _fields(value: object, expected: set[str]) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != expected:
+        raise TransformerLabError("cache snapshot fields do not match schema")
+    return value
+
+
+def _decode_tensor(value: object, *, dimensions: int, floating: bool) -> Tensor:
+    entry = _fields(value, {"dtype", "shape", "data"})
+    dtype = entry["dtype"]
+    shape = entry["shape"]
+    data = entry["data"]
+    if (
+        not isinstance(dtype, str)
+        or dtype not in _DTYPES
+        or (dtype == "torch.int64") == floating
+        or not isinstance(shape, list)
+        or len(shape) != dimensions
+        or any(type(size) is not int or size <= 0 for size in shape)
+        or not isinstance(data, str)
+    ):
+        raise TransformerLabError("invalid snapshot tensor dtype, shape, or bytes")
+    expected = math.prod(shape) * torch.empty((), dtype=_DTYPES[dtype]).element_size()
+    if expected > _MAX_SNAPSHOT_BYTES:
+        raise TransformerLabError("cache snapshot tensor exceeds size limit")
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise TransformerLabError("invalid snapshot tensor encoding") from exc
+    if len(raw) != expected:
+        raise TransformerLabError("snapshot tensor byte count does not match shape")
+    return torch.frombuffer(bytearray(raw), dtype=_DTYPES[dtype]).reshape(shape).clone()
+
+
+def cache_from_bytes(data: bytes) -> DecoderCache:
+    """Decode a bounded, strictly validated, CPU-owned snapshot."""
+    if not isinstance(data, bytes):
+        raise TypeError("snapshot must be bytes")
+    if len(data) > _MAX_SNAPSHOT_BYTES:
+        raise TransformerLabError("cache snapshot exceeds 64 MiB limit")
+    try:
+        envelope = json.loads(data.decode("utf-8"), object_pairs_hook=_strict_object)
+    except (ValueError, UnicodeError, RecursionError) as exc:
+        raise TransformerLabError("invalid cache snapshot JSON") from exc
+    envelope = _fields(envelope, {"version", "sha256", "payload"})
+    if type(envelope["version"]) is not int or envelope["version"] != 1:
+        raise TransformerLabError("unsupported cache snapshot version")
+    payload = _fields(
+        envelope["payload"], {"tokens", "layers", "config_digest", "model_digest"}
+    )
+    try:
+        digest = sha256(_json_bytes(payload)).hexdigest()
+    except (ValueError, RecursionError) as exc:
+        raise TransformerLabError("invalid cache snapshot payload") from exc
+    if envelope["sha256"] != digest:
+        raise TransformerLabError("cache snapshot checksum mismatch")
+    entries = payload["layers"]
+    if not isinstance(entries, list) or not entries:
+        raise TransformerLabError("cache snapshot requires layer entries")
+    layers = []
+    for entry in entries:
+        entry = _fields(entry, {"keys", "values"})
+        layers.append(
+            LayerKV(
+                _decode_tensor(entry["keys"], dimensions=4, floating=True),
+                _decode_tensor(entry["values"], dimensions=4, floating=True),
+            )
+        )
+    return DecoderCache(
+        _decode_tensor(payload["tokens"], dimensions=2, floating=False),
+        tuple(layers),
+        config_digest=payload["config_digest"],
+        model_digest=payload["model_digest"],
     )
