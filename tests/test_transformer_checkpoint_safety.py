@@ -103,6 +103,35 @@ class CheckpointPublicationTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), original)
         self.assertEqual(list(self.path.parent.iterdir()), [self.path])
 
+    def test_corpus_fingerprint_must_be_a_sha256_digest(self) -> None:
+        for fingerprint in ("z" * 64, "A" * 64, "a" * 63, b"a" * 64):
+            with self.subTest(fingerprint=fingerprint), self.assertRaisesRegex(
+                ValueError, "SHA-256"
+            ):
+                save_training_checkpoint(
+                    self.path,
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    cursor=self.cursor,
+                    training_config=self.training,
+                    corpus_fingerprint=fingerprint,
+                    step=1,
+                )
+
+        self.save()
+        payload = torch.load(self.path, weights_only=True)
+        payload["corpus_fingerprint"] = "z" * 64
+        torch.save(payload, self.path)
+        with self.assertRaisesRegex(ValueError, "SHA-256"):
+            load_training_checkpoint(
+                self.path,
+                model=self.model,
+                optimizer=self.optimizer,
+                cursor=self.cursor,
+                training_config=self.training,
+                corpus_fingerprint="z" * 64,
+            )
+
     def test_concurrent_writers_publish_complete_independent_archives(self) -> None:
         barrier = threading.Barrier(2, timeout=10)
         real_save = torch.save

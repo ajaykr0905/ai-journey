@@ -7,6 +7,7 @@ import json
 import math
 import os
 import random
+import re
 import tempfile
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
@@ -34,6 +35,11 @@ _LEGACY_TRANSFORMER_CONTROLS = {
     "activation_checkpointing": False,
     "attention_backend": "manual",
 }
+
+
+def _require_sha256_digest(value: str, name: str) -> None:
+    if not isinstance(value, str) or re.fullmatch(r"[a-f0-9]{64}", value) is None:
+        raise TransformerLabError(f"{name} must be a SHA-256 hex digest")
 
 
 def seed_everything(seed: int) -> None:
@@ -903,8 +909,7 @@ def save_training_checkpoint(
         raise TypeError("path must be pathlib.Path")
     if isinstance(step, bool) or not isinstance(step, int) or step < 0:
         raise TransformerLabError("step must be a non-negative integer")
-    if len(corpus_fingerprint) != 64:
-        raise TransformerLabError("corpus_fingerprint must be a SHA-256 hex digest")
+    _require_sha256_digest(corpus_fingerprint, "corpus_fingerprint")
     payload = {
         "schema_version": CHECKPOINT_SCHEMA_VERSION,
         "step": step,
@@ -951,6 +956,7 @@ def load_training_checkpoint(
 ) -> int:
     """Validate and restore an exact transformer training checkpoint."""
 
+    _require_sha256_digest(corpus_fingerprint, "corpus_fingerprint")
     payload = torch.load(path, map_location="cpu", weights_only=True)
     if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
         raise TransformerLabError("unsupported checkpoint schema")
@@ -970,7 +976,9 @@ def load_training_checkpoint(
         raise TransformerLabError("checkpoint model configuration mismatch")
     if payload.get("training_config") != asdict(training_config):
         raise TransformerLabError("checkpoint training configuration mismatch")
-    if payload.get("corpus_fingerprint") != corpus_fingerprint:
+    saved_corpus_fingerprint = payload.get("corpus_fingerprint")
+    _require_sha256_digest(saved_corpus_fingerprint, "checkpoint corpus_fingerprint")
+    if saved_corpus_fingerprint != corpus_fingerprint:
         raise TransformerLabError("checkpoint corpus fingerprint mismatch")
     step = payload.get("step")
     if isinstance(step, bool) or not isinstance(step, int) or step < 0:
