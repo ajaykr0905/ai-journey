@@ -175,10 +175,12 @@ def load_certification_report(path: Path) -> dict:
             result[key] = value
         return result
 
-    if path.stat().st_size > 4_000_000:
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    with path.open("rb") as handle:
+        encoded = handle.read(4_000_001)
+    if len(encoded) > 4_000_000:
         raise TransformerLabError("certification report exceeds size bound")
-    report = json.loads(
-        path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates
-    )
+    report = json.loads(encoded.decode("utf-8"), object_pairs_hook=reject_duplicates)
     verify_certification_report(report)
     return report

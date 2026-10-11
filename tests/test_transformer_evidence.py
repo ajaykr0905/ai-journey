@@ -64,3 +64,12 @@ class TransformerEvidenceTests(unittest.TestCase):
             path.write_text('{"schema":"x","schema":"x"}')
             with self.assertRaisesRegex(ValueError, "duplicate"):
                 load_certification_report(path)
+
+    def test_report_size_is_bounded_on_the_same_open_file(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "evidence.json")
+            write_certification_report(path, self.report)
+            with path.open("ab") as handle:
+                handle.write(b" " * 4_000_001)
+            with self.assertRaisesRegex(ValueError, "size bound"):
+                load_certification_report(path)
