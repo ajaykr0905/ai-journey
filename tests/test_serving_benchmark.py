@@ -173,6 +173,25 @@ class ServingBenchmarkTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "broken"):
                 benchmark_generation(self.model, self.prompt, repeats=1, warmup=0)
 
+    def test_generation_failure_preserves_caller_rng_and_module_modes(self) -> None:
+        self.model.train()
+        self.model.blocks[0].eval()
+        modes = [module.training for module in self.model.modules()]
+        rng = torch.get_rng_state().clone()
+
+        def fail_after_mutating_caller_state(*args, **kwargs):
+            torch.rand(4)
+            self.model.eval()
+            raise RuntimeError("generation failed")
+
+        with mock.patch.object(
+            self.model, "generate", side_effect=fail_after_mutating_caller_state
+        ):
+            with self.assertRaisesRegex(RuntimeError, "generation failed"):
+                benchmark_generation(self.model, self.prompt, repeats=1, warmup=0)
+        self.assertTrue(torch.equal(rng, torch.get_rng_state()))
+        self.assertEqual([module.training for module in self.model.modules()], modes)
+
     def test_cli_publication_and_rng_preservation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "result.json"
