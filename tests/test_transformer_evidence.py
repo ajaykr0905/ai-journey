@@ -44,6 +44,10 @@ class TransformerEvidenceTests(unittest.TestCase):
         raw["parameter_count"] += 1
         with self.assertRaisesRegex(ValueError, "parameter count"):
             build_certification_report(raw)
+        raw = copy.deepcopy(self.result)
+        raw["input_sha256"] = "a" * 64
+        with self.assertRaisesRegex(ValueError, "input fingerprint"):
+            build_certification_report(raw)
 
     def test_tampering_and_failed_publish_preserve_existing_bytes(self):
         with TemporaryDirectory() as directory:

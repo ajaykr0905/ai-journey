@@ -11,6 +11,8 @@ from hashlib import sha256
 from math import isfinite
 from pathlib import Path
 
+import torch
+
 from .attention_audit import AttentionGradientAudit, AttentionWeightDiagnostics
 from .transformer_certification import TransformerCertificationConfig
 from .transformer_lab import TransformerConfig, TransformerLabError
@@ -51,6 +53,24 @@ def _expected_parameter_count(model: TransformerConfig) -> int:
     return embeddings + model.layer_count * block + final_normalization
 
 
+def _expected_input_fingerprint(controls: TransformerCertificationConfig) -> str:
+    model = controls.model
+    generator = torch.Generator(device="cpu").manual_seed(controls.seed)
+    inputs = torch.randn(
+        2,
+        min(5, model.block_size),
+        model.embedding_dim,
+        generator=generator,
+        dtype=torch.float64,
+    )
+    tokens = torch.randint(
+        model.vocab_size,
+        (2, model.block_size + 3),
+        generator=generator,
+    )
+    return sha256(inputs.numpy().tobytes() + tokens.numpy().tobytes()).hexdigest()
+
+
 def verify_certification_report(report: dict) -> None:
     """Check the digest and measured safety conditions; no learner claim is implied."""
     _keys(report, {"schema", "result", "report_sha256"}, "report")
@@ -83,7 +103,11 @@ def verify_certification_report(report: dict) -> None:
         tolerance=result["config"]["tolerance"],
     )
     digest = result["input_sha256"]
-    if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+    if (
+        not isinstance(digest, str)
+        or not re.fullmatch(r"[a-f0-9]{64}", digest)
+        or digest != _expected_input_fingerprint(controls)
+    ):
         raise TransformerLabError("invalid input fingerprint")
     attention = result["attention"]
     if not isinstance(attention, list) or len(attention) != model.layer_count:
