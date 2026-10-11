@@ -1128,12 +1128,16 @@ def run_transformer_experiment(
 def write_experiment_report(path: Path, result: ExperimentResult) -> None:
     """Atomically write stable JSON evidence for an experiment."""
 
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if not isinstance(result, ExperimentResult):
+        raise TypeError("result must be ExperimentResult")
+    rendered = (
+        json.dumps(result.to_dict(), indent=2, sort_keys=True, allow_nan=False) + "\n"
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    temporary.write_text(rendered, encoding="utf-8")
     temporary.replace(path)
 
 
