@@ -133,11 +133,35 @@ class ServingBenchmarkTests(unittest.TestCase):
         self.assertEqual(full.call_count, 4)
         self.assertEqual(cached.call_count, 4)
         result = report["methods"]["full"]
-        self.assertEqual(result["sample_ns"], [10, 30, 50])
-        self.assertEqual(result["median_ns"], 30)
+        self.assertEqual(result["sample_ns"], [10, 40, 50])
+        self.assertEqual(result["median_ns"], 40)
         self.assertEqual(result["p95_ns"], 50)
-        self.assertAlmostEqual(result["generated_tokens_per_second"], 1e9 / 30)
-        self.assertEqual(report["methods"]["cached"]["sample_ns"], [20, 40, 60])
+        self.assertAlmostEqual(result["generated_tokens_per_second"], 1e9 / 40)
+        self.assertEqual(report["methods"]["cached"]["sample_ns"], [20, 30, 60])
+
+    def test_timing_pairs_alternate_execution_order(self) -> None:
+        output = torch.tensor([[1, 2, 3]])
+        calls = []
+
+        def full(*args, **kwargs):
+            calls.append("full")
+            return output
+
+        def cached(*args, **kwargs):
+            calls.append("cached")
+            return output
+
+        with mock.patch.object(self.model, "generate", side_effect=full), mock.patch(
+            "ai_journey.serving_benchmark.generate_cached", side_effect=cached
+        ):
+            report = benchmark_generation(
+                self.model, self.prompt, new_tokens=1, repeats=3, warmup=0
+            )
+        self.assertEqual(calls, ["full", "cached", "cached", "full", "full", "cached"])
+        self.assertEqual(
+            report["execution_order"],
+            "alternating timing pairs; measured pairs start full then cached",
+        )
 
     def test_rejects_mismatch_zero_duration_and_generation_errors(self) -> None:
         output = torch.tensor([[1, 2, 3]])
@@ -172,6 +196,25 @@ class ServingBenchmarkTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "broken"):
                 benchmark_generation(self.model, self.prompt, repeats=1, warmup=0)
+
+    def test_generation_failure_preserves_caller_rng_and_module_modes(self) -> None:
+        self.model.train()
+        self.model.blocks[0].eval()
+        modes = [module.training for module in self.model.modules()]
+        rng = torch.get_rng_state().clone()
+
+        def fail_after_mutating_caller_state(*args, **kwargs):
+            torch.rand(4)
+            self.model.eval()
+            raise RuntimeError("generation failed")
+
+        with mock.patch.object(
+            self.model, "generate", side_effect=fail_after_mutating_caller_state
+        ):
+            with self.assertRaisesRegex(RuntimeError, "generation failed"):
+                benchmark_generation(self.model, self.prompt, repeats=1, warmup=0)
+        self.assertTrue(torch.equal(rng, torch.get_rng_state()))
+        self.assertEqual([module.training for module in self.model.modules()], modes)
 
     def test_cli_publication_and_rng_preservation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -85,29 +85,40 @@ def benchmark_generation(
         identity.update(_tensor_digest(tensor).encode())
     samples: dict[str, list[int]] = {"full": [], "cached": []}
     reference = None
-    for iteration in range(warmup + repeats):
-        for method in samples:
-            generator = torch.Generator(device="cpu").manual_seed(seed)
-            start = perf_counter_ns()
-            if method == "full":
-                output = model.generate(
-                    prompt, new_tokens=new_tokens, top_k=1, generator=generator
-                )
-            else:
-                output = generate_cached(
-                    model, prompt, new_tokens=new_tokens, top_k=1, seed=seed
-                )
-            elapsed = perf_counter_ns() - start
-            if elapsed <= 0 or not math.isfinite(elapsed):
-                raise ValueError("generation duration must be positive and finite")
-            if reference is None:
-                reference = output.clone()
-            if output.shape != (batch, context + new_tokens) or not torch.equal(
-                reference, output
-            ):
-                raise ValueError("generation outputs do not match exactly")
-            if iteration >= warmup:
-                samples[method].append(elapsed)
+    caller_rng = torch.get_rng_state().clone()
+    caller_modes = [(module, module.training) for module in model.modules()]
+    try:
+        for iteration in range(warmup + repeats):
+            phase_iteration = iteration if iteration < warmup else iteration - warmup
+            methods = (
+                tuple(samples) if phase_iteration % 2 == 0 else tuple(reversed(samples))
+            )
+            for method in methods:
+                generator = torch.Generator(device="cpu").manual_seed(seed)
+                start = perf_counter_ns()
+                if method == "full":
+                    output = model.generate(
+                        prompt, new_tokens=new_tokens, top_k=1, generator=generator
+                    )
+                else:
+                    output = generate_cached(
+                        model, prompt, new_tokens=new_tokens, top_k=1, seed=seed
+                    )
+                elapsed = perf_counter_ns() - start
+                if elapsed <= 0 or not math.isfinite(elapsed):
+                    raise ValueError("generation duration must be positive and finite")
+                if reference is None:
+                    reference = output.clone()
+                if output.shape != (batch, context + new_tokens) or not torch.equal(
+                    reference, output
+                ):
+                    raise ValueError("generation outputs do not match exactly")
+                if iteration >= warmup:
+                    samples[method].append(elapsed)
+    finally:
+        torch.set_rng_state(caller_rng)
+        for module, training in caller_modes:
+            module.training = training
     results = {}
     for method, durations in samples.items():
         median = statistics.median(durations)
@@ -123,6 +134,9 @@ def benchmark_generation(
         "scope": "caller-supplied CPU model; complete generation calls include validation, cache hashing and rollover",
         "percentile_method": "nearest rank: sorted samples[ceil(0.95*n)-1]",
         "method_order": ["full", "cached"],
+        "execution_order": (
+            "alternating timing pairs; measured pairs start full then cached"
+        ),
         "config": asdict(model.config),
         "controls": {
             "new_tokens": new_tokens,

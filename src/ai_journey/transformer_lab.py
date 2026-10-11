@@ -982,7 +982,12 @@ def load_training_checkpoint(
     payload = torch.load(path, map_location="cpu", weights_only=True)
     if not isinstance(payload, Mapping) or set(payload) != _CHECKPOINT_FIELDS:
         raise TransformerLabError("checkpoint fields are invalid")
-    if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
+    schema_version = payload.get("schema_version")
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != CHECKPOINT_SCHEMA_VERSION
+    ):
         raise TransformerLabError("unsupported checkpoint schema")
     saved_config = payload.get("model_config")
     if not isinstance(saved_config, Mapping):
@@ -998,12 +1003,26 @@ def load_training_checkpoint(
         raise TransformerLabError("checkpoint model configuration is invalid") from exc
     if restored_config != model.config:
         raise TransformerLabError("checkpoint model configuration mismatch")
-    if payload.get("training_config") != asdict(training_config):
+    saved_training_config = payload.get("training_config")
+    if not isinstance(saved_training_config, Mapping):
+        raise TransformerLabError("checkpoint training configuration mismatch")
+    if saved_training_config.keys() != asdict(training_config).keys():
+        raise TransformerLabError("checkpoint training configuration mismatch")
+    try:
+        restored_training_config = TrainingConfig(**dict(saved_training_config))
+    except (TypeError, ValueError) as exc:
+        raise TransformerLabError(
+            "checkpoint training configuration is invalid"
+        ) from exc
+    if restored_training_config != training_config:
         raise TransformerLabError("checkpoint training configuration mismatch")
     saved_corpus_fingerprint = payload.get("corpus_fingerprint")
     _require_sha256_digest(saved_corpus_fingerprint, "checkpoint corpus_fingerprint")
     if saved_corpus_fingerprint != corpus_fingerprint:
         raise TransformerLabError("checkpoint corpus fingerprint mismatch")
+    _require_sha256_digest(
+        payload.get("model_fingerprint"), "checkpoint model_fingerprint"
+    )
     step = payload.get("step")
     if isinstance(step, bool) or not isinstance(step, int) or step < 0:
         raise TransformerLabError("checkpoint step is invalid")
@@ -1128,13 +1147,38 @@ def run_transformer_experiment(
 def write_experiment_report(path: Path, result: ExperimentResult) -> None:
     """Atomically write stable JSON evidence for an experiment."""
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if not isinstance(result, ExperimentResult):
+        raise TypeError("result must be ExperimentResult")
+    rendered = (
+        json.dumps(result.to_dict(), indent=2, sort_keys=True, allow_nan=False) + "\n"
     )
-    temporary.replace(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(rendered)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        temporary = None
+        descriptor = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)
