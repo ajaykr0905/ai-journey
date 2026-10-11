@@ -40,6 +40,10 @@ class TransformerEvidenceTests(unittest.TestCase):
         raw["attention"][0]["causality"]["boundaries_checked"] = 0
         with self.assertRaisesRegex(ValueError, "boundaries"):
             build_certification_report(raw)
+        raw = copy.deepcopy(self.result)
+        raw["parameter_count"] += 1
+        with self.assertRaisesRegex(ValueError, "parameter count"):
+            build_certification_report(raw)
 
     def test_tampering_and_failed_publish_preserve_existing_bytes(self):
         with TemporaryDirectory() as directory:

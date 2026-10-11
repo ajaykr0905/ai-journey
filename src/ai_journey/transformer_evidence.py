@@ -42,6 +42,15 @@ def _number(value, name, *, maximum=None):
         raise TransformerLabError(f"invalid or failing {name}")
 
 
+def _expected_parameter_count(model: TransformerConfig) -> int:
+    width = model.embedding_dim
+    expansion = model.feed_forward_expansion
+    embeddings = (2 * model.vocab_size + model.block_size) * width
+    block = (4 + 2 * expansion) * width**2 + (9 + expansion) * width
+    final_normalization = 2 * width
+    return embeddings + model.layer_count * block + final_normalization
+
+
 def verify_certification_report(report: dict) -> None:
     """Check the digest and measured safety conditions; no learner claim is implied."""
     _keys(report, {"schema", "result", "report_sha256"}, "report")
@@ -120,7 +129,9 @@ def verify_certification_report(report: dict) -> None:
                 )
     for name in ("cache_rollover_error", "padding_error"):
         _number(result[name], name, maximum=controls.tolerance)
-    if type(result["parameter_count"]) is not int or result["parameter_count"] <= 0:
+    if type(result["parameter_count"]) is not int or result[
+        "parameter_count"
+    ] != _expected_parameter_count(model):
         raise TransformerLabError("invalid parameter count")
     runtime = result["runtime"]
     _keys(runtime, {"device", "dtype", "torch_version", "threads"}, "runtime")
