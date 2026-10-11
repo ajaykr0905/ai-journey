@@ -161,6 +161,28 @@ class CheckpointPublicationTests(unittest.TestCase):
                 corpus_fingerprint="z" * 64,
             )
 
+    def test_restore_rejects_malformed_checkpoint_containers(self) -> None:
+        self.save()
+        valid = torch.load(self.path, weights_only=True)
+        malformed = [
+            [valid],
+            {key: value for key, value in valid.items() if key != "cursor_state"},
+            {**valid, "unexpected": True},
+        ]
+        for payload in malformed:
+            torch.save(payload, self.path)
+            with self.subTest(payload_type=type(payload)), self.assertRaisesRegex(
+                ValueError, "checkpoint fields"
+            ):
+                load_training_checkpoint(
+                    self.path,
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    cursor=self.cursor,
+                    training_config=self.training,
+                    corpus_fingerprint="a" * 64,
+                )
+
     def test_concurrent_writers_publish_complete_independent_archives(self) -> None:
         barrier = threading.Barrier(2, timeout=10)
         real_save = torch.save

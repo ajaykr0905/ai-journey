@@ -814,6 +814,18 @@ def train_steps(
 
 
 CHECKPOINT_SCHEMA_VERSION = 1
+_CHECKPOINT_FIELDS = {
+    "schema_version",
+    "step",
+    "model_config",
+    "training_config",
+    "corpus_fingerprint",
+    "model_fingerprint",
+    "model_state",
+    "optimizer_state",
+    "cursor_state",
+    "torch_rng_state",
+}
 
 
 def _require_finite_checkpoint_state(value: Any, name: str) -> None:
@@ -968,6 +980,8 @@ def load_training_checkpoint(
 
     _require_sha256_digest(corpus_fingerprint, "corpus_fingerprint")
     payload = torch.load(path, map_location="cpu", weights_only=True)
+    if not isinstance(payload, Mapping) or set(payload) != _CHECKPOINT_FIELDS:
+        raise TransformerLabError("checkpoint fields are invalid")
     if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
         raise TransformerLabError("unsupported checkpoint schema")
     saved_config = payload.get("model_config")
