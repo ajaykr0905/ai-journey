@@ -883,7 +883,7 @@ def model_fingerprint(model: DecoderLanguageModel) -> str:
         digest.update(name.encode())
         digest.update(str(value.dtype).encode())
         digest.update(str(tuple(value.shape)).encode())
-        digest.update(value.numpy().tobytes())
+        digest.update(value.reshape(-1).view(torch.uint8).numpy().tobytes())
     return digest.hexdigest()
 
 

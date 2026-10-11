@@ -198,6 +198,27 @@ supporting, contradicting or inconclusive findings, not a model-quality claim.
 See [the operating guide](docs/transformer-attention-serving.md) for pre/post-norm,
 SDPA, activation checkpointing, cache restart, and the CPU-only scope.
 
+## Measure cached generation on a bounded CPU control
+
+```bash
+mkdir -p artifacts
+ai-journey-serving-benchmark --output artifacts/serving-benchmark.json
+```
+
+The installed command compares full-context and cached greedy generation using
+a seeded, untrained float32 CPU model and synthetic token IDs. Every warmup and
+measured output must match exactly. The report records per-call samples, median,
+nearest-rank p95, generated-token throughput, controls and model/prompt/output
+hashes. Warmups are excluded; complete-call timings include validation, cache
+hashing and context rollover. Calls always run full then cached, and a three-run
+p95 is just the largest sample, not a stable tail-latency estimate.
+
+The output directory must exist. CLI limits are 1–32 new tokens, 1–20 repeats,
+0–5 warmups, batch size 1–4 and 1–128 prompt tokens. Timing varies by machine and
+load; cached generation may be slower. This is not trained-model quality,
+production throughput, GPU or distributed evidence. Existing output is replaced
+only after the complete JSON report is flushed successfully.
+
 ## Train the Tiny Shakespeare baseline
 
 The Day 34 command fetches the exact checksum-pinned public corpus, trains a

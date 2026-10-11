@@ -29,6 +29,10 @@ jobs:
           python -m compileall -q src scripts tests tools
           ruff check tests/test_transformer_padded_batches.py
           ruff format --check tests/test_transformer_padded_batches.py
+          ruff check tests/test_transformer_fingerprint_dtypes.py
+          ruff format --check tests/test_transformer_fingerprint_dtypes.py
+          ruff check src/ai_journey/serving_benchmark.py tests/test_serving_benchmark.py
+          ruff format --check src/ai_journey/serving_benchmark.py tests/test_serving_benchmark.py
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Run Days 0-11
@@ -245,3 +249,7 @@ jobs:
           --output /tmp/ai-journey-artifacts/day-37-post-sdpa.json
           --backend sdpa
           --norm-placement post
+      - name: Benchmark bounded CPU generation with exact output parity
+        run: >-
+          ai-journey-serving-benchmark
+          --output /tmp/ai-journey-artifacts/serving-benchmark.json
