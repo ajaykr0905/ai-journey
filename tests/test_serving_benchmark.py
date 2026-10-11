@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -234,6 +235,18 @@ class ServingBenchmarkTests(unittest.TestCase):
                 json.loads(path.read_text(encoding="utf-8")), {"valid": True}
             )
             self.assertEqual(list(path.parent.iterdir()), [path])
+
+    def test_publish_syncs_parent_directory_after_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "benchmark.json"
+            with mock.patch(
+                "ai_journey.serving_benchmark.os.open", wraps=os.open
+            ) as opened, mock.patch(
+                "ai_journey.serving_benchmark.os.fsync", wraps=os.fsync
+            ) as synced:
+                _publish(path, {"valid": True})
+            self.assertIn(mock.call(path.parent, os.O_RDONLY), opened.call_args_list)
+            self.assertEqual(synced.call_count, 2)
 
 
 if __name__ == "__main__":
