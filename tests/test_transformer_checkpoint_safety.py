@@ -94,6 +94,35 @@ class CheckpointPublicationTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), original)
         self.assertEqual(list(self.path.parent.iterdir()), [self.path])
 
+    def test_directory_sync_failure_reports_uncertain_new_checkpoint(self) -> None:
+        self.save()
+        real_fsync = os.fsync
+        sync_count = 0
+
+        def fail_directory_sync(descriptor: int) -> None:
+            nonlocal sync_count
+            sync_count += 1
+            if sync_count == 2:
+                raise OSError("simulated directory sync failure")
+            real_fsync(descriptor)
+
+        with patch("os.fsync", side_effect=fail_directory_sync):
+            with self.assertRaisesRegex(OSError, "directory sync failure"):
+                self.save(2)
+        self.assertEqual(sync_count, 2)
+        self.assertEqual(list(self.path.parent.iterdir()), [self.path])
+        self.assertEqual(
+            load_training_checkpoint(
+                self.path,
+                model=self.model,
+                optimizer=self.optimizer,
+                cursor=self.cursor,
+                training_config=self.training,
+                corpus_fingerprint="a" * 64,
+            ),
+            2,
+        )
+
     def test_replacement_failure_keeps_previous_checkpoint(self) -> None:
         self.save()
         original = self.path.read_bytes()
@@ -102,6 +131,57 @@ class CheckpointPublicationTests(unittest.TestCase):
                 self.save(2)
         self.assertEqual(self.path.read_bytes(), original)
         self.assertEqual(list(self.path.parent.iterdir()), [self.path])
+
+    def test_corpus_fingerprint_must_be_a_sha256_digest(self) -> None:
+        for fingerprint in ("z" * 64, "A" * 64, "a" * 63, b"a" * 64):
+            with self.subTest(fingerprint=fingerprint), self.assertRaisesRegex(
+                ValueError, "SHA-256"
+            ):
+                save_training_checkpoint(
+                    self.path,
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    cursor=self.cursor,
+                    training_config=self.training,
+                    corpus_fingerprint=fingerprint,
+                    step=1,
+                )
+
+        self.save()
+        payload = torch.load(self.path, weights_only=True)
+        payload["corpus_fingerprint"] = "z" * 64
+        torch.save(payload, self.path)
+        with self.assertRaisesRegex(ValueError, "SHA-256"):
+            load_training_checkpoint(
+                self.path,
+                model=self.model,
+                optimizer=self.optimizer,
+                cursor=self.cursor,
+                training_config=self.training,
+                corpus_fingerprint="z" * 64,
+            )
+
+    def test_restore_rejects_malformed_checkpoint_containers(self) -> None:
+        self.save()
+        valid = torch.load(self.path, weights_only=True)
+        malformed = [
+            [valid],
+            {key: value for key, value in valid.items() if key != "cursor_state"},
+            {**valid, "unexpected": True},
+        ]
+        for payload in malformed:
+            torch.save(payload, self.path)
+            with self.subTest(payload_type=type(payload)), self.assertRaisesRegex(
+                ValueError, "checkpoint fields"
+            ):
+                load_training_checkpoint(
+                    self.path,
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    cursor=self.cursor,
+                    training_config=self.training,
+                    corpus_fingerprint="a" * 64,
+                )
 
     def test_concurrent_writers_publish_complete_independent_archives(self) -> None:
         barrier = threading.Barrier(2, timeout=10)

@@ -7,6 +7,7 @@ import json
 import math
 import os
 import random
+import re
 import tempfile
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
@@ -34,6 +35,11 @@ _LEGACY_TRANSFORMER_CONTROLS = {
     "activation_checkpointing": False,
     "attention_backend": "manual",
 }
+
+
+def _require_sha256_digest(value: str, name: str) -> None:
+    if not isinstance(value, str) or re.fullmatch(r"[a-f0-9]{64}", value) is None:
+        raise TransformerLabError(f"{name} must be a SHA-256 hex digest")
 
 
 def seed_everything(seed: int) -> None:
@@ -808,6 +814,18 @@ def train_steps(
 
 
 CHECKPOINT_SCHEMA_VERSION = 1
+_CHECKPOINT_FIELDS = {
+    "schema_version",
+    "step",
+    "model_config",
+    "training_config",
+    "corpus_fingerprint",
+    "model_fingerprint",
+    "model_state",
+    "optimizer_state",
+    "cursor_state",
+    "torch_rng_state",
+}
 
 
 def _require_finite_checkpoint_state(value: Any, name: str) -> None:
@@ -897,14 +915,17 @@ def save_training_checkpoint(
     corpus_fingerprint: str,
     step: int,
 ) -> None:
-    """Atomically save all state required for an exact training restart."""
+    """Atomically save and durably publish exact training restart state.
+
+    A parent-directory fsync failure is reported after replacement because the
+    new checkpoint is valid but its directory entry may not survive a crash.
+    """
 
     if not isinstance(path, Path):
         raise TypeError("path must be pathlib.Path")
     if isinstance(step, bool) or not isinstance(step, int) or step < 0:
         raise TransformerLabError("step must be a non-negative integer")
-    if len(corpus_fingerprint) != 64:
-        raise TransformerLabError("corpus_fingerprint must be a SHA-256 hex digest")
+    _require_sha256_digest(corpus_fingerprint, "corpus_fingerprint")
     payload = {
         "schema_version": CHECKPOINT_SCHEMA_VERSION,
         "step": step,
@@ -934,7 +955,13 @@ def save_training_checkpoint(
             torch.save(payload, stream)
             stream.flush()
             os.fsync(stream.fileno())
-        temporary.replace(path)
+        os.replace(temporary, path)
+        temporary = None
+        descriptor = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
@@ -951,7 +978,10 @@ def load_training_checkpoint(
 ) -> int:
     """Validate and restore an exact transformer training checkpoint."""
 
+    _require_sha256_digest(corpus_fingerprint, "corpus_fingerprint")
     payload = torch.load(path, map_location="cpu", weights_only=True)
+    if not isinstance(payload, Mapping) or set(payload) != _CHECKPOINT_FIELDS:
+        raise TransformerLabError("checkpoint fields are invalid")
     if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
         raise TransformerLabError("unsupported checkpoint schema")
     saved_config = payload.get("model_config")
@@ -970,7 +1000,9 @@ def load_training_checkpoint(
         raise TransformerLabError("checkpoint model configuration mismatch")
     if payload.get("training_config") != asdict(training_config):
         raise TransformerLabError("checkpoint training configuration mismatch")
-    if payload.get("corpus_fingerprint") != corpus_fingerprint:
+    saved_corpus_fingerprint = payload.get("corpus_fingerprint")
+    _require_sha256_digest(saved_corpus_fingerprint, "checkpoint corpus_fingerprint")
+    if saved_corpus_fingerprint != corpus_fingerprint:
         raise TransformerLabError("checkpoint corpus fingerprint mismatch")
     step = payload.get("step")
     if isinstance(step, bool) or not isinstance(step, int) or step < 0:

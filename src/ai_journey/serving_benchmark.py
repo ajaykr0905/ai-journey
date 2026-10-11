@@ -153,6 +153,7 @@ def benchmark_generation(
 
 def _publish(path: Path, report: dict) -> None:
     data = json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -167,6 +168,12 @@ def _publish(path: Path, report: dict) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
+        temporary = None
+        descriptor = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
