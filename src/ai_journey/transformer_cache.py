@@ -578,6 +578,7 @@ def save_cache(path: Path, cache: DecoderCache) -> None:
     if not isinstance(path, Path):
         raise TypeError("path must be pathlib.Path")
     encoded = cache_to_bytes(cache)
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(

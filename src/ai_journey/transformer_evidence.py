@@ -11,6 +11,8 @@ from hashlib import sha256
 from math import isfinite
 from pathlib import Path
 
+import torch
+
 from .attention_audit import AttentionGradientAudit, AttentionWeightDiagnostics
 from .transformer_certification import TransformerCertificationConfig
 from .transformer_lab import TransformerConfig, TransformerLabError
@@ -40,6 +42,33 @@ def _number(value, name, *, maximum=None):
         or (maximum is not None and value > maximum)
     ):
         raise TransformerLabError(f"invalid or failing {name}")
+
+
+def _expected_parameter_count(model: TransformerConfig) -> int:
+    width = model.embedding_dim
+    expansion = model.feed_forward_expansion
+    embeddings = (2 * model.vocab_size + model.block_size) * width
+    block = (4 + 2 * expansion) * width**2 + (9 + expansion) * width
+    final_normalization = 2 * width
+    return embeddings + model.layer_count * block + final_normalization
+
+
+def _expected_input_fingerprint(controls: TransformerCertificationConfig) -> str:
+    model = controls.model
+    generator = torch.Generator(device="cpu").manual_seed(controls.seed)
+    inputs = torch.randn(
+        2,
+        min(5, model.block_size),
+        model.embedding_dim,
+        generator=generator,
+        dtype=torch.float64,
+    )
+    tokens = torch.randint(
+        model.vocab_size,
+        (2, model.block_size + 3),
+        generator=generator,
+    )
+    return sha256(inputs.numpy().tobytes() + tokens.numpy().tobytes()).hexdigest()
 
 
 def verify_certification_report(report: dict) -> None:
@@ -74,7 +103,11 @@ def verify_certification_report(report: dict) -> None:
         tolerance=result["config"]["tolerance"],
     )
     digest = result["input_sha256"]
-    if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+    if (
+        not isinstance(digest, str)
+        or not re.fullmatch(r"[a-f0-9]{64}", digest)
+        or digest != _expected_input_fingerprint(controls)
+    ):
         raise TransformerLabError("invalid input fingerprint")
     attention = result["attention"]
     if not isinstance(attention, list) or len(attention) != model.layer_count:
@@ -120,7 +153,9 @@ def verify_certification_report(report: dict) -> None:
                 )
     for name in ("cache_rollover_error", "padding_error"):
         _number(result[name], name, maximum=controls.tolerance)
-    if type(result["parameter_count"]) is not int or result["parameter_count"] <= 0:
+    if type(result["parameter_count"]) is not int or result[
+        "parameter_count"
+    ] != _expected_parameter_count(model):
         raise TransformerLabError("invalid parameter count")
     runtime = result["runtime"]
     _keys(runtime, {"device", "dtype", "torch_version", "threads"}, "runtime")
@@ -161,6 +196,12 @@ def write_certification_report(path: Path, report: dict) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
+        temporary = None
+        descriptor = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
@@ -175,10 +216,12 @@ def load_certification_report(path: Path) -> dict:
             result[key] = value
         return result
 
-    if path.stat().st_size > 4_000_000:
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    with path.open("rb") as handle:
+        encoded = handle.read(4_000_001)
+    if len(encoded) > 4_000_000:
         raise TransformerLabError("certification report exceeds size bound")
-    report = json.loads(
-        path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates
-    )
+    report = json.loads(encoded.decode("utf-8"), object_pairs_hook=reject_duplicates)
     verify_certification_report(report)
     return report
