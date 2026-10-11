@@ -903,7 +903,11 @@ def save_training_checkpoint(
     corpus_fingerprint: str,
     step: int,
 ) -> None:
-    """Atomically save all state required for an exact training restart."""
+    """Atomically save and durably publish exact training restart state.
+
+    A parent-directory fsync failure is reported after replacement because the
+    new checkpoint is valid but its directory entry may not survive a crash.
+    """
 
     if not isinstance(path, Path):
         raise TypeError("path must be pathlib.Path")
@@ -939,7 +943,13 @@ def save_training_checkpoint(
             torch.save(payload, stream)
             stream.flush()
             os.fsync(stream.fileno())
-        temporary.replace(path)
+        os.replace(temporary, path)
+        temporary = None
+        descriptor = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)

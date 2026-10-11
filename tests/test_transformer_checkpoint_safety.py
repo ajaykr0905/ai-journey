@@ -94,6 +94,35 @@ class CheckpointPublicationTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), original)
         self.assertEqual(list(self.path.parent.iterdir()), [self.path])
 
+    def test_directory_sync_failure_reports_uncertain_new_checkpoint(self) -> None:
+        self.save()
+        real_fsync = os.fsync
+        sync_count = 0
+
+        def fail_directory_sync(descriptor: int) -> None:
+            nonlocal sync_count
+            sync_count += 1
+            if sync_count == 2:
+                raise OSError("simulated directory sync failure")
+            real_fsync(descriptor)
+
+        with patch("os.fsync", side_effect=fail_directory_sync):
+            with self.assertRaisesRegex(OSError, "directory sync failure"):
+                self.save(2)
+        self.assertEqual(sync_count, 2)
+        self.assertEqual(list(self.path.parent.iterdir()), [self.path])
+        self.assertEqual(
+            load_training_checkpoint(
+                self.path,
+                model=self.model,
+                optimizer=self.optimizer,
+                cursor=self.cursor,
+                training_config=self.training,
+                corpus_fingerprint="a" * 64,
+            ),
+            2,
+        )
+
     def test_replacement_failure_keeps_previous_checkpoint(self) -> None:
         self.save()
         original = self.path.read_bytes()
