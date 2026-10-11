@@ -41,6 +41,7 @@
     "tests/test_transformer_padded_batches.py",
     "tests/test_transformer_cache.py",
     "tests/test_transformer_cache_restart.py",
+    "tests/test_transformer_fingerprint_dtypes.py",
     "tests/test_attention_audit.py",
     "tests/test_transformer_certification.py",
     "tests/test_transformer_evidence.py",
