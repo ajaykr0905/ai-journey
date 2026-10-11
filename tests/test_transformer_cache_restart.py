@@ -131,6 +131,14 @@ class CacheSnapshotTests(unittest.TestCase):
             torch.testing.assert_close(loaded.tokens, self.tokens)
             self.assertEqual(list(Path(directory).iterdir()), [path])
 
+    def test_snapshot_publication_creates_missing_parent_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "cache" / "inference.json"
+            save_cache(path, self.cache)
+            loaded = load_cache(path, self.model)
+            torch.testing.assert_close(loaded.tokens, self.tokens)
+            self.assertEqual(list(path.parent.iterdir()), [path])
+
     def test_failed_replace_or_file_flush_preserves_previous_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "inference.json"
