@@ -89,7 +89,11 @@ def benchmark_generation(
     caller_modes = [(module, module.training) for module in model.modules()]
     try:
         for iteration in range(warmup + repeats):
-            for method in samples:
+            phase_iteration = iteration if iteration < warmup else iteration - warmup
+            methods = (
+                tuple(samples) if phase_iteration % 2 == 0 else tuple(reversed(samples))
+            )
+            for method in methods:
                 generator = torch.Generator(device="cpu").manual_seed(seed)
                 start = perf_counter_ns()
                 if method == "full":
@@ -130,6 +134,9 @@ def benchmark_generation(
         "scope": "caller-supplied CPU model; complete generation calls include validation, cache hashing and rollover",
         "percentile_method": "nearest rank: sorted samples[ceil(0.95*n)-1]",
         "method_order": ["full", "cached"],
+        "execution_order": (
+            "alternating timing pairs; measured pairs start full then cached"
+        ),
         "config": asdict(model.config),
         "controls": {
             "new_tokens": new_tokens,
