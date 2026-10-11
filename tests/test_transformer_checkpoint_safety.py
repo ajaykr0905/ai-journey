@@ -183,6 +183,51 @@ class CheckpointPublicationTests(unittest.TestCase):
                     corpus_fingerprint="a" * 64,
                 )
 
+    def test_restore_rejects_numeric_type_aliases_in_checkpoint_metadata(self) -> None:
+        self.save()
+        valid = torch.load(self.path, weights_only=True)
+        malformed = []
+        boolean_schema = copy.deepcopy(valid)
+        boolean_schema["schema_version"] = True
+        malformed.append(("boolean schema", boolean_schema))
+        floating_steps = copy.deepcopy(valid)
+        floating_steps["training_config"]["steps"] = float(self.training.steps)
+        malformed.append(("floating steps", floating_steps))
+
+        for defect, payload in malformed:
+            torch.save(payload, self.path)
+            with self.subTest(defect=defect), self.assertRaisesRegex(
+                ValueError, "checkpoint"
+            ):
+                load_training_checkpoint(
+                    self.path,
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    cursor=self.cursor,
+                    training_config=self.training,
+                    corpus_fingerprint="a" * 64,
+                )
+
+    def test_malformed_model_fingerprint_is_rejected_before_model_restore(self) -> None:
+        self.save()
+        payload = torch.load(self.path, weights_only=True)
+        payload["model_fingerprint"] = "z" * 64
+        torch.save(payload, self.path)
+
+        with patch.object(
+            self.model, "load_state_dict", wraps=self.model.load_state_dict
+        ) as restore:
+            with self.assertRaisesRegex(ValueError, "SHA-256"):
+                load_training_checkpoint(
+                    self.path,
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    cursor=self.cursor,
+                    training_config=self.training,
+                    corpus_fingerprint="a" * 64,
+                )
+        restore.assert_not_called()
+
     def test_concurrent_writers_publish_complete_independent_archives(self) -> None:
         barrier = threading.Barrier(2, timeout=10)
         real_save = torch.save
