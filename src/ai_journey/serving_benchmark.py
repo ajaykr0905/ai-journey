@@ -153,6 +153,7 @@ def benchmark_generation(
 
 def _publish(path: Path, report: dict) -> None:
     data = json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(

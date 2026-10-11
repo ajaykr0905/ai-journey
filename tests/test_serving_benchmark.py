@@ -226,6 +226,15 @@ class ServingBenchmarkTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             build_parser().parse_args([])
 
+    def test_publish_creates_parent_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "results" / "benchmark.json"
+            _publish(path, {"valid": True})
+            self.assertEqual(
+                json.loads(path.read_text(encoding="utf-8")), {"valid": True}
+            )
+            self.assertEqual(list(path.parent.iterdir()), [path])
+
 
 if __name__ == "__main__":
     unittest.main()
