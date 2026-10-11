@@ -62,6 +62,17 @@ class TransformerEvidenceTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), b"previous")
             self.assertEqual(list(Path(directory).iterdir()), [path])
 
+    def test_directory_flush_failure_reports_uncertain_durability(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "evidence.json")
+            with patch(
+                "ai_journey.transformer_evidence.os.fsync",
+                side_effect=[None, OSError("directory flush failed")],
+            ):
+                with self.assertRaisesRegex(OSError, "directory flush"):
+                    write_certification_report(path, self.report)
+            self.assertEqual(load_certification_report(path), self.report)
+
     def test_duplicate_fields_are_rejected_before_hash_check(self):
         with TemporaryDirectory() as directory:
             path = Path(directory, "evidence.json")
