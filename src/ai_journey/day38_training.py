@@ -210,6 +210,7 @@ class Day38Experiment:
     full_validation_token_count: int
     used_train_token_count: int
     used_validation_token_count: int
+    vocab_size: int
     corpus_fingerprint: str
     codec_fingerprint: str
     model_fingerprint: str
@@ -362,6 +363,7 @@ def run_day38_experiment(
         full_validation_token_count=bounded.full_validation_token_count,
         used_train_token_count=bounded.used_train_token_count,
         used_validation_token_count=bounded.used_validation_token_count,
+        vocab_size=corpus.vocab_size,
         corpus_fingerprint=result.corpus_fingerprint,
         codec_fingerprint=result.codec_fingerprint,
         model_fingerprint=result.model_fingerprint,
@@ -501,6 +503,7 @@ def verify_day38_report(report: dict[str, Any]) -> None:
         "full_validation_token_count",
         "used_train_token_count",
         "used_validation_token_count",
+        "vocab_size",
         "parameter_count",
         "completed_steps",
     )
@@ -539,7 +542,10 @@ def verify_day38_report(report: dict[str, Any]) -> None:
         not isinstance(sample, str)
         or not isinstance(sample_ids, list)
         or any(
-            isinstance(token_id, bool) or not isinstance(token_id, int) or token_id < 0
+            isinstance(token_id, bool)
+            or not isinstance(token_id, int)
+            or token_id < 0
+            or token_id >= experiment["vocab_size"]
             for token_id in sample_ids
         )
         or len(sample) != expected_sample_length

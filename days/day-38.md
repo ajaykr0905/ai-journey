@@ -48,11 +48,12 @@ compatibility rather than silently starting a different experiment.
 Two clean CPU runs on 2026-10-12 used the pinned source digest
 `86c4e6aa9db7c042ec79f339dcb96d42b0075e16b8fc2e86bf0ca57e2dc565ed`,
 65,536 training tokens, 8,192 held-out tokens, an 80-step configuration, dropout
-0.2, four heads, two blocks, 32 embedding channels, and 30,656 parameters. Both
+0.2, a 65-character vocabulary, four heads, two blocks, 32 embedding channels,
+and 30,656 parameters. Both
 runs produced model fingerprint
 `e9171adbec47da0b0b0665ebc0feb4a1b91154626dd6e1423f3d27d8107d282b`,
 training NLL 2.575125, held-out NLL 2.710894, and the same sampled token sequence.
-Their measured durations were 9.782 and 9.729 seconds on the local CPU. The
+Their final measured durations were 10.093 and 9.912 seconds on the local CPU. The
 untrained reference NLLs were 4.184218 and 4.181267 respectively.
 
 The short sample is visibly imperfect character text. Loss improvement and exact

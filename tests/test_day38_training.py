@@ -235,6 +235,18 @@ class Day38ExperimentTests(unittest.TestCase):
         with self.assertRaisesRegex(TransformerLabError, "limitations"):
             verify_day38_report(report)
 
+    def test_report_rejects_re_signed_out_of_vocabulary_sample_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            report = build_day38_report(
+                self.run_experiment(Path(directory)), elapsed_seconds=1.0
+            )
+        report["experiment"]["sample_token_ids"][-1] = report["experiment"][
+            "vocab_size"
+        ]
+        resign(report)
+        with self.assertRaisesRegex(TransformerLabError, "sample evidence"):
+            verify_day38_report(report)
+
     def test_budgets_must_exceed_context_window(self) -> None:
         with self.assertRaises(TransformerLabError):
             Day38DataConfig(

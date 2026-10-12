@@ -190,7 +190,7 @@ and scope limitations.
 Two independent local runs on 2026-10-12 produced the same model fingerprint,
 losses, update trace, and 201-token sample. The measured run reduced training
 NLL from 4.184218 to 2.575125 and held-out NLL from 4.181267 to 2.710894 in
-about 9.8 seconds per run on an Apple-silicon CPU with five PyTorch intra-op
+about 10 seconds per run on an Apple-silicon CPU with five PyTorch intra-op
 threads. These are bounded diagnostic measurements, not a claim of language
 quality, GPU performance, distributed scale, production readiness, lecture
 completion, or Ajay's personal exercise completion. See
