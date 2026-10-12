@@ -6,6 +6,7 @@ import copy
 import json
 import math
 import os
+import pickle
 import random
 import re
 import tempfile
@@ -1088,7 +1089,20 @@ def load_training_checkpoint(
 
     _validate_optimizer_binding(model, optimizer)
     _require_sha256_digest(corpus_fingerprint, "corpus_fingerprint")
-    payload = torch.load(path, map_location="cpu", weights_only=True)
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    try:
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+    except (
+        OSError,
+        RuntimeError,
+        EOFError,
+        pickle.UnpicklingError,
+        IndexError,
+        KeyError,
+        ValueError,
+    ) as exc:
+        raise TransformerLabError(f"unable to read checkpoint: {path}") from exc
     if not isinstance(payload, Mapping) or set(payload) != _CHECKPOINT_FIELDS:
         raise TransformerLabError("checkpoint fields are invalid")
     schema_version = payload.get("schema_version")

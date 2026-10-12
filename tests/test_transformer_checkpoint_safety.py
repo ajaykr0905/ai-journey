@@ -19,6 +19,7 @@ from ai_journey.transformer_lab import (
     TrainingConfig,
     TransformerConfig,
     load_training_checkpoint,
+    TransformerLabError,
     model_fingerprint,
     save_training_checkpoint,
 )
@@ -50,6 +51,22 @@ class CheckpointPublicationTests(unittest.TestCase):
             corpus_fingerprint="a" * 64,
             step=step,
         )
+
+    def test_corrupt_archive_reports_a_checkpoint_error_without_mutation(self):
+        self.path.write_bytes(b"truncated checkpoint")
+        before = model_fingerprint(self.model)
+        rng = torch.get_rng_state().clone()
+        with self.assertRaisesRegex(TransformerLabError, "read checkpoint"):
+            load_training_checkpoint(
+                self.path,
+                model=self.model,
+                optimizer=self.optimizer,
+                cursor=self.cursor,
+                training_config=self.training,
+                corpus_fingerprint="a" * 64,
+            )
+        self.assertEqual(before, model_fingerprint(self.model))
+        self.assertTrue(torch.equal(rng, torch.get_rng_state()))
 
     def test_success_syncs_serialized_state_before_replacement(self) -> None:
         with patch("os.fsync", wraps=os.fsync) as sync:
