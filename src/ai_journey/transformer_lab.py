@@ -802,9 +802,11 @@ def train_steps(
         _, loss = model(x, y)
         if loss is None:
             raise RuntimeError("training loss was not computed")
+        if not bool(torch.isfinite(loss)):
+            raise TransformerLabError("training loss must be finite")
         loss.backward()
         gradient_norm = nn.utils.clip_grad_norm_(
-            model.parameters(), max_norm=config.gradient_clip
+            model.parameters(), max_norm=config.gradient_clip, error_if_nonfinite=True
         )
         optimizer.step()
         metrics.append(

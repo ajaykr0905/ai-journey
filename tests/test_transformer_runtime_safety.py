@@ -1,7 +1,9 @@
 """Rejected training inputs must not corrupt reproducible state."""
 
+import copy
 import random
 import unittest
+from unittest import mock
 
 import numpy as np
 import torch
@@ -13,6 +15,7 @@ from ai_journey.transformer_lab import (
     TransformerConfig,
     build_optimizer,
     seed_everything,
+    train_steps,
 )
 
 
@@ -39,3 +42,30 @@ class RuntimeSafetyTests(unittest.TestCase):
             self.assertTrue(torch.equal(torch_state, torch.get_rng_state()))
             with self.assertRaises(ValueError):
                 TrainingConfig(seed=seed)
+
+    def test_nonfinite_training_never_reaches_the_optimizer(self):
+        before = copy.deepcopy(self.model.state_dict())
+        with mock.patch.object(self.optimizer, "step") as update:
+            loss = torch.tensor(float("nan"), requires_grad=True)
+            with mock.patch.object(self.model, "forward", return_value=(None, loss)):
+                with self.assertRaisesRegex(ValueError, "finite"):
+                    train_steps(
+                        self.model,
+                        self.cursor,
+                        self.optimizer,
+                        self.config,
+                        step_count=1,
+                    )
+            update.assert_not_called()
+        for name, tensor in before.items():
+            self.assertTrue(torch.equal(tensor, self.model.state_dict()[name]))
+        parameter = next(self.model.parameters())
+        hook = parameter.register_hook(lambda grad: torch.full_like(grad, float("inf")))
+        try:
+            with self.assertRaisesRegex((ValueError, RuntimeError), "finite"):
+                train_steps(
+                    self.model, self.cursor, self.optimizer, self.config, step_count=1
+                )
+        finally:
+            hook.remove()
+        self.assertFalse(self.optimizer.state)
