@@ -35,6 +35,8 @@ jobs:
           ruff format --check src/ai_journey/serving_benchmark.py tests/test_serving_benchmark.py
           ruff check src/ai_journey/day38_training.py src/ai_journey/day38_cli.py tests/test_day38_training.py tests/test_run_day_38.py
           ruff format --check src/ai_journey/day38_training.py src/ai_journey/day38_cli.py tests/test_day38_training.py tests/test_run_day_38.py
+          ruff check src/ai_journey/day38_serving.py src/ai_journey/day38_inference_cli.py src/ai_journey/day38_ablation.py tests/test_day38_serving.py tests/test_day38_ablation.py tests/test_transformer_runtime_safety.py
+          ruff format --check src/ai_journey/day38_serving.py src/ai_journey/day38_inference_cli.py src/ai_journey/day38_ablation.py tests/test_day38_serving.py tests/test_day38_ablation.py tests/test_transformer_runtime_safety.py
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Run Days 0-11
@@ -248,6 +250,24 @@ jobs:
           --validation-token-limit 80
           --sample-tokens 16
           --sample-top-k 5
+      - name: Audit and serve the trained Day 38 checkpoint
+        run: |
+          for operation in audit generate benchmark; do
+            ai-journey-day-38-infer \
+              --report /tmp/ai-journey-artifacts/day-38-transformer.json \
+              --checkpoint /tmp/ai-journey-artifacts/day-38-transformer.pt \
+              --corpus /tmp/ai-journey-artifacts/tinyshakespeare.txt \
+              --operation "$operation" --new-tokens 4 \
+              --output "/tmp/ai-journey-artifacts/day-38-$operation.json"
+          done
+      - name: Run paired public-data dropout controls
+        run: >-
+          ai-journey-day-38-ablate
+          --corpus /tmp/ai-journey-artifacts/tinyshakespeare.txt
+          --protocol config/day-38-dropout-ablation.json
+          --train-tokens 320
+          --validation-tokens 80
+          --output /tmp/ai-journey-artifacts/day-38-dropout.json
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py
