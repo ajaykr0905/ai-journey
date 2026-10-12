@@ -787,6 +787,8 @@ def evaluate_nll(
                 y.reshape(-1),
                 reduction="none",
             )
+            if not bool(torch.isfinite(per_token).all()):
+                raise TransformerLabError("evaluation losses must remain finite")
             losses.append(per_token)
         return float(torch.cat(losses).mean())
     finally:

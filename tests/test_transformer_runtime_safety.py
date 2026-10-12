@@ -16,6 +16,7 @@ from ai_journey.transformer_lab import (
     CharacterCodec,
     TransformerConfig,
     build_optimizer,
+    evaluate_nll,
     seed_everything,
     train_steps,
 )
@@ -106,6 +107,16 @@ class RuntimeSafetyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "optimizer.*parameters"):
             train_steps(self.model, self.cursor, optimizer, self.config, step_count=1)
         self.assertEqual(before, self.cursor.state_dict())
+
+    def test_evaluation_rejects_nonfinite_metrics_and_restores_modes(self):
+        self.model.train()
+        self.model.blocks[0].eval()
+        modes = [module.training for module in self.model.modules()]
+        logits = torch.full((2, 4, 5), float("nan"))
+        with mock.patch.object(self.model, "forward", return_value=(logits, None)):
+            with self.assertRaisesRegex(ValueError, "finite"):
+                evaluate_nll(self.model, self.cursor.tokens, batch_size=2)
+        self.assertEqual(modes, [module.training for module in self.model.modules()])
 
     def test_invalid_targets_do_not_update_batchnorm_statistics(self):
         model = DecoderLanguageModel(
