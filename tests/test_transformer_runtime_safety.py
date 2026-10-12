@@ -118,6 +118,15 @@ class RuntimeSafetyTests(unittest.TestCase):
                 evaluate_nll(self.model, self.cursor.tokens, batch_size=2)
         self.assertEqual(modes, [module.training for module in self.model.modules()])
 
+    def test_evaluation_streams_weighted_losses_across_tail_batches(self):
+        tokens = self.cursor.tokens[:17]
+        expected = evaluate_nll(self.model, tokens, batch_size=64)
+        with mock.patch(
+            "torch.cat", side_effect=AssertionError("retained corpus losses")
+        ):
+            actual = evaluate_nll(self.model, tokens, batch_size=3)
+        self.assertAlmostEqual(expected, actual, places=6)
+
     def test_invalid_targets_do_not_update_batchnorm_statistics(self):
         model = DecoderLanguageModel(
             TransformerConfig(

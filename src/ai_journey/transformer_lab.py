@@ -771,7 +771,8 @@ def evaluate_nll(
     modes = [(module, module.training) for module in model.modules()]
     try:
         model.eval()
-        losses: list[Tensor] = []
+        total_loss = 0.0
+        token_count = 0
         for start in range(0, len(tokens) - model.config.block_size, batch_size):
             indexes = range(
                 start,
@@ -789,8 +790,9 @@ def evaluate_nll(
             )
             if not bool(torch.isfinite(per_token).all()):
                 raise TransformerLabError("evaluation losses must remain finite")
-            losses.append(per_token)
-        return float(torch.cat(losses).mean())
+            total_loss += float(per_token.double().sum())
+            token_count += per_token.numel()
+        return total_loss / token_count
     finally:
         for module, training in modes:
             module.training = training
