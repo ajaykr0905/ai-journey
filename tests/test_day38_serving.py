@@ -1,6 +1,9 @@
 """Serving accepts only models bound to complete verified training artifacts."""
 
 import hashlib
+import io
+import json
+from contextlib import redirect_stdout, redirect_stderr
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,7 +17,8 @@ from ai_journey.day38_training import (
     run_day38_experiment,
     write_day38_report,
 )
-from ai_journey.day38_serving import load_trained_artifact
+from ai_journey.day38_serving import load_trained_artifact, generate_from_artifact
+from ai_journey.day38_inference_cli import main
 from ai_journey.gpt_bigram import CorpusSource
 
 
@@ -83,3 +87,39 @@ class Day38ServingTests(unittest.TestCase):
         torch.save(payload, self.checkpoint)
         with self.assertRaisesRegex(ValueError, "fingerprint"):
             self.load()
+
+    def test_generation_repeats_and_matches_cached_decode(self):
+        artifact = self.load()
+        rng = torch.get_rng_state().clone()
+        full = generate_from_artifact(artifact, "\n", new_tokens=12, top_k=1)
+        repeat = generate_from_artifact(artifact, "\n", new_tokens=12, top_k=1)
+        cached = generate_from_artifact(
+            artifact, "\n", new_tokens=12, top_k=1, cached=True
+        )
+        self.assertEqual(full, repeat)
+        self.assertEqual(full["token_ids"], cached["token_ids"])
+        self.assertTrue(torch.equal(rng, torch.get_rng_state()))
+
+    def test_generation_cli_preserves_inputs_and_protects_aliases(self):
+        output = self.root / "sample.json"
+        args = [
+            "--report",
+            str(self.report),
+            "--checkpoint",
+            str(self.checkpoint),
+            "--corpus",
+            str(self.corpus),
+            "--output",
+            str(output),
+            "--new-tokens",
+            "4",
+        ]
+        original = self.checkpoint.read_bytes()
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(main(args), 0)
+        self.assertEqual(len(json.loads(output.read_text())["token_ids"]), 5)
+        self.assertEqual(original, self.checkpoint.read_bytes())
+        args[7] = str(self.checkpoint)
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(main(args), 2)
+        self.assertEqual(original, self.checkpoint.read_bytes())
