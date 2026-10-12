@@ -481,6 +481,21 @@ def verify_day38_report(report: dict[str, Any]) -> None:
     config = experiment.get("config")
     if not isinstance(config, dict):
         raise TransformerLabError("experiment config must be an object")
+    source_payload = experiment.get("source")
+    if not isinstance(source_payload, dict):
+        raise TransformerLabError("experiment source must be an object")
+    try:
+        source = CorpusSource(**source_payload)
+        data_payload = config.get("data")
+        if not isinstance(data_payload, dict):
+            raise TransformerLabError("experiment data config must be an object")
+        data_config = Day38DataConfig(**data_payload)
+        training_config = Day38TrainingConfig(
+            data=data_config,
+            **{key: value for key, value in config.items() if key != "data"},
+        )
+    except (TypeError, ValueError) as exc:
+        raise TransformerLabError("experiment source or config is invalid") from exc
     expected_finding = (
         "training-and-validation-nll-decreased"
         if experiment["final_train_nll"] < experiment["initial_train_nll"]
@@ -523,8 +538,22 @@ def verify_day38_report(report: dict[str, Any]) -> None:
         != experiment["total_token_count"]
         or experiment["split_index"] != experiment["full_train_token_count"]
         or experiment["completed_steps"] != config.get("steps")
+        or experiment["used_train_token_count"] > data_config.train_token_limit
+        or experiment["used_validation_token_count"]
+        > data_config.validation_token_limit
+        or experiment["used_train_token_count"] <= data_config.block_size
+        or experiment["used_validation_token_count"] <= data_config.block_size
     ):
         raise TransformerLabError("experiment counts are inconsistent")
+    with _preserve_random_state():
+        seed_everything(training_config.seed)
+        expected_parameters = DecoderLanguageModel(
+            training_config.model_config(experiment["vocab_size"])
+        ).parameter_count
+    if experiment["parameter_count"] != expected_parameters:
+        raise TransformerLabError("parameter_count does not match the model config")
+    if source.sha256 != source_payload["sha256"]:
+        raise RuntimeError("validated source digest changed unexpectedly")
     for name in ("corpus_fingerprint", "codec_fingerprint", "model_fingerprint"):
         value = experiment.get(name)
         if (

@@ -247,6 +247,24 @@ class Day38ExperimentTests(unittest.TestCase):
         with self.assertRaisesRegex(TransformerLabError, "sample evidence"):
             verify_day38_report(report)
 
+    def test_report_rejects_re_signed_source_and_architecture_mismatches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            report = build_day38_report(
+                self.run_experiment(Path(directory)), elapsed_seconds=1.0
+            )
+        report["experiment"]["source"]["sha256"] = "invalid"
+        resign(report)
+        with self.assertRaisesRegex(TransformerLabError, "source or config"):
+            verify_day38_report(report)
+
+        report["experiment"]["source"]["sha256"] = hashlib.sha256(
+            self.text.encode("utf-8")
+        ).hexdigest()
+        report["experiment"]["parameter_count"] += 1
+        resign(report)
+        with self.assertRaisesRegex(TransformerLabError, "parameter_count"):
+            verify_day38_report(report)
+
     def test_budgets_must_exceed_context_window(self) -> None:
         with self.assertRaises(TransformerLabError):
             Day38DataConfig(
