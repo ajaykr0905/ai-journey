@@ -249,6 +249,27 @@ class Day38ExperimentTests(unittest.TestCase):
         with self.assertRaisesRegex(TransformerLabError, "sample evidence"):
             verify_day38_report(report)
 
+    def test_report_rejects_re_signed_sample_decode_mismatches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            report = build_day38_report(
+                self.run_experiment(Path(directory)), elapsed_seconds=1.0
+            )
+        report["experiment"]["sample"] = "\n" + "x" * (
+            len(report["experiment"]["sample"]) - 1
+        )
+        resign(report)
+        with self.assertRaisesRegex(TransformerLabError, "does not match"):
+            verify_day38_report(report)
+
+        report["experiment"]["sample"] = "".join(
+            report["experiment"]["vocabulary"][token_id]
+            for token_id in report["experiment"]["sample_token_ids"]
+        )
+        report["experiment"]["vocabulary"].reverse()
+        resign(report)
+        with self.assertRaisesRegex(TransformerLabError, "vocabulary"):
+            verify_day38_report(report)
+
     def test_report_rejects_re_signed_source_and_architecture_mismatches(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             report = build_day38_report(

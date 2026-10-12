@@ -211,6 +211,7 @@ class Day38Experiment:
     used_train_token_count: int
     used_validation_token_count: int
     vocab_size: int
+    vocabulary: tuple[str, ...]
     corpus_fingerprint: str
     codec_fingerprint: str
     model_fingerprint: str
@@ -230,6 +231,7 @@ class Day38Experiment:
         payload["source"] = asdict(self.source)
         payload["config"]["data"] = asdict(self.config.data)
         payload["sample_token_ids"] = list(self.sample_token_ids)
+        payload["vocabulary"] = list(self.vocabulary)
         payload["trace"] = list(self.trace)
         return payload
 
@@ -365,6 +367,7 @@ def run_day38_experiment(
         used_train_token_count=bounded.used_train_token_count,
         used_validation_token_count=bounded.used_validation_token_count,
         vocab_size=corpus.vocab_size,
+        vocabulary=corpus.codec.tokens,
         corpus_fingerprint=result.corpus_fingerprint,
         codec_fingerprint=result.codec_fingerprint,
         model_fingerprint=result.model_fingerprint,
@@ -597,6 +600,16 @@ def verify_day38_report(report: dict[str, Any]) -> None:
             or any(character not in "0123456789abcdef" for character in value)
         ):
             raise TransformerLabError(f"{name} must be a SHA-256 digest")
+    vocabulary = experiment.get("vocabulary")
+    if (
+        not isinstance(vocabulary, list)
+        or len(vocabulary) != experiment["vocab_size"]
+        or any(not isinstance(token, str) or len(token) != 1 for token in vocabulary)
+        or vocabulary != sorted(set(vocabulary))
+        or sha256("".join(vocabulary).encode()).hexdigest()
+        != experiment["codec_fingerprint"]
+    ):
+        raise TransformerLabError("vocabulary does not match the codec fingerprint")
     sample = experiment.get("sample")
     sample_ids = experiment.get("sample_token_ids")
     expected_sample_length = len(config.get("sample_prompt", "")) + config.get(
@@ -617,6 +630,9 @@ def verify_day38_report(report: dict[str, Any]) -> None:
         or not sample.startswith(config.get("sample_prompt", ""))
     ):
         raise TransformerLabError("sample evidence length is inconsistent")
+    decoded = "".join(vocabulary[token_id] for token_id in sample_ids)
+    if decoded != sample:
+        raise TransformerLabError("sample text does not match its token ids")
     expected_runtime_fields = {
         "python_version",
         "torch_version",

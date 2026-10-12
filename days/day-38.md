@@ -53,7 +53,7 @@ and 30,656 parameters. Both
 runs produced model fingerprint
 `e9171adbec47da0b0b0665ebc0feb4a1b91154626dd6e1423f3d27d8107d282b`,
 training NLL 2.575125, held-out NLL 2.710894, and the same sampled token sequence.
-Their final measured durations were 10.093 and 9.912 seconds on the local CPU. The
+Each final measured run completed in about 10 seconds on the local CPU. The
 untrained reference NLLs were 4.184218 and 4.181267 respectively.
 
 The short sample is visibly imperfect character text. Loss improvement and exact
