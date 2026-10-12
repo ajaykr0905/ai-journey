@@ -801,6 +801,21 @@ class StepMetric:
     gradient_norm: float
 
 
+def _validate_optimizer_binding(
+    model: DecoderLanguageModel, optimizer: torch.optim.Optimizer
+) -> None:
+    if not isinstance(optimizer, torch.optim.Optimizer):
+        raise TypeError("optimizer must be torch.optim.Optimizer")
+    parameters = [
+        id(parameter)
+        for group in optimizer.param_groups
+        for parameter in group["params"]
+    ]
+    expected = {id(parameter) for parameter in model.parameters()}
+    if len(parameters) != len(set(parameters)) or set(parameters) != expected:
+        raise TransformerLabError("optimizer parameters must match the complete model")
+
+
 def train_steps(
     model: DecoderLanguageModel,
     cursor: BatchCursor,
@@ -812,6 +827,7 @@ def train_steps(
 ) -> tuple[StepMetric, ...]:
     """Train a bounded number of steps and return inspectable metrics."""
 
+    _validate_optimizer_binding(model, optimizer)
     count = config.steps if step_count is None else step_count
     if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
         raise TransformerLabError("step_count must be a positive integer")
@@ -959,6 +975,7 @@ def save_training_checkpoint(
     if isinstance(step, bool) or not isinstance(step, int) or step < 0:
         raise TransformerLabError("step must be a non-negative integer")
     _require_sha256_digest(corpus_fingerprint, "corpus_fingerprint")
+    _validate_optimizer_binding(model, optimizer)
     payload = {
         "schema_version": CHECKPOINT_SCHEMA_VERSION,
         "step": step,
@@ -1011,6 +1028,7 @@ def load_training_checkpoint(
 ) -> int:
     """Validate and restore an exact transformer training checkpoint."""
 
+    _validate_optimizer_binding(model, optimizer)
     _require_sha256_digest(corpus_fingerprint, "corpus_fingerprint")
     payload = torch.load(path, map_location="cpu", weights_only=True)
     if not isinstance(payload, Mapping) or set(payload) != _CHECKPOINT_FIELDS:

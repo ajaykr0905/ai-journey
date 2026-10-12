@@ -99,6 +99,14 @@ class RuntimeSafetyTests(unittest.TestCase):
             hook.remove()
         self.assertFalse(self.optimizer.state)
 
+    def test_training_rejects_optimizer_for_another_model(self):
+        other = copy.deepcopy(self.model)
+        optimizer = build_optimizer(other, self.config)
+        before = self.cursor.state_dict()
+        with self.assertRaisesRegex(ValueError, "optimizer.*parameters"):
+            train_steps(self.model, self.cursor, optimizer, self.config, step_count=1)
+        self.assertEqual(before, self.cursor.state_dict())
+
     def test_invalid_targets_do_not_update_batchnorm_statistics(self):
         model = DecoderLanguageModel(
             TransformerConfig(
