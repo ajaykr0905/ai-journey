@@ -610,6 +610,20 @@ class DecoderLanguageModel(nn.Module):
             valid = valid_sequence_positions(
                 lengths, batch=batch, time=time, device=token_ids.device
             )
+        if targets is not None:
+            if (
+                not isinstance(targets, Tensor)
+                or targets.shape != token_ids.shape
+                or targets.dtype != torch.long
+            ):
+                raise TypeError("targets must match token_ids shape and dtype")
+            if targets.device != token_ids.device:
+                raise TransformerLabError("targets must match token_ids device")
+            loss_targets = targets.reshape(-1) if valid is None else targets[valid]
+            if bool(
+                ((loss_targets < 0) | (loss_targets >= self.config.vocab_size)).any()
+            ):
+                raise TransformerLabError("valid target id is outside the vocabulary")
         positions = torch.arange(time, device=token_ids.device)
         hidden = self.token_embedding(token_ids) + self.position_embedding(positions)
         for block in self.blocks:
@@ -632,24 +646,11 @@ class DecoderLanguageModel(nn.Module):
             logits = logits.masked_fill(~valid[:, :, None], 0.0)
         loss = None
         if targets is not None:
-            if (
-                not isinstance(targets, Tensor)
-                or targets.shape != token_ids.shape
-                or targets.dtype != torch.long
-            ):
-                raise TypeError("targets must match token_ids shape and dtype")
-            if targets.device != token_ids.device:
-                raise TransformerLabError("targets must match token_ids device")
             loss_logits = (
                 logits.reshape(-1, self.config.vocab_size)
                 if valid is None
                 else logits[valid]
             )
-            loss_targets = targets.reshape(-1) if valid is None else targets[valid]
-            if bool(
-                ((loss_targets < 0) | (loss_targets >= self.config.vocab_size)).any()
-            ):
-                raise TransformerLabError("valid target id is outside the vocabulary")
             loss = F.cross_entropy(loss_logits, loss_targets)
         return logits, loss
 

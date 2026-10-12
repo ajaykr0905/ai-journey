@@ -69,3 +69,23 @@ class RuntimeSafetyTests(unittest.TestCase):
         finally:
             hook.remove()
         self.assertFalse(self.optimizer.state)
+
+    def test_invalid_targets_do_not_update_batchnorm_statistics(self):
+        model = DecoderLanguageModel(
+            TransformerConfig(
+                vocab_size=5,
+                block_size=4,
+                embedding_dim=8,
+                head_count=2,
+                layer_count=1,
+                normalization_mode="scratch_batch_norm",
+            )
+        )
+        before = copy.deepcopy(model.state_dict())
+        with self.assertRaises(ValueError):
+            model(
+                torch.zeros(2, 4, dtype=torch.long),
+                torch.full((2, 4), 5, dtype=torch.long),
+            )
+        for name, tensor in before.items():
+            self.assertTrue(torch.equal(tensor, model.state_dict()[name]), name)
