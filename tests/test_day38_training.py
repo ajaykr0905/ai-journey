@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import random
+import json
 import sys
 import tempfile
 import unittest
@@ -16,8 +17,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from ai_journey.day38_training import (  # noqa: E402
     Day38DataConfig,
     Day38TrainingConfig,
+    build_day38_report,
     prepare_bounded_corpus,
     run_day38_experiment,
+    verify_day38_report,
+    write_day38_report,
 )
 from ai_journey.gpt_bigram import CorpusSource, GPTBigramError  # noqa: E402
 from ai_journey.transformer_lab import TransformerLabError  # noqa: E402
@@ -161,6 +165,37 @@ class Day38ExperimentTests(unittest.TestCase):
         self.assertEqual(np.random.get_state()[2:], numpy_state[2:])
         torch.testing.assert_close(torch.get_rng_state(), torch_state)
         self.assertEqual(torch.are_deterministic_algorithms_enabled(), deterministic)
+
+    def test_report_is_self_verifying_and_publishes_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            experiment = self.run_experiment(root)
+            report = build_day38_report(experiment, elapsed_seconds=1.25)
+            output = root / "nested" / "day38.json"
+            write_day38_report(output, report)
+            written = json.loads(output.read_text(encoding="utf-8"))
+
+        verify_day38_report(written)
+        self.assertEqual(written["runtime"]["device"], "cpu")
+        self.assertEqual(written["finding"], "training-and-validation-nll-decreased")
+        self.assertIn("bounded CPU character-level experiment", written["limitations"])
+
+    def test_report_rejects_tampered_or_nonfinite_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            report = build_day38_report(
+                self.run_experiment(Path(directory)), elapsed_seconds=1.0
+            )
+        report["experiment"]["final_validation_nll"] += 0.5
+        with self.assertRaisesRegex(TransformerLabError, "fingerprint mismatch"):
+            verify_day38_report(report)
+
+        with tempfile.TemporaryDirectory() as directory:
+            report = build_day38_report(
+                self.run_experiment(Path(directory)), elapsed_seconds=1.0
+            )
+        report["runtime"]["elapsed_seconds"] = float("nan")
+        with self.assertRaisesRegex(TransformerLabError, "finite JSON"):
+            verify_day38_report(report)
 
     def test_budgets_must_exceed_context_window(self) -> None:
         with self.assertRaises(TransformerLabError):

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import os
+import platform
 import random
+import tempfile
 from contextlib import contextmanager
 from dataclasses import asdict
 from dataclasses import dataclass
+from hashlib import sha256
 from math import isfinite
 from pathlib import Path
 from typing import Any
@@ -28,6 +33,8 @@ from .transformer_lab import (
     run_transformer_experiment,
     seed_everything,
 )
+
+DAY38_REPORT_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -360,3 +367,165 @@ def run_day38_experiment(
         sample=corpus.codec.decode(sample_ids),
         sample_token_ids=sample_ids,
     )
+
+
+def _evidence_fingerprint(payload: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    return sha256(canonical.encode()).hexdigest()
+
+
+def build_day38_report(
+    experiment: Day38Experiment, *, elapsed_seconds: float
+) -> dict[str, Any]:
+    """Build a tamper-evident report with runtime and scope limitations."""
+
+    if not isinstance(experiment, Day38Experiment):
+        raise TypeError("experiment must be Day38Experiment")
+    if (
+        isinstance(elapsed_seconds, bool)
+        or not isinstance(elapsed_seconds, (int, float))
+        or not isfinite(elapsed_seconds)
+        or elapsed_seconds < 0
+    ):
+        raise TransformerLabError("elapsed_seconds must be finite and non-negative")
+    payload = {
+        "schema_version": DAY38_REPORT_SCHEMA_VERSION,
+        "experiment": experiment.to_dict(),
+        "runtime": {
+            "python_version": platform.python_version(),
+            "torch_version": torch.__version__,
+            "numpy_version": np.__version__,
+            "platform": platform.platform(),
+            "device": "cpu",
+            "intraop_threads": torch.get_num_threads(),
+            "deterministic_algorithms": True,
+            "elapsed_seconds": float(elapsed_seconds),
+        },
+        "finding": (
+            "training-and-validation-nll-decreased"
+            if experiment.final_train_nll < experiment.initial_train_nll
+            and experiment.final_validation_nll < experiment.initial_validation_nll
+            else "declared-loss-improvement-not-observed"
+        ),
+        "limitations": [
+            "bounded CPU character-level experiment",
+            "sample quality is diagnostic rather than a model-quality claim",
+            "no GPU, distributed, production, or learner-completion evidence",
+        ],
+    }
+    payload["evidence_fingerprint"] = _evidence_fingerprint(payload)
+    verify_day38_report(payload)
+    return payload
+
+
+def verify_day38_report(report: dict[str, Any]) -> None:
+    """Reject malformed, nonfinite, or fingerprint-mismatched Day 38 evidence."""
+
+    if not isinstance(report, dict):
+        raise TypeError("report must be a dictionary")
+    expected = {
+        "schema_version",
+        "experiment",
+        "runtime",
+        "finding",
+        "limitations",
+        "evidence_fingerprint",
+    }
+    if set(report) != expected:
+        raise TransformerLabError("report fields are invalid")
+    if report["schema_version"] != DAY38_REPORT_SCHEMA_VERSION:
+        raise TransformerLabError("unsupported report schema")
+    fingerprint = report["evidence_fingerprint"]
+    if (
+        not isinstance(fingerprint, str)
+        or len(fingerprint) != 64
+        or any(character not in "0123456789abcdef" for character in fingerprint)
+    ):
+        raise TransformerLabError("evidence_fingerprint must be a SHA-256 digest")
+    unsigned = {
+        key: value for key, value in report.items() if key != "evidence_fingerprint"
+    }
+    try:
+        expected_fingerprint = _evidence_fingerprint(unsigned)
+    except (TypeError, ValueError) as exc:
+        raise TransformerLabError("report values must be finite JSON data") from exc
+    if fingerprint != expected_fingerprint:
+        raise TransformerLabError("evidence fingerprint mismatch")
+    experiment = report["experiment"]
+    runtime = report["runtime"]
+    if not isinstance(experiment, dict) or not isinstance(runtime, dict):
+        raise TransformerLabError("experiment and runtime must be objects")
+    metrics = (
+        "initial_train_nll",
+        "final_train_nll",
+        "initial_validation_nll",
+        "final_validation_nll",
+    )
+    if any(
+        isinstance(experiment.get(name), bool)
+        or not isinstance(experiment.get(name), (int, float))
+        or not isfinite(experiment[name])
+        for name in metrics
+    ):
+        raise TransformerLabError("loss metrics must be finite numbers")
+    config = experiment.get("config")
+    if not isinstance(config, dict):
+        raise TransformerLabError("experiment config must be an object")
+    sample = experiment.get("sample")
+    sample_ids = experiment.get("sample_token_ids")
+    expected_sample_length = len(config.get("sample_prompt", "")) + config.get(
+        "sample_tokens", -1
+    )
+    if (
+        not isinstance(sample, str)
+        or not isinstance(sample_ids, list)
+        or len(sample) != expected_sample_length
+        or len(sample_ids) != expected_sample_length
+    ):
+        raise TransformerLabError("sample evidence length is inconsistent")
+    elapsed = runtime.get("elapsed_seconds")
+    if (
+        isinstance(elapsed, bool)
+        or not isinstance(elapsed, (int, float))
+        or not isfinite(elapsed)
+        or elapsed < 0
+    ):
+        raise TransformerLabError(
+            "runtime elapsed_seconds must be finite and non-negative"
+        )
+
+
+def write_day38_report(path: Path, report: dict[str, Any]) -> None:
+    """Verify and durably publish a complete JSON evidence snapshot."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    verify_day38_report(report)
+    rendered = json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(rendered)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        temporary = None
+        descriptor = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
