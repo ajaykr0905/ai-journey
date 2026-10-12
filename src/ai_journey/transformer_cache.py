@@ -661,10 +661,17 @@ def generate_cached(
                     "sampling logits must remain finite after temperature scaling"
                 )
             if top_k is not None:
-                values, _ = torch.topk(next_logits, min(top_k, next_logits.shape[-1]))
-                next_logits = next_logits.masked_fill(
-                    next_logits < values[:, [-1]], float("-inf")
+                indexes = (
+                    next_logits.argmax(dim=-1, keepdim=True)
+                    if top_k == 1
+                    else torch.topk(
+                        next_logits, min(top_k, next_logits.shape[-1])
+                    ).indices
                 )
+                allowed = torch.zeros_like(next_logits, dtype=torch.bool).scatter_(
+                    1, indexes, True
+                )
+                next_logits = next_logits.masked_fill(~allowed, float("-inf"))
             next_token = torch.multinomial(
                 F.softmax(next_logits, dim=-1), num_samples=1, generator=generator
             )

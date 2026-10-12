@@ -8,6 +8,7 @@ from unittest import mock
 import numpy as np
 import torch
 
+from ai_journey.transformer_cache import generate_cached
 from ai_journey.transformer_lab import (
     BatchCursor,
     DecoderLanguageModel,
@@ -142,6 +143,17 @@ class RuntimeSafetyTests(unittest.TestCase):
         ):
             actual = evaluate_nll(self.model, tokens, batch_size=3)
         self.assertAlmostEqual(expected, actual, places=6)
+
+    def test_greedy_generation_breaks_ties_with_argmax_for_both_paths(self):
+        with torch.no_grad():
+            self.model.lm_head.weight.zero_()
+        prompt = torch.tensor([[1, 2]])
+        full = self.model.generate(
+            prompt, new_tokens=8, top_k=1, generator=torch.Generator().manual_seed(37)
+        )
+        cached = generate_cached(self.model, prompt, new_tokens=8, top_k=1, seed=37)
+        self.assertTrue(torch.equal(full[:, 2:], torch.zeros(1, 8, dtype=torch.long)))
+        self.assertTrue(torch.equal(full, cached))
 
     def test_invalid_targets_do_not_update_batchnorm_statistics(self):
         model = DecoderLanguageModel(
