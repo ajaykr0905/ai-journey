@@ -1,6 +1,6 @@
 # Progress and Evidence
 
-Last updated: 2026-10-11
+Last updated: 2026-10-12
 
 This file separates repository-verifiable work from activities that require the
 learner's own completion evidence.
@@ -43,6 +43,7 @@ learner's own completion evidence.
 | 35 | Four causal-prefix averaging methods, forward/gradient equivalence, no-future-leak and padding audits, resumable streaming state, tamper-evident report, installed CLI, and CI gate present | Primary and support lectures pending user confirmation | Learner three-method implementation, independent run with seed/output path, triangular-row explanation, and future-token perturbation explanation pending |
 | 36 | Independent single-head/per-head attention oracle, input and projection gradients, causal boundary checks, and probability diagnostics verified alongside Day 37 | Primary and support lectures pending user confirmation | Learner single-head implementation, QKV shapes and square-root scaling explanation pending |
 | 37 | Pre/post-norm residual blocks, padded loss, configurable MLP, activation checkpointing, SDPA parity, restartable cached inference, matched three-head-count protocol, installed CLI and CI gate present | Primary and support lectures pending user confirmation | Learner full Block implementation, independent seeded run, pre-norm versus post-norm explanation and interpretation of the three configurations pending |
+| 38 | Checksum-pinned bounded Tiny Shakespeare transformer training, exact checkpoint replay, deterministic sampling, runtime provenance, tamper-evident report, installed CLI, and repeat-run evidence present | Primary and support lectures pending user confirmation | Learner full-model run, generated-output screenshot, dropout/scaling notes, sample interpretation, and personal closing-remarks reflection pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,
