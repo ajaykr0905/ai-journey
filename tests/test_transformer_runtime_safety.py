@@ -73,6 +73,15 @@ class RuntimeSafetyTests(unittest.TestCase):
             ):
                 TokenCorpus(corpus.codec, invalid, corpus.validation_tokens, "a" * 64)
 
+    def test_cursor_rejects_unreachable_or_unexecutable_restart_state(self):
+        original = self.cursor.state_dict()
+        for state in ({"epoch": 0, "offset": 1}, {"epoch": 2**64, "offset": 0}):
+            with self.subTest(state=state), self.assertRaises(ValueError):
+                self.cursor.load_state_dict(state)
+            self.assertEqual(original, self.cursor.state_dict())
+        with self.assertRaises(ValueError):
+            BatchCursor(self.cursor.tokens, block_size=4, batch_size=2, seed=2**64)
+
     def test_nonfinite_training_never_reaches_the_optimizer(self):
         before = copy.deepcopy(self.model.state_dict())
         with mock.patch.object(self.optimizer, "step") as update:

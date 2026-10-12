@@ -343,6 +343,8 @@ class BatchCursor:
             raise TransformerLabError("token stream must be longer than block_size")
         if isinstance(seed, bool) or not isinstance(seed, int):
             raise TypeError("seed must be an integer")
+        if not 0 <= seed < 2**63:
+            raise TransformerLabError("cursor seed must be in [0, 2**63)")
         self.tokens = tokens.clone()
         self.block_size = block_size
         self.batch_size = batch_size
@@ -387,6 +389,10 @@ class BatchCursor:
             raise TypeError("batch cursor state values must be integers")
         if epoch < 0 or not 0 <= offset <= self.sample_count:
             raise TransformerLabError("batch cursor state is out of range")
+        if epoch + self.seed >= 2**63:
+            raise TransformerLabError("batch cursor epoch exceeds its RNG seed range")
+        if offset != self.sample_count and offset % self.batch_size:
+            raise TransformerLabError("batch cursor offset is not a batch boundary")
         self.epoch = epoch
         self.offset = offset
 
