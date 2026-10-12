@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import random
 import json
 import sys
@@ -247,6 +248,31 @@ class Day38ExperimentTests(unittest.TestCase):
         resign(report)
         with self.assertRaisesRegex(TransformerLabError, "limitations"):
             verify_day38_report(report)
+
+    def test_report_rejects_missing_controls_unknown_fields_and_numeric_aliases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            valid = build_day38_report(
+                self.run_experiment(Path(directory)), elapsed_seconds=1
+            )
+        variants = []
+        report = copy.deepcopy(valid)
+        report["schema_version"] = True
+        variants.append(report)
+        report = copy.deepcopy(valid)
+        report["experiment"]["trace"][0]["step"] = 1.0
+        variants.append(report)
+        report = copy.deepcopy(valid)
+        report["experiment"]["config"].pop("dropout")
+        variants.append(report)
+        report = copy.deepcopy(valid)
+        report["experiment"]["unexpected"] = "unvalidated"
+        variants.append(report)
+        for report in variants:
+            resign(report)
+            with self.subTest(report=report["schema_version"]), self.assertRaises(
+                ValueError
+            ):
+                verify_day38_report(report)
 
     def test_report_rejects_re_signed_out_of_vocabulary_sample_ids(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

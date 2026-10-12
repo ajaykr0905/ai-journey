@@ -10,6 +10,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import asdict
 from dataclasses import dataclass
+from dataclasses import fields
 from hashlib import sha256
 from math import isfinite
 from pathlib import Path
@@ -451,7 +452,10 @@ def verify_day38_report(report: dict[str, Any]) -> None:
     }
     if set(report) != expected:
         raise TransformerLabError("report fields are invalid")
-    if report["schema_version"] != DAY38_REPORT_SCHEMA_VERSION:
+    if (
+        type(report["schema_version"]) is not int
+        or report["schema_version"] != DAY38_REPORT_SCHEMA_VERSION
+    ):
         raise TransformerLabError("unsupported report schema")
     fingerprint = report["evidence_fingerprint"]
     if (
@@ -473,6 +477,8 @@ def verify_day38_report(report: dict[str, Any]) -> None:
     runtime = report["runtime"]
     if not isinstance(experiment, dict) or not isinstance(runtime, dict):
         raise TransformerLabError("experiment and runtime must be objects")
+    if set(experiment) != {field.name for field in fields(Day38Experiment)}:
+        raise TransformerLabError("experiment fields are invalid")
     metrics = (
         "initial_train_nll",
         "final_train_nll",
@@ -489,6 +495,8 @@ def verify_day38_report(report: dict[str, Any]) -> None:
     config = experiment.get("config")
     if not isinstance(config, dict):
         raise TransformerLabError("experiment config must be an object")
+    if set(config) != {field.name for field in fields(Day38TrainingConfig)}:
+        raise TransformerLabError("experiment config fields are invalid")
     source_payload = experiment.get("source")
     if not isinstance(source_payload, dict):
         raise TransformerLabError("experiment source must be an object")
@@ -497,6 +505,8 @@ def verify_day38_report(report: dict[str, Any]) -> None:
         data_payload = config.get("data")
         if not isinstance(data_payload, dict):
             raise TransformerLabError("experiment data config must be an object")
+        if set(data_payload) != {field.name for field in fields(Day38DataConfig)}:
+            raise TransformerLabError("experiment data config fields are invalid")
         data_config = Day38DataConfig(**data_payload)
         training_config = Day38TrainingConfig(
             data=data_config,
@@ -582,7 +592,7 @@ def verify_day38_report(report: dict[str, Any]) -> None:
             "gradient_norm",
         }:
             raise TransformerLabError("training trace fields are invalid")
-        if metric["step"] != expected_step:
+        if type(metric["step"]) is not int or metric["step"] != expected_step:
             raise TransformerLabError("training trace steps are not contiguous")
         for name in ("loss", "gradient_norm"):
             value = metric[name]
