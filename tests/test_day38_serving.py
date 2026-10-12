@@ -21,6 +21,7 @@ from ai_journey.day38_serving import (
     load_trained_artifact,
     generate_from_artifact,
     audit_trained_artifact,
+    benchmark_trained_artifact,
 )
 from ai_journey.day38_inference_cli import main
 from ai_journey.gpt_bigram import CorpusSource
@@ -112,6 +113,40 @@ class Day38ServingTests(unittest.TestCase):
         artifact.report["experiment"]["final_validation_nll"] += 0.5
         with self.assertRaisesRegex(ValueError, "validation_nll"):
             audit_trained_artifact(artifact)
+
+    def test_benchmark_uses_trained_weights_and_records_provenance(self):
+        artifact = self.load()
+        result = benchmark_trained_artifact(artifact, repeats=1, warmup=0)
+        self.assertTrue(result["outputs_match"])
+        self.assertEqual(
+            result["training_evidence_fingerprint"],
+            artifact.report["evidence_fingerprint"],
+        )
+        for method in result["methods"].values():
+            self.assertEqual(len(method["sample_ns"]), 1)
+            self.assertGreater(method["median_ns"], 0)
+
+    def test_benchmark_cli_default_generation_size_is_executable(self):
+        output = self.root / "benchmark.json"
+        args = [
+            "--report",
+            str(self.report),
+            "--checkpoint",
+            str(self.checkpoint),
+            "--corpus",
+            str(self.corpus),
+            "--output",
+            str(output),
+            "--operation",
+            "benchmark",
+            "--repeats",
+            "1",
+            "--warmup",
+            "0",
+        ]
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(main(args), 0)
+        self.assertEqual(json.loads(output.read_text())["controls"]["new_tokens"], 4)
 
     def test_generation_cli_preserves_inputs_and_protects_aliases(self):
         output = self.root / "sample.json"

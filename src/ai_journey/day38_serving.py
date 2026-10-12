@@ -6,7 +6,7 @@ from pathlib import Path
 
 import torch
 
-from .serving_benchmark import _publish
+from .serving_benchmark import _publish, benchmark_generation
 from .transformer_cache import generate_cached
 
 from .day38_training import (
@@ -201,3 +201,33 @@ def audit_trained_artifact(artifact: TrainedArtifact) -> dict:
         "loss_tolerance": {"relative": 1e-6, "absolute": 1e-6},
         "passed": True,
     }
+
+
+def benchmark_trained_artifact(
+    artifact: TrainedArtifact,
+    prompt: str = "\n",
+    *,
+    new_tokens: int = 4,
+    repeats: int = 3,
+    warmup: int = 1,
+    seed: int = 38,
+) -> dict:
+    """Measure full and cached generation from the verified trained weights."""
+    expected = artifact.report["experiment"]["model_fingerprint"]
+    if model_fingerprint(artifact.model) != expected:
+        raise TransformerLabError("live model no longer matches the training artifact")
+    tokens = torch.tensor([artifact.corpus.codec.encode(prompt)], dtype=torch.long)
+    report = benchmark_generation(
+        artifact.model,
+        tokens,
+        new_tokens=new_tokens,
+        repeats=repeats,
+        warmup=warmup,
+        seed=seed,
+    )
+    report["training_evidence_fingerprint"] = artifact.report["evidence_fingerprint"]
+    report["trained_model_fingerprint"] = expected
+    report["trained_checkpoint_scope"] = (
+        "bounded local CPU measurements; checkpoint loading excluded"
+    )
+    return report
