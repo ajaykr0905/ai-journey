@@ -47,6 +47,8 @@ def seed_everything(seed: int) -> None:
 
     if isinstance(seed, bool) or not isinstance(seed, int):
         raise TypeError("seed must be an integer")
+    if not 0 <= seed < 2**32:
+        raise TransformerLabError("seed must be in NumPy's range [0, 2**32)")
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -182,6 +184,8 @@ class TrainingConfig:
                 raise TransformerLabError(f"{name} must be positive")
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
             raise TypeError("seed must be an integer")
+        if not 0 <= self.seed < 2**32:
+            raise TransformerLabError("seed must be in NumPy's range [0, 2**32)")
         for name in ("learning_rate", "gradient_clip"):
             value = getattr(self, name)
             if (
