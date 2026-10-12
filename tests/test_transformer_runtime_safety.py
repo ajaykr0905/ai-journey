@@ -18,12 +18,30 @@ from ai_journey.transformer_lab import (
     TransformerConfig,
     build_optimizer,
     evaluate_nll,
+    expected_parameter_count,
     seed_everything,
     train_steps,
 )
 
 
 class RuntimeSafetyTests(unittest.TestCase):
+    def test_parameter_estimates_match_allocated_models(self):
+        for expansion in (1, 4, 7):
+            for normalization in ("layer_norm", "scratch_batch_norm"):
+                config = TransformerConfig(
+                    vocab_size=7,
+                    block_size=5,
+                    embedding_dim=8,
+                    head_count=2,
+                    layer_count=3,
+                    feed_forward_expansion=expansion,
+                    normalization_mode=normalization,
+                )
+                self.assertEqual(
+                    expected_parameter_count(config),
+                    DecoderLanguageModel(config).parameter_count,
+                )
+
     def setUp(self):
         self.model = DecoderLanguageModel(
             TransformerConfig(

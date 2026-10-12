@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import torch
@@ -209,6 +210,17 @@ class Day38ExperimentTests(unittest.TestCase):
         self.assertEqual(written["runtime"]["device"], "cpu")
         self.assertEqual(written["finding"], "training-and-validation-nll-decreased")
         self.assertIn("bounded CPU character-level experiment", written["limitations"])
+
+    def test_report_verification_does_not_allocate_model_weights(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = build_day38_report(
+                self.run_experiment(Path(directory)), elapsed_seconds=1
+            )
+        with mock.patch(
+            "ai_journey.day38_training.DecoderLanguageModel",
+            side_effect=AssertionError("weight allocation"),
+        ):
+            verify_day38_report(report)
 
     def test_report_rejects_tampered_or_nonfinite_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

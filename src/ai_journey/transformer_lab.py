@@ -580,6 +580,17 @@ def expected_initialization_std(module: nn.Module, config: TransformerConfig) ->
     return config.initialization_std
 
 
+def expected_parameter_count(config: TransformerConfig) -> int:
+    """Count decoder parameters without allocating weights or causal masks."""
+    if not isinstance(config, TransformerConfig):
+        raise TypeError("config must be TransformerConfig")
+    width = config.embedding_dim
+    expansion = config.feed_forward_expansion
+    embeddings_and_head = width * (2 * config.vocab_size + config.block_size)
+    per_block = (4 + 2 * expansion) * width**2 + (9 + expansion) * width
+    return embeddings_and_head + config.layer_count * per_block + 2 * width
+
+
 class DecoderLanguageModel(nn.Module):
     """Small decoder-only character language model."""
 

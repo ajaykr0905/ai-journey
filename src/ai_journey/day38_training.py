@@ -29,6 +29,7 @@ from .transformer_lab import (
     TransformerConfig,
     TransformerLabError,
     build_optimizer,
+    expected_parameter_count,
     load_training_checkpoint,
     model_fingerprint,
     run_transformer_experiment,
@@ -570,11 +571,9 @@ def verify_day38_report(report: dict[str, Any]) -> None:
         or experiment["used_validation_token_count"] <= data_config.block_size
     ):
         raise TransformerLabError("experiment counts are inconsistent")
-    with _preserve_random_state():
-        seed_everything(training_config.seed)
-        expected_parameters = DecoderLanguageModel(
-            training_config.model_config(experiment["vocab_size"])
-        ).parameter_count
+    expected_parameters = expected_parameter_count(
+        training_config.model_config(experiment["vocab_size"])
+    )
     if experiment["parameter_count"] != expected_parameters:
         raise TransformerLabError("parameter_count does not match the model config")
     if source.sha256 != source_payload["sha256"]:
