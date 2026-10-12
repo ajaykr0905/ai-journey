@@ -124,6 +124,9 @@ class Day38TrainingConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):
                 raise TypeError(f"{name} must be an integer")
+        for name in ("seed", "sample_seed"):
+            if not 0 <= getattr(self, name) < 2**32:
+                raise TransformerLabError(f"{name} must be in NumPy's range [0, 2**32)")
         for name in (
             "embedding_dim",
             "head_count",

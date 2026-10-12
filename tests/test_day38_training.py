@@ -166,6 +166,12 @@ class Day38ExperimentTests(unittest.TestCase):
         torch.testing.assert_close(torch.get_rng_state(), torch_state)
         self.assertEqual(torch.are_deterministic_algorithms_enabled(), deterministic)
 
+    def test_training_and_sampling_seeds_use_the_supported_range(self) -> None:
+        with self.assertRaisesRegex(TransformerLabError, "seed must be"):
+            Day38TrainingConfig(seed=-1)
+        with self.assertRaisesRegex(TransformerLabError, "sample_seed must be"):
+            Day38TrainingConfig(sample_seed=2**32)
+
     def test_report_is_self_verifying_and_publishes_atomically(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
