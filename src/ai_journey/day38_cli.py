@@ -55,6 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
 def _protect_paths(corpus: Path, output: Path, checkpoint: Path) -> None:
     paths = (corpus, output, checkpoint)
     for index, path in enumerate(paths):
+        if path.exists() and not path.is_file():
+            raise TransformerLabError("corpus and artifact paths must be regular files")
+        for parent in path.parents:
+            if parent.exists() and not parent.is_dir():
+                raise TransformerLabError("artifact parent paths must be directories")
         for other in paths[:index]:
             if path.resolve() == other.resolve() or (
                 path.exists() and other.exists() and path.samefile(other)
