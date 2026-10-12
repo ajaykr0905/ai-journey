@@ -68,6 +68,44 @@ class CheckpointPublicationTests(unittest.TestCase):
         self.assertEqual(before, model_fingerprint(self.model))
         self.assertTrue(torch.equal(rng, torch.get_rng_state()))
 
+    def test_checkpoint_binds_sampler_tokens_and_batching_controls(self):
+        self.save()
+        for tokens, block, batch, seed in (
+            (self.cursor.tokens.flip(0), 4, 2, 0),
+            (self.cursor.tokens, 4, 3, 0),
+            (self.cursor.tokens, 4, 2, 1),
+        ):
+            cursor = BatchCursor(tokens, block_size=block, batch_size=batch, seed=seed)
+            with self.subTest(batch=batch, seed=seed), self.assertRaisesRegex(
+                ValueError, "cursor identity"
+            ):
+                load_training_checkpoint(
+                    self.path,
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    cursor=cursor,
+                    training_config=self.training,
+                    corpus_fingerprint="a" * 64,
+                )
+
+    def test_legacy_checkpoint_schema_remains_readable(self):
+        self.save()
+        payload = torch.load(self.path, weights_only=True)
+        payload["schema_version"] = 1
+        payload.pop("cursor_fingerprint", None)
+        torch.save(payload, self.path)
+        self.assertEqual(
+            load_training_checkpoint(
+                self.path,
+                model=self.model,
+                optimizer=self.optimizer,
+                cursor=self.cursor,
+                training_config=self.training,
+                corpus_fingerprint="a" * 64,
+            ),
+            1,
+        )
+
     def test_success_syncs_serialized_state_before_replacement(self) -> None:
         with patch("os.fsync", wraps=os.fsync) as sync:
             self.save()

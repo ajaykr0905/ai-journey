@@ -379,6 +379,21 @@ class BatchCursor:
     def state_dict(self) -> dict[str, int]:
         return {"epoch": self.epoch, "offset": self.offset}
 
+    def fingerprint(self) -> str:
+        """Bind restart position to the actual stream and sampler controls."""
+        digest = sha256(
+            json.dumps(
+                {
+                    "block_size": self.block_size,
+                    "batch_size": self.batch_size,
+                    "seed": self.seed,
+                },
+                sort_keys=True,
+            ).encode()
+        )
+        digest.update(self.tokens.detach().cpu().contiguous().numpy().tobytes())
+        return digest.hexdigest()
+
     def load_state_dict(self, state: dict[str, int]) -> None:
         if set(state) != {"epoch", "offset"}:
             raise TransformerLabError("batch cursor state has invalid fields")
@@ -896,7 +911,7 @@ def train_steps(
     return tuple(metrics)
 
 
-CHECKPOINT_SCHEMA_VERSION = 1
+CHECKPOINT_SCHEMA_VERSION = 2
 _CHECKPOINT_FIELDS = {
     "schema_version",
     "step",
@@ -1045,6 +1060,7 @@ def save_training_checkpoint(
         "model_state": model.state_dict(),
         "optimizer_state": optimizer.state_dict(),
         "cursor_state": cursor.state_dict(),
+        "cursor_fingerprint": cursor.fingerprint(),
         "torch_rng_state": torch.get_rng_state(),
     }
     for name in ("model_state", "optimizer_state", "model_config", "training_config"):
@@ -1103,15 +1119,25 @@ def load_training_checkpoint(
         ValueError,
     ) as exc:
         raise TransformerLabError(f"unable to read checkpoint: {path}") from exc
-    if not isinstance(payload, Mapping) or set(payload) != _CHECKPOINT_FIELDS:
+    if not isinstance(payload, Mapping) or set(payload) not in (
+        _CHECKPOINT_FIELDS,
+        _CHECKPOINT_FIELDS | {"cursor_fingerprint"},
+    ):
         raise TransformerLabError("checkpoint fields are invalid")
     schema_version = payload.get("schema_version")
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
-        or schema_version != CHECKPOINT_SCHEMA_VERSION
+        or schema_version not in (1, CHECKPOINT_SCHEMA_VERSION)
     ):
         raise TransformerLabError("unsupported checkpoint schema")
+    if schema_version == CHECKPOINT_SCHEMA_VERSION:
+        if set(payload) != _CHECKPOINT_FIELDS | {"cursor_fingerprint"}:
+            raise TransformerLabError("checkpoint fields are invalid")
+        if payload["cursor_fingerprint"] != cursor.fingerprint():
+            raise TransformerLabError("checkpoint cursor identity mismatch")
+    elif set(payload) != _CHECKPOINT_FIELDS:
+        raise TransformerLabError("legacy checkpoint fields are invalid")
     saved_config = payload.get("model_config")
     if not isinstance(saved_config, Mapping):
         raise TransformerLabError("checkpoint model configuration mismatch")
