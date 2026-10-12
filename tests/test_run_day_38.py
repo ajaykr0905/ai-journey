@@ -112,6 +112,18 @@ class Day38CliTests(unittest.TestCase):
             self.assertEqual(result, 0)
             fetch.assert_called_once_with(root / "corpus.txt", source)
 
+    def test_invalid_output_directory_preserves_existing_checkpoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "day38.json").mkdir()
+            (root / "day38.pt").write_bytes(b"previous checkpoint")
+            with mock.patch(
+                "ai_journey.day38_cli.load_verified_corpus"
+            ) as load, redirect_stderr(io.StringIO()):
+                self.assertEqual(main(self.arguments(root)), 2)
+            load.assert_not_called()
+            self.assertEqual((root / "day38.pt").read_bytes(), b"previous checkpoint")
+
 
 if __name__ == "__main__":
     unittest.main()

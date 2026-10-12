@@ -19,6 +19,8 @@ ai-journey-day-34 = "ai_journey.day34_cli:main"
 ai-journey-day-35 = "ai_journey.day35_cli:main"
 ai-journey-day-37 = "ai_journey.day37_cli:main"
 ai-journey-day-38 = "ai_journey.day38_cli:main"
+ai-journey-day-38-infer = "ai_journey.day38_inference_cli:main"
+ai-journey-day-38-ablate = "ai_journey.day38_ablation:main"
 ai-journey-serving-benchmark = "ai_journey.serving_benchmark:main"
 
 [tool.setuptools.packages.find]

@@ -31,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--download", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--steps", type=int, default=80)
+    parser.add_argument("--max-parameters", type=int, default=1_000_000)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--block-size", type=int, default=32)
     parser.add_argument("--embedding-dim", type=int, default=32)
@@ -55,6 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
 def _protect_paths(corpus: Path, output: Path, checkpoint: Path) -> None:
     paths = (corpus, output, checkpoint)
     for index, path in enumerate(paths):
+        if path.exists() and not path.is_file():
+            raise TransformerLabError("corpus and artifact paths must be regular files")
+        for parent in path.parents:
+            if parent.exists() and not parent.is_dir():
+                raise TransformerLabError("artifact parent paths must be directories")
         for other in paths[:index]:
             if path.resolve() == other.resolve() or (
                 path.exists() and other.exists() and path.samefile(other)
@@ -104,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
             config,
             checkpoint_path=args.checkpoint,
             resume=args.resume,
+            max_parameters=args.max_parameters,
         )
         report = build_day38_report(
             experiment, elapsed_seconds=time.perf_counter() - started

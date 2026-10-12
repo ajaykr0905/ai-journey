@@ -6,6 +6,7 @@ import copy
 import json
 import math
 import os
+import pickle
 import random
 import re
 import tempfile
@@ -43,13 +44,15 @@ def _require_sha256_digest(value: str, name: str) -> None:
 
 
 def seed_everything(seed: int) -> None:
-    """Seed Python, NumPy, and PyTorch and request deterministic kernels."""
+    """Seed Python, NumPy, and the CPU generator for deterministic CPU runs."""
 
     if isinstance(seed, bool) or not isinstance(seed, int):
         raise TypeError("seed must be an integer")
+    if not 0 <= seed < 2**32:
+        raise TransformerLabError("seed must be in NumPy's range [0, 2**32)")
     random.seed(seed)
     np.random.seed(seed)
-    torch.manual_seed(seed)
+    torch.random.default_generator.manual_seed(seed)
     torch.use_deterministic_algorithms(True)
 
 
@@ -182,6 +185,8 @@ class TrainingConfig:
                 raise TransformerLabError(f"{name} must be positive")
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
             raise TypeError("seed must be an integer")
+        if not 0 <= self.seed < 2**32:
+            raise TransformerLabError("seed must be in NumPy's range [0, 2**32)")
         for name in ("learning_rate", "gradient_clip"):
             value = getattr(self, name)
             if (
@@ -250,6 +255,28 @@ class TokenCorpus:
     validation_tokens: Tensor
     source_sha256: str
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.codec, CharacterCodec):
+            raise TypeError("codec must be CharacterCodec")
+        _require_sha256_digest(self.source_sha256, "source_sha256")
+        for name in ("train_tokens", "validation_tokens"):
+            tokens = getattr(self, name)
+            if (
+                not isinstance(tokens, Tensor)
+                or tokens.layout != torch.strided
+                or tokens.ndim != 1
+                or tokens.dtype != torch.long
+                or tokens.device.type != "cpu"
+            ):
+                raise TypeError(
+                    f"{name} must be a dense one-dimensional CPU long tensor"
+                )
+            if tokens.numel() < 2 or bool(
+                ((tokens < 0) | (tokens >= self.vocab_size)).any()
+            ):
+                raise TransformerLabError(f"{name} must contain valid vocabulary ids")
+            object.__setattr__(self, name, tokens.detach().clone())
+
     @classmethod
     def from_path(
         cls, path: Path, *, validation_fraction: float = 0.2, block_size: int = 16
@@ -291,6 +318,10 @@ class TokenCorpus:
         digest = sha256()
         digest.update(self.source_sha256.encode())
         digest.update(self.codec.fingerprint().encode())
+        digest.update(b"partition-lengths-v2:")
+        digest.update(
+            f"{len(self.train_tokens)}:{len(self.validation_tokens)}:".encode()
+        )
         digest.update(self.train_tokens.numpy().tobytes())
         digest.update(self.validation_tokens.numpy().tobytes())
         return digest.hexdigest()
@@ -313,6 +344,8 @@ class BatchCursor:
             raise TransformerLabError("token stream must be longer than block_size")
         if isinstance(seed, bool) or not isinstance(seed, int):
             raise TypeError("seed must be an integer")
+        if not 0 <= seed < 2**63:
+            raise TransformerLabError("cursor seed must be in [0, 2**63)")
         self.tokens = tokens.clone()
         self.block_size = block_size
         self.batch_size = batch_size
@@ -346,6 +379,21 @@ class BatchCursor:
     def state_dict(self) -> dict[str, int]:
         return {"epoch": self.epoch, "offset": self.offset}
 
+    def fingerprint(self) -> str:
+        """Bind restart position to the actual stream and sampler controls."""
+        digest = sha256(
+            json.dumps(
+                {
+                    "block_size": self.block_size,
+                    "batch_size": self.batch_size,
+                    "seed": self.seed,
+                },
+                sort_keys=True,
+            ).encode()
+        )
+        digest.update(self.tokens.detach().cpu().contiguous().numpy().tobytes())
+        return digest.hexdigest()
+
     def load_state_dict(self, state: dict[str, int]) -> None:
         if set(state) != {"epoch", "offset"}:
             raise TransformerLabError("batch cursor state has invalid fields")
@@ -357,6 +405,10 @@ class BatchCursor:
             raise TypeError("batch cursor state values must be integers")
         if epoch < 0 or not 0 <= offset <= self.sample_count:
             raise TransformerLabError("batch cursor state is out of range")
+        if epoch + self.seed >= 2**63:
+            raise TransformerLabError("batch cursor epoch exceeds its RNG seed range")
+        if offset != self.sample_count and offset % self.batch_size:
+            raise TransformerLabError("batch cursor offset is not a batch boundary")
         self.epoch = epoch
         self.offset = offset
 
@@ -544,6 +596,17 @@ def expected_initialization_std(module: nn.Module, config: TransformerConfig) ->
     return config.initialization_std
 
 
+def expected_parameter_count(config: TransformerConfig) -> int:
+    """Count decoder parameters without allocating weights or causal masks."""
+    if not isinstance(config, TransformerConfig):
+        raise TypeError("config must be TransformerConfig")
+    width = config.embedding_dim
+    expansion = config.feed_forward_expansion
+    embeddings_and_head = width * (2 * config.vocab_size + config.block_size)
+    per_block = (4 + 2 * expansion) * width**2 + (9 + expansion) * width
+    return embeddings_and_head + config.layer_count * per_block + 2 * width
+
+
 class DecoderLanguageModel(nn.Module):
     """Small decoder-only character language model."""
 
@@ -606,6 +669,20 @@ class DecoderLanguageModel(nn.Module):
             valid = valid_sequence_positions(
                 lengths, batch=batch, time=time, device=token_ids.device
             )
+        if targets is not None:
+            if (
+                not isinstance(targets, Tensor)
+                or targets.shape != token_ids.shape
+                or targets.dtype != torch.long
+            ):
+                raise TypeError("targets must match token_ids shape and dtype")
+            if targets.device != token_ids.device:
+                raise TransformerLabError("targets must match token_ids device")
+            loss_targets = targets.reshape(-1) if valid is None else targets[valid]
+            if bool(
+                ((loss_targets < 0) | (loss_targets >= self.config.vocab_size)).any()
+            ):
+                raise TransformerLabError("valid target id is outside the vocabulary")
         positions = torch.arange(time, device=token_ids.device)
         hidden = self.token_embedding(token_ids) + self.position_embedding(positions)
         for block in self.blocks:
@@ -628,24 +705,11 @@ class DecoderLanguageModel(nn.Module):
             logits = logits.masked_fill(~valid[:, :, None], 0.0)
         loss = None
         if targets is not None:
-            if (
-                not isinstance(targets, Tensor)
-                or targets.shape != token_ids.shape
-                or targets.dtype != torch.long
-            ):
-                raise TypeError("targets must match token_ids shape and dtype")
-            if targets.device != token_ids.device:
-                raise TransformerLabError("targets must match token_ids device")
             loss_logits = (
                 logits.reshape(-1, self.config.vocab_size)
                 if valid is None
                 else logits[valid]
             )
-            loss_targets = targets.reshape(-1) if valid is None else targets[valid]
-            if bool(
-                ((loss_targets < 0) | (loss_targets >= self.config.vocab_size)).any()
-            ):
-                raise TransformerLabError("valid target id is outside the vocabulary")
             loss = F.cross_entropy(loss_logits, loss_targets)
         return logits, loss
 
@@ -690,10 +754,17 @@ class DecoderLanguageModel(nn.Module):
                 if not bool(torch.isfinite(next_logits).all()):
                     raise TransformerLabError("sampling logits must be finite")
                 if top_k is not None:
-                    values, _ = torch.topk(
-                        next_logits, min(top_k, next_logits.shape[-1])
+                    indexes = (
+                        next_logits.argmax(dim=-1, keepdim=True)
+                        if top_k == 1
+                        else torch.topk(
+                            next_logits, min(top_k, next_logits.shape[-1])
+                        ).indices
                     )
-                    next_logits[next_logits < values[:, [-1]]] = float("-inf")
+                    allowed = torch.zeros_like(next_logits, dtype=torch.bool).scatter_(
+                        1, indexes, True
+                    )
+                    next_logits = next_logits.masked_fill(~allowed, float("-inf"))
                 probabilities = F.softmax(next_logits, dim=-1)
                 next_token = torch.multinomial(
                     probabilities, num_samples=1, generator=generator
@@ -740,7 +811,8 @@ def evaluate_nll(
     modes = [(module, module.training) for module in model.modules()]
     try:
         model.eval()
-        losses: list[Tensor] = []
+        total_loss = 0.0
+        token_count = 0
         for start in range(0, len(tokens) - model.config.block_size, batch_size):
             indexes = range(
                 start,
@@ -756,8 +828,11 @@ def evaluate_nll(
                 y.reshape(-1),
                 reduction="none",
             )
-            losses.append(per_token)
-        return float(torch.cat(losses).mean())
+            if not bool(torch.isfinite(per_token).all()):
+                raise TransformerLabError("evaluation losses must remain finite")
+            total_loss += float(per_token.double().sum())
+            token_count += per_token.numel()
+        return total_loss / token_count
     finally:
         for module, training in modes:
             module.training = training
@@ -768,6 +843,21 @@ class StepMetric:
     step: int
     loss: float
     gradient_norm: float
+
+
+def _validate_optimizer_binding(
+    model: DecoderLanguageModel, optimizer: torch.optim.Optimizer
+) -> None:
+    if not isinstance(optimizer, torch.optim.Optimizer):
+        raise TypeError("optimizer must be torch.optim.Optimizer")
+    parameters = [
+        id(parameter)
+        for group in optimizer.param_groups
+        for parameter in group["params"]
+    ]
+    expected = {id(parameter) for parameter in model.parameters()}
+    if len(parameters) != len(set(parameters)) or set(parameters) != expected:
+        raise TransformerLabError("optimizer parameters must match the complete model")
 
 
 def train_steps(
@@ -781,6 +871,12 @@ def train_steps(
 ) -> tuple[StepMetric, ...]:
     """Train a bounded number of steps and return inspectable metrics."""
 
+    _validate_optimizer_binding(model, optimizer)
+    if not isinstance(cursor, BatchCursor):
+        raise TypeError("cursor must be BatchCursor")
+    if cursor.block_size != model.config.block_size:
+        raise TransformerLabError("training cursor block_size must match the model")
+    model._validate_token_ids(cursor.tokens.unsqueeze(0), limit_time=False)
     count = config.steps if step_count is None else step_count
     if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
         raise TransformerLabError("step_count must be a positive integer")
@@ -798,9 +894,11 @@ def train_steps(
         _, loss = model(x, y)
         if loss is None:
             raise RuntimeError("training loss was not computed")
+        if not bool(torch.isfinite(loss)):
+            raise TransformerLabError("training loss must be finite")
         loss.backward()
         gradient_norm = nn.utils.clip_grad_norm_(
-            model.parameters(), max_norm=config.gradient_clip
+            model.parameters(), max_norm=config.gradient_clip, error_if_nonfinite=True
         )
         optimizer.step()
         metrics.append(
@@ -813,7 +911,7 @@ def train_steps(
     return tuple(metrics)
 
 
-CHECKPOINT_SCHEMA_VERSION = 1
+CHECKPOINT_SCHEMA_VERSION = 2
 _CHECKPOINT_FIELDS = {
     "schema_version",
     "step",
@@ -853,6 +951,31 @@ def _validate_adamw_checkpoint_state(optimizer: torch.optim.Optimizer) -> None:
     if not isinstance(optimizer, torch.optim.AdamW):
         return
     for group in optimizer.param_groups:
+        for name in ("lr", "eps", "weight_decay"):
+            value = group.get(name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+                or (name == "eps" and value == 0)
+            ):
+                raise TransformerLabError(f"AdamW checkpoint {name} is invalid")
+        betas = group.get("betas")
+        if (
+            not isinstance(betas, (list, tuple))
+            or len(betas) != 2
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not 0 <= value < 1
+                for value in betas
+            )
+        ):
+            raise TransformerLabError("AdamW checkpoint betas are invalid")
+        for name in ("amsgrad", "maximize", "capturable", "differentiable"):
+            if not isinstance(group.get(name), bool):
+                raise TransformerLabError(f"AdamW checkpoint {name} must be boolean")
         moments = ["exp_avg", "exp_avg_sq"]
         if group.get("amsgrad", False):
             moments.append("max_exp_avg_sq")
@@ -926,6 +1049,7 @@ def save_training_checkpoint(
     if isinstance(step, bool) or not isinstance(step, int) or step < 0:
         raise TransformerLabError("step must be a non-negative integer")
     _require_sha256_digest(corpus_fingerprint, "corpus_fingerprint")
+    _validate_optimizer_binding(model, optimizer)
     payload = {
         "schema_version": CHECKPOINT_SCHEMA_VERSION,
         "step": step,
@@ -936,6 +1060,7 @@ def save_training_checkpoint(
         "model_state": model.state_dict(),
         "optimizer_state": optimizer.state_dict(),
         "cursor_state": cursor.state_dict(),
+        "cursor_fingerprint": cursor.fingerprint(),
         "torch_rng_state": torch.get_rng_state(),
     }
     for name in ("model_state", "optimizer_state", "model_config", "training_config"):
@@ -978,17 +1103,41 @@ def load_training_checkpoint(
 ) -> int:
     """Validate and restore an exact transformer training checkpoint."""
 
+    _validate_optimizer_binding(model, optimizer)
     _require_sha256_digest(corpus_fingerprint, "corpus_fingerprint")
-    payload = torch.load(path, map_location="cpu", weights_only=True)
-    if not isinstance(payload, Mapping) or set(payload) != _CHECKPOINT_FIELDS:
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    try:
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+    except (
+        OSError,
+        RuntimeError,
+        EOFError,
+        pickle.UnpicklingError,
+        IndexError,
+        KeyError,
+        ValueError,
+    ) as exc:
+        raise TransformerLabError(f"unable to read checkpoint: {path}") from exc
+    if not isinstance(payload, Mapping) or set(payload) not in (
+        _CHECKPOINT_FIELDS,
+        _CHECKPOINT_FIELDS | {"cursor_fingerprint"},
+    ):
         raise TransformerLabError("checkpoint fields are invalid")
     schema_version = payload.get("schema_version")
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
-        or schema_version != CHECKPOINT_SCHEMA_VERSION
+        or schema_version not in (1, CHECKPOINT_SCHEMA_VERSION)
     ):
         raise TransformerLabError("unsupported checkpoint schema")
+    if schema_version == CHECKPOINT_SCHEMA_VERSION:
+        if set(payload) != _CHECKPOINT_FIELDS | {"cursor_fingerprint"}:
+            raise TransformerLabError("checkpoint fields are invalid")
+        if payload["cursor_fingerprint"] != cursor.fingerprint():
+            raise TransformerLabError("checkpoint cursor identity mismatch")
+    elif set(payload) != _CHECKPOINT_FIELDS:
+        raise TransformerLabError("legacy checkpoint fields are invalid")
     saved_config = payload.get("model_config")
     if not isinstance(saved_config, Mapping):
         raise TransformerLabError("checkpoint model configuration mismatch")

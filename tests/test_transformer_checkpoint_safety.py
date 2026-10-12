@@ -19,6 +19,7 @@ from ai_journey.transformer_lab import (
     TrainingConfig,
     TransformerConfig,
     load_training_checkpoint,
+    TransformerLabError,
     model_fingerprint,
     save_training_checkpoint,
 )
@@ -51,6 +52,60 @@ class CheckpointPublicationTests(unittest.TestCase):
             step=step,
         )
 
+    def test_corrupt_archive_reports_a_checkpoint_error_without_mutation(self):
+        self.path.write_bytes(b"truncated checkpoint")
+        before = model_fingerprint(self.model)
+        rng = torch.get_rng_state().clone()
+        with self.assertRaisesRegex(TransformerLabError, "read checkpoint"):
+            load_training_checkpoint(
+                self.path,
+                model=self.model,
+                optimizer=self.optimizer,
+                cursor=self.cursor,
+                training_config=self.training,
+                corpus_fingerprint="a" * 64,
+            )
+        self.assertEqual(before, model_fingerprint(self.model))
+        self.assertTrue(torch.equal(rng, torch.get_rng_state()))
+
+    def test_checkpoint_binds_sampler_tokens_and_batching_controls(self):
+        self.save()
+        for tokens, block, batch, seed in (
+            (self.cursor.tokens.flip(0), 4, 2, 0),
+            (self.cursor.tokens, 4, 3, 0),
+            (self.cursor.tokens, 4, 2, 1),
+        ):
+            cursor = BatchCursor(tokens, block_size=block, batch_size=batch, seed=seed)
+            with self.subTest(batch=batch, seed=seed), self.assertRaisesRegex(
+                ValueError, "cursor identity"
+            ):
+                load_training_checkpoint(
+                    self.path,
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    cursor=cursor,
+                    training_config=self.training,
+                    corpus_fingerprint="a" * 64,
+                )
+
+    def test_legacy_checkpoint_schema_remains_readable(self):
+        self.save()
+        payload = torch.load(self.path, weights_only=True)
+        payload["schema_version"] = 1
+        payload.pop("cursor_fingerprint", None)
+        torch.save(payload, self.path)
+        self.assertEqual(
+            load_training_checkpoint(
+                self.path,
+                model=self.model,
+                optimizer=self.optimizer,
+                cursor=self.cursor,
+                training_config=self.training,
+                corpus_fingerprint="a" * 64,
+            ),
+            1,
+        )
+
     def test_success_syncs_serialized_state_before_replacement(self) -> None:
         with patch("os.fsync", wraps=os.fsync) as sync:
             self.save()
@@ -67,6 +122,26 @@ class CheckpointPublicationTests(unittest.TestCase):
             ),
             1,
         )
+
+    def test_checkpoint_rejects_unusable_adamw_controls(self) -> None:
+        group = self.optimizer.param_groups[0]
+        for name, value in (
+            ("lr", -1.0),
+            ("eps", 0.0),
+            ("betas", (2.0, 0.9)),
+            ("weight_decay", -1.0),
+            ("amsgrad", "yes"),
+        ):
+            original = group[name]
+            group[name] = value
+            try:
+                with self.subTest(name=name), self.assertRaisesRegex(
+                    ValueError, "AdamW"
+                ):
+                    self.save()
+                self.assertFalse(self.path.exists())
+            finally:
+                group[name] = original
 
     def test_serialization_failure_preserves_checkpoint_and_removes_partial_file(self):
         self.save()

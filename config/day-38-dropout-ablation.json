@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "name": "day-38-dropout",
+  "hypothesis": "Dropout 0.1 reduces mean held-out NLL by at least 0.01 versus zero dropout after 80 matched CPU updates; dropout 0.2 is the higher-regularization comparison.",
+  "independent_variable": "model.dropout",
+  "primary_metric": "validation_nll",
+  "expected_direction": "lower",
+  "minimum_effect": 0.01,
+  "baseline_label": "no-dropout",
+  "trial_seeds": [38, 39, 40],
+  "model_config": {
+    "block_size": 32, "embedding_dim": 32, "head_count": 4, "layer_count": 2,
+    "dropout": 0.0, "initialization_std": 0.02, "initialization_mode": "fixed_normal",
+    "initialization_gain": 1.4142135623730951, "normalization_mode": "layer_norm",
+    "batch_norm_eps": 0.00001, "batch_norm_momentum": 0.1
+  },
+  "training_config": {
+    "steps": 80, "batch_size": 16, "learning_rate": 0.003,
+    "weight_decay": 0.01, "gradient_clip": 1.0
+  },
+  "arms": [
+    {"label": "no-dropout", "value": 0.0},
+    {"label": "dropout-low", "value": 0.1},
+    {"label": "dropout-high", "value": 0.2}
+  ]
+}

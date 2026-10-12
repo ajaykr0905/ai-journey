@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import random
 import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import torch
@@ -22,6 +24,7 @@ from ai_journey.day38_training import (  # noqa: E402
     run_day38_experiment,
     verify_day38_report,
     write_day38_report,
+    load_day38_report,
 )
 from ai_journey.gpt_bigram import CorpusSource, GPTBigramError  # noqa: E402
 from ai_journey.transformer_lab import TransformerLabError  # noqa: E402
@@ -113,6 +116,17 @@ class Day38ExperimentTests(unittest.TestCase):
             sample_seed=3800,
         )
 
+    def test_experiment_restores_deterministic_warning_policy(self) -> None:
+        enabled = torch.are_deterministic_algorithms_enabled()
+        warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+            with tempfile.TemporaryDirectory() as directory:
+                self.run_experiment(Path(directory))
+            self.assertTrue(torch.is_deterministic_algorithms_warn_only_enabled())
+        finally:
+            torch.use_deterministic_algorithms(enabled, warn_only=warn_only)
+
     def run_experiment(self, root: Path):
         return run_day38_experiment(
             self.text,
@@ -184,6 +198,20 @@ class Day38ExperimentTests(unittest.TestCase):
         with self.assertRaisesRegex(TransformerLabError, "sample_seed must be"):
             Day38TrainingConfig(sample_seed=2**32)
 
+    def test_parameter_budget_rejects_training_before_checkpoint_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "checkpoint.pt"
+            path.write_bytes(b"previous checkpoint")
+            with self.assertRaisesRegex(ValueError, "parameter budget"):
+                run_day38_experiment(
+                    self.text,
+                    source_for(self.text),
+                    self.config(),
+                    checkpoint_path=path,
+                    max_parameters=100,
+                )
+            self.assertEqual(path.read_bytes(), b"previous checkpoint")
+
     def test_report_is_self_verifying_and_publishes_atomically(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -197,6 +225,32 @@ class Day38ExperimentTests(unittest.TestCase):
         self.assertEqual(written["runtime"]["device"], "cpu")
         self.assertEqual(written["finding"], "training-and-validation-nll-decreased")
         self.assertIn("bounded CPU character-level experiment", written["limitations"])
+
+    def test_report_verification_does_not_allocate_model_weights(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = build_day38_report(
+                self.run_experiment(Path(directory)), elapsed_seconds=1
+            )
+        with mock.patch(
+            "ai_journey.day38_training.DecoderLanguageModel",
+            side_effect=AssertionError("weight allocation"),
+        ):
+            verify_day38_report(report)
+
+    def test_report_loader_validates_content_and_rejects_duplicate_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence.json"
+            report = build_day38_report(
+                self.run_experiment(Path(directory)), elapsed_seconds=1
+            )
+            write_day38_report(path, report)
+            self.assertEqual(load_day38_report(path), report)
+            path.write_text('{"schema_version":1,"schema_version":1}')
+            with self.assertRaisesRegex(ValueError, "duplicate"):
+                load_day38_report(path)
+            path.write_bytes(b"x" * (8 * 1024 * 1024 + 1))
+            with self.assertRaisesRegex(ValueError, "8 MiB"):
+                load_day38_report(path)
 
     def test_report_rejects_tampered_or_nonfinite_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -236,6 +290,31 @@ class Day38ExperimentTests(unittest.TestCase):
         resign(report)
         with self.assertRaisesRegex(TransformerLabError, "limitations"):
             verify_day38_report(report)
+
+    def test_report_rejects_missing_controls_unknown_fields_and_numeric_aliases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            valid = build_day38_report(
+                self.run_experiment(Path(directory)), elapsed_seconds=1
+            )
+        variants = []
+        report = copy.deepcopy(valid)
+        report["schema_version"] = True
+        variants.append(report)
+        report = copy.deepcopy(valid)
+        report["experiment"]["trace"][0]["step"] = 1.0
+        variants.append(report)
+        report = copy.deepcopy(valid)
+        report["experiment"]["config"].pop("dropout")
+        variants.append(report)
+        report = copy.deepcopy(valid)
+        report["experiment"]["unexpected"] = "unvalidated"
+        variants.append(report)
+        for report in variants:
+            resign(report)
+            with self.subTest(report=report["schema_version"]), self.assertRaises(
+                ValueError
+            ):
+                verify_day38_report(report)
 
     def test_report_rejects_re_signed_out_of_vocabulary_sample_ids(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -311,6 +390,22 @@ class Day38ExperimentTests(unittest.TestCase):
                 train_token_limit=8,
                 validation_token_limit=9,
             )
+
+    def test_reports_require_the_exact_declared_corpus_geometry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            valid = build_day38_report(
+                self.run_experiment(Path(directory)), elapsed_seconds=1
+            )
+        shortened = copy.deepcopy(valid)
+        shortened["experiment"]["used_train_token_count"] -= 1
+        wrong_split = copy.deepcopy(valid)
+        wrong_split["experiment"]["split_index"] -= 1
+        wrong_split["experiment"]["full_train_token_count"] -= 1
+        wrong_split["experiment"]["full_validation_token_count"] += 1
+        for report in (shortened, wrong_split):
+            resign(report)
+            with self.assertRaisesRegex(ValueError, "counts"):
+                verify_day38_report(report)
 
     def test_small_source_split_is_rejected(self) -> None:
         text = "abcdefghij"

@@ -10,6 +10,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import asdict
 from dataclasses import dataclass
+from dataclasses import fields
 from hashlib import sha256
 from math import isfinite
 from pathlib import Path
@@ -28,6 +29,7 @@ from .transformer_lab import (
     TransformerConfig,
     TransformerLabError,
     build_optimizer,
+    expected_parameter_count,
     load_training_checkpoint,
     model_fingerprint,
     run_transformer_experiment,
@@ -242,13 +244,14 @@ def _preserve_random_state():
     numpy_state = np.random.get_state()
     torch_state = torch.get_rng_state().clone()
     deterministic = torch.are_deterministic_algorithms_enabled()
+    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
     try:
         yield
     finally:
         random.setstate(python_state)
         np.random.set_state(numpy_state)
         torch.set_rng_state(torch_state)
-        torch.use_deterministic_algorithms(deterministic)
+        torch.use_deterministic_algorithms(deterministic, warn_only=warn_only)
 
 
 def prepare_bounded_corpus(
@@ -302,6 +305,7 @@ def run_day38_experiment(
     *,
     checkpoint_path: Path,
     resume: bool = False,
+    max_parameters: int = 1_000_000,
 ) -> Day38Experiment:
     """Train the complete decoder stack and replay a sample from its checkpoint."""
 
@@ -311,9 +315,17 @@ def run_day38_experiment(
         raise TypeError("checkpoint_path must be pathlib.Path")
     if not isinstance(resume, bool):
         raise TypeError("resume must be a boolean")
+    if (
+        isinstance(max_parameters, bool)
+        or not isinstance(max_parameters, int)
+        or max_parameters <= 0
+    ):
+        raise TransformerLabError("parameter budget must be a positive integer")
     bounded = prepare_bounded_corpus(text, source, config.data)
     corpus = bounded.corpus
     model_config = config.model_config(corpus.vocab_size)
+    if expected_parameter_count(model_config) > max_parameters:
+        raise TransformerLabError("model exceeds the declared parameter budget")
     training_config = config.training_config()
     corpus.codec.encode(config.sample_prompt)
     with _preserve_random_state():
@@ -450,7 +462,10 @@ def verify_day38_report(report: dict[str, Any]) -> None:
     }
     if set(report) != expected:
         raise TransformerLabError("report fields are invalid")
-    if report["schema_version"] != DAY38_REPORT_SCHEMA_VERSION:
+    if (
+        type(report["schema_version"]) is not int
+        or report["schema_version"] != DAY38_REPORT_SCHEMA_VERSION
+    ):
         raise TransformerLabError("unsupported report schema")
     fingerprint = report["evidence_fingerprint"]
     if (
@@ -472,6 +487,8 @@ def verify_day38_report(report: dict[str, Any]) -> None:
     runtime = report["runtime"]
     if not isinstance(experiment, dict) or not isinstance(runtime, dict):
         raise TransformerLabError("experiment and runtime must be objects")
+    if set(experiment) != {field.name for field in fields(Day38Experiment)}:
+        raise TransformerLabError("experiment fields are invalid")
     metrics = (
         "initial_train_nll",
         "final_train_nll",
@@ -488,6 +505,8 @@ def verify_day38_report(report: dict[str, Any]) -> None:
     config = experiment.get("config")
     if not isinstance(config, dict):
         raise TransformerLabError("experiment config must be an object")
+    if set(config) != {field.name for field in fields(Day38TrainingConfig)}:
+        raise TransformerLabError("experiment config fields are invalid")
     source_payload = experiment.get("source")
     if not isinstance(source_payload, dict):
         raise TransformerLabError("experiment source must be an object")
@@ -496,6 +515,8 @@ def verify_day38_report(report: dict[str, Any]) -> None:
         data_payload = config.get("data")
         if not isinstance(data_payload, dict):
             raise TransformerLabError("experiment data config must be an object")
+        if set(data_payload) != {field.name for field in fields(Day38DataConfig)}:
+            raise TransformerLabError("experiment data config fields are invalid")
         data_config = Day38DataConfig(**data_payload)
         training_config = Day38TrainingConfig(
             data=data_config,
@@ -557,13 +578,21 @@ def verify_day38_report(report: dict[str, Any]) -> None:
         > data_config.validation_token_limit
         or experiment["used_train_token_count"] <= data_config.block_size
         or experiment["used_validation_token_count"] <= data_config.block_size
+        or experiment["total_token_count"] > source.byte_count
+        or experiment["split_index"]
+        != int(experiment["total_token_count"] * (1 - data_config.validation_fraction))
+        or experiment["used_train_token_count"]
+        != min(experiment["full_train_token_count"], data_config.train_token_limit)
+        or experiment["used_validation_token_count"]
+        != min(
+            experiment["full_validation_token_count"],
+            data_config.validation_token_limit,
+        )
     ):
         raise TransformerLabError("experiment counts are inconsistent")
-    with _preserve_random_state():
-        seed_everything(training_config.seed)
-        expected_parameters = DecoderLanguageModel(
-            training_config.model_config(experiment["vocab_size"])
-        ).parameter_count
+    expected_parameters = expected_parameter_count(
+        training_config.model_config(experiment["vocab_size"])
+    )
     if experiment["parameter_count"] != expected_parameters:
         raise TransformerLabError("parameter_count does not match the model config")
     if source.sha256 != source_payload["sha256"]:
@@ -581,7 +610,7 @@ def verify_day38_report(report: dict[str, Any]) -> None:
             "gradient_norm",
         }:
             raise TransformerLabError("training trace fields are invalid")
-        if metric["step"] != expected_step:
+        if type(metric["step"]) is not int or metric["step"] != expected_step:
             raise TransformerLabError("training trace steps are not contiguous")
         for name in ("loss", "gradient_norm"):
             value = metric[name]
@@ -700,3 +729,28 @@ def write_day38_report(path: Path, report: dict[str, Any]) -> None:
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def load_day38_report(path: Path) -> dict[str, Any]:
+    """Read a bounded evidence file and reject duplicate JSON fields."""
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise TransformerLabError("duplicate report field")
+            result[key] = value
+        return result
+
+    try:
+        with path.open("rb") as stream:
+            payload = stream.read(8 * 1024 * 1024 + 1)
+        if len(payload) > 8 * 1024 * 1024:
+            raise TransformerLabError("report exceeds the 8 MiB limit")
+        report = json.loads(payload.decode("utf-8"), object_pairs_hook=unique_fields)
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise TransformerLabError(f"unable to read report: {path}") from exc
+    verify_day38_report(report)
+    return report

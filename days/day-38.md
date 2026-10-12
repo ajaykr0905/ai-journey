@@ -42,8 +42,43 @@ ai-journey-day-38 \
 The output and checkpoint paths must differ from the corpus and from each other.
 Changing the model, optimizer, data limits, or seed invalidates checkpoint
 compatibility rather than silently starting a different experiment.
+`--max-parameters` limits model allocation (default: 1,000,000 parameters).
+The corpus fingerprint now binds partition lengths; checkpoints from the older
+partition fingerprint must be regenerated. New checkpoints additionally bind
+the sampler's token stream, seed, context, and batch size.
 
 ## Verified bounded run
+
+Audit or serve the trained checkpoint without running training again:
+
+```bash
+ai-journey-day-38-infer \
+  --report artifacts/day-38-transformer.json \
+  --checkpoint artifacts/day-38-transformer.pt \
+  --corpus artifacts/tinyshakespeare.txt \
+  --operation audit --output artifacts/day-38-audit.json
+```
+
+Use `--operation generate --new-tokens 80` for seeded samples, optionally
+`--cached`; use `--operation benchmark --new-tokens 4` for full/cache timings.
+The benchmark includes cache validation and context rollover but excludes
+artifact loading. It measures bounded local CPU calls.
+
+Run the predeclared dropout comparison with three configurations and three seeds:
+
+```bash
+ai-journey-day-38-ablate \
+  --corpus artifacts/tinyshakespeare.txt \
+  --protocol config/day-38-dropout-ablation.json \
+  --output artifacts/day-38-dropout.json
+```
+
+The 2026-10-12 CPU run used 4,096 training tokens, 1,024 held-out tokens,
+80 updates per trial, and seeds 38/39/40. Mean held-out NLL was 2.894318 for
+dropout 0.0, 2.900121 for 0.1, and 2.897345 for 0.2. Both contrasts were
+inconclusive against the predeclared 0.01 improvement threshold. The report
+contains each trial's configuration, fingerprints, trace, metrics, and runtime;
+these machine results do not establish learner completion.
 
 Two clean CPU runs on 2026-10-12 used the pinned source digest
 `86c4e6aa9db7c042ec79f339dcb96d42b0075e16b8fc2e86bf0ca57e2dc565ed`,
