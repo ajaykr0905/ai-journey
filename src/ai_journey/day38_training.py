@@ -35,6 +35,11 @@ from .transformer_lab import (
 )
 
 DAY38_REPORT_SCHEMA_VERSION = 1
+DAY38_LIMITATIONS = (
+    "bounded CPU character-level experiment",
+    "sample quality is diagnostic rather than a model-quality claim",
+    "no GPU, distributed, production, or learner-completion evidence",
+)
 
 
 @dataclass(frozen=True)
@@ -413,9 +418,7 @@ def build_day38_report(
             else "declared-loss-improvement-not-observed"
         ),
         "limitations": [
-            "bounded CPU character-level experiment",
-            "sample quality is diagnostic rather than a model-quality claim",
-            "no GPU, distributed, production, or learner-completion evidence",
+            *DAY38_LIMITATIONS,
         ],
     }
     payload["evidence_fingerprint"] = _evidence_fingerprint(payload)
@@ -476,6 +479,57 @@ def verify_day38_report(report: dict[str, Any]) -> None:
     config = experiment.get("config")
     if not isinstance(config, dict):
         raise TransformerLabError("experiment config must be an object")
+    expected_finding = (
+        "training-and-validation-nll-decreased"
+        if experiment["final_train_nll"] < experiment["initial_train_nll"]
+        and experiment["final_validation_nll"] < experiment["initial_validation_nll"]
+        else "declared-loss-improvement-not-observed"
+    )
+    if report["finding"] != expected_finding:
+        raise TransformerLabError("finding does not match the measured losses")
+    limitations = report["limitations"]
+    if (
+        not isinstance(limitations, list)
+        or any(not isinstance(item, str) or not item for item in limitations)
+        or not set(DAY38_LIMITATIONS).issubset(limitations)
+    ):
+        raise TransformerLabError("required experiment limitations are missing")
+    integer_fields = (
+        "total_token_count",
+        "split_index",
+        "full_train_token_count",
+        "full_validation_token_count",
+        "used_train_token_count",
+        "used_validation_token_count",
+        "parameter_count",
+        "completed_steps",
+    )
+    if any(
+        isinstance(experiment.get(name), bool)
+        or not isinstance(experiment.get(name), int)
+        or experiment[name] <= 0
+        for name in integer_fields
+    ):
+        raise TransformerLabError("experiment counts must be positive integers")
+    if (
+        experiment["used_train_token_count"] > experiment["full_train_token_count"]
+        or experiment["used_validation_token_count"]
+        > experiment["full_validation_token_count"]
+        or experiment["full_train_token_count"]
+        + experiment["full_validation_token_count"]
+        != experiment["total_token_count"]
+        or experiment["split_index"] != experiment["full_train_token_count"]
+        or experiment["completed_steps"] != config.get("steps")
+    ):
+        raise TransformerLabError("experiment counts are inconsistent")
+    for name in ("corpus_fingerprint", "codec_fingerprint", "model_fingerprint"):
+        value = experiment.get(name)
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+        ):
+            raise TransformerLabError(f"{name} must be a SHA-256 digest")
     sample = experiment.get("sample")
     sample_ids = experiment.get("sample_token_ids")
     expected_sample_length = len(config.get("sample_prompt", "")) + config.get(
@@ -484,10 +538,38 @@ def verify_day38_report(report: dict[str, Any]) -> None:
     if (
         not isinstance(sample, str)
         or not isinstance(sample_ids, list)
+        or any(
+            isinstance(token_id, bool) or not isinstance(token_id, int) or token_id < 0
+            for token_id in sample_ids
+        )
         or len(sample) != expected_sample_length
         or len(sample_ids) != expected_sample_length
+        or not sample.startswith(config.get("sample_prompt", ""))
     ):
         raise TransformerLabError("sample evidence length is inconsistent")
+    expected_runtime_fields = {
+        "python_version",
+        "torch_version",
+        "numpy_version",
+        "platform",
+        "device",
+        "intraop_threads",
+        "deterministic_algorithms",
+        "elapsed_seconds",
+    }
+    if set(runtime) != expected_runtime_fields:
+        raise TransformerLabError("runtime fields are invalid")
+    for name in ("python_version", "torch_version", "numpy_version", "platform"):
+        if not isinstance(runtime[name], str) or not runtime[name]:
+            raise TransformerLabError(f"runtime {name} must be a non-empty string")
+    if runtime["device"] != "cpu" or runtime["deterministic_algorithms"] is not True:
+        raise TransformerLabError("runtime must describe deterministic CPU execution")
+    if (
+        isinstance(runtime["intraop_threads"], bool)
+        or not isinstance(runtime["intraop_threads"], int)
+        or runtime["intraop_threads"] <= 0
+    ):
+        raise TransformerLabError("runtime intraop_threads must be positive")
     elapsed = runtime.get("elapsed_seconds")
     if (
         isinstance(elapsed, bool)

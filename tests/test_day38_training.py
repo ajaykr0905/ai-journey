@@ -38,6 +38,16 @@ def source_for(text: str) -> CorpusSource:
     )
 
 
+def resign(report: dict) -> None:
+    unsigned = {
+        key: value for key, value in report.items() if key != "evidence_fingerprint"
+    }
+    canonical = json.dumps(
+        unsigned, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    report["evidence_fingerprint"] = hashlib.sha256(canonical.encode()).hexdigest()
+
+
 class Day38DataTests(unittest.TestCase):
     def test_bounded_partitions_are_disjoint_and_ordered(self) -> None:
         text = "abcdefghijklmnopqrstuvwxyz" * 8
@@ -201,6 +211,28 @@ class Day38ExperimentTests(unittest.TestCase):
             )
         report["runtime"]["elapsed_seconds"] = float("nan")
         with self.assertRaisesRegex(TransformerLabError, "finite JSON"):
+            verify_day38_report(report)
+
+    def test_report_rejects_re_signed_semantic_contradictions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            report = build_day38_report(
+                self.run_experiment(Path(directory)), elapsed_seconds=1.0
+            )
+        report["finding"] = "declared-loss-improvement-not-observed"
+        resign(report)
+        with self.assertRaisesRegex(TransformerLabError, "finding"):
+            verify_day38_report(report)
+
+        report["finding"] = "training-and-validation-nll-decreased"
+        report["runtime"].pop("platform")
+        resign(report)
+        with self.assertRaisesRegex(TransformerLabError, "runtime fields"):
+            verify_day38_report(report)
+
+        report["runtime"]["platform"] = "test"
+        report["limitations"] = []
+        resign(report)
+        with self.assertRaisesRegex(TransformerLabError, "limitations"):
             verify_day38_report(report)
 
     def test_budgets_must_exceed_context_window(self) -> None:
