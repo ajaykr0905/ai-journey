@@ -68,6 +68,26 @@ class CheckpointPublicationTests(unittest.TestCase):
             1,
         )
 
+    def test_checkpoint_rejects_unusable_adamw_controls(self) -> None:
+        group = self.optimizer.param_groups[0]
+        for name, value in (
+            ("lr", -1.0),
+            ("eps", 0.0),
+            ("betas", (2.0, 0.9)),
+            ("weight_decay", -1.0),
+            ("amsgrad", "yes"),
+        ):
+            original = group[name]
+            group[name] = value
+            try:
+                with self.subTest(name=name), self.assertRaisesRegex(
+                    ValueError, "AdamW"
+                ):
+                    self.save()
+                self.assertFalse(self.path.exists())
+            finally:
+                group[name] = original
+
     def test_serialization_failure_preserves_checkpoint_and_removes_partial_file(self):
         self.save()
         original = self.path.read_bytes()

@@ -906,6 +906,31 @@ def _validate_adamw_checkpoint_state(optimizer: torch.optim.Optimizer) -> None:
     if not isinstance(optimizer, torch.optim.AdamW):
         return
     for group in optimizer.param_groups:
+        for name in ("lr", "eps", "weight_decay"):
+            value = group.get(name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+                or (name == "eps" and value == 0)
+            ):
+                raise TransformerLabError(f"AdamW checkpoint {name} is invalid")
+        betas = group.get("betas")
+        if (
+            not isinstance(betas, (list, tuple))
+            or len(betas) != 2
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not 0 <= value < 1
+                for value in betas
+            )
+        ):
+            raise TransformerLabError("AdamW checkpoint betas are invalid")
+        for name in ("amsgrad", "maximize", "capturable", "differentiable"):
+            if not isinstance(group.get(name), bool):
+                raise TransformerLabError(f"AdamW checkpoint {name} must be boolean")
         moments = ["exp_avg", "exp_avg_sq"]
         if group.get("amsgrad", False):
             moments.append("max_exp_avg_sq")
