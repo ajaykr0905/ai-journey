@@ -569,6 +569,16 @@ def verify_day38_report(report: dict[str, Any]) -> None:
         > data_config.validation_token_limit
         or experiment["used_train_token_count"] <= data_config.block_size
         or experiment["used_validation_token_count"] <= data_config.block_size
+        or experiment["total_token_count"] > source.byte_count
+        or experiment["split_index"]
+        != int(experiment["total_token_count"] * (1 - data_config.validation_fraction))
+        or experiment["used_train_token_count"]
+        != min(experiment["full_train_token_count"], data_config.train_token_limit)
+        or experiment["used_validation_token_count"]
+        != min(
+            experiment["full_validation_token_count"],
+            data_config.validation_token_limit,
+        )
     ):
         raise TransformerLabError("experiment counts are inconsistent")
     expected_parameters = expected_parameter_count(

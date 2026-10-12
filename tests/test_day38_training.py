@@ -361,6 +361,22 @@ class Day38ExperimentTests(unittest.TestCase):
                 validation_token_limit=9,
             )
 
+    def test_reports_require_the_exact_declared_corpus_geometry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            valid = build_day38_report(
+                self.run_experiment(Path(directory)), elapsed_seconds=1
+            )
+        shortened = copy.deepcopy(valid)
+        shortened["experiment"]["used_train_token_count"] -= 1
+        wrong_split = copy.deepcopy(valid)
+        wrong_split["experiment"]["split_index"] -= 1
+        wrong_split["experiment"]["full_train_token_count"] -= 1
+        wrong_split["experiment"]["full_validation_token_count"] += 1
+        for report in (shortened, wrong_split):
+            resign(report)
+            with self.assertRaisesRegex(ValueError, "counts"):
+                verify_day38_report(report)
+
     def test_small_source_split_is_rejected(self) -> None:
         text = "abcdefghij"
         with self.assertRaises(TransformerLabError):
