@@ -12,6 +12,8 @@ from ai_journey.transformer_lab import (
     BatchCursor,
     DecoderLanguageModel,
     TrainingConfig,
+    TokenCorpus,
+    CharacterCodec,
     TransformerConfig,
     build_optimizer,
     seed_everything,
@@ -42,6 +44,16 @@ class RuntimeSafetyTests(unittest.TestCase):
             self.assertTrue(torch.equal(torch_state, torch.get_rng_state()))
             with self.assertRaises(ValueError):
                 TrainingConfig(seed=seed)
+
+    def test_corpus_fingerprint_binds_partition_boundaries(self):
+        codec = CharacterCodec(("a", "b"))
+        first = TokenCorpus(
+            codec, torch.tensor([0, 1, 0]), torch.tensor([1, 0]), "a" * 64
+        )
+        second = TokenCorpus(
+            codec, torch.tensor([0, 1]), torch.tensor([0, 1, 0]), "a" * 64
+        )
+        self.assertNotEqual(first.fingerprint(), second.fingerprint())
 
     def test_nonfinite_training_never_reaches_the_optimizer(self):
         before = copy.deepcopy(self.model.state_dict())

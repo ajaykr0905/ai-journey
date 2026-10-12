@@ -295,6 +295,10 @@ class TokenCorpus:
         digest = sha256()
         digest.update(self.source_sha256.encode())
         digest.update(self.codec.fingerprint().encode())
+        digest.update(b"partition-lengths-v2:")
+        digest.update(
+            f"{len(self.train_tokens)}:{len(self.validation_tokens)}:".encode()
+        )
         digest.update(self.train_tokens.numpy().tobytes())
         digest.update(self.validation_tokens.numpy().tobytes())
         return digest.hexdigest()
