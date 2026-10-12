@@ -729,3 +729,28 @@ def write_day38_report(path: Path, report: dict[str, Any]) -> None:
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def load_day38_report(path: Path) -> dict[str, Any]:
+    """Read a bounded evidence file and reject duplicate JSON fields."""
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise TransformerLabError("duplicate report field")
+            result[key] = value
+        return result
+
+    try:
+        with path.open("rb") as stream:
+            payload = stream.read(8 * 1024 * 1024 + 1)
+        if len(payload) > 8 * 1024 * 1024:
+            raise TransformerLabError("report exceeds the 8 MiB limit")
+        report = json.loads(payload.decode("utf-8"), object_pairs_hook=unique_fields)
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise TransformerLabError(f"unable to read report: {path}") from exc
+    verify_day38_report(report)
+    return report

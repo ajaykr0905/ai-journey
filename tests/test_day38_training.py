@@ -24,6 +24,7 @@ from ai_journey.day38_training import (  # noqa: E402
     run_day38_experiment,
     verify_day38_report,
     write_day38_report,
+    load_day38_report,
 )
 from ai_journey.gpt_bigram import CorpusSource, GPTBigramError  # noqa: E402
 from ai_journey.transformer_lab import TransformerLabError  # noqa: E402
@@ -235,6 +236,21 @@ class Day38ExperimentTests(unittest.TestCase):
             side_effect=AssertionError("weight allocation"),
         ):
             verify_day38_report(report)
+
+    def test_report_loader_validates_content_and_rejects_duplicate_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence.json"
+            report = build_day38_report(
+                self.run_experiment(Path(directory)), elapsed_seconds=1
+            )
+            write_day38_report(path, report)
+            self.assertEqual(load_day38_report(path), report)
+            path.write_text('{"schema_version":1,"schema_version":1}')
+            with self.assertRaisesRegex(ValueError, "duplicate"):
+                load_day38_report(path)
+            path.write_bytes(b"x" * (8 * 1024 * 1024 + 1))
+            with self.assertRaisesRegex(ValueError, "8 MiB"):
+                load_day38_report(path)
 
     def test_report_rejects_tampered_or_nonfinite_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
