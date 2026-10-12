@@ -1,4 +1,4 @@
-# AI Journey: Days 0–35
+# AI Journey: Days 0–38
 
 This repository is a public-safe, executable record of an added setup day plus the
 selected work through Day 37 of a 90-day AI engineering learning plan. It combines
@@ -78,6 +78,10 @@ then grow these exercises into production-quality training and inference project
 - Four equivalent causal-prefix averaging methods with gradient, no-future-leak,
   padding, streaming, restart, and tamper-evident evidence in
   [`scripts/run_day_35.py`](scripts/run_day_35.py)
+- A checksum-pinned, scale-limited Tiny Shakespeare transformer run with bounded
+  token partitions, exact restart checkpoints, deterministic sampling, runtime
+  provenance, and tamper-evident evidence in
+  [`src/ai_journey/day38_training.py`](src/ai_journey/day38_training.py)
 - Unit tests in [`tests/`](tests/)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
@@ -164,8 +168,34 @@ ai-journey-day-34 \
   --checkpoint artifacts/day-34-bigram.pt
 ai-journey-day-35 \
   --output artifacts/day-35-causal-average.json
+ai-journey-day-38 \
+  --corpus artifacts/tinyshakespeare.txt \
+  --download \
+  --output artifacts/day-38-transformer.json \
+  --checkpoint artifacts/day-38-transformer.pt
 python -m unittest discover -s tests -v
 ```
+
+## Train the Day 38 full transformer
+
+The installed Day 38 command verifies the pinned Tiny Shakespeare bytes, keeps
+the ordered train and validation partitions disjoint, and trains the complete
+decoder stack with attention, feed-forward layers, residual paths, LayerNorm,
+and dropout. Default work is explicitly bounded to 65,536 training tokens,
+8,192 held-out tokens, 80 updates, and a 30,656-parameter CPU model. The final
+sample is replayed from the published restart checkpoint, while the report
+records exact configs, losses, token counts, runtime, model/source fingerprints,
+and scope limitations.
+
+Two independent local runs on 2026-10-12 produced the same model fingerprint,
+losses, update trace, and 201-token sample. The measured run reduced training
+NLL from 4.184218 to 2.575125 and held-out NLL from 4.181267 to 2.710894 in
+about 10 seconds per run on an Apple-silicon CPU with five PyTorch intra-op
+threads. These are bounded diagnostic measurements, not a claim of language
+quality, GPU performance, distributed scale, production readiness, lecture
+completion, or Ajay's personal exercise completion. See
+[`days/day-38.md`](days/day-38.md) for the operating contract and remaining
+learner evidence.
 
 ## Verify causal prefix averaging
 

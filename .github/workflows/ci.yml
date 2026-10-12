@@ -33,6 +33,8 @@ jobs:
           ruff format --check tests/test_transformer_fingerprint_dtypes.py
           ruff check src/ai_journey/serving_benchmark.py tests/test_serving_benchmark.py
           ruff format --check src/ai_journey/serving_benchmark.py tests/test_serving_benchmark.py
+          ruff check src/ai_journey/day38_training.py src/ai_journey/day38_cli.py tests/test_day38_training.py tests/test_run_day_38.py
+          ruff format --check src/ai_journey/day38_training.py src/ai_journey/day38_cli.py tests/test_day38_training.py tests/test_run_day_38.py
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Run Days 0-11
@@ -230,6 +232,22 @@ jobs:
           --batch-size 2
           --time 5
           --channels 3
+      - name: Train and replay the Day 38 full transformer
+        run: >-
+          ai-journey-day-38
+          --corpus /tmp/ai-journey-artifacts/tinyshakespeare.txt
+          --output /tmp/ai-journey-artifacts/day-38-transformer.json
+          --checkpoint /tmp/ai-journey-artifacts/day-38-transformer.pt
+          --steps 2
+          --batch-size 4
+          --block-size 8
+          --embedding-dim 8
+          --heads 2
+          --layers 1
+          --train-token-limit 320
+          --validation-token-limit 80
+          --sample-tokens 16
+          --sample-top-k 5
       - name: Check deployment readiness
         run: >-
           python tools/deployment_readiness_check.py
