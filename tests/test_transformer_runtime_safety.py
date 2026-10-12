@@ -55,6 +55,23 @@ class RuntimeSafetyTests(unittest.TestCase):
         )
         self.assertNotEqual(first.fingerprint(), second.fingerprint())
 
+    def test_token_corpus_owns_validated_cpu_partitions(self):
+        train = torch.tensor([0, 1, 0])
+        corpus = TokenCorpus(CharacterCodec(("a", "b")), train, train, "a" * 64)
+        fingerprint = corpus.fingerprint()
+        train.fill_(1)
+        self.assertEqual(fingerprint, corpus.fingerprint())
+        for invalid in (
+            torch.tensor([0.0, 1.0]),
+            torch.tensor([-1, 1]),
+            torch.tensor([0, 2]),
+            torch.tensor([[0, 1]]),
+        ):
+            with self.subTest(tokens=invalid), self.assertRaises(
+                (TypeError, ValueError)
+            ):
+                TokenCorpus(corpus.codec, invalid, corpus.validation_tokens, "a" * 64)
+
     def test_nonfinite_training_never_reaches_the_optimizer(self):
         before = copy.deepcopy(self.model.state_dict())
         with mock.patch.object(self.optimizer, "step") as update:

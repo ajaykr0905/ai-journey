@@ -254,6 +254,28 @@ class TokenCorpus:
     validation_tokens: Tensor
     source_sha256: str
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.codec, CharacterCodec):
+            raise TypeError("codec must be CharacterCodec")
+        _require_sha256_digest(self.source_sha256, "source_sha256")
+        for name in ("train_tokens", "validation_tokens"):
+            tokens = getattr(self, name)
+            if (
+                not isinstance(tokens, Tensor)
+                or tokens.layout != torch.strided
+                or tokens.ndim != 1
+                or tokens.dtype != torch.long
+                or tokens.device.type != "cpu"
+            ):
+                raise TypeError(
+                    f"{name} must be a dense one-dimensional CPU long tensor"
+                )
+            if tokens.numel() < 2 or bool(
+                ((tokens < 0) | (tokens >= self.vocab_size)).any()
+            ):
+                raise TransformerLabError(f"{name} must contain valid vocabulary ids")
+            object.__setattr__(self, name, tokens.detach().clone())
+
     @classmethod
     def from_path(
         cls, path: Path, *, validation_fraction: float = 0.2, block_size: int = 16
