@@ -838,6 +838,11 @@ def train_steps(
     """Train a bounded number of steps and return inspectable metrics."""
 
     _validate_optimizer_binding(model, optimizer)
+    if not isinstance(cursor, BatchCursor):
+        raise TypeError("cursor must be BatchCursor")
+    if cursor.block_size != model.config.block_size:
+        raise TransformerLabError("training cursor block_size must match the model")
+    model._validate_token_ids(cursor.tokens.unsqueeze(0), limit_time=False)
     count = config.steps if step_count is None else step_count
     if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
         raise TransformerLabError("step_count must be a positive integer")

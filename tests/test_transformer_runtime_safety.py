@@ -117,6 +117,13 @@ class RuntimeSafetyTests(unittest.TestCase):
             train_steps(self.model, self.cursor, optimizer, self.config, step_count=1)
         self.assertEqual(before, self.cursor.state_dict())
 
+    def test_training_rejects_incompatible_cursor_before_consuming_data(self):
+        cursor = BatchCursor(self.cursor.tokens, block_size=5, batch_size=2)
+        original = cursor.state_dict()
+        with self.assertRaisesRegex(ValueError, "block_size"):
+            train_steps(self.model, cursor, self.optimizer, self.config, step_count=1)
+        self.assertEqual(original, cursor.state_dict())
+
     def test_evaluation_rejects_nonfinite_metrics_and_restores_modes(self):
         self.model.train()
         self.model.blocks[0].eval()
