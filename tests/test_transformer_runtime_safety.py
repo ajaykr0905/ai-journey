@@ -65,6 +65,11 @@ class RuntimeSafetyTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 TrainingConfig(seed=seed)
 
+    def test_cpu_seeding_does_not_schedule_cuda_rng_mutations(self):
+        with mock.patch("torch.cuda.manual_seed_all") as cuda_seed:
+            seed_everything(38)
+        cuda_seed.assert_not_called()
+
     def test_corpus_fingerprint_binds_partition_boundaries(self):
         codec = CharacterCodec(("a", "b"))
         first = TokenCorpus(

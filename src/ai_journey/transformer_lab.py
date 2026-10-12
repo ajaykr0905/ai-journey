@@ -44,7 +44,7 @@ def _require_sha256_digest(value: str, name: str) -> None:
 
 
 def seed_everything(seed: int) -> None:
-    """Seed Python, NumPy, and PyTorch and request deterministic kernels."""
+    """Seed Python, NumPy, and the CPU generator for deterministic CPU runs."""
 
     if isinstance(seed, bool) or not isinstance(seed, int):
         raise TypeError("seed must be an integer")
@@ -52,7 +52,7 @@ def seed_everything(seed: int) -> None:
         raise TransformerLabError("seed must be in NumPy's range [0, 2**32)")
     random.seed(seed)
     np.random.seed(seed)
-    torch.manual_seed(seed)
+    torch.random.default_generator.manual_seed(seed)
     torch.use_deterministic_algorithms(True)
 
 
