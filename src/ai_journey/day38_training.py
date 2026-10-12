@@ -215,6 +215,7 @@ class Day38Experiment:
     codec_fingerprint: str
     model_fingerprint: str
     parameter_count: int
+    started_step: int
     completed_steps: int
     initial_train_nll: float
     final_train_nll: float
@@ -368,6 +369,9 @@ def run_day38_experiment(
         codec_fingerprint=result.codec_fingerprint,
         model_fingerprint=result.model_fingerprint,
         parameter_count=result.parameter_count,
+        started_step=(
+            result.trace[0].step - 1 if result.trace else result.completed_steps
+        ),
         completed_steps=result.completed_steps,
         initial_train_nll=result.initial_train_nll,
         final_train_nll=result.final_train_nll,
@@ -529,6 +533,13 @@ def verify_day38_report(report: dict[str, Any]) -> None:
         for name in integer_fields
     ):
         raise TransformerLabError("experiment counts must be positive integers")
+    started_step = experiment.get("started_step")
+    if (
+        isinstance(started_step, bool)
+        or not isinstance(started_step, int)
+        or not 0 <= started_step <= experiment["completed_steps"]
+    ):
+        raise TransformerLabError("started_step must be within the completed run")
     if (
         experiment["used_train_token_count"] > experiment["full_train_token_count"]
         or experiment["used_validation_token_count"]
@@ -554,6 +565,30 @@ def verify_day38_report(report: dict[str, Any]) -> None:
         raise TransformerLabError("parameter_count does not match the model config")
     if source.sha256 != source_payload["sha256"]:
         raise RuntimeError("validated source digest changed unexpectedly")
+    trace = experiment.get("trace")
+    expected_trace_steps = list(
+        range(started_step + 1, experiment["completed_steps"] + 1)
+    )
+    if not isinstance(trace, list) or len(trace) != len(expected_trace_steps):
+        raise TransformerLabError("training trace does not match the resume boundary")
+    for metric, expected_step in zip(trace, expected_trace_steps, strict=True):
+        if not isinstance(metric, dict) or set(metric) != {
+            "step",
+            "loss",
+            "gradient_norm",
+        }:
+            raise TransformerLabError("training trace fields are invalid")
+        if metric["step"] != expected_step:
+            raise TransformerLabError("training trace steps are not contiguous")
+        for name in ("loss", "gradient_norm"):
+            value = metric[name]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not isfinite(value)
+                or value < 0
+            ):
+                raise TransformerLabError("training trace metrics must be finite")
     for name in ("corpus_fingerprint", "codec_fingerprint", "model_fingerprint"):
         value = experiment.get(name)
         if (

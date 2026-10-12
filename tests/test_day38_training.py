@@ -131,6 +131,7 @@ class Day38ExperimentTests(unittest.TestCase):
         self.assertEqual(first.to_dict(), second.to_dict())
         self.assertLess(first.final_train_nll, first.initial_train_nll)
         self.assertEqual(first.completed_steps, 8)
+        self.assertEqual(first.started_step, 0)
         self.assertEqual(len(first.trace), 8)
         self.assertEqual(len(first.sample_token_ids), 13)
         self.assertTrue(first.sample.startswith("\n"))
@@ -153,6 +154,7 @@ class Day38ExperimentTests(unittest.TestCase):
             )
 
         self.assertEqual(resumed.trace, ())
+        self.assertEqual(resumed.started_step, 8)
         self.assertEqual(resumed.model_fingerprint, first.model_fingerprint)
         self.assertEqual(resumed.sample, first.sample)
         self.assertEqual(resumed.final_validation_nll, first.final_validation_nll)
@@ -263,6 +265,22 @@ class Day38ExperimentTests(unittest.TestCase):
         report["experiment"]["parameter_count"] += 1
         resign(report)
         with self.assertRaisesRegex(TransformerLabError, "parameter_count"):
+            verify_day38_report(report)
+
+    def test_report_rejects_re_signed_resume_trace_mismatches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            report = build_day38_report(
+                self.run_experiment(Path(directory)), elapsed_seconds=1.0
+            )
+        report["experiment"]["started_step"] = 1
+        resign(report)
+        with self.assertRaisesRegex(TransformerLabError, "resume boundary"):
+            verify_day38_report(report)
+
+        report["experiment"]["started_step"] = 0
+        report["experiment"]["trace"][1]["step"] = 99
+        resign(report)
+        with self.assertRaisesRegex(TransformerLabError, "not contiguous"):
             verify_day38_report(report)
 
     def test_budgets_must_exceed_context_window(self) -> None:
