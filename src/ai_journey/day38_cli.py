@@ -31,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--download", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--steps", type=int, default=80)
+    parser.add_argument("--max-parameters", type=int, default=1_000_000)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--block-size", type=int, default=32)
     parser.add_argument("--embedding-dim", type=int, default=32)
@@ -109,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
             config,
             checkpoint_path=args.checkpoint,
             resume=args.resume,
+            max_parameters=args.max_parameters,
         )
         report = build_day38_report(
             experiment, elapsed_seconds=time.perf_counter() - started

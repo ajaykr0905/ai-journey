@@ -42,6 +42,10 @@ ai-journey-day-38 \
 The output and checkpoint paths must differ from the corpus and from each other.
 Changing the model, optimizer, data limits, or seed invalidates checkpoint
 compatibility rather than silently starting a different experiment.
+`--max-parameters` limits model allocation (default: 1,000,000 parameters).
+The corpus fingerprint now binds partition lengths; checkpoints from the older
+partition fingerprint must be regenerated. New checkpoints additionally bind
+the sampler's token stream, seed, context, and batch size.
 
 ## Verified bounded run
 

@@ -197,6 +197,20 @@ class Day38ExperimentTests(unittest.TestCase):
         with self.assertRaisesRegex(TransformerLabError, "sample_seed must be"):
             Day38TrainingConfig(sample_seed=2**32)
 
+    def test_parameter_budget_rejects_training_before_checkpoint_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "checkpoint.pt"
+            path.write_bytes(b"previous checkpoint")
+            with self.assertRaisesRegex(ValueError, "parameter budget"):
+                run_day38_experiment(
+                    self.text,
+                    source_for(self.text),
+                    self.config(),
+                    checkpoint_path=path,
+                    max_parameters=100,
+                )
+            self.assertEqual(path.read_bytes(), b"previous checkpoint")
+
     def test_report_is_self_verifying_and_publishes_atomically(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

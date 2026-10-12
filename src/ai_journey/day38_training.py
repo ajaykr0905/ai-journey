@@ -305,6 +305,7 @@ def run_day38_experiment(
     *,
     checkpoint_path: Path,
     resume: bool = False,
+    max_parameters: int = 1_000_000,
 ) -> Day38Experiment:
     """Train the complete decoder stack and replay a sample from its checkpoint."""
 
@@ -314,9 +315,17 @@ def run_day38_experiment(
         raise TypeError("checkpoint_path must be pathlib.Path")
     if not isinstance(resume, bool):
         raise TypeError("resume must be a boolean")
+    if (
+        isinstance(max_parameters, bool)
+        or not isinstance(max_parameters, int)
+        or max_parameters <= 0
+    ):
+        raise TransformerLabError("parameter budget must be a positive integer")
     bounded = prepare_bounded_corpus(text, source, config.data)
     corpus = bounded.corpus
     model_config = config.model_config(corpus.vocab_size)
+    if expected_parameter_count(model_config) > max_parameters:
+        raise TransformerLabError("model exceeds the declared parameter budget")
     training_config = config.training_config()
     corpus.codec.encode(config.sample_prompt)
     with _preserve_random_state():
