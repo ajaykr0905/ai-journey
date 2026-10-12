@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from .day38_serving import (
+    audit_trained_artifact,
     generate_from_artifact,
     load_trained_artifact,
     write_serving_report,
@@ -15,6 +16,9 @@ from .transformer_lab import TransformerLabError
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--operation", choices=("generate", "audit"), default="generate"
+    )
     for name in ("report", "checkpoint", "corpus", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
     parser.add_argument("--prompt", default="\n")
@@ -41,15 +45,18 @@ def main(argv: list[str] | None = None) -> int:
     try:
         protect_output(args.output, (args.report, args.checkpoint, args.corpus))
         artifact = load_trained_artifact(args.report, args.checkpoint, args.corpus)
-        report = generate_from_artifact(
-            artifact,
-            args.prompt,
-            new_tokens=args.new_tokens,
-            temperature=args.temperature,
-            top_k=args.top_k,
-            seed=args.seed,
-            cached=args.cached,
-        )
+        if args.operation == "audit":
+            report = audit_trained_artifact(artifact)
+        else:
+            report = generate_from_artifact(
+                artifact,
+                args.prompt,
+                new_tokens=args.new_tokens,
+                temperature=args.temperature,
+                top_k=args.top_k,
+                seed=args.seed,
+                cached=args.cached,
+            )
         write_serving_report(args.output, report)
     except (GPTBigramError, TransformerLabError, OSError, TypeError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)

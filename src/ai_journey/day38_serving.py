@@ -1,6 +1,7 @@
 """Read-only operations on verified Day 38 training artifacts."""
 
 from dataclasses import dataclass
+from math import isclose
 from pathlib import Path
 
 import torch
@@ -25,6 +26,7 @@ from .transformer_lab import (
     expected_parameter_count,
     load_training_checkpoint,
     model_fingerprint,
+    evaluate_nll,
 )
 
 
@@ -159,3 +161,43 @@ def write_serving_report(path: Path, report: dict) -> None:
     if not isinstance(path, Path):
         raise TypeError("path must be pathlib.Path")
     _publish(path, report)
+
+
+def audit_trained_artifact(artifact: TrainedArtifact) -> dict:
+    """Independently replay the sample and remeasure both final loss metrics."""
+    evidence = artifact.report["experiment"]
+    config = evidence["config"]
+    sample = generate_from_artifact(
+        artifact,
+        config["sample_prompt"],
+        new_tokens=config["sample_tokens"],
+        temperature=config["sample_temperature"],
+        top_k=config["sample_top_k"],
+        seed=config["sample_seed"],
+    )
+    train = evaluate_nll(artifact.model, artifact.corpus.train_tokens)
+    validation = evaluate_nll(artifact.model, artifact.corpus.validation_tokens)
+    checks = {
+        "sample_replay": sample["token_ids"] == evidence["sample_token_ids"],
+        "train_nll": isclose(
+            train, evidence["final_train_nll"], abs_tol=1e-6, rel_tol=1e-6
+        ),
+        "validation_nll": isclose(
+            validation, evidence["final_validation_nll"], abs_tol=1e-6, rel_tol=1e-6
+        ),
+    }
+    if not all(checks.values()):
+        raise TransformerLabError(
+            "checkpoint audit failed: "
+            + ", ".join(name for name, passed in checks.items() if not passed)
+        )
+    return {
+        "schema": "day38-checkpoint-audit-v1",
+        "training_evidence_fingerprint": artifact.report["evidence_fingerprint"],
+        "model_fingerprint": evidence["model_fingerprint"],
+        "checks": checks,
+        "observed_train_nll": train,
+        "observed_validation_nll": validation,
+        "loss_tolerance": {"relative": 1e-6, "absolute": 1e-6},
+        "passed": True,
+    }

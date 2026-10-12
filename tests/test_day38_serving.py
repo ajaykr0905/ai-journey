@@ -17,7 +17,11 @@ from ai_journey.day38_training import (
     run_day38_experiment,
     write_day38_report,
 )
-from ai_journey.day38_serving import load_trained_artifact, generate_from_artifact
+from ai_journey.day38_serving import (
+    load_trained_artifact,
+    generate_from_artifact,
+    audit_trained_artifact,
+)
 from ai_journey.day38_inference_cli import main
 from ai_journey.gpt_bigram import CorpusSource
 
@@ -99,6 +103,15 @@ class Day38ServingTests(unittest.TestCase):
         self.assertEqual(full, repeat)
         self.assertEqual(full["token_ids"], cached["token_ids"])
         self.assertTrue(torch.equal(rng, torch.get_rng_state()))
+
+    def test_checkpoint_audit_remeasures_losses_and_replays_samples(self):
+        artifact = self.load()
+        result = audit_trained_artifact(artifact)
+        self.assertTrue(result["passed"])
+        self.assertTrue(all(result["checks"].values()))
+        artifact.report["experiment"]["final_validation_nll"] += 0.5
+        with self.assertRaisesRegex(ValueError, "validation_nll"):
+            audit_trained_artifact(artifact)
 
     def test_generation_cli_preserves_inputs_and_protects_aliases(self):
         output = self.root / "sample.json"
