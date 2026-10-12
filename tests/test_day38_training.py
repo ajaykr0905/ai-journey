@@ -113,6 +113,17 @@ class Day38ExperimentTests(unittest.TestCase):
             sample_seed=3800,
         )
 
+    def test_experiment_restores_deterministic_warning_policy(self) -> None:
+        enabled = torch.are_deterministic_algorithms_enabled()
+        warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+            with tempfile.TemporaryDirectory() as directory:
+                self.run_experiment(Path(directory))
+            self.assertTrue(torch.is_deterministic_algorithms_warn_only_enabled())
+        finally:
+            torch.use_deterministic_algorithms(enabled, warn_only=warn_only)
+
     def run_experiment(self, root: Path):
         return run_day38_experiment(
             self.text,

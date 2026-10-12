@@ -242,13 +242,14 @@ def _preserve_random_state():
     numpy_state = np.random.get_state()
     torch_state = torch.get_rng_state().clone()
     deterministic = torch.are_deterministic_algorithms_enabled()
+    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
     try:
         yield
     finally:
         random.setstate(python_state)
         np.random.set_state(numpy_state)
         torch.set_rng_state(torch_state)
-        torch.use_deterministic_algorithms(deterministic)
+        torch.use_deterministic_algorithms(deterministic, warn_only=warn_only)
 
 
 def prepare_bounded_corpus(
