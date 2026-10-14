@@ -153,7 +153,11 @@ class RegexTokenizer(ByteTokenizer):
             raise TokenizerError("invalid tokenizer pattern") from exc
         if self._compiled.match("") is not None:
             raise TokenizerError("pattern must not match empty text")
-        self.pattern = pattern
+        self._pattern_text = pattern
+
+    @property
+    def pattern(self):
+        return self._pattern_text
 
     def pieces(self, text):
         if not isinstance(text, str):
@@ -206,8 +210,8 @@ class SpecialTokenizer:
             raise TokenizerError("special names must be unique bounded strings")
         for name in names:
             name.encode("utf-8")
-        self.tokenizer = tokenizer
-        self.names = names
+        self._tokenizer = tokenizer
+        self._names = names
         self._special_ids = {
             name: tokenizer.vocab_size + index for index, name in enumerate(names)
         }
@@ -222,6 +226,14 @@ class SpecialTokenizer:
             if names
             else None
         )
+
+    @property
+    def tokenizer(self):
+        return self._tokenizer
+
+    @property
+    def names(self):
+        return self._names
 
     @property
     def vocab_size(self):
