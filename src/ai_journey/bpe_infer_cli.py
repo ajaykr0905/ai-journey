@@ -19,6 +19,7 @@ def main(argv=None):
     parser.add_argument("--seed", type=int, default=40)
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--top-k", type=int, default=20)
+    parser.add_argument("--cached", action="store_true")
     args = parser.parse_args(argv)
     try:
         inputs = [
@@ -38,6 +39,7 @@ def main(argv=None):
             seed=args.seed,
             temperature=args.temperature,
             top_k=args.top_k,
+            cached=args.cached,
         )
         _publish(
             args.output,
@@ -48,7 +50,14 @@ def main(argv=None):
                 "corpus_sha256": artifact.corpus.fingerprint(),
                 "controls": {
                     name: getattr(args, name)
-                    for name in ("prompt", "new_tokens", "seed", "temperature", "top_k")
+                    for name in (
+                        "prompt",
+                        "new_tokens",
+                        "seed",
+                        "temperature",
+                        "top_k",
+                        "cached",
+                    )
                 },
                 "sample": sample,
             },
