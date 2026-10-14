@@ -5,7 +5,7 @@ import json
 from time import perf_counter
 
 from .bpe import ByteTokenizer, TokenizerError
-from .parallel_corpus import ParallelSplit
+from .parallel_corpus import ParallelSplit, parallel_folds
 from .tokenizer_io import tokenizer_fingerprint
 from .tokenizer_metrics import compression_metrics
 from .tokenizer_training import train_documents
@@ -95,4 +95,48 @@ def run_compression_experiment(
         ],
         "evaluations": evaluations,
         "limitations": "Local CPU tokenizer compression only; no model-quality, GPU, or learner-completion evidence.",
+    }
+
+
+def run_compression_cross_validation(
+    first, second, *, vocab_sizes=(272, 288, 304), pattern=None
+):
+    """Use PUD's recommended ten-fold training protocol, not its test labels."""
+    folds = [
+        run_compression_experiment(split, vocab_sizes=vocab_sizes, pattern=pattern)
+        for split in parallel_folds(first, second, fold_count=10)
+    ]
+    aggregate = []
+    for trial in range(6):
+        rows = [fold["evaluations"][trial] for fold in folds]
+        heldout = []
+        for language in range(2):
+            metrics = [row["heldout"][language] for row in rows]
+            totals = {
+                field: sum(metric[field] for metric in metrics)
+                for field in (
+                    "documents",
+                    "utf8_bytes",
+                    "characters",
+                    "tokens",
+                    "byte_fallback_tokens",
+                )
+            }
+            totals["bytes_per_token"] = totals["utf8_bytes"] / totals["tokens"]
+            totals["characters_per_token"] = totals["characters"] / totals["tokens"]
+            heldout.append(totals)
+        aggregate.append(
+            {
+                "training_partition": rows[0]["training_partition"],
+                "requested_vocabulary": rows[0]["requested_vocabulary"],
+                "heldout": heldout,
+            }
+        )
+    return {
+        "schema_version": 1,
+        "experiment": "parallel-ten-fold-vocabulary-compression",
+        "fold_count": 10,
+        "folds": folds,
+        "aggregate": aggregate,
+        "limitations": "Token compression on public text only; no parsing score or language-model quality claim.",
     }
