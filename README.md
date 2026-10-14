@@ -83,6 +83,9 @@ then grow these exercises into production-quality training and inference project
   provenance, and tamper-evident evidence in
   [`src/ai_journey/day38_training.py`](src/ai_journey/day38_training.py)
 - Unit tests in [`tests/`](tests/)
+- A lossless multilingual BPE tokenizer, verified public-data training pipeline,
+  durable restart, strict UTF-8 cached serving and parity-gated benchmarks;
+  reproduce them using [`docs/bpe-training-serving.md`](docs/bpe-training-serving.md)
 - A deployment-readiness checker in
   [`tools/deployment_readiness_check.py`](tools/deployment_readiness_check.py)
 - GitHub Actions CI in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)

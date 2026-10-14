@@ -1,6 +1,6 @@
 # Progress and Evidence
 
-Last updated: 2026-10-12
+Last updated: 2026-10-14
 
 This file separates repository-verifiable work from activities that require the
 learner's own completion evidence.
@@ -44,6 +44,7 @@ learner's own completion evidence.
 | 36 | Independent single-head/per-head attention oracle, input and projection gradients, causal boundary checks, and probability diagnostics verified alongside Day 37 | Primary and support lectures pending user confirmation | Learner single-head implementation, QKV shapes and square-root scaling explanation pending |
 | 37 | Pre/post-norm residual blocks, padded loss, configurable MLP, activation checkpointing, SDPA parity, restartable cached inference, matched three-head-count protocol, installed CLI and CI gate present | Primary and support lectures pending user confirmation | Learner full Block implementation, independent seeded run, pre-norm versus post-norm explanation and interpretation of the three configurations pending |
 | 38 | Checksum-pinned bounded Tiny Shakespeare transformer training, exact checkpoint replay, deterministic sampling, runtime provenance, tamper-evident report, installed CLI, and repeat-run evidence present | Primary and support lectures pending user confirmation | Learner full-model run, generated-output screenshot, dropout/scaling notes, sample interpretation, and personal closing-remarks reflection pending |
+| 40 | Lossless byte/regex BPE, special-token policy, pinned aligned public corpora, three vocabulary budgets with ten-fold compression, exact tokenizer/model restart, train-only codec, strict UTF-8 cached serving, installed commands and operating guide present | Primary and support lectures pending user confirmation | Learner BPE type-along/rebuild, independent Hindi or Tamil versus English run, and explanations of merge ranks, regex boundaries, special tokens, compression denominators and sampling limits pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,
