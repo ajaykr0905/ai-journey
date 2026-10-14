@@ -52,6 +52,7 @@ class ByteTokenizer:
         if not isinstance(merges, tuple) or len(merges) > 3840:
             raise TokenizerError("merges must be a tuple of at most 3840 pairs")
         vocabulary = [bytes([value]) for value in range(256)]
+        storage_bytes = 256
         seen = set()
         for pair in merges:
             if not isinstance(pair, tuple) or len(pair) != 2:
@@ -62,6 +63,12 @@ class ByteTokenizer:
                     "merge ranks must be unique and dependency ordered"
                 )
             seen.add(pair)
+            expansion = len(vocabulary[pair[0]]) + len(vocabulary[pair[1]])
+            if expansion > 16384 or storage_bytes + expansion > 8 * 1024 * 1024:
+                raise TokenizerError(
+                    "expanded vocabulary exceeds its byte-storage budget"
+                )
+            storage_bytes += expansion
             vocabulary.append(vocabulary[pair[0]] + vocabulary[pair[1]])
         self._merges = merges
         self._vocabulary = tuple(vocabulary)
