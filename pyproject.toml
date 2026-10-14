@@ -23,6 +23,12 @@ ai-journey-day-38-infer = "ai_journey.day38_inference_cli:main"
 ai-journey-day-38-ablate = "ai_journey.day38_ablation:main"
 ai-journey-serving-benchmark = "ai_journey.serving_benchmark:main"
 ai-journey-tokenizer = "ai_journey.tokenizer_cli:main"
+ai-journey-tokenizer-resume = "ai_journey.tokenizer_restart_cli:main"
+ai-journey-tokenizer-compare = "ai_journey.day40_cli:main"
+ai-journey-corpus-export = "ai_journey.parallel_export:main"
+ai-journey-bpe-train = "ai_journey.bpe_train_cli:main"
+ai-journey-bpe-infer = "ai_journey.bpe_infer_cli:main"
+ai-journey-bpe-encode-benchmark = "ai_journey.bpe_benchmark:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
