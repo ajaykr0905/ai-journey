@@ -10,6 +10,7 @@ import pickle
 import random
 import re
 import tempfile
+import zipfile
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from hashlib import sha256
@@ -1144,6 +1145,7 @@ def load_training_checkpoint(
     cursor: BatchCursor,
     training_config: TrainingConfig,
     corpus_fingerprint: str,
+    max_checkpoint_bytes: int = 64 * 1024 * 1024,
 ) -> int:
     """Validate and restore an exact transformer training checkpoint."""
 
@@ -1151,8 +1153,26 @@ def load_training_checkpoint(
     _require_sha256_digest(corpus_fingerprint, "corpus_fingerprint")
     if not isinstance(path, Path):
         raise TypeError("path must be pathlib.Path")
+    if type(max_checkpoint_bytes) is not int or max_checkpoint_bytes <= 0:
+        raise TransformerLabError("checkpoint byte budget must be positive")
     try:
-        payload = torch.load(path, map_location="cpu", weights_only=True)
+        with path.open("rb") as stream:
+            if os.fstat(stream.fileno()).st_size > max_checkpoint_bytes:
+                raise TransformerLabError("checkpoint archive exceeds its byte budget")
+            with zipfile.ZipFile(stream) as archive:
+                members = archive.infolist()
+                if sum(member.file_size for member in members) > max_checkpoint_bytes:
+                    raise TransformerLabError(
+                        "expanded checkpoint archive exceeds its byte budget"
+                    )
+                if any(
+                    member.compress_type != zipfile.ZIP_STORED for member in members
+                ):
+                    raise TransformerLabError(
+                        "checkpoint requires uncompressed torch.save ZIP records"
+                    )
+            stream.seek(0)
+            payload = torch.load(stream, map_location="cpu", weights_only=True)
     except (
         OSError,
         RuntimeError,
@@ -1161,6 +1181,7 @@ def load_training_checkpoint(
         IndexError,
         KeyError,
         ValueError,
+        zipfile.BadZipFile,
     ) as exc:
         raise TransformerLabError(f"unable to read checkpoint: {path}") from exc
     if not isinstance(payload, Mapping) or set(payload) not in (
