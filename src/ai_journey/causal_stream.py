@@ -45,7 +45,11 @@ def build_snapshot_payload(snapshot: StreamSnapshot) -> dict[str, Any]:
         raise CausalAverageError(
             "serialized stream snapshots require float32 or float64"
         )
-    if snapshot.total.ndim != 1 or not torch.isfinite(snapshot.total).all():
+    if (
+        snapshot.total.ndim != 1
+        or snapshot.total.numel() == 0
+        or not torch.isfinite(snapshot.total).all()
+    ):
         raise CausalAverageError("snapshot total must be a finite vector")
     if (
         isinstance(snapshot.count, bool)
@@ -53,6 +57,8 @@ def build_snapshot_payload(snapshot: StreamSnapshot) -> dict[str, Any]:
         or snapshot.count < 0
     ):
         raise CausalAverageError("snapshot count must be a non-negative integer")
+    if snapshot.count == 0 and bool(snapshot.total.ne(0).any()):
+        raise CausalAverageError("zero-count snapshot must have zero total")
     core: dict[str, Any] = {
         "schema": SNAPSHOT_SCHEMA,
         "count": snapshot.count,
@@ -161,6 +167,10 @@ class CausalAverageStream:
             device=chunk.device,
         ).unsqueeze(-1)
         output = cumulative / counts
+        if not torch.isfinite(cumulative).all() or not torch.isfinite(output).all():
+            raise CausalAverageError(
+                "stream accumulation and averages must remain finite"
+            )
         self._sum = cumulative[-1].detach().clone()
         self._count += len(chunk)
         return output
@@ -194,5 +204,7 @@ class CausalAverageStream:
             )
         if not torch.isfinite(total).all():
             raise CausalAverageError("snapshot total must be finite")
+        if snapshot.count == 0 and bool(total.ne(0).any()):
+            raise CausalAverageError("zero-count snapshot must have zero total")
         self._sum = total.detach().clone()
         self._count = snapshot.count
