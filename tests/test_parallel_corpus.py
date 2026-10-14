@@ -1,6 +1,6 @@
 import unittest
 
-from ai_journey.parallel_corpus import extract_sentences
+from ai_journey.parallel_corpus import extract_sentences, Sentence, align_and_split
 from ai_journey.bpe import TokenizerError
 
 
@@ -22,3 +22,27 @@ class SentenceExtractionTests(unittest.TestCase):
         ):
             with self.assertRaises(TokenizerError):
                 extract_sentences(payload)
+
+
+class ParallelSplitTests(unittest.TestCase):
+    def test_translations_keep_matching_disjoint_ids_independent_of_file_order(self):
+        first = tuple(Sentence(str(index), f"first {index}") for index in range(10))
+        second = tuple(Sentence(str(index), f"second {index}") for index in range(10))
+        split = align_and_split(first, second, train_count=7)
+        self.assertEqual(
+            split, align_and_split(first[::-1], second[::-1], train_count=7)
+        )
+        self.assertEqual(
+            [row.sentence_id for row in split.first_train],
+            [row.sentence_id for row in split.second_train],
+        )
+        self.assertFalse(
+            {row.sentence_id for row in split.first_train}
+            & {row.sentence_id for row in split.first_validation}
+        )
+
+    def test_unpaired_or_duplicate_ids_are_rejected(self):
+        first = (Sentence("a", "one"), Sentence("b", "two"))
+        for second in (first[:1], (first[0], first[0])):
+            with self.assertRaises(TokenizerError):
+                align_and_split(first, second, train_count=1)
