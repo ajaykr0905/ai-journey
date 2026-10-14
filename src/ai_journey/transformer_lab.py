@@ -10,6 +10,7 @@ import pickle
 import random
 import re
 import tempfile
+import zipfile
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from hashlib import sha256
@@ -23,6 +24,7 @@ from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint as activation_checkpoint
 
 from .batch_normalization import ScratchBatchNorm
+from .tokenizer_codec import BPECodec
 
 
 class TransformerLabError(ValueError):
@@ -245,19 +247,23 @@ class CharacterCodec:
     def fingerprint(self) -> str:
         return sha256("".join(self.tokens).encode()).hexdigest()
 
+    @property
+    def vocab_size(self) -> int:
+        return len(self.tokens)
+
 
 @dataclass(frozen=True)
 class TokenCorpus:
     """Tokenized public text with immutable provenance and held-out split."""
 
-    codec: CharacterCodec
+    codec: CharacterCodec | BPECodec
     train_tokens: Tensor
     validation_tokens: Tensor
     source_sha256: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.codec, CharacterCodec):
-            raise TypeError("codec must be CharacterCodec")
+        if not isinstance(self.codec, (CharacterCodec, BPECodec)):
+            raise TypeError("codec must be CharacterCodec or BPECodec")
         _require_sha256_digest(self.source_sha256, "source_sha256")
         for name in ("train_tokens", "validation_tokens"):
             tokens = getattr(self, name)
@@ -312,7 +318,7 @@ class TokenCorpus:
 
     @property
     def vocab_size(self) -> int:
-        return len(self.codec.tokens)
+        return self.codec.vocab_size
 
     def fingerprint(self) -> str:
         digest = sha256()
@@ -886,21 +892,60 @@ def train_steps(
         or start_step < 0
     ):
         raise TransformerLabError("start_step must be a non-negative integer")
+    caller_modes = [(module, module.training) for module in model.modules()]
     model.train()
     metrics: list[StepMetric] = []
     for step in range(start_step, start_step + count):
-        x, y = cursor.next()
-        optimizer.zero_grad(set_to_none=True)
-        _, loss = model(x, y)
-        if loss is None:
-            raise RuntimeError("training loss was not computed")
-        if not bool(torch.isfinite(loss)):
-            raise TransformerLabError("training loss must be finite")
-        loss.backward()
-        gradient_norm = nn.utils.clip_grad_norm_(
-            model.parameters(), max_norm=config.gradient_clip, error_if_nonfinite=True
+        # This bounded lab prioritizes retry correctness over snapshot overhead.
+        saved_model = copy.deepcopy(model.state_dict())
+        saved_optimizer = copy.deepcopy(optimizer.state_dict())
+        saved_cursor = cursor.state_dict()
+        saved_rng = torch.get_rng_state().clone()
+        saved_python_rng = random.getstate()
+        saved_numpy_rng = np.random.get_state()
+        device = model.token_embedding.weight.device
+        saved_device_rng = (
+            torch.cuda.get_rng_state(device) if device.type == "cuda" else None
         )
-        optimizer.step()
+        saved_gradients = [
+            None if parameter.grad is None else parameter.grad.detach().clone()
+            for parameter in model.parameters()
+        ]
+        try:
+            x, y = cursor.next()
+            optimizer.zero_grad(set_to_none=True)
+            _, loss = model(x, y)
+            if loss is None:
+                raise RuntimeError("training loss was not computed")
+            if not bool(torch.isfinite(loss)):
+                raise TransformerLabError("training loss must be finite")
+            loss.backward()
+            gradient_norm = nn.utils.clip_grad_norm_(
+                model.parameters(),
+                max_norm=config.gradient_clip,
+                error_if_nonfinite=True,
+            )
+            optimizer.step()
+            _require_finite_checkpoint_state(model.state_dict(), "updated model")
+            _require_finite_checkpoint_state(
+                optimizer.state_dict(), "updated optimizer"
+            )
+        except Exception:
+            model.load_state_dict(saved_model)
+            optimizer.load_state_dict(saved_optimizer)
+            cursor.load_state_dict(saved_cursor)
+            torch.set_rng_state(saved_rng)
+            random.setstate(saved_python_rng)
+            np.random.set_state(saved_numpy_rng)
+            if saved_device_rng is not None:
+                torch.cuda.set_rng_state(saved_device_rng, device)
+            for parameter, gradient in zip(
+                model.parameters(), saved_gradients, strict=True
+            ):
+                parameter.grad = gradient
+            for module, mode in caller_modes:
+                module.training = mode
+            raise
         metrics.append(
             StepMetric(
                 step=step + 1,
@@ -1100,6 +1145,7 @@ def load_training_checkpoint(
     cursor: BatchCursor,
     training_config: TrainingConfig,
     corpus_fingerprint: str,
+    max_checkpoint_bytes: int = 64 * 1024 * 1024,
 ) -> int:
     """Validate and restore an exact transformer training checkpoint."""
 
@@ -1107,8 +1153,26 @@ def load_training_checkpoint(
     _require_sha256_digest(corpus_fingerprint, "corpus_fingerprint")
     if not isinstance(path, Path):
         raise TypeError("path must be pathlib.Path")
+    if type(max_checkpoint_bytes) is not int or max_checkpoint_bytes <= 0:
+        raise TransformerLabError("checkpoint byte budget must be positive")
     try:
-        payload = torch.load(path, map_location="cpu", weights_only=True)
+        with path.open("rb") as stream:
+            if os.fstat(stream.fileno()).st_size > max_checkpoint_bytes:
+                raise TransformerLabError("checkpoint archive exceeds its byte budget")
+            with zipfile.ZipFile(stream) as archive:
+                members = archive.infolist()
+                if sum(member.file_size for member in members) > max_checkpoint_bytes:
+                    raise TransformerLabError(
+                        "expanded checkpoint archive exceeds its byte budget"
+                    )
+                if any(
+                    member.compress_type != zipfile.ZIP_STORED for member in members
+                ):
+                    raise TransformerLabError(
+                        "checkpoint requires uncompressed torch.save ZIP records"
+                    )
+            stream.seek(0)
+            payload = torch.load(stream, map_location="cpu", weights_only=True)
     except (
         OSError,
         RuntimeError,
@@ -1117,6 +1181,7 @@ def load_training_checkpoint(
         IndexError,
         KeyError,
         ValueError,
+        zipfile.BadZipFile,
     ) as exc:
         raise TransformerLabError(f"unable to read checkpoint: {path}") from exc
     if not isinstance(payload, Mapping) or set(payload) not in (

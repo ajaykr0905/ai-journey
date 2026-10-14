@@ -22,6 +22,7 @@ ai-journey-day-38 = "ai_journey.day38_cli:main"
 ai-journey-day-38-infer = "ai_journey.day38_inference_cli:main"
 ai-journey-day-38-ablate = "ai_journey.day38_ablation:main"
 ai-journey-serving-benchmark = "ai_journey.serving_benchmark:main"
+ai-journey-tokenizer = "ai_journey.tokenizer_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
