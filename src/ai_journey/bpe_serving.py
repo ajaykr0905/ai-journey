@@ -8,6 +8,7 @@ import torch
 from .bpe import SpecialTokenizer, TokenizerError
 from .bpe_corpus import EOS_MARKER
 from .tokenizer_codec import BPECodec
+from .transformer_cache import prefill, decode as decode_cached
 from .transformer_lab import DecoderLanguageModel
 
 
@@ -44,6 +45,7 @@ def generate_utf8(
     seed=40,
     temperature=1.0,
     top_k=None,
+    cached=False,
 ):
     """Sample only valid UTF-8 continuations, with EOS and caller-state isolation.
 
@@ -52,6 +54,8 @@ def generate_utf8(
     """
     if not isinstance(model, DecoderLanguageModel) or not isinstance(codec, BPECodec):
         raise TypeError("generation requires a decoder and BPECodec")
+    if not isinstance(cached, bool):
+        raise TypeError("cached must be boolean")
     tokenizer = codec.tokenizer
     if not isinstance(tokenizer, SpecialTokenizer) or tokenizer.names != (EOS_MARKER,):
         raise TokenizerError("UTF-8 serving requires exactly one reserved EOS marker")
@@ -86,11 +90,15 @@ def generate_utf8(
     modes = [(module, module.training) for module in model.modules()]
     emitted = []
     stopped = False
+    cache = logits = None
     try:
         model.eval()
         for index in range(new_tokens):
-            context = torch.tensor([ids[-model.config.block_size :]], dtype=torch.long)
-            logits, _ = model(context)
+            if not cached or logits is None:
+                context = torch.tensor(
+                    [ids[-model.config.block_size :]], dtype=torch.long
+                )
+                logits, cache = prefill(model, context) if cached else model(context)
             scores = logits[0, -1] / temperature
             if not bool(torch.isfinite(scores).all()):
                 raise TokenizerError("generation logits must remain finite")
@@ -113,6 +121,10 @@ def generate_utf8(
                 stopped = True
                 break
             emitted.append(decoder.decode(tokenizer.token_bytes(token), final=False))
+            if cached and index + 1 < new_tokens:
+                logits, cache = decode_cached(
+                    model, torch.tensor([[token]], dtype=torch.long), cache
+                )
         emitted.append(decoder.decode(b"", final=True))
     finally:
         for module, mode in modes:
@@ -122,4 +134,5 @@ def generate_utf8(
         "text": prompt + "".join(emitted),
         "eos": stopped,
         "sampling_policy": "strict-utf8-with-byte-fallback-completion-budget",
+        "backend": "kv-cache" if cached else "full-forward",
     }

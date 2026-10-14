@@ -15,6 +15,19 @@ class ControlledCompressionTests(unittest.TestCase):
         en = tuple(Sentence(str(index), f"hello hello {index}") for index in range(8))
         return align_and_split(hi, en, train_count=6)
 
+    def test_distinct_ids_cannot_hide_exact_text_leakage(self):
+        split = self.split()
+        for family in ("first", "second"):
+            train = getattr(split, f"{family}_train")
+            validation = getattr(split, f"{family}_validation")
+            leaked = (
+                Sentence(validation[0].sentence_id, train[0].text),
+                *validation[1:],
+            )
+            bad = replace(split, **{f"{family}_validation": leaked})
+            with self.assertRaisesRegex(TokenizerError, "text duplicates"):
+                run_compression_experiment(bad)
+
     def test_three_controlled_sizes_and_cross_language_holdouts_are_reproducible(self):
         first = run_compression_experiment(self.split(), vocab_sizes=(258, 260, 262))
         second = run_compression_experiment(self.split(), vocab_sizes=(258, 260, 262))

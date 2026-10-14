@@ -1,6 +1,14 @@
 {
   "required_files": [
     "README.md",
+    "docs/bpe-training-serving.md",
+    "scripts/verify_bpe_lab.py",
+    "src/ai_journey/bpe.py",
+    "src/ai_journey/bpe_train_cli.py",
+    "src/ai_journey/bpe_infer_cli.py",
+    "src/ai_journey/bpe_serving_benchmark.py",
+    "src/ai_journey/tokenizer_restart_cli.py",
+    "src/ai_journey/export_verification.py",
     "PROGRESS.md",
     "SECURITY.md",
     "requirements.txt",

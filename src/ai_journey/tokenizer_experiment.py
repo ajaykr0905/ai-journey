@@ -55,6 +55,11 @@ def run_compression_experiment(
         raise TokenizerError("partition ids must be unique and disjoint")
     train = (split.first_train, split.second_train)
     heldout = (split.first_validation, split.second_validation)
+    for fitting, validation in zip(train, heldout, strict=True):
+        if {row.text for row in fitting}.intersection(row.text for row in validation):
+            raise TokenizerError(
+                "held-out text duplicates training text under distinct ids"
+            )
     evaluations = []
     for family, records in enumerate(train):
         documents = tuple(row.text for row in records)

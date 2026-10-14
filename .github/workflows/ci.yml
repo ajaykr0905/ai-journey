@@ -39,6 +39,24 @@ jobs:
           ruff format --check src/ai_journey/day38_serving.py src/ai_journey/day38_inference_cli.py src/ai_journey/day38_ablation.py tests/test_day38_serving.py tests/test_day38_ablation.py tests/test_transformer_runtime_safety.py
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
+      - name: Check BPE source tests and pipeline formatting
+        run: |
+          ruff check src/ai_journey/bpe*.py src/ai_journey/token*.py src/ai_journey/parallel*.py src/ai_journey/export_verification.py src/ai_journey/day40_cli.py tests/test_bpe*.py tests/test_tokenizer*.py tests/test_parallel*.py tests/test_export_verification.py tests/test_run_day_40.py scripts/verify_bpe_lab.py
+          ruff format --check src/ai_journey/bpe*.py src/ai_journey/token*.py src/ai_journey/parallel*.py src/ai_journey/export_verification.py src/ai_journey/day40_cli.py tests/test_bpe*.py tests/test_tokenizer*.py tests/test_parallel*.py tests/test_export_verification.py tests/test_run_day_40.py scripts/verify_bpe_lab.py
+      - name: Fetch immutable public BPE snapshots
+        run: |
+          mkdir -p /tmp/ai-journey-artifacts/bpe-sources
+          curl --fail --location --retry 2 --max-time 60 https://raw.githubusercontent.com/UniversalDependencies/UD_Hindi-PUD/33e5ecd280d97c7b744993a1e12230559c94fc89/hi_pud-ud-test.conllu --output /tmp/ai-journey-artifacts/bpe-sources/hindi.conllu
+          curl --fail --location --retry 2 --max-time 60 https://raw.githubusercontent.com/UniversalDependencies/UD_English-PUD/6e328e8195c04a297c1e375d21fe663be1ce6178/en_pud-ud-test.conllu --output /tmp/ai-journey-artifacts/bpe-sources/english.conllu
+      - name: Certify BPE public-data restart and paired serving
+        env:
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+        run: >-
+          python scripts/verify_bpe_lab.py
+          --hindi /tmp/ai-journey-artifacts/bpe-sources/hindi.conllu
+          --english /tmp/ai-journey-artifacts/bpe-sources/english.conllu
+          --artifact-dir /tmp/ai-journey-artifacts/bpe
       - name: Run Days 0-11
         run: python scripts/run_days_00_11.py --artifact-dir /tmp/ai-journey-artifacts
       - name: Run Day 12 shape validation

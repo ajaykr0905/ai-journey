@@ -45,6 +45,21 @@ def merge_pair(
     return tuple(output)
 
 
+def _weighted_pair_counts(streams):
+    counts = Counter()
+    for stream, weight in streams.items():
+        for pair, frequency in pair_counts(stream).items():
+            counts[pair] += frequency * weight
+    return counts
+
+
+def _merge_weighted_streams(streams, pair, replacement):
+    merged = Counter()
+    for stream, weight in streams.items():
+        merged[merge_pair(stream, pair, replacement)] += weight
+    return merged
+
+
 class ByteTokenizer:
     """Lossless UTF-8 byte BPE with immutable, dependency-ordered merge ranks."""
 
@@ -99,20 +114,16 @@ class ByteTokenizer:
 
     @classmethod
     def _train_segments(cls, segments, *, vocab_size, min_frequency):
-        streams = [tuple(segment.encode("utf-8")) for segment in segments]
+        streams = Counter(tuple(segment.encode("utf-8")) for segment in segments)
         merges = []
         while len(merges) + 256 < vocab_size:
-            counts = Counter()
-            for values in streams:
-                counts.update(pair_counts(values))
+            counts = _weighted_pair_counts(streams)
             if not counts:
                 break
             pair = min(counts, key=lambda candidate: (-counts[candidate], candidate))
             if counts[pair] < min_frequency:
                 break
-            streams = [
-                merge_pair(values, pair, 256 + len(merges)) for values in streams
-            ]
+            streams = _merge_weighted_streams(streams, pair, 256 + len(merges))
             merges.append(pair)
         return cls(tuple(merges))
 

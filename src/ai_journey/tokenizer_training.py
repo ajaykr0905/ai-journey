@@ -4,7 +4,13 @@ from collections import Counter
 from hashlib import sha256
 import json
 
-from .bpe import ByteTokenizer, RegexTokenizer, TokenizerError, pair_counts, merge_pair
+from .bpe import (
+    ByteTokenizer,
+    RegexTokenizer,
+    TokenizerError,
+    _weighted_pair_counts,
+    _merge_weighted_streams,
+)
 
 
 def training_segments(documents: tuple[str, ...], *, pattern: str | None = None):
@@ -43,7 +49,7 @@ class BPETrainingSession:
     def __init__(self, documents, *, min_frequency=2, pattern=None):
         ByteTokenizer.train("", min_frequency=min_frequency)
         segments = training_segments(documents, pattern=pattern)
-        self._streams = [tuple(piece.encode()) for piece in segments]
+        self._streams = Counter(tuple(piece.encode()) for piece in segments)
         self._identity = sha256(
             json.dumps(documents, ensure_ascii=False).encode()
         ).hexdigest()
@@ -66,18 +72,14 @@ class BPETrainingSession:
         ):
             raise TokenizerError("merge budget exceeds the bounded vocabulary")
         for _ in range(merge_count):
-            counts = Counter()
-            for stream in self._streams:
-                counts.update(pair_counts(stream))
+            counts = _weighted_pair_counts(self._streams)
             if not counts:
                 break
             pair = min(counts, key=lambda candidate: (-counts[candidate], candidate))
             if counts[pair] < self._min_frequency:
                 break
             replacement = 256 + len(self._merges)
-            self._streams = [
-                merge_pair(stream, pair, replacement) for stream in self._streams
-            ]
+            self._streams = _merge_weighted_streams(self._streams, pair, replacement)
             self._merges.append(pair)
         return self.tokenizer
 

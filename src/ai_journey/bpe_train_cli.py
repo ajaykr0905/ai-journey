@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .bpe import DEFAULT_PATTERN, TokenizerError
 from .bpe_corpus import build_bpe_corpus
+from .export_verification import verify_export
 from .serving_benchmark import _publish
 from .tokenizer_cli import read_documents
 from .tokenizer_io import save_tokenizer
@@ -24,6 +25,8 @@ def main(argv=None):
     parser.add_argument("--block-size", type=int, default=8)
     parser.add_argument("--regex", action="store_true")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--source-snapshot", type=Path)
     args = parser.parse_args(argv)
     try:
         paths = [
@@ -32,6 +35,21 @@ def main(argv=None):
         ]
         if len(set(paths)) != len(paths):
             raise TokenizerError("input and output paths must be distinct")
+        if args.source_snapshot is not None and args.manifest is None:
+            raise TokenizerError("source verification requires an export manifest")
+        if args.manifest is not None:
+            if any(
+                path.resolve() in paths[2:]
+                for path in (args.manifest, args.source_snapshot)
+                if path is not None
+            ):
+                raise TokenizerError("output paths must preserve provenance inputs")
+            verify_export(
+                args.manifest,
+                args.train,
+                args.validation,
+                source_path=args.source_snapshot,
+            )
         if (
             not 256 <= args.vocab_size <= 512
             or not 1 <= args.steps <= 100
