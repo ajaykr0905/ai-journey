@@ -111,3 +111,22 @@ def align_and_split(
         tuple(left[value] for value in heldout),
         tuple(right[value] for value in heldout),
     )
+
+
+def parallel_folds(first, second, *, fold_count=10, seed=40):
+    """Visit every parallel sentence once as held out, using balanced folds."""
+    if type(fold_count) is not int or not 2 <= fold_count <= len(first):
+        raise TokenizerError("fold_count must leave nonempty train and held-out sets")
+    # Reuse alignment and stable seeded ordering; join the two partitions back.
+    aligned = align_and_split(first, second, train_count=1, seed=seed)
+    left = aligned.first_train + aligned.first_validation
+    right = aligned.second_train + aligned.second_validation
+    return tuple(
+        ParallelSplit(
+            tuple(row for index, row in enumerate(left) if index % fold_count != fold),
+            tuple(row for index, row in enumerate(right) if index % fold_count != fold),
+            tuple(row for index, row in enumerate(left) if index % fold_count == fold),
+            tuple(row for index, row in enumerate(right) if index % fold_count == fold),
+        )
+        for fold in range(fold_count)
+    )

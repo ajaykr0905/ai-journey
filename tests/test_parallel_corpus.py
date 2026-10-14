@@ -1,6 +1,11 @@
 import unittest
 
-from ai_journey.parallel_corpus import extract_sentences, Sentence, align_and_split
+from ai_journey.parallel_corpus import (
+    extract_sentences,
+    Sentence,
+    align_and_split,
+    parallel_folds,
+)
 from ai_journey.bpe import TokenizerError
 
 
@@ -46,3 +51,25 @@ class ParallelSplitTests(unittest.TestCase):
         for second in (first[:1], (first[0], first[0])):
             with self.assertRaises(TokenizerError):
                 align_and_split(first, second, train_count=1)
+
+    def test_balanced_cross_validation_visits_every_translation_exactly_once(self):
+        first = tuple(Sentence(str(index), f"first {index}") for index in range(23))
+        second = tuple(Sentence(str(index), f"second {index}") for index in range(23))
+        folds = parallel_folds(first, second, fold_count=10)
+        self.assertEqual(
+            folds, parallel_folds(first[::-1], second[::-1], fold_count=10)
+        )
+        seen = []
+        sizes = []
+        for split in folds:
+            heldout = [row.sentence_id for row in split.first_validation]
+            seen.extend(heldout)
+            sizes.append(len(heldout))
+            self.assertEqual(
+                heldout, [row.sentence_id for row in split.second_validation]
+            )
+            self.assertFalse(
+                set(heldout) & {row.sentence_id for row in split.first_train}
+            )
+        self.assertEqual(sorted(seen), sorted(row.sentence_id for row in first))
+        self.assertLessEqual(max(sizes) - min(sizes), 1)
