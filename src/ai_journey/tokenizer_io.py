@@ -5,7 +5,6 @@ from hashlib import sha256
 from pathlib import Path
 
 from .bpe import ByteTokenizer, RegexTokenizer, SpecialTokenizer, TokenizerError
-from .serving_benchmark import _publish
 
 
 def tokenizer_state(tokenizer) -> dict:
@@ -66,6 +65,9 @@ def _restore(state):
 
 
 def save_tokenizer(path: Path, tokenizer) -> None:
+    # Publication uses the shared durable writer; identity does not load models.
+    from .serving_benchmark import _publish
+
     if not isinstance(path, Path):
         raise TypeError("path must be pathlib.Path")
     _publish(

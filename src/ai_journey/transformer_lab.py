@@ -23,6 +23,7 @@ from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint as activation_checkpoint
 
 from .batch_normalization import ScratchBatchNorm
+from .tokenizer_codec import BPECodec
 
 
 class TransformerLabError(ValueError):
@@ -245,19 +246,23 @@ class CharacterCodec:
     def fingerprint(self) -> str:
         return sha256("".join(self.tokens).encode()).hexdigest()
 
+    @property
+    def vocab_size(self) -> int:
+        return len(self.tokens)
+
 
 @dataclass(frozen=True)
 class TokenCorpus:
     """Tokenized public text with immutable provenance and held-out split."""
 
-    codec: CharacterCodec
+    codec: CharacterCodec | BPECodec
     train_tokens: Tensor
     validation_tokens: Tensor
     source_sha256: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.codec, CharacterCodec):
-            raise TypeError("codec must be CharacterCodec")
+        if not isinstance(self.codec, (CharacterCodec, BPECodec)):
+            raise TypeError("codec must be CharacterCodec or BPECodec")
         _require_sha256_digest(self.source_sha256, "source_sha256")
         for name in ("train_tokens", "validation_tokens"):
             tokens = getattr(self, name)
@@ -312,7 +317,7 @@ class TokenCorpus:
 
     @property
     def vocab_size(self) -> int:
-        return len(self.codec.tokens)
+        return self.codec.vocab_size
 
     def fingerprint(self) -> str:
         digest = sha256()
