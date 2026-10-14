@@ -1,6 +1,12 @@
 import unittest
 
-from ai_journey.bpe import pair_counts, merge_pair, TokenizerError, ByteTokenizer
+from ai_journey.bpe import (
+    pair_counts,
+    merge_pair,
+    TokenizerError,
+    ByteTokenizer,
+    RegexTokenizer,
+)
 
 
 class PairPrimitiveTests(unittest.TestCase):
@@ -37,3 +43,21 @@ class ByteTokenizerTests(unittest.TestCase):
         self.assertEqual(ByteTokenizer.train("x").vocab_size, 256)
         with self.assertRaises(TokenizerError):
             ByteTokenizer().decode_bytes([256])
+
+
+class RegexTokenizerTests(unittest.TestCase):
+    def test_training_respects_piece_boundaries(self):
+        text = "a b " * 100
+        tokenizer = RegexTokenizer.train(text)
+        self.assertEqual(tokenizer.vocab_size, 256)
+        self.assertGreater(ByteTokenizer.train(text).vocab_size, 256)
+        self.assertEqual(tokenizer.decode(tokenizer.encode(text)), text)
+
+    def test_lossless_unicode_and_pattern_coverage(self):
+        text = "नमस्ते\tதமிழ்\r\nhello 😀"
+        tokenizer = RegexTokenizer.train(text * 20)
+        self.assertEqual("".join(tokenizer.pieces(text)), text)
+        self.assertEqual(tokenizer.decode(tokenizer.encode(text)), text)
+        for pattern in (r"a*", r"(?=a)", r"a", "["):
+            with self.assertRaises(TokenizerError):
+                RegexTokenizer.train("abc", pattern=pattern)

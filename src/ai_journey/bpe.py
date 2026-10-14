@@ -2,6 +2,7 @@
 
 from collections import Counter
 from collections.abc import Sequence
+import re
 
 
 class TokenizerError(ValueError):
@@ -85,16 +86,26 @@ class ByteTokenizer:
         data = text.encode("utf-8")
         if len(data) > 1024 * 1024:
             raise TokenizerError("training corpus exceeds 1 MiB")
-        values = tuple(data)
+        return cls._train_segments(
+            (text,), vocab_size=vocab_size, min_frequency=min_frequency
+        )
+
+    @classmethod
+    def _train_segments(cls, segments, *, vocab_size, min_frequency):
+        streams = [tuple(segment.encode("utf-8")) for segment in segments]
         merges = []
         while len(merges) + 256 < vocab_size:
-            counts = pair_counts(values)
+            counts = Counter()
+            for values in streams:
+                counts.update(pair_counts(values))
             if not counts:
                 break
             pair = min(counts, key=lambda candidate: (-counts[candidate], candidate))
             if counts[pair] < min_frequency:
                 break
-            values = merge_pair(values, pair, 256 + len(merges))
+            streams = [
+                merge_pair(values, pair, 256 + len(merges)) for values in streams
+            ]
             merges.append(pair)
         return cls(tuple(merges))
 
@@ -118,3 +129,55 @@ class ByteTokenizer:
 
     def decode(self, values) -> str:
         return self.decode_bytes(values).decode("utf-8")
+
+
+DEFAULT_PATTERN = r"\w+|[^\w\s]+|\s+"
+
+
+class RegexTokenizer(ByteTokenizer):
+    """Experimental stdlib-Unicode segmentation; merges never cross regex pieces."""
+
+    def __init__(self, merges=(), *, pattern=DEFAULT_PATTERN):
+        super().__init__(merges)
+        if not isinstance(pattern, str) or not pattern:
+            raise TokenizerError("pattern must be a nonempty string")
+        try:
+            self._compiled = re.compile(pattern)
+        except re.error as exc:
+            raise TokenizerError("invalid tokenizer pattern") from exc
+        if self._compiled.match("") is not None:
+            raise TokenizerError("pattern must not match empty text")
+        self.pattern = pattern
+
+    def pieces(self, text):
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        pieces = []
+        position = 0
+        for match in self._compiled.finditer(text):
+            if match.start() != position or match.end() == position:
+                raise TokenizerError("pattern must cover every character exactly once")
+            pieces.append(match.group())
+            position = match.end()
+        if position != len(text):
+            raise TokenizerError("pattern must cover every character exactly once")
+        return tuple(pieces)
+
+    @classmethod
+    def train(cls, text, *, vocab_size=320, min_frequency=2, pattern=DEFAULT_PATTERN):
+        # Reuse basic training validation before applying boundary-aware counts.
+        ByteTokenizer.train("", vocab_size=vocab_size, min_frequency=min_frequency)
+        splitter = cls(pattern=pattern)
+        if len(text.encode("utf-8")) > 1024 * 1024:
+            raise TokenizerError("training corpus exceeds 1 MiB")
+        trained = ByteTokenizer._train_segments(
+            splitter.pieces(text), vocab_size=vocab_size, min_frequency=min_frequency
+        )
+        return cls(trained.merges, pattern=pattern)
+
+    def encode(self, text):
+        return tuple(
+            token
+            for piece in self.pieces(text)
+            for token in super(RegexTokenizer, self).encode(piece)
+        )
