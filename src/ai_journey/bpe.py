@@ -127,6 +127,12 @@ class ByteTokenizer:
             raise TokenizerError("token id is outside the vocabulary")
         return b"".join(self._vocabulary[value] for value in values)
 
+    def token_bytes(self, value: int) -> bytes:
+        token_ids([value])
+        if value >= self.vocab_size:
+            raise TokenizerError("token id is outside the vocabulary")
+        return self._vocabulary[value]
+
     def decode(self, values) -> str:
         return self.decode_bytes(values).decode("utf-8")
 
@@ -181,3 +187,77 @@ class RegexTokenizer(ByteTokenizer):
             for piece in self.pieces(text)
             for token in super(RegexTokenizer, self).encode(piece)
         )
+
+
+class SpecialTokenizer:
+    """Reserve named markers while rejecting them in untrusted ordinary input."""
+
+    def __init__(self, tokenizer: ByteTokenizer, names: tuple[str, ...]):
+        if not isinstance(tokenizer, ByteTokenizer):
+            raise TypeError("tokenizer must be a byte tokenizer")
+        if (
+            not isinstance(names, tuple)
+            or len(names) > 64
+            or len(set(names)) != len(names)
+            or any(
+                not isinstance(name, str) or not 1 <= len(name) <= 128 for name in names
+            )
+        ):
+            raise TokenizerError("special names must be unique bounded strings")
+        for name in names:
+            name.encode("utf-8")
+        self.tokenizer = tokenizer
+        self.names = names
+        self._special_ids = {
+            name: tokenizer.vocab_size + index for index, name in enumerate(names)
+        }
+        self._special_bytes = tuple(name.encode("utf-8") for name in names)
+        self._pattern = (
+            re.compile(
+                "|".join(
+                    re.escape(name)
+                    for name in sorted(names, key=lambda name: (-len(name), name))
+                )
+            )
+            if names
+            else None
+        )
+
+    @property
+    def vocab_size(self):
+        return self.tokenizer.vocab_size + len(self.names)
+
+    def encode(self, text: str, *, allowed: frozenset[str] = frozenset()):
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        if not isinstance(allowed, frozenset) or not allowed.issubset(
+            self._special_ids
+        ):
+            raise TokenizerError("allowed markers must name registered special tokens")
+        if self._pattern is None:
+            return self.tokenizer.encode(text)
+        output = []
+        position = 0
+        for match in self._pattern.finditer(text):
+            name = match.group()
+            if name not in allowed:
+                raise TokenizerError("special marker requires explicit authorization")
+            output.extend(self.tokenizer.encode(text[position : match.start()]))
+            output.append(self._special_ids[name])
+            position = match.end()
+        output.extend(self.tokenizer.encode(text[position:]))
+        return tuple(output)
+
+    def token_bytes(self, value):
+        token_ids([value])
+        if value < self.tokenizer.vocab_size:
+            return self.tokenizer.token_bytes(value)
+        if value >= self.vocab_size:
+            raise TokenizerError("token id is outside the vocabulary")
+        return self._special_bytes[value - self.tokenizer.vocab_size]
+
+    def decode_bytes(self, values):
+        return b"".join(self.token_bytes(value) for value in token_ids(values))
+
+    def decode(self, values):
+        return self.decode_bytes(values).decode("utf-8")

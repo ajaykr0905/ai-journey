@@ -6,6 +6,7 @@ from ai_journey.bpe import (
     TokenizerError,
     ByteTokenizer,
     RegexTokenizer,
+    SpecialTokenizer,
 )
 
 
@@ -61,3 +62,26 @@ class RegexTokenizerTests(unittest.TestCase):
         for pattern in (r"a*", r"(?=a)", r"a", "["):
             with self.assertRaises(TokenizerError):
                 RegexTokenizer.train("abc", pattern=pattern)
+
+
+class SpecialTokenizerTests(unittest.TestCase):
+    def test_untrusted_markers_require_explicit_permission(self):
+        tokenizer = SpecialTokenizer(RegexTokenizer(), ("<end>", "<end><pad>"))
+        with self.assertRaisesRegex(TokenizerError, "authorization"):
+            tokenizer.encode("user <end>")
+        text = "नमस्ते<end><pad>hello<end>"
+        values = tokenizer.encode(text, allowed=frozenset(tokenizer.names))
+        self.assertEqual(values.count(257), 1)
+        self.assertEqual(values.count(256), 1)
+        self.assertEqual(tokenizer.decode(values), text)
+        ordinary = tokenizer.tokenizer.encode(text)
+        self.assertNotIn(256, ordinary)
+
+    def test_registered_ids_do_not_collide_with_merged_tokens(self):
+        base = ByteTokenizer.train("abab" * 20)
+        tokenizer = SpecialTokenizer(base, ("<end>",))
+        self.assertEqual(
+            tokenizer.encode("<end>", allowed=frozenset({"<end>"})), (base.vocab_size,)
+        )
+        with self.assertRaises(TokenizerError):
+            tokenizer.encode("text", allowed=frozenset({"typo"}))
