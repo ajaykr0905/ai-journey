@@ -29,6 +29,7 @@ ai-journey-corpus-export = "ai_journey.parallel_export:main"
 ai-journey-bpe-train = "ai_journey.bpe_train_cli:main"
 ai-journey-bpe-infer = "ai_journey.bpe_infer_cli:main"
 ai-journey-bpe-encode-benchmark = "ai_journey.bpe_benchmark:main"
+ai-journey-bpe-model-compare = "ai_journey.bpe_model_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
