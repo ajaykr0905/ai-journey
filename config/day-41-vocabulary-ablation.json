@@ -1,0 +1,8 @@
+{
+  "vocab_sizes": [256, 272, 304],
+  "seeds": [41, 42, 43],
+  "steps": 20,
+  "block_size": 8,
+  "batch_size": 4,
+  "hypothesis": "More BPE merges reduce content token count; held-out bits per byte need not improve."
+}
