@@ -30,6 +30,7 @@ ai-journey-bpe-train = "ai_journey.bpe_train_cli:main"
 ai-journey-bpe-infer = "ai_journey.bpe_infer_cli:main"
 ai-journey-bpe-encode-benchmark = "ai_journey.bpe_benchmark:main"
 ai-journey-bpe-model-compare = "ai_journey.bpe_model_cli:main"
+ai-journey-bpe-model-verify = "ai_journey.bpe_model_verify:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
