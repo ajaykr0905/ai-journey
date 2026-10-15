@@ -57,6 +57,13 @@ jobs:
           --hindi /tmp/ai-journey-artifacts/bpe-sources/hindi.conllu
           --english /tmp/ai-journey-artifacts/bpe-sources/english.conllu
           --artifact-dir /tmp/ai-journey-artifacts/bpe
+      - name: Compare decoder vocabulary budgets on pinned public text
+        env:
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+        run: |
+          ai-journey-bpe-model-compare --hindi /tmp/ai-journey-artifacts/bpe-sources/hindi.conllu --english /tmp/ai-journey-artifacts/bpe-sources/english.conllu --protocol config/day-41-vocabulary-ablation.json --output /tmp/ai-journey-artifacts/bpe/model-comparison.json
+          ai-journey-bpe-model-verify --report /tmp/ai-journey-artifacts/bpe/model-comparison.json --hindi /tmp/ai-journey-artifacts/bpe-sources/hindi.conllu --english /tmp/ai-journey-artifacts/bpe-sources/english.conllu
       - name: Run Days 0-11
         run: python scripts/run_days_00_11.py --artifact-dir /tmp/ai-journey-artifacts
       - name: Run Day 12 shape validation
