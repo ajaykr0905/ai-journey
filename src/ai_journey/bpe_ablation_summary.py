@@ -153,6 +153,17 @@ def summarize_ablation(report: dict) -> dict:
         for budget in protocol.vocab_sizes:
             rows = [matrix[seed, budget] for seed in protocol.seeds]
             scores = [row["final"]["content_bits_per_byte"] for row in rows]
+            initial_scores = [row["initial"]["content_bits_per_byte"] for row in rows]
+            # A tokenizer can lower this no-learning baseline simply by merging.
+            uniform = [
+                math.log2(row["actual_vocab_size_with_eos"])
+                * row["final"]["content_tokens"]
+                / row["final"]["utf8_bytes"]
+                for row in rows
+            ]
+            learned_gains = [
+                before - after for before, after in zip(initial_scores, scores)
+            ]
             deltas = [
                 score - matrix[seed, 256]["final"]["content_bits_per_byte"]
                 for seed, score in zip(protocol.seeds, scores)
@@ -164,6 +175,13 @@ def summarize_ablation(report: dict) -> dict:
                     "parameter_count": rows[0]["parameter_count"],
                     "seeds": list(protocol.seeds),
                     "mean_bits_per_byte": fmean(scores),
+                    "mean_initial_bits_per_byte": fmean(initial_scores),
+                    "uniform_token_bits_per_byte": fmean(uniform),
+                    "mean_gain_from_uniform_bits_per_byte": fmean(
+                        before - after for before, after in zip(uniform, scores)
+                    ),
+                    "mean_gain_from_initial_bits_per_byte": fmean(learned_gains),
+                    "gain_from_initial_range": [min(learned_gains), max(learned_gains)],
                     "seed_sd_bits_per_byte": stdev(scores),
                     "paired_deltas_vs_byte": deltas,
                     "mean_paired_delta": fmean(deltas),

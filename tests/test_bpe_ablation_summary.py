@@ -1,4 +1,5 @@
 from copy import deepcopy
+import math
 import unittest
 
 from ai_journey.bpe import TokenizerError
@@ -38,6 +39,29 @@ class PairedAblationSummaryTests(unittest.TestCase):
             ]
             self.assertEqual(arm["paired_deltas_vs_byte"], expected)
             self.assertAlmostEqual(arm["mean_paired_delta"], sum(expected) / 2)
+
+    def test_uniform_baseline_does_not_confuse_token_compression_with_learning(self):
+        summary = summarize_ablation(self.report)
+        for arm in summary["arms"]:
+            rows = [
+                row
+                for row in self.report["trials"]
+                if row["requested_vocab_size"] == arm["requested_vocab_size"]
+            ]
+            expected = sum(
+                math.log2(row["actual_vocab_size_with_eos"])
+                / row["final"]["bytes_per_content_token"]
+                for row in rows
+            ) / len(rows)
+            self.assertAlmostEqual(arm["uniform_token_bits_per_byte"], expected)
+            self.assertAlmostEqual(
+                arm["mean_gain_from_initial_bits_per_byte"],
+                arm["mean_initial_bits_per_byte"] - arm["mean_bits_per_byte"],
+            )
+            self.assertAlmostEqual(
+                arm["mean_gain_from_uniform_bits_per_byte"],
+                expected - arm["mean_bits_per_byte"],
+            )
 
     def test_tampering_or_incomplete_pairing_is_rejected(self):
         mutations = [
