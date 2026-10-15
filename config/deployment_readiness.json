@@ -1,5 +1,12 @@
 {
   "required_files": [
+    "docs/bpe-model-comparison.md",
+    "config/day-41-vocabulary-ablation.json",
+    "src/ai_journey/bpe_likelihood.py",
+    "src/ai_journey/bpe_model_ablation.py",
+    "src/ai_journey/bpe_ablation_summary.py",
+    "src/ai_journey/bpe_model_cli.py",
+    "src/ai_journey/bpe_model_verify.py",
     "README.md",
     "docs/bpe-training-serving.md",
     "scripts/verify_bpe_lab.py",
