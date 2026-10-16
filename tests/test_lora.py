@@ -357,6 +357,38 @@ class ArchitectureIdentityTests(unittest.TestCase):
         self.assertEqual(frozen_fingerprint(first), before)
 
 
+class FrozenBufferTests(unittest.TestCase):
+    def test_scratch_batchnorm_decoder_is_rejected_before_installation(self):
+        base = DecoderLanguageModel(
+            TransformerConfig(
+                vocab_size=8,
+                block_size=4,
+                embedding_dim=8,
+                head_count=2,
+                layer_count=1,
+                normalization_mode="scratch_batch_norm",
+            )
+        )
+        before = {name: value.clone() for name, value in base.state_dict().items()}
+        with self.assertRaisesRegex(LoRAError, "stateless normalization"):
+            inject_adapters(base, ("blocks.0.attention.query_key_value",), LoRAConfig())
+        for name, value in base.state_dict().items():
+            self.assertTrue(torch.equal(value, before[name]))
+
+    def test_torch_batchnorm_is_also_rejected_and_layernorm_is_supported(self):
+        with self.assertRaisesRegex(LoRAError, "stateless normalization"):
+            inject_adapters(
+                nn.Sequential(nn.Linear(4, 4), nn.BatchNorm1d(4)), ("0",), LoRAConfig()
+            )
+        model = inject_adapters(
+            nn.Sequential(nn.Linear(4, 4), nn.LayerNorm(4)), ("0",), LoRAConfig()
+        )
+        before = frozen_fingerprint(model)
+        model(torch.ones(2, 4)).sum().backward()
+        audit_adapter_gradients(model)
+        self.assertEqual(frozen_fingerprint(model), before)
+
+
 class AdapterGradientAuditTests(unittest.TestCase):
     def setUp(self):
         self.model = inject_adapters(

@@ -10,6 +10,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from .batch_normalization import ScratchBatchNorm
+
 
 class LoRAError(ValueError):
     """An adapter, its target, or its saved state violates the contract."""
@@ -119,6 +121,13 @@ def inject_adapters(model: nn.Module, targets: tuple[str, ...], config: LoRAConf
         raise LoRAError("targets must be a nonempty tuple of distinct module paths")
     if any(isinstance(module, LoRALinear) for module in model.modules()):
         raise LoRAError("model already contains adapters")
+    if any(
+        isinstance(module, (ScratchBatchNorm, nn.modules.batchnorm._BatchNorm))
+        for module in model.modules()
+    ):
+        raise LoRAError(
+            "frozen adapter bases require stateless normalization; BatchNorm running statistics would change"
+        )
     all_modules = list(model.named_modules(remove_duplicate=False))
     for name in targets:
         try:

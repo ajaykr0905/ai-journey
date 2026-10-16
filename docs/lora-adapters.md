@@ -45,6 +45,8 @@ Installing adapters returns an independent copy, preserves the original model's
 trainability and logits at initialization, and freezes every original parameter.
 Targets must be distinct, explicitly named, unshared `nn.Linear` modules. Target
 order does not change initialization. Already adapted models are rejected.
+Bases using BatchNorm are rejected because freezing its parameters would still
+allow running statistics to change. The decoder experiment uses LayerNorm.
 The adapter optimizer checks the whole trainability boundary before allocating
 AdamW state. The gradient audit accepts A's expected zero first-step gradient
 while detecting disconnected factors and accidental base gradients.
