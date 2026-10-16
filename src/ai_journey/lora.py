@@ -315,3 +315,28 @@ def merge_adapters(model: nn.Module):
         parent, _, child = name.rpartition(".")
         result.get_submodule(parent).add_module(child, dense)
     return result
+
+
+def audit_adapter_gradients(model: nn.Module):
+    """Fail on a broken freeze boundary, stale base grads, or absent/nonfinite grads.
+
+    Zero gradients are valid: with B initialized at zero, A's first gradient
+    is analytically zero. An absent gradient is a disconnected parameter.
+    Call after backward and before optimizer.step().
+    """
+    factors = adapter_parameters(model)
+    ids = {id(p) for p in factors}
+    if not ids:
+        raise LoRAError("gradient audit requires adapters")
+    norms = {}
+    for name, parameter in model.named_parameters():
+        if id(parameter) not in ids:
+            if parameter.requires_grad or parameter.grad is not None:
+                raise LoRAError(f"frozen parameter received a gradient: {name}")
+            continue
+        if not parameter.requires_grad or parameter.grad is None:
+            raise LoRAError(f"adapter factor is disconnected: {name}")
+        if not bool(torch.isfinite(parameter.grad).all()):
+            raise LoRAError(f"adapter gradient is nonfinite: {name}")
+        norms[name] = float(torch.linalg.vector_norm(parameter.grad.detach().double()))
+    return {"factor_count": len(factors), "gradient_norms": norms}

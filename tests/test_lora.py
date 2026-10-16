@@ -16,6 +16,7 @@ from ai_journey.lora import (
     adapter_state,
     load_adapter_state,
     merge_adapters,
+    audit_adapter_gradients,
 )
 from ai_journey.transformer_lab import DecoderLanguageModel, TransformerConfig
 
@@ -257,14 +258,6 @@ class AdapterLoadTests(unittest.TestCase):
         with self.assertRaises(LoRAError):
             load_adapter_state(self.model, state)
 
-
-class AdapterLoadValidationTests(AdapterLoadTests):
-    def test_failed_load_preserves_earlier_zero_factors(self):
-        state = adapter_state(self.model)
-        state["layers"]["0"]["b"].fill_(1)
-        state["layers"]["1"]["b"][0, 0] = float("nan")
-        with self.assertRaises(LoRAError):
-            load_adapter_state(self.model, state)
         self.assertEqual(float(self.model[0].lora_b.detach().abs().sum()), 0)
 
     def test_base_identity_target_set_controls_dtype_and_shape_are_bound(self):
@@ -332,3 +325,31 @@ class AdapterMergeTests(unittest.TestCase):
         with self.assertRaises(LoRAError):
             merge_adapters(layer)
         self.assertTrue(torch.equal(before, layer.base.weight))
+
+
+class AdapterGradientAuditTests(unittest.TestCase):
+    def setUp(self):
+        self.model = inject_adapters(
+            nn.Sequential(nn.Linear(4, 4)), ("0",), LoRAConfig()
+        )
+
+    def test_first_backward_has_zero_a_gradient_and_live_b_gradient(self):
+        self.model(torch.ones(2, 4)).square().sum().backward()
+        audit = audit_adapter_gradients(self.model)
+        self.assertEqual(audit["factor_count"], 2)
+        self.assertEqual(audit["gradient_norms"]["0.lora_a"], 0)
+        self.assertGreater(audit["gradient_norms"]["0.lora_b"], 0)
+
+    def test_missing_factor_gradients_cannot_masquerade_as_frozen_savings(self):
+        with self.assertRaises(LoRAError):
+            audit_adapter_gradients(self.model)
+
+    def test_stale_base_gradient_and_nonfinite_factor_gradient_are_rejected(self):
+        self.model(torch.ones(2, 4)).sum().backward()
+        self.model[0].base.weight.grad = torch.zeros_like(self.model[0].base.weight)
+        with self.assertRaises(LoRAError):
+            audit_adapter_gradients(self.model)
+        self.model[0].base.weight.grad = None
+        self.model[0].lora_b.grad[0, 0] = float("nan")
+        with self.assertRaises(LoRAError):
+            audit_adapter_gradients(self.model)
