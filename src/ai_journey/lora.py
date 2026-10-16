@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 import copy
 from hashlib import sha256
 import math
+import json
 
 import torch
 from torch import nn
@@ -143,3 +144,38 @@ def inject_adapters(model: nn.Module, targets: tuple[str, ...], config: LoRAConf
             LoRALinear(result.get_submodule(name), replace(config, seed=seed)),
         )
     return result
+
+
+def adapter_parameters(model: nn.Module):
+    """Return exactly the low-rank factors, in stable module traversal order."""
+    if not isinstance(model, nn.Module):
+        raise TypeError("model must be nn.Module")
+    return tuple(
+        parameter
+        for module in model.modules()
+        if isinstance(module, LoRALinear)
+        for parameter in (module.lora_a, module.lora_b)
+    )
+
+
+def parameter_summary(model: nn.Module):
+    """Count unique parameters without equating savings with measured RAM."""
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return {"total": total, "trainable": trainable, "frozen": total - trainable}
+
+
+def _tensor_digest(items):
+    digest = sha256()
+    for name, parameter in sorted(items):
+        value = parameter.detach().cpu().contiguous()
+        digest.update(json.dumps([name, list(value.shape), str(value.dtype)]).encode())
+        digest.update(value.reshape(-1).view(torch.uint8).numpy().tobytes())
+    return digest.hexdigest()
+
+
+def frozen_fingerprint(model: nn.Module):
+    """Bind names, shapes, dtypes and bytes of every frozen parameter/buffer."""
+    items = [(n, p) for n, p in model.named_parameters() if not p.requires_grad]
+    items.extend(model.named_buffers())
+    return _tensor_digest(items)

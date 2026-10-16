@@ -3,7 +3,15 @@ import unittest
 import torch
 from torch import nn
 
-from ai_journey.lora import LoRAConfig, LoRAError, LoRALinear, inject_adapters
+from ai_journey.lora import (
+    LoRAConfig,
+    LoRAError,
+    LoRALinear,
+    inject_adapters,
+    adapter_parameters,
+    parameter_summary,
+    frozen_fingerprint,
+)
 from ai_journey.transformer_lab import DecoderLanguageModel, TransformerConfig
 
 
@@ -127,3 +135,34 @@ class InjectionTests(unittest.TestCase):
         alias = nn.ModuleDict({"left": shared, "right": shared})
         with self.assertRaises(LoRAError):
             inject_adapters(alias, ("left",), LoRAConfig())
+
+
+class ParameterAccountingTests(unittest.TestCase):
+    def test_trainable_census_is_exact_for_a_frozen_projection(self):
+        model = nn.Sequential(nn.Linear(4, 6), nn.Linear(6, 2))
+        adapted = inject_adapters(model, ("0",), LoRAConfig(rank=2))
+        summary = parameter_summary(adapted)
+        self.assertEqual(summary["trainable"], 2 * (4 + 6))
+        self.assertEqual(summary["frozen"], sum(p.numel() for p in model.parameters()))
+        self.assertEqual(summary["total"], summary["trainable"] + summary["frozen"])
+        self.assertEqual(sum(p.numel() for p in adapter_parameters(adapted)), 20)
+        self.assertEqual(adapter_parameters(model), ())
+
+    def test_frozen_identity_ignores_updates_but_detects_base_corruption(self):
+        adapted = inject_adapters(nn.Sequential(nn.Linear(4, 4)), ("0",), LoRAConfig())
+        original = frozen_fingerprint(adapted)
+        with torch.no_grad():
+            adapted[0].lora_b.fill_(1)
+        self.assertEqual(frozen_fingerprint(adapted), original)
+        with torch.no_grad():
+            adapted[0].base.weight[0, 0] += 1
+        self.assertNotEqual(frozen_fingerprint(adapted), original)
+
+    def test_frozen_identity_includes_dtype_and_persistent_model_buffers(self):
+        adapted = inject_adapters(nn.Sequential(nn.Linear(4, 4)), ("0",), LoRAConfig())
+        original = frozen_fingerprint(adapted)
+        self.assertNotEqual(frozen_fingerprint(adapted.double()), original)
+        adapted.register_buffer("running_value", torch.tensor(1.0))
+        before = frozen_fingerprint(adapted)
+        adapted.running_value.fill_(2)
+        self.assertNotEqual(frozen_fingerprint(adapted), before)
