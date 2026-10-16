@@ -3,6 +3,7 @@ from dataclasses import replace
 import math
 import random
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -19,7 +20,9 @@ from ai_journey.lora_experiment import (
     isolated_cpu_runtime,
     train_on_batches,
     run_dense_comparison,
+    run_comparison,
 )
+from ai_journey.lora import LoRALinear
 from ai_journey.transformer_lab import DecoderLanguageModel, model_fingerprint
 
 
@@ -223,3 +226,54 @@ class PairedDenseComparisonTests(unittest.TestCase):
         self.assertEqual(
             run_dense_comparison(tiny_config()), run_dense_comparison(tiny_config())
         )
+
+
+class PairedAdapterComparisonTests(unittest.TestCase):
+    def test_all_arms_match_exposure_with_frozen_evidence_and_rank_capacity(self):
+        result = run_comparison(tiny_config())
+        for seed in result["seeds"]:
+            frozen, dense, rank1, rank2 = seed["trials"]
+            self.assertEqual(
+                [row["name"] for row in seed["trials"]],
+                ["frozen", "full", "lora-rank-1", "lora-rank-2"],
+            )
+            for rank, trial in enumerate((rank1, rank2), 1):
+                self.assertEqual(trial["parameters"]["trainable"], 6 * 4 * rank)
+                self.assertEqual(
+                    trial["parameters"]["frozen"], dense["parameters"]["total"]
+                )
+                self.assertLess(
+                    trial["parameters"]["trainable"], dense["parameters"]["trainable"]
+                )
+                self.assertEqual(trial["adapter"]["alpha"] / rank, 2.0)
+                self.assertEqual(trial["adapter"]["seed"], seed["seed"])
+                self.assertEqual(trial["merge"]["parameters"], frozen["parameters"])
+                self.assertLessEqual(trial["merge"]["probe_max_abs_error"], 1e-10)
+                self.assertNotEqual(trial["initial_sha256"], trial["final_sha256"])
+            for trial in seed["trials"]:
+                self.assertEqual(trial["initial_function_max_abs_error"], 0)
+                self.assertEqual(
+                    trial["frozen_before_sha256"], trial["frozen_after_sha256"]
+                )
+                self.assertEqual(trial["training"]["consumed_target_tokens"], 6)
+                self.assertEqual(trial["heldout"]["target_tokens"], 376)
+
+    def test_adapter_comparison_repeats_exactly_without_consuming_caller_rng(self):
+        state = torch.get_rng_state().clone()
+        first = run_comparison(tiny_config())
+        self.assertTrue(torch.equal(state, torch.get_rng_state()))
+        self.assertEqual(first, run_comparison(tiny_config()))
+
+    def test_frozen_weight_mutation_is_detected_during_an_adapter_trial(self):
+        def corrupt(model, batches, **kwargs):
+            result = train_on_batches(model, batches, **kwargs)
+            if any(isinstance(module, LoRALinear) for module in model.modules()):
+                with torch.no_grad():
+                    model.token_embedding.weight[0, 0] += 1
+            return result
+
+        with patch("ai_journey.lora_experiment.train_on_batches", side_effect=corrupt):
+            with self.assertRaisesRegex(
+                LoRAExperimentError, "frozen model state changed"
+            ):
+                run_comparison(tiny_config())

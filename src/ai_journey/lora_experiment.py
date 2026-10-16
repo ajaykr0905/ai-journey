@@ -13,7 +13,14 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
-from .lora import frozen_fingerprint, parameter_summary
+from .lora import (
+    LoRAConfig,
+    adapter_parameters,
+    frozen_fingerprint,
+    inject_adapters,
+    merge_adapters,
+    parameter_summary,
+)
 from .lora_data import (
     FIXTURE_ID,
     LoRAExperimentError,
@@ -248,6 +255,13 @@ LIMITATIONS = (
 )
 
 
+ADAPTER_TARGETS = (
+    "blocks.0.attention.query_key_value",
+    "blocks.0.attention.projection",
+)
+COMPARISON_ARMS = ("frozen", "full", "lora-rank-1", "lora-rank-2")
+
+
 def config_dict(config):
     return {**asdict(config), "seeds": list(config.seeds)}
 
@@ -261,7 +275,7 @@ def _probe(model, batch):
     return logits
 
 
-def _trial(name, model, base, batches, split, codec, config):
+def _trial(name, model, base, batches, split, codec, config, adapter_config=None):
     initial = model_fingerprint(model)
     counts = parameter_summary(model)
     frozen_before = frozen_fingerprint(model)
@@ -278,8 +292,22 @@ def _trial(name, model, base, batches, split, codec, config):
     frozen_after = frozen_fingerprint(model)
     if frozen_before != frozen_after:
         raise LoRAExperimentError("frozen model state changed during adaptation")
+    merge = None
+    if adapter_config is not None:
+        adapted_logits = _probe(model, batches[0])
+        merged = merge_adapters(model)
+        merge_error = float((adapted_logits - _probe(merged, batches[0])).abs().max())
+        if not math.isfinite(merge_error) or merge_error > 1e-10:
+            raise LoRAExperimentError("merged adapter failed dense probe equivalence")
+        merge = {
+            "probe_max_abs_error": merge_error,
+            "dense_sha256": model_fingerprint(merged),
+            "parameters": parameter_summary(merged),
+        }
     return {
         "name": name,
+        "adapter": asdict(adapter_config) if adapter_config is not None else None,
+        "merge": merge,
         "parameters": counts,
         "initial_sha256": initial,
         "final_sha256": model_fingerprint(model),
@@ -326,11 +354,37 @@ def _run_comparison(config, arms):
             pretrained = model_fingerprint(base)
             trials = []
             for name in arms:
-                model = copy.deepcopy(base)
-                if name == "frozen":
-                    model.requires_grad_(False)
+                adapter_config = None
+                if name.startswith("lora-rank-"):
+                    rank = int(name.rsplit("-", 1)[1])
+                    adapter_config = LoRAConfig(
+                        rank=rank,
+                        alpha=rank * config.adapter_scale,
+                        dropout=0.0,
+                        seed=seed,
+                    )
+                    model = inject_adapters(base, ADAPTER_TARGETS, adapter_config)
+                    if {id(p) for p in adapter_parameters(model)} != {
+                        id(p) for p in model.parameters() if p.requires_grad
+                    }:
+                        raise LoRAExperimentError(
+                            "only adapter factors may be optimized"
+                        )
+                else:
+                    model = copy.deepcopy(base)
+                    if name == "frozen":
+                        model.requires_grad_(False)
                 trials.append(
-                    _trial(name, model, base, adaptation, split, codec, config)
+                    _trial(
+                        name,
+                        model,
+                        base,
+                        adaptation,
+                        split,
+                        codec,
+                        config,
+                        adapter_config,
+                    )
                 )
             if pretrained != model_fingerprint(base):
                 raise LoRAExperimentError("forked trials mutated the pretrained source")
@@ -350,6 +404,7 @@ def _run_comparison(config, arms):
         "config": config_dict(config),
         "fixture": {"id": FIXTURE_ID, **split.evidence()},
         "model": asdict(model_config),
+        "adapter_targets": list(ADAPTER_TARGETS),
         "heldout": heldout_evidence(
             split.validation, codec, block_size=config.block_size
         ),
@@ -368,3 +423,8 @@ def _run_comparison(config, arms):
 def run_dense_comparison(config=ComparisonConfig()):
     """Pretrain once per seed, then compare dense adaptation with a frozen fork."""
     return _run_comparison(config, ("frozen", "full"))
+
+
+def run_comparison(config=ComparisonConfig()):
+    """Compare full, frozen, and rank-1/rank-2 forks with matched token exposure."""
+    return _run_comparison(config, COMPARISON_ARMS)
