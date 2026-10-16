@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import random
 
 from .transformer_lab import CharacterCodec
 
@@ -119,3 +120,115 @@ def synthetic_fixture() -> DocumentSplit:
         )
         (train if index < 8 else validation).append(doc)
     return DocumentSplit(tuple(pretrain), tuple(train), tuple(validation))
+
+
+def bounded_integer(value, name, minimum, maximum):
+    if type(value) is not int or not minimum <= value <= maximum:
+        raise LoRAExperimentError(
+            f"{name} must be an integer in [{minimum}, {maximum}]"
+        )
+    return value
+
+
+def _encoded_documents(documents, codec):
+    if (
+        not isinstance(documents, tuple)
+        or not documents
+        or any(not isinstance(doc, Document) for doc in documents)
+        or len({doc.document_id for doc in documents}) != len(documents)
+    ):
+        raise LoRAExperimentError("expected documents with unique ids")
+    if not isinstance(codec, CharacterCodec):
+        raise LoRAExperimentError("expected a training CharacterCodec")
+    return tuple((doc.document_id, codec.encode(doc.text)) for doc in documents)
+
+
+@dataclass(frozen=True)
+class TrainingWindow:
+    document_id: str
+    start: int
+    inputs: tuple[int, ...]
+    targets: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class HeldoutTarget:
+    document_id: str
+    target_index: int
+    context: tuple[int, ...]
+    target: int
+
+
+def training_batches(documents, codec, *, block_size, batch_size, steps, seed):
+    """Draw one immutable schedule with a private RNG; no document concatenation."""
+    bounded_integer(block_size, "block_size", 1, 32)
+    bounded_integer(batch_size, "batch_size", 1, 8)
+    bounded_integer(steps, "steps", 1, 64)
+    bounded_integer(seed, "seed", 0, 2**32 - 1)
+    candidates = []
+    for doc_id, tokens in _encoded_documents(documents, codec):
+        if len(tokens) <= block_size:
+            raise LoRAExperimentError(
+                "every training document needs a full block and target"
+            )
+        for start in range(len(tokens) - block_size):
+            candidates.append(
+                TrainingWindow(
+                    doc_id,
+                    start,
+                    tokens[start : start + block_size],
+                    tokens[start + 1 : start + block_size + 1],
+                )
+            )
+    rng = random.Random(seed)
+    return tuple(
+        tuple(rng.choice(candidates) for _ in range(batch_size)) for _ in range(steps)
+    )
+
+
+def schedule_evidence(batches):
+    return {
+        "steps": len(batches),
+        "windows": sum(len(batch) for batch in batches),
+        "target_tokens": sum(len(row.targets) for batch in batches for row in batch),
+        "sha256": canonical_digest(
+            [
+                [[row.document_id, row.start, row.inputs, row.targets] for row in batch]
+                for batch in batches
+            ]
+        ),
+    }
+
+
+def heldout_targets(documents, codec, *, block_size):
+    """Each target 1..len(document)-1 is scored once with a bounded left context.
+
+    The first character is context, never an unconditional target. Contexts may
+    overlap, but targets do not; absolute positions restart within each window.
+    """
+    bounded_integer(block_size, "block_size", 1, 32)
+    return tuple(
+        HeldoutTarget(
+            doc_id, index, tokens[max(0, index - block_size) : index], tokens[index]
+        )
+        for doc_id, tokens in _encoded_documents(documents, codec)
+        for index in range(1, len(tokens))
+    )
+
+
+def heldout_evidence(documents, codec, *, block_size):
+    targets = heldout_targets(documents, codec, block_size=block_size)
+    return {
+        "target_tokens": len(targets),
+        "per_document": [
+            {"document_id": doc.document_id, "target_tokens": len(doc.text) - 1}
+            for doc in documents
+        ],
+        "sha256": canonical_digest(
+            [
+                [row.document_id, row.target_index, row.context, row.target]
+                for row in targets
+            ]
+        ),
+        "policy": "one-last-logit-per-target; document-local sliding context; first character excluded",
+    }

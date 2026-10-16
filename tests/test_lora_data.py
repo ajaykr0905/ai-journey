@@ -1,4 +1,5 @@
 from dataclasses import replace
+import random
 import unittest
 
 from ai_journey.lora_data import (
@@ -6,6 +7,10 @@ from ai_journey.lora_data import (
     DocumentSplit,
     LoRAExperimentError,
     synthetic_fixture,
+    training_batches,
+    schedule_evidence,
+    heldout_targets,
+    heldout_evidence,
 )
 
 
@@ -65,3 +70,70 @@ class LoRAFixtureTests(unittest.TestCase):
             with self.subTest(doc_id=doc_id, text=text):
                 with self.assertRaises(LoRAExperimentError):
                     Document(doc_id, text)
+
+
+class LoRADocumentWindowTests(unittest.TestCase):
+    def test_training_schedule_is_local_reproducible_and_document_isolated(self):
+        split = synthetic_fixture()
+        controls = dict(block_size=7, batch_size=3, steps=5, seed=12)
+        before = random.getstate()
+        first = training_batches(split.train, split.codec(), **controls)
+        self.assertEqual(before, random.getstate())
+        self.assertEqual(
+            first, training_batches(split.train, split.codec(), **controls)
+        )
+        self.assertNotEqual(
+            first,
+            training_batches(split.train, split.codec(), **{**controls, "seed": 13}),
+        )
+        docs = {doc.document_id: split.codec().encode(doc.text) for doc in split.train}
+        for batch in first:
+            for row in batch:
+                tokens = docs[row.document_id]
+                self.assertEqual(row.inputs, tokens[row.start : row.start + 7])
+                self.assertEqual(row.targets, tokens[row.start + 1 : row.start + 8])
+        self.assertEqual(schedule_evidence(first)["target_tokens"], 105)
+
+    def test_holdout_covers_short_remainder_and_long_documents_exactly_once(self):
+        split = synthetic_fixture()
+        documents = (Document("short", "ca"), Document("long", "calm cedar.\n"))
+        targets = heldout_targets(documents, split.codec(), block_size=4)
+        expected = [
+            (doc.document_id, i) for doc in documents for i in range(1, len(doc.text))
+        ]
+        self.assertEqual(
+            [(row.document_id, row.target_index) for row in targets], expected
+        )
+        for row in targets:
+            text = next(
+                doc.text for doc in documents if doc.document_id == row.document_id
+            )
+            self.assertEqual(
+                split.codec().decode(row.context),
+                text[max(0, row.target_index - 4) : row.target_index],
+            )
+            self.assertEqual(split.codec().tokens[row.target], text[row.target_index])
+        evidence = heldout_evidence(documents, split.codec(), block_size=4)
+        self.assertEqual(evidence["target_tokens"], len(expected))
+        self.assertEqual(
+            sum(row["target_tokens"] for row in evidence["per_document"]), len(expected)
+        )
+
+    def test_window_controls_fail_before_sampling(self):
+        split = synthetic_fixture()
+        controls = dict(block_size=8, batch_size=2, steps=2, seed=1)
+        for field, value in (
+            ("block_size", True),
+            ("batch_size", 9),
+            ("steps", 65),
+            ("seed", -1),
+        ):
+            with self.subTest(field=field), self.assertRaises(LoRAExperimentError):
+                training_batches(
+                    split.train, split.codec(), **{**controls, field: value}
+                )
+        with self.assertRaisesRegex(LoRAExperimentError, "full block"):
+            training_batches((Document("short", "ca"),), split.codec(), **controls)
+        for docs in ((), (split.train[0], split.train[0])):
+            with self.assertRaises(LoRAExperimentError):
+                heldout_targets(docs, split.codec(), block_size=4)
