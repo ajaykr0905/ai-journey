@@ -327,6 +327,36 @@ class AdapterMergeTests(unittest.TestCase):
         self.assertTrue(torch.equal(before, layer.base.weight))
 
 
+class ArchitectureIdentityTests(unittest.TestCase):
+    def test_identical_tensors_with_different_attention_heads_cannot_share_adapters(
+        self,
+    ):
+        common = dict(vocab_size=8, block_size=4, embedding_dim=8, layer_count=1)
+        first = DecoderLanguageModel(TransformerConfig(**common, head_count=2))
+        second = DecoderLanguageModel(TransformerConfig(**common, head_count=1))
+        second.load_state_dict(first.state_dict())
+        targets = ("blocks.0.attention.query_key_value",)
+        source = inject_adapters(first, targets, LoRAConfig())
+        destination = inject_adapters(second, targets, LoRAConfig())
+        self.assertNotEqual(frozen_fingerprint(source), frozen_fingerprint(destination))
+        with self.assertRaises(LoRAError):
+            load_adapter_state(destination, adapter_state(source))
+
+    def test_registered_activation_semantics_and_norm_epsilon_are_bound(self):
+        first = nn.Sequential(nn.Linear(4, 4), nn.GELU(), nn.LayerNorm(4))
+        second = copy.deepcopy(first)
+        second[1] = nn.ReLU()
+        for model in (first, second):
+            model.requires_grad_(False)
+        self.assertNotEqual(frozen_fingerprint(first), frozen_fingerprint(second))
+        second = copy.deepcopy(first)
+        second[2].eps = 1e-2
+        self.assertNotEqual(frozen_fingerprint(first), frozen_fingerprint(second))
+        before = frozen_fingerprint(first)
+        first.eval()
+        self.assertEqual(frozen_fingerprint(first), before)
+
+
 class AdapterGradientAuditTests(unittest.TestCase):
     def setUp(self):
         self.model = inject_adapters(

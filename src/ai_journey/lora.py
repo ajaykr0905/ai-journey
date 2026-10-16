@@ -175,10 +175,38 @@ def _tensor_digest(items):
 
 
 def frozen_fingerprint(model: nn.Module):
-    """Bind names, shapes, dtypes and bytes of every frozen parameter/buffer."""
+    """Bind decoder architecture and every frozen parameter/buffer.
+
+    Equal tensor bytes do not imply equal functions: attention head counts and
+    normalization placement can differ without changing any tensor shape.
+    Module modes are deliberately excluded because evaluation toggles them.
+    """
     items = [(n, p) for n, p in model.named_parameters() if not p.requires_grad]
     items.extend(model.named_buffers())
-    return _tensor_digest(items)
+    architecture = []
+    for name, module in model.named_modules():
+        settings = {}
+        if isinstance(module, nn.Dropout):
+            settings["p"] = module.p
+        if isinstance(module, nn.LayerNorm):
+            settings["eps"] = module.eps
+        if isinstance(module, nn.GELU):
+            settings["approximate"] = module.approximate
+        architecture.append(
+            [name, type(module).__module__, type(module).__qualname__, settings]
+        )
+    config = getattr(model, "config", None)
+    config_digest = (
+        config.fingerprint() if callable(getattr(config, "fingerprint", None)) else None
+    )
+    contract = {
+        "modules": architecture,
+        "config": config_digest,
+        "tensors": _tensor_digest(items),
+    }
+    return sha256(
+        json.dumps(contract, sort_keys=True, allow_nan=False).encode()
+    ).hexdigest()
 
 
 def build_adapter_optimizer(model: nn.Module, *, learning_rate=3e-3, weight_decay=0.0):
