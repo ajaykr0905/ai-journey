@@ -1,6 +1,6 @@
 """Small, explicit low-rank adapters for the bounded CPU decoder lab."""
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 import copy
 from hashlib import sha256
 import math
@@ -205,3 +205,31 @@ def build_adapter_optimizer(model: nn.Module, *, learning_rate=3e-3, weight_deca
     if any(not bool(torch.isfinite(p).all()) for p in parameters):
         raise LoRAError("adapter parameters must be finite")
     return torch.optim.AdamW(parameters, lr=learning_rate, weight_decay=weight_decay)
+
+
+def adapter_state(model: nn.Module):
+    """Export only factors and the exact frozen-model identity they belong to.
+
+    Returned tensors own their storage. This is an adapter checkpoint, not an
+    optimizer or training-resume checkpoint, and contains no base-model weights.
+    """
+    layers = {}
+    for name, module in model.named_modules():
+        if isinstance(module, LoRALinear):
+            if any(
+                not bool(torch.isfinite(p).all())
+                for p in (module.lora_a, module.lora_b)
+            ):
+                raise LoRAError("cannot export nonfinite adapter factors")
+            layers[name] = {
+                "config": asdict(module.config),
+                "a": module.lora_a.detach().clone(),
+                "b": module.lora_b.detach().clone(),
+            }
+    if not layers:
+        raise LoRAError("model contains no adapters")
+    return {
+        "schema": "lora-state-v1",
+        "base_fingerprint": frozen_fingerprint(model),
+        "layers": layers,
+    }

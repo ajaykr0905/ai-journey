@@ -12,6 +12,7 @@ from ai_journey.lora import (
     parameter_summary,
     frozen_fingerprint,
     build_adapter_optimizer,
+    adapter_state,
 )
 from ai_journey.transformer_lab import DecoderLanguageModel, TransformerConfig
 
@@ -207,3 +208,26 @@ class AdapterOptimizerTests(unittest.TestCase):
                 build_adapter_optimizer(model, **controls)
         with self.assertRaises(LoRAError):
             build_adapter_optimizer(nn.Linear(4, 4))
+
+
+class AdapterStateTests(unittest.TestCase):
+    def test_export_contains_no_base_weights_and_owns_its_tensors(self):
+        model = inject_adapters(nn.Sequential(nn.Linear(4, 4)), ("0",), LoRAConfig())
+        state = adapter_state(model)
+        self.assertEqual(state["schema"], "lora-state-v1")
+        self.assertEqual(state["base_fingerprint"], frozen_fingerprint(model))
+        self.assertEqual(set(state["layers"]), {"0"})
+        layer = state["layers"]["0"]
+        self.assertEqual(set(layer), {"config", "a", "b"})
+        self.assertEqual(layer["config"]["rank"], 2)
+        layer["b"].fill_(5)
+        self.assertEqual(float(model[0].lora_b.detach().abs().sum()), 0)
+
+    def test_nonfinite_factors_and_models_without_adapters_cannot_be_saved(self):
+        with self.assertRaises(LoRAError):
+            adapter_state(nn.Linear(4, 4))
+        model = inject_adapters(nn.Sequential(nn.Linear(4, 4)), ("0",), LoRAConfig())
+        with torch.no_grad():
+            model[0].lora_b[0, 0] = float("inf")
+        with self.assertRaises(LoRAError):
+            adapter_state(model)
