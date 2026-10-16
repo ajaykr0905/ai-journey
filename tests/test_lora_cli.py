@@ -4,6 +4,8 @@ from io import StringIO
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -136,3 +138,73 @@ class LoRACLITests(unittest.TestCase):
             self.assertEqual(main(self.argv), 2)
             self.assertEqual(verify_main(["--report", str(self.output)]), 2)
         self.assertFalse(self.output.exists())
+
+
+class LoRAFreshProcessPipelineTests(unittest.TestCase):
+    def test_checked_in_protocol_repeats_and_replays_in_separate_processes(self):
+        root = Path(__file__).resolve().parents[1]
+        config = root / "config/lora-comparison.json"
+        self.assertEqual(load_config(config), ComparisonConfig())
+        config_before = config.read_bytes()
+        environment = {
+            **os.environ,
+            "PYTHONPATH": str(root / "src"),
+            "OMP_NUM_THREADS": "1",
+            "MKL_NUM_THREADS": "1",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "nested/report.json"
+            command = [
+                sys.executable,
+                "-m",
+                "ai_journey.lora_cli",
+                "--config",
+                str(config),
+                "--output",
+                str(output),
+            ]
+            first = subprocess.run(
+                command,
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(first.returncode, 0, first.stderr)
+            before = output.read_bytes()
+            second = subprocess.run(
+                command,
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual(before, output.read_bytes())
+            verification = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "from ai_journey.lora_cli import verify_main; raise SystemExit(verify_main())",
+                    "--report",
+                    str(output),
+                ],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(verification.returncode, 0, verification.stderr)
+            self.assertIn("2 pretrained bases and 8 CPU trials", verification.stdout)
+            self.assertEqual(before, output.read_bytes())
+            self.assertEqual(config_before, config.read_bytes())
+            report = json.loads(before)
+            for seed in report["result"]["seeds"]:
+                self.assertEqual(seed["pretrain_schedule"]["target_tokens"], 384)
+                self.assertEqual(seed["adaptation_schedule"]["target_tokens"], 256)
+                self.assertEqual(len(seed["trials"]), 4)
+                for trial in seed["trials"]:
+                    self.assertEqual(trial["heldout"]["target_tokens"], 376)

@@ -211,6 +211,21 @@ class ComparisonReportContractTests(unittest.TestCase):
             self.assertEqual(list(Path(directory).iterdir()), [path])
             self.assertEqual(json.loads(before), self.report)
 
+    def test_staged_fsync_failure_preserves_prior_report_and_cleans_temporary_file(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "comparison.json"
+            path.write_bytes(b"previous report")
+            with patch(
+                "ai_journey.lora_report.os.fsync",
+                side_effect=OSError("injected fsync failure"),
+            ):
+                with self.assertRaises(OSError):
+                    write_report(path, self.report)
+            self.assertEqual(path.read_bytes(), b"previous report")
+            self.assertEqual(list(Path(directory).iterdir()), [path])
+
 
 class ComparisonReplayTests(unittest.TestCase):
     @classmethod

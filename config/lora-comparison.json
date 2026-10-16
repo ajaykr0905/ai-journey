@@ -1,0 +1,13 @@
+{
+  "seeds": [11, 29],
+  "block_size": 8,
+  "embedding_dim": 16,
+  "head_count": 2,
+  "batch_size": 4,
+  "pretrain_steps": 12,
+  "finetune_steps": 8,
+  "pretrain_learning_rate": 0.01,
+  "finetune_learning_rate": 0.01,
+  "adapter_scale": 2.0,
+  "evaluation_batch_size": 32
+}
