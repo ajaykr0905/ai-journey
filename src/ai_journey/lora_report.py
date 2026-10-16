@@ -24,6 +24,7 @@ from .lora_experiment import (
     COMPARISON_ARMS,
     LIMITATIONS,
     config_from_dict,
+    run_comparison,
 )
 from .transformer_lab import expected_parameter_count
 
@@ -472,3 +473,39 @@ def write_report(path, report):
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def _replay_content(report):
+    """Exclude only the digest and the explicitly environmental runtime object."""
+    return {
+        "schema": report["schema"],
+        "result": {
+            key: value for key, value in report["result"].items() if key != "runtime"
+        },
+        "summary": report["summary"],
+    }
+
+
+def replay_report(report):
+    """Rebuild every base and fork; verify weights, traces, scores and summaries.
+
+    Runtime metadata is descriptive. It is still schema/scope checked, but Python
+    and PyTorch version strings are not an equality gate. Exact numeric replay
+    can fail on a different numerical backend, and no tolerance hides that fact.
+    """
+    validate_report(report)
+    config = config_from_dict(report["result"]["config"])
+    replay = build_report(run_comparison(config))
+    if canonical_digest(_replay_content(report)) != canonical_digest(
+        _replay_content(replay)
+    ):
+        raise LoRAExperimentError(
+            "exact replay mismatch: model fingerprints, training traces, held-out metrics, "
+            "or paired summaries do not reproduce"
+        )
+    return {
+        "sha256": report["sha256"],
+        "verified_pretrains": len(config.seeds),
+        "verified_trials": len(config.seeds) * len(COMPARISON_ARMS),
+        "policy": "exact CPU float64 replay; only result.runtime and the report digest excluded",
+    }

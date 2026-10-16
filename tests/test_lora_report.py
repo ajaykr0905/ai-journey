@@ -6,11 +6,14 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import torch
+
 from ai_journey.lora_data import LoRAExperimentError
 from ai_journey.lora_experiment import COMPARISON_ARMS, ComparisonConfig, run_comparison
 from ai_journey.lora_report import (
     build_report,
     render_report,
+    replay_report,
     report_digest,
     summarize_comparison,
     validate_report,
@@ -207,3 +210,85 @@ class ComparisonReportContractTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), before)
             self.assertEqual(list(Path(directory).iterdir()), [path])
             self.assertEqual(json.loads(before), self.report)
+
+
+class ComparisonReplayTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.report = build_report(
+            run_comparison(
+                ComparisonConfig(
+                    block_size=3,
+                    embedding_dim=4,
+                    head_count=1,
+                    batch_size=2,
+                    pretrain_steps=1,
+                    finetune_steps=1,
+                )
+            )
+        )
+
+    def test_exact_replay_rebuilds_all_seed_bases_and_trials_and_preserves_rng(self):
+        state = torch.get_rng_state().clone()
+        verified = replay_report(self.report)
+        self.assertEqual(verified["verified_pretrains"], 2)
+        self.assertEqual(verified["verified_trials"], 8)
+        self.assertEqual(verified["sha256"], self.report["sha256"])
+        self.assertTrue(torch.equal(state, torch.get_rng_state()))
+
+    def test_only_declared_environmental_metadata_is_excluded_from_exact_comparison(
+        self,
+    ):
+        report = copy.deepcopy(self.report)
+        report["result"]["runtime"].update(
+            python="another-python", torch="another-build"
+        )
+        report["sha256"] = report_digest(report)
+        replay_report(report)
+        report["result"]["runtime"].update(device="cuda")
+        report["sha256"] = report_digest(report)
+        with self.assertRaisesRegex(LoRAExperimentError, "runtime scope"):
+            replay_report(report)
+
+    def test_self_consistent_rehashed_forged_metrics_weights_and_traces_fail_replay(
+        self,
+    ):
+        for field in ("metrics", "weights", "trace", "frozen"):
+            report = copy.deepcopy(self.report)
+            trial = report["result"]["seeds"][0]["trials"][1]
+            if field == "metrics":
+                score = trial["heldout"]
+                score["nll_sum"] += 17
+                score["mean_nll"] = score["nll_sum"] / score["target_tokens"]
+                score["perplexity"] = math.exp(score["mean_nll"])
+            elif field == "weights":
+                trial["final_sha256"] = "0" * 64
+            elif field == "trace":
+                trial["training"]["losses"][0] += 0.5
+            else:
+                trial["frozen_before_sha256"] = "0" * 64
+                trial["frozen_after_sha256"] = "0" * 64
+            report["summary"] = summarize_comparison(report["result"])
+            report["sha256"] = report_digest(report)
+            validate_report(report)
+            state = torch.get_rng_state().clone()
+            with self.subTest(field=field), self.assertRaisesRegex(
+                LoRAExperimentError, "exact replay mismatch"
+            ):
+                replay_report(report)
+            self.assertTrue(torch.equal(state, torch.get_rng_state()))
+
+    def test_forged_work_budget_is_rejected_before_any_replay_model_is_built(self):
+        report = copy.deepcopy(self.report)
+        report["result"]["config"].update(
+            block_size=32,
+            embedding_dim=32,
+            batch_size=8,
+            pretrain_steps=64,
+            finetune_steps=64,
+        )
+        report["sha256"] = report_digest(report)
+        with patch("ai_journey.lora_report.run_comparison") as runner:
+            with self.assertRaisesRegex(LoRAExperimentError, "work budget"):
+                replay_report(report)
+            runner.assert_not_called()
