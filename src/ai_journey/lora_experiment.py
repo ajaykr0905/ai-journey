@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
 import copy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 import math
 import platform
 import random
@@ -264,6 +264,19 @@ COMPARISON_ARMS = ("frozen", "full", "lora-rank-1", "lora-rank-2")
 
 def config_dict(config):
     return {**asdict(config), "seeds": list(config.seeds)}
+
+
+def config_from_dict(value):
+    """Require a complete protocol, with no ignored or misspelled controls."""
+    if (
+        not isinstance(value, dict)
+        or set(value) != {field.name for field in fields(ComparisonConfig)}
+        or not isinstance(value["seeds"], list)
+    ):
+        raise LoRAExperimentError(
+            "config requires exactly all comparison controls and a seeds list"
+        )
+    return ComparisonConfig(**{**value, "seeds": tuple(value["seeds"])})
 
 
 def _probe(model, batch):
