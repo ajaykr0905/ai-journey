@@ -179,3 +179,29 @@ def frozen_fingerprint(model: nn.Module):
     items = [(n, p) for n, p in model.named_parameters() if not p.requires_grad]
     items.extend(model.named_buffers())
     return _tensor_digest(items)
+
+
+def build_adapter_optimizer(model: nn.Module, *, learning_rate=3e-3, weight_decay=0.0):
+    """Build AdamW only after checking the complete trainability boundary."""
+    for name, value in (
+        ("learning_rate", learning_rate),
+        ("weight_decay", weight_decay),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+            or (name == "learning_rate" and value == 0)
+        ):
+            raise LoRAError(
+                f"{name} must be finite and {'positive' if name == 'learning_rate' else 'nonnegative'}"
+            )
+    parameters = adapter_parameters(model)
+    expected = {id(p) for p in parameters}
+    actual = {id(p) for p in model.parameters() if p.requires_grad}
+    if not expected or actual != expected:
+        raise LoRAError("only adapter factors may be trainable")
+    if any(not bool(torch.isfinite(p).all()) for p in parameters):
+        raise LoRAError("adapter parameters must be finite")
+    return torch.optim.AdamW(parameters, lr=learning_rate, weight_decay=weight_decay)

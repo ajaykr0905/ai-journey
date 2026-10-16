@@ -11,6 +11,7 @@ from ai_journey.lora import (
     adapter_parameters,
     parameter_summary,
     frozen_fingerprint,
+    build_adapter_optimizer,
 )
 from ai_journey.transformer_lab import DecoderLanguageModel, TransformerConfig
 
@@ -166,3 +167,43 @@ class ParameterAccountingTests(unittest.TestCase):
         before = frozen_fingerprint(adapted)
         adapted.running_value.fill_(2)
         self.assertNotEqual(frozen_fingerprint(adapted), before)
+
+
+class AdapterOptimizerTests(unittest.TestCase):
+    def test_optimizer_step_changes_factors_and_never_frozen_weights(self):
+        model = inject_adapters(nn.Sequential(nn.Linear(4, 4)), ("0",), LoRAConfig())
+        optimizer = build_adapter_optimizer(model)
+        before = frozen_fingerprint(model)
+        factor = model[0].lora_b.detach().clone()
+        model(torch.ones(3, 4)).square().sum().backward()
+        optimizer.step()
+        self.assertEqual(before, frozen_fingerprint(model))
+        self.assertFalse(torch.equal(factor, model[0].lora_b))
+        self.assertEqual(len(optimizer.state), 2)
+        self.assertEqual(
+            {id(p) for group in optimizer.param_groups for p in group["params"]},
+            {id(p) for p in adapter_parameters(model)},
+        )
+
+    def test_accidental_unfreeze_or_missing_adapter_factor_fails_closed(self):
+        model = inject_adapters(nn.Sequential(nn.Linear(4, 4)), ("0",), LoRAConfig())
+        model[0].base.weight.requires_grad_(True)
+        with self.assertRaises(LoRAError):
+            build_adapter_optimizer(model)
+        model[0].base.weight.requires_grad_(False)
+        model[0].lora_a.requires_grad_(False)
+        with self.assertRaises(LoRAError):
+            build_adapter_optimizer(model)
+
+    def test_optimizer_controls_and_dense_models_are_rejected(self):
+        model = inject_adapters(nn.Sequential(nn.Linear(4, 4)), ("0",), LoRAConfig())
+        for controls in (
+            {"learning_rate": True},
+            {"learning_rate": 0},
+            {"weight_decay": -1},
+            {"weight_decay": float("nan")},
+        ):
+            with self.subTest(controls=controls), self.assertRaises(LoRAError):
+                build_adapter_optimizer(model, **controls)
+        with self.assertRaises(LoRAError):
+            build_adapter_optimizer(nn.Linear(4, 4))
