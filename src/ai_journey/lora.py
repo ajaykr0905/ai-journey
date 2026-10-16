@@ -279,3 +279,39 @@ def load_adapter_state(model: nn.Module, state):
         for parameter, value in prepared:
             parameter.copy_(value)
             parameter.grad = None
+
+
+def merge_adapters(model: nn.Module):
+    """Return a dense inference copy, folding each low-rank update once.
+
+    Merging is valid for evaluation, where adapter dropout is disabled. Reject
+    training-mode adapters with dropout so the export cannot silently change
+    the active function. The original factors and base weights remain intact.
+    """
+    layers = [
+        (name, module)
+        for name, module in model.named_modules()
+        if isinstance(module, LoRALinear)
+    ]
+    if not layers:
+        raise LoRAError("model contains no adapters")
+    dense_layers = {}
+    for name, module in layers:
+        if module.training and module.config.dropout:
+            raise LoRAError("set adapters to evaluation mode before merging dropout")
+        weight = module.base.weight.detach() + module.delta_weight().detach()
+        if not bool(torch.isfinite(weight).all()):
+            raise LoRAError("merged projection must be finite")
+        dense = copy.deepcopy(module.base)
+        with torch.no_grad():
+            dense.weight.copy_(weight)
+        dense.requires_grad_(False)
+        dense.train(module.training)
+        dense_layers[name] = dense
+    if isinstance(model, LoRALinear):
+        return dense_layers[""]
+    result = copy.deepcopy(model)
+    for name, dense in dense_layers.items():
+        parent, _, child = name.rpartition(".")
+        result.get_submodule(parent).add_module(child, dense)
+    return result

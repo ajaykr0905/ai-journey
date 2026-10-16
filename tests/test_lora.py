@@ -15,6 +15,7 @@ from ai_journey.lora import (
     build_adapter_optimizer,
     adapter_state,
     load_adapter_state,
+    merge_adapters,
 )
 from ai_journey.transformer_lab import DecoderLanguageModel, TransformerConfig
 
@@ -255,6 +256,15 @@ class AdapterLoadTests(unittest.TestCase):
         state["layers"]["1"]["b"][0, 0] = float("nan")
         with self.assertRaises(LoRAError):
             load_adapter_state(self.model, state)
+
+
+class AdapterLoadValidationTests(AdapterLoadTests):
+    def test_failed_load_preserves_earlier_zero_factors(self):
+        state = adapter_state(self.model)
+        state["layers"]["0"]["b"].fill_(1)
+        state["layers"]["1"]["b"][0, 0] = float("nan")
+        with self.assertRaises(LoRAError):
+            load_adapter_state(self.model, state)
         self.assertEqual(float(self.model[0].lora_b.detach().abs().sum()), 0)
 
     def test_base_identity_target_set_controls_dtype_and_shape_are_bound(self):
@@ -278,3 +288,47 @@ class AdapterLoadTests(unittest.TestCase):
         state["layers"]["0"]["b"].fill_(1e30)
         with self.assertRaises(LoRAError):
             load_adapter_state(self.model, state)
+
+
+class AdapterMergeTests(unittest.TestCase):
+    def test_merge_matches_decoder_logits_without_changing_training_model(self):
+        base = DecoderLanguageModel(
+            TransformerConfig(
+                vocab_size=8, block_size=4, embedding_dim=8, head_count=2, layer_count=1
+            )
+        ).double()
+        adapted = inject_adapters(
+            base,
+            ("blocks.0.attention.query_key_value", "blocks.0.attention.projection"),
+            LoRAConfig(),
+        ).eval()
+        with torch.no_grad():
+            for module in adapted.modules():
+                if isinstance(module, LoRALinear):
+                    module.lora_b.fill_(0.1)
+        before = {name: value.clone() for name, value in adapted.state_dict().items()}
+        tokens = torch.tensor([[1, 2, 3, 4]])
+        merged = merge_adapters(adapted)
+        torch.testing.assert_close(
+            merged(tokens)[0], adapted(tokens)[0], rtol=1e-10, atol=1e-12
+        )
+        self.assertFalse(any(isinstance(m, LoRALinear) for m in merged.modules()))
+        self.assertEqual(set(merged.state_dict()), set(base.state_dict()))
+        for name, value in adapted.state_dict().items():
+            self.assertTrue(torch.equal(value, before[name]))
+
+    def test_root_layer_merge_and_dropout_contract(self):
+        layer = LoRALinear(nn.Linear(4, 4), LoRAConfig(dropout=0.5))
+        with self.assertRaises(LoRAError):
+            merge_adapters(layer)
+        layer.eval()
+        self.assertIs(type(merge_adapters(layer)), nn.Linear)
+
+    def test_nonfinite_merge_fails_without_modifying_base(self):
+        layer = LoRALinear(nn.Linear(4, 4), LoRAConfig())
+        before = layer.base.weight.detach().clone()
+        with torch.no_grad():
+            layer.lora_b.fill_(float("inf"))
+        with self.assertRaises(LoRAError):
+            merge_adapters(layer)
+        self.assertTrue(torch.equal(before, layer.base.weight))
