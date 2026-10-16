@@ -3,7 +3,8 @@ import unittest
 import torch
 from torch import nn
 
-from ai_journey.lora import LoRAConfig, LoRAError, LoRALinear
+from ai_journey.lora import LoRAConfig, LoRAError, LoRALinear, inject_adapters
+from ai_journey.transformer_lab import DecoderLanguageModel, TransformerConfig
 
 
 class LoRAConfigTests(unittest.TestCase):
@@ -75,3 +76,54 @@ class LoRALinearTests(unittest.TestCase):
         torch.testing.assert_close(layer(inputs), expected)
         layer.train()
         self.assertFalse(torch.equal(layer(inputs), layer(inputs)))
+
+
+class InjectionTests(unittest.TestCase):
+    def setUp(self):
+        self.model = DecoderLanguageModel(
+            TransformerConfig(
+                vocab_size=8, block_size=4, embedding_dim=8, head_count=2, layer_count=1
+            )
+        )
+        self.targets = (
+            "blocks.0.attention.query_key_value",
+            "blocks.0.attention.projection",
+        )
+
+    def test_decoder_injection_preserves_logits_and_original_trainability(self):
+        tokens = torch.tensor([[1, 2, 3, 4]])
+        logits = self.model(tokens)[0].detach().clone()
+        adapted = inject_adapters(self.model, self.targets, LoRAConfig())
+        self.assertTrue(torch.equal(logits, adapted(tokens)[0]))
+        self.assertTrue(all(p.requires_grad for p in self.model.parameters()))
+        for name, parameter in adapted.named_parameters():
+            self.assertEqual(
+                parameter.requires_grad, name.endswith(("lora_a", "lora_b"))
+            )
+        loss = adapted(tokens, tokens.roll(-1, 1))[1]
+        loss.backward()
+        self.assertTrue(
+            all(p.grad is None for n, p in adapted.named_parameters() if ".base." in n)
+        )
+
+    def test_target_order_has_no_effect_on_local_initialization(self):
+        first = inject_adapters(self.model, self.targets, LoRAConfig())
+        second = inject_adapters(self.model, self.targets[::-1], LoRAConfig())
+        for name, value in first.state_dict().items():
+            self.assertTrue(torch.equal(value, second.state_dict()[name]))
+
+    def test_bad_targets_do_not_partially_mutate_original(self):
+        for targets in ((), ("missing",), ("blocks",), (self.targets[0],) * 2):
+            with self.subTest(targets=targets), self.assertRaises(LoRAError):
+                inject_adapters(self.model, targets, LoRAConfig())
+        self.assertTrue(all(p.requires_grad for p in self.model.parameters()))
+        self.assertFalse(any(isinstance(m, LoRALinear) for m in self.model.modules()))
+
+    def test_nested_and_aliased_adapters_are_rejected(self):
+        adapted = inject_adapters(self.model, self.targets, LoRAConfig())
+        with self.assertRaises(LoRAError):
+            inject_adapters(adapted, self.targets, LoRAConfig())
+        shared = nn.Linear(4, 4)
+        alias = nn.ModuleDict({"left": shared, "right": shared})
+        with self.assertRaises(LoRAError):
+            inject_adapters(alias, ("left",), LoRAConfig())

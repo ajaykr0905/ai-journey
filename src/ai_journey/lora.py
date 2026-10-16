@@ -1,7 +1,8 @@
 """Small, explicit low-rank adapters for the bounded CPU decoder lab."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import copy
+from hashlib import sha256
 import math
 
 import torch
@@ -97,3 +98,48 @@ class LoRALinear(nn.Module):
     def forward(self, inputs):
         update = F.linear(F.linear(self.dropout(inputs), self.lora_a), self.lora_b)
         return self.base(inputs) + update * self.config.scaling
+
+
+def inject_adapters(model: nn.Module, targets: tuple[str, ...], config: LoRAConfig):
+    """Return an independent model adapting only explicitly named projections.
+
+    Resolve every target before cloning or freezing. Aliased modules and nested
+    adapters are rejected rather than silently adapting only some references.
+    Target-specific local seeds make installation order irrelevant.
+    """
+    if not isinstance(model, nn.Module) or not isinstance(config, LoRAConfig):
+        raise TypeError("expected nn.Module and LoRAConfig")
+    if (
+        not isinstance(targets, tuple)
+        or not 1 <= len(targets) <= 128
+        or any(not isinstance(name, str) or not name for name in targets)
+        or len(set(targets)) != len(targets)
+    ):
+        raise LoRAError("targets must be a nonempty tuple of distinct module paths")
+    if any(isinstance(module, LoRALinear) for module in model.modules()):
+        raise LoRAError("model already contains adapters")
+    all_modules = list(model.named_modules(remove_duplicate=False))
+    for name in targets:
+        try:
+            target = model.get_submodule(name)
+        except AttributeError as exc:
+            raise LoRAError(f"unknown adapter target: {name}") from exc
+        if type(target) is not nn.Linear:
+            raise LoRAError(f"adapter target must be a plain linear layer: {name}")
+        if sum(module is target for _, module in all_modules) != 1:
+            raise LoRAError(f"adapter target is shared by multiple paths: {name}")
+        if config.rank > min(target.in_features, target.out_features):
+            raise LoRAError(f"adapter rank exceeds target dimensions: {name}")
+    result = copy.deepcopy(model)
+    result.requires_grad_(False)
+    for parameter in result.parameters():
+        parameter.grad = None
+    for name in targets:
+        seed = int.from_bytes(sha256(f"{config.seed}:{name}".encode()).digest()[:4])
+        parent_name, _, child_name = name.rpartition(".")
+        parent = result.get_submodule(parent_name)
+        parent.add_module(
+            child_name,
+            LoRALinear(result.get_submodule(name), replace(config, seed=seed)),
+        )
+    return result
