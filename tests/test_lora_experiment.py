@@ -18,6 +18,7 @@ from ai_journey.lora_experiment import (
     evaluate_heldout,
     isolated_cpu_runtime,
     train_on_batches,
+    run_dense_comparison,
 )
 from ai_journey.transformer_lab import DecoderLanguageModel, model_fingerprint
 
@@ -183,3 +184,42 @@ class LoRADensePrimitivesTests(unittest.TestCase):
                 evaluate_heldout(model, split.validation, split.codec())
             with self.assertRaisesRegex(LoRAExperimentError, "finite float64"):
                 train_on_batches(model, (), learning_rate=0.01)
+
+
+class PairedDenseComparisonTests(unittest.TestCase):
+    def test_each_seed_pretrains_once_and_forks_identical_dense_weights(self):
+        result = run_dense_comparison(tiny_config())
+        self.assertEqual([row["seed"] for row in result["seeds"]], [11, 29])
+        self.assertNotEqual(
+            result["seeds"][0]["pretrained_sha256"],
+            result["seeds"][1]["pretrained_sha256"],
+        )
+        for row in result["seeds"]:
+            self.assertNotEqual(row["initial_sha256"], row["pretrained_sha256"])
+            self.assertEqual(row["pretrained_sha256"], row["source_after_sha256"])
+            frozen, dense = row["trials"]
+            self.assertEqual(frozen["initial_sha256"], row["pretrained_sha256"])
+            self.assertEqual(dense["initial_sha256"], row["pretrained_sha256"])
+            self.assertEqual(frozen["initial_sha256"], frozen["final_sha256"])
+            self.assertNotEqual(dense["initial_sha256"], dense["final_sha256"])
+            self.assertEqual(frozen["parameters"]["trainable"], 0)
+            self.assertEqual(
+                dense["parameters"]["total"], dense["parameters"]["trainable"]
+            )
+            for trial in row["trials"]:
+                self.assertEqual(
+                    trial["training"]["consumed_target_tokens"],
+                    row["adaptation_schedule"]["target_tokens"],
+                )
+                self.assertEqual(
+                    trial["heldout"]["target_tokens"],
+                    result["heldout"]["target_tokens"],
+                )
+                self.assertEqual(
+                    trial["frozen_before_sha256"], trial["frozen_after_sha256"]
+                )
+
+    def test_dense_comparison_is_exactly_reproducible(self):
+        self.assertEqual(
+            run_dense_comparison(tiny_config()), run_dense_comparison(tiny_config())
+        )

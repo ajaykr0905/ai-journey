@@ -3,16 +3,28 @@
 from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass
+import copy
+from dataclasses import asdict, dataclass
 import math
+import platform
 import random
 
 import numpy as np
 import torch
 from torch.nn import functional as F
 
-from .lora_data import LoRAExperimentError, bounded_integer, heldout_targets
-from .transformer_lab import TransformerConfig
+from .lora import frozen_fingerprint, parameter_summary
+from .lora_data import (
+    FIXTURE_ID,
+    LoRAExperimentError,
+    bounded_integer,
+    heldout_evidence,
+    heldout_targets,
+    schedule_evidence,
+    synthetic_fixture,
+    training_batches,
+)
+from .transformer_lab import DecoderLanguageModel, TransformerConfig, model_fingerprint
 
 
 @dataclass(frozen=True)
@@ -226,3 +238,133 @@ def evaluate_heldout(model, documents, codec, *, batch_size=32):
         "mean_nll": mean,
         "perplexity": perplexity,
     }
+
+
+LIMITATIONS = (
+    "Authored synthetic character grammar; tiny one-layer CPU decoder; paired seeds "
+    "are descriptive, not population confidence. Equal batches and target exposure "
+    "do not equal compute cost. No claim that LoRA always wins, that these results "
+    "represent large models, or that parameter counts measure RAM or latency."
+)
+
+
+def config_dict(config):
+    return {**asdict(config), "seeds": list(config.seeds)}
+
+
+def _probe(model, batch):
+    model.eval()
+    with torch.inference_mode():
+        logits, _ = model(
+            torch.tensor([row.inputs for row in batch], dtype=torch.long, device="cpu")
+        )
+    return logits
+
+
+def _trial(name, model, base, batches, split, codec, config):
+    initial = model_fingerprint(model)
+    counts = parameter_summary(model)
+    frozen_before = frozen_fingerprint(model)
+    probe_error = float(
+        (_probe(model, batches[0]) - _probe(base, batches[0])).abs().max()
+    )
+    if probe_error != 0:
+        raise LoRAExperimentError(
+            "comparison arms must start from the same base function"
+        )
+    trace = train_on_batches(
+        model, batches, learning_rate=config.finetune_learning_rate
+    )
+    frozen_after = frozen_fingerprint(model)
+    if frozen_before != frozen_after:
+        raise LoRAExperimentError("frozen model state changed during adaptation")
+    return {
+        "name": name,
+        "parameters": counts,
+        "initial_sha256": initial,
+        "final_sha256": model_fingerprint(model),
+        "frozen_before_sha256": frozen_before,
+        "frozen_after_sha256": frozen_after,
+        "initial_function_max_abs_error": probe_error,
+        "training": trace,
+        "heldout": evaluate_heldout(
+            model, split.validation, codec, batch_size=config.evaluation_batch_size
+        ),
+    }
+
+
+def _run_comparison(config, arms):
+    if not isinstance(config, ComparisonConfig):
+        raise LoRAExperimentError("comparison requires ComparisonConfig")
+    split = synthetic_fixture()
+    codec = split.codec()
+    model_config = config.model_config(len(codec.tokens))
+    seeds = []
+    for seed in config.seeds:
+        with isolated_cpu_runtime(seed):
+            base = DecoderLanguageModel(model_config)
+            initial = model_fingerprint(base)
+            pretrain = training_batches(
+                split.pretrain,
+                codec,
+                block_size=config.block_size,
+                batch_size=config.batch_size,
+                steps=config.pretrain_steps,
+                seed=seed ^ 0xB45E,
+            )
+            adaptation = training_batches(
+                split.train,
+                codec,
+                block_size=config.block_size,
+                batch_size=config.batch_size,
+                steps=config.finetune_steps,
+                seed=seed ^ 0xA11CE,
+            )
+            trace = train_on_batches(
+                base, pretrain, learning_rate=config.pretrain_learning_rate
+            )
+            pretrained = model_fingerprint(base)
+            trials = []
+            for name in arms:
+                model = copy.deepcopy(base)
+                if name == "frozen":
+                    model.requires_grad_(False)
+                trials.append(
+                    _trial(name, model, base, adaptation, split, codec, config)
+                )
+            if pretrained != model_fingerprint(base):
+                raise LoRAExperimentError("forked trials mutated the pretrained source")
+            seeds.append(
+                {
+                    "seed": seed,
+                    "initial_sha256": initial,
+                    "pretrained_sha256": pretrained,
+                    "source_after_sha256": model_fingerprint(base),
+                    "pretrain_schedule": schedule_evidence(pretrain),
+                    "adaptation_schedule": schedule_evidence(adaptation),
+                    "pretraining": trace,
+                    "trials": trials,
+                }
+            )
+    return {
+        "config": config_dict(config),
+        "fixture": {"id": FIXTURE_ID, **split.evidence()},
+        "model": asdict(model_config),
+        "heldout": heldout_evidence(
+            split.validation, codec, block_size=config.block_size
+        ),
+        "seeds": seeds,
+        "runtime": {
+            "python": platform.python_version(),
+            "torch": str(torch.__version__),
+            "device": "cpu",
+            "dtype": "float64",
+            "threads": 1,
+        },
+        "limitations": LIMITATIONS,
+    }
+
+
+def run_dense_comparison(config=ComparisonConfig()):
+    """Pretrain once per seed, then compare dense adaptation with a frozen fork."""
+    return _run_comparison(config, ("frozen", "full"))
