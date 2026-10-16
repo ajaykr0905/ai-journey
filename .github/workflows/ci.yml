@@ -39,6 +39,17 @@ jobs:
           ruff format --check src/ai_journey/day38_serving.py src/ai_journey/day38_inference_cli.py src/ai_journey/day38_ablation.py tests/test_day38_serving.py tests/test_day38_ablation.py tests/test_transformer_runtime_safety.py
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
+      - name: Check low-rank adapter source and numerical oracles
+        run: |
+          ruff check src/ai_journey/lora*.py tests/test_lora*.py
+          ruff format --check src/ai_journey/lora*.py tests/test_lora*.py
+      - name: Compare and replay low-rank adaptation against full fine-tuning
+        env:
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+        run: |
+          ai-journey-lora-compare --config config/lora-comparison.json --output /tmp/ai-journey-artifacts/lora-comparison.json
+          ai-journey-lora-verify --report /tmp/ai-journey-artifacts/lora-comparison.json
       - name: Check BPE source tests and pipeline formatting
         run: |
           ruff check src/ai_journey/bpe*.py src/ai_journey/token*.py src/ai_journey/parallel*.py src/ai_journey/export_verification.py src/ai_journey/day40_cli.py tests/test_bpe*.py tests/test_tokenizer*.py tests/test_parallel*.py tests/test_export_verification.py tests/test_run_day_40.py scripts/verify_bpe_lab.py

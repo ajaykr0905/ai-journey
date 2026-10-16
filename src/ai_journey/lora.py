@@ -1,0 +1,384 @@
+"""Small, explicit low-rank adapters for the bounded CPU decoder lab."""
+
+from dataclasses import asdict, dataclass, replace
+import copy
+from hashlib import sha256
+import math
+import json
+
+import torch
+from torch import nn
+from torch.nn import functional as F
+
+from .batch_normalization import ScratchBatchNorm
+
+
+class LoRAError(ValueError):
+    """An adapter, its target, or its saved state violates the contract."""
+
+
+@dataclass(frozen=True)
+class LoRAConfig:
+    """Predeclared adapter capacity, scaling, dropout, and local RNG seed."""
+
+    rank: int = 2
+    alpha: float = 4.0
+    dropout: float = 0.0
+    seed: int = 42
+
+    def __post_init__(self):
+        if type(self.rank) is not int or not 1 <= self.rank <= 256:
+            raise LoRAError("rank must be an integer in [1, 256]")
+        if (
+            isinstance(self.alpha, bool)
+            or not isinstance(self.alpha, (int, float))
+            or not math.isfinite(self.alpha)
+            or not 0 < self.alpha <= 1024
+        ):
+            raise LoRAError("alpha must be finite and in (0, 1024]")
+        if (
+            isinstance(self.dropout, bool)
+            or not isinstance(self.dropout, (int, float))
+            or not math.isfinite(self.dropout)
+            or not 0 <= self.dropout < 1
+        ):
+            raise LoRAError("dropout must be finite and in [0, 1)")
+        if type(self.seed) is not int or not 0 <= self.seed < 2**32:
+            raise LoRAError("seed must be an integer in [0, 2**32)")
+
+    @property
+    def scaling(self):
+        return self.alpha / self.rank
+
+
+class LoRALinear(nn.Module):
+    """Frozen dense projection plus ``(alpha/rank) * B @ A``.
+
+    B starts at zero, so installing an adapter preserves the base function.
+    A uses a local generator: constructing adapters does not consume the
+    caller's training RNG. The supplied dense layer is never modified.
+    """
+
+    def __init__(self, base: nn.Linear, config: LoRAConfig):
+        super().__init__()
+        if type(base) is not nn.Linear or not isinstance(config, LoRAConfig):
+            raise TypeError("expected a plain nn.Linear and LoRAConfig")
+        if base.weight.device.type != "cpu" or not base.weight.is_floating_point():
+            raise LoRAError("this adapter lab requires floating-point CPU weights")
+        if config.rank > min(base.in_features, base.out_features):
+            raise LoRAError("adapter rank exceeds the projection dimensions")
+        if any(not bool(torch.isfinite(p).all()) for p in base.parameters()):
+            raise LoRAError("base projection parameters must be finite")
+        self.config = config
+        self.base = copy.deepcopy(base)
+        self.base.requires_grad_(False)
+        for parameter in self.base.parameters():
+            parameter.grad = None
+        self.in_features = base.in_features
+        self.out_features = base.out_features
+        generator = torch.Generator(device="cpu").manual_seed(config.seed)
+        a = torch.empty(config.rank, base.in_features, dtype=base.weight.dtype)
+        a.normal_(mean=0, std=1 / math.sqrt(base.in_features), generator=generator)
+        self.lora_a = nn.Parameter(a)
+        self.lora_b = nn.Parameter(
+            torch.zeros(base.out_features, config.rank, dtype=base.weight.dtype)
+        )
+        self.dropout = nn.Dropout(config.dropout)
+        self.train(base.training)
+
+    @property
+    def weight(self):
+        """Expose the base dtype/device contract used by decoder validation."""
+        return self.base.weight
+
+    @property
+    def bias(self):
+        return self.base.bias
+
+    def delta_weight(self):
+        return (self.lora_b @ self.lora_a) * self.config.scaling
+
+    def forward(self, inputs):
+        update = F.linear(F.linear(self.dropout(inputs), self.lora_a), self.lora_b)
+        return self.base(inputs) + update * self.config.scaling
+
+
+def inject_adapters(model: nn.Module, targets: tuple[str, ...], config: LoRAConfig):
+    """Return an independent model adapting only explicitly named projections.
+
+    Resolve every target before cloning or freezing. Aliased modules and nested
+    adapters are rejected rather than silently adapting only some references.
+    Target-specific local seeds make installation order irrelevant.
+    """
+    if not isinstance(model, nn.Module) or not isinstance(config, LoRAConfig):
+        raise TypeError("expected nn.Module and LoRAConfig")
+    if (
+        not isinstance(targets, tuple)
+        or not 1 <= len(targets) <= 128
+        or any(not isinstance(name, str) or not name for name in targets)
+        or len(set(targets)) != len(targets)
+    ):
+        raise LoRAError("targets must be a nonempty tuple of distinct module paths")
+    if any(isinstance(module, LoRALinear) for module in model.modules()):
+        raise LoRAError("model already contains adapters")
+    if any(
+        isinstance(module, (ScratchBatchNorm, nn.modules.batchnorm._BatchNorm))
+        for module in model.modules()
+    ):
+        raise LoRAError(
+            "frozen adapter bases require stateless normalization; BatchNorm running statistics would change"
+        )
+    all_modules = list(model.named_modules(remove_duplicate=False))
+    for name in targets:
+        try:
+            target = model.get_submodule(name)
+        except AttributeError as exc:
+            raise LoRAError(f"unknown adapter target: {name}") from exc
+        if type(target) is not nn.Linear:
+            raise LoRAError(f"adapter target must be a plain linear layer: {name}")
+        if sum(module is target for _, module in all_modules) != 1:
+            raise LoRAError(f"adapter target is shared by multiple paths: {name}")
+        if config.rank > min(target.in_features, target.out_features):
+            raise LoRAError(f"adapter rank exceeds target dimensions: {name}")
+    result = copy.deepcopy(model)
+    result.requires_grad_(False)
+    for parameter in result.parameters():
+        parameter.grad = None
+    for name in targets:
+        seed = int.from_bytes(sha256(f"{config.seed}:{name}".encode()).digest()[:4])
+        parent_name, _, child_name = name.rpartition(".")
+        parent = result.get_submodule(parent_name)
+        parent.add_module(
+            child_name,
+            LoRALinear(result.get_submodule(name), replace(config, seed=seed)),
+        )
+    return result
+
+
+def adapter_parameters(model: nn.Module):
+    """Return exactly the low-rank factors, in stable module traversal order."""
+    if not isinstance(model, nn.Module):
+        raise TypeError("model must be nn.Module")
+    return tuple(
+        parameter
+        for module in model.modules()
+        if isinstance(module, LoRALinear)
+        for parameter in (module.lora_a, module.lora_b)
+    )
+
+
+def parameter_summary(model: nn.Module):
+    """Count unique parameters without equating savings with measured RAM."""
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return {"total": total, "trainable": trainable, "frozen": total - trainable}
+
+
+def _tensor_digest(items):
+    digest = sha256()
+    for name, parameter in sorted(items):
+        value = parameter.detach().cpu().contiguous()
+        digest.update(json.dumps([name, list(value.shape), str(value.dtype)]).encode())
+        digest.update(value.reshape(-1).view(torch.uint8).numpy().tobytes())
+    return digest.hexdigest()
+
+
+def frozen_fingerprint(model: nn.Module):
+    """Bind decoder architecture and every frozen parameter/buffer.
+
+    Equal tensor bytes do not imply equal functions: attention head counts and
+    normalization placement can differ without changing any tensor shape.
+    Module modes are deliberately excluded because evaluation toggles them.
+    """
+    items = [(n, p) for n, p in model.named_parameters() if not p.requires_grad]
+    items.extend(model.named_buffers())
+    architecture = []
+    for name, module in model.named_modules():
+        settings = {}
+        if isinstance(module, nn.Dropout):
+            settings["p"] = module.p
+        if isinstance(module, nn.LayerNorm):
+            settings["eps"] = module.eps
+        if isinstance(module, nn.GELU):
+            settings["approximate"] = module.approximate
+        architecture.append(
+            [name, type(module).__module__, type(module).__qualname__, settings]
+        )
+    config = getattr(model, "config", None)
+    config_digest = (
+        config.fingerprint() if callable(getattr(config, "fingerprint", None)) else None
+    )
+    contract = {
+        "modules": architecture,
+        "config": config_digest,
+        "tensors": _tensor_digest(items),
+    }
+    return sha256(
+        json.dumps(contract, sort_keys=True, allow_nan=False).encode()
+    ).hexdigest()
+
+
+def build_adapter_optimizer(model: nn.Module, *, learning_rate=3e-3, weight_decay=0.0):
+    """Build AdamW only after checking the complete trainability boundary."""
+    for name, value in (
+        ("learning_rate", learning_rate),
+        ("weight_decay", weight_decay),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+            or (name == "learning_rate" and value == 0)
+        ):
+            raise LoRAError(
+                f"{name} must be finite and {'positive' if name == 'learning_rate' else 'nonnegative'}"
+            )
+    parameters = adapter_parameters(model)
+    expected = {id(p) for p in parameters}
+    actual = {id(p) for p in model.parameters() if p.requires_grad}
+    if not expected or actual != expected:
+        raise LoRAError("only adapter factors may be trainable")
+    if any(not bool(torch.isfinite(p).all()) for p in parameters):
+        raise LoRAError("adapter parameters must be finite")
+    return torch.optim.AdamW(parameters, lr=learning_rate, weight_decay=weight_decay)
+
+
+def adapter_state(model: nn.Module):
+    """Export only factors and the exact frozen-model identity they belong to.
+
+    Returned tensors own their storage. This is an adapter checkpoint, not an
+    optimizer or training-resume checkpoint, and contains no base-model weights.
+    """
+    layers = {}
+    for name, module in model.named_modules():
+        if isinstance(module, LoRALinear):
+            if any(
+                not bool(torch.isfinite(p).all())
+                for p in (module.lora_a, module.lora_b)
+            ):
+                raise LoRAError("cannot export nonfinite adapter factors")
+            layers[name] = {
+                "config": asdict(module.config),
+                "a": module.lora_a.detach().clone(),
+                "b": module.lora_b.detach().clone(),
+            }
+    if not layers:
+        raise LoRAError("model contains no adapters")
+    return {
+        "schema": "lora-state-v1",
+        "base_fingerprint": frozen_fingerprint(model),
+        "layers": layers,
+    }
+
+
+def load_adapter_state(model: nn.Module, state):
+    """Validate the whole checkpoint before changing any adapter parameter."""
+    modules = {
+        name: module
+        for name, module in model.named_modules()
+        if isinstance(module, LoRALinear)
+    }
+    if not modules:
+        raise LoRAError("model contains no adapters")
+    if (
+        not isinstance(state, dict)
+        or set(state) != {"schema", "base_fingerprint", "layers"}
+        or state["schema"] != "lora-state-v1"
+        or state["base_fingerprint"] != frozen_fingerprint(model)
+        or not isinstance(state["layers"], dict)
+        or set(state["layers"]) != set(modules)
+    ):
+        raise LoRAError("adapter state does not match the frozen base and target set")
+    prepared = []
+    for name, module in modules.items():
+        layer = state["layers"][name]
+        if (
+            not isinstance(layer, dict)
+            or set(layer) != {"config", "a", "b"}
+            or layer["config"] != asdict(module.config)
+        ):
+            raise LoRAError(f"adapter controls do not match target: {name}")
+        tensors = {}
+        for key, parameter in (("a", module.lora_a), ("b", module.lora_b)):
+            value = layer[key]
+            if (
+                not isinstance(value, torch.Tensor)
+                or value.layout != torch.strided
+                or value.device.type != "cpu"
+                or value.shape != parameter.shape
+                or value.dtype != parameter.dtype
+                or not bool(torch.isfinite(value).all())
+            ):
+                raise LoRAError(f"invalid adapter tensor: {name}.{key}")
+            tensors[key] = value.detach().clone()
+            prepared.append((parameter, tensors[key]))
+        if not bool(
+            torch.isfinite((tensors["b"] @ tensors["a"]) * module.config.scaling).all()
+        ):
+            raise LoRAError(f"adapter update overflows at target: {name}")
+    with torch.no_grad():
+        for parameter, value in prepared:
+            parameter.copy_(value)
+            parameter.grad = None
+
+
+def merge_adapters(model: nn.Module):
+    """Return a dense inference copy, folding each low-rank update once.
+
+    Merging is valid for evaluation, where adapter dropout is disabled. Reject
+    training-mode adapters with dropout so the export cannot silently change
+    the active function. The original factors and base weights remain intact.
+    """
+    layers = [
+        (name, module)
+        for name, module in model.named_modules()
+        if isinstance(module, LoRALinear)
+    ]
+    if not layers:
+        raise LoRAError("model contains no adapters")
+    dense_layers = {}
+    for name, module in layers:
+        if module.training and module.config.dropout:
+            raise LoRAError("set adapters to evaluation mode before merging dropout")
+        weight = module.base.weight.detach() + module.delta_weight().detach()
+        if not bool(torch.isfinite(weight).all()):
+            raise LoRAError("merged projection must be finite")
+        dense = copy.deepcopy(module.base)
+        with torch.no_grad():
+            dense.weight.copy_(weight)
+        dense.requires_grad_(False)
+        dense.train(module.training)
+        dense_layers[name] = dense
+    if isinstance(model, LoRALinear):
+        return dense_layers[""]
+    result = copy.deepcopy(model)
+    for name, dense in dense_layers.items():
+        parent, _, child = name.rpartition(".")
+        result.get_submodule(parent).add_module(child, dense)
+    return result
+
+
+def audit_adapter_gradients(model: nn.Module):
+    """Fail on a broken freeze boundary, stale base grads, or absent/nonfinite grads.
+
+    Zero gradients are valid: with B initialized at zero, A's first gradient
+    is analytically zero. An absent gradient is a disconnected parameter.
+    Call after backward and before optimizer.step().
+    """
+    factors = adapter_parameters(model)
+    ids = {id(p) for p in factors}
+    if not ids:
+        raise LoRAError("gradient audit requires adapters")
+    norms = {}
+    for name, parameter in model.named_parameters():
+        if id(parameter) not in ids:
+            if parameter.requires_grad or parameter.grad is not None:
+                raise LoRAError(f"frozen parameter received a gradient: {name}")
+            continue
+        if not parameter.requires_grad or parameter.grad is None:
+            raise LoRAError(f"adapter factor is disconnected: {name}")
+        if not bool(torch.isfinite(parameter.grad).all()):
+            raise LoRAError(f"adapter gradient is nonfinite: {name}")
+        norms[name] = float(torch.linalg.vector_norm(parameter.grad.detach().double()))
+    return {"factor_count": len(factors), "gradient_norms": norms}

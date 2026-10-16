@@ -16,6 +16,8 @@ then grow these exercises into production-quality training and inference project
 
 ## What is included
 
+- Explicit LoRA adapters, gradient audits, dense inference export, and bounded
+  JSON checkpoints in the [adapter operating guide](docs/lora-adapters.md)
 - Day-by-day notes in [`days/`](days/)
 - Reusable Python 3.11 code in [`src/ai_journey/`](src/ai_journey/)
 - One command to run Days 0–11 in [`scripts/run_days_00_11.py`](scripts/run_days_00_11.py)
