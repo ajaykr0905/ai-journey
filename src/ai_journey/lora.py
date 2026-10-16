@@ -233,3 +233,49 @@ def adapter_state(model: nn.Module):
         "base_fingerprint": frozen_fingerprint(model),
         "layers": layers,
     }
+
+
+def load_adapter_state(model: nn.Module, state):
+    """Validate the whole checkpoint before changing any adapter parameter."""
+    expected = adapter_state(model)
+    if (
+        not isinstance(state, dict)
+        or set(state) != {"schema", "base_fingerprint", "layers"}
+        or state["schema"] != expected["schema"]
+        or state["base_fingerprint"] != expected["base_fingerprint"]
+        or not isinstance(state["layers"], dict)
+        or set(state["layers"]) != set(expected["layers"])
+    ):
+        raise LoRAError("adapter state does not match the frozen base and target set")
+    prepared = []
+    for name, reference in expected["layers"].items():
+        layer = state["layers"][name]
+        if (
+            not isinstance(layer, dict)
+            or set(layer) != {"config", "a", "b"}
+            or layer["config"] != reference["config"]
+        ):
+            raise LoRAError(f"adapter controls do not match target: {name}")
+        module = model.get_submodule(name)
+        tensors = {}
+        for key, parameter in (("a", module.lora_a), ("b", module.lora_b)):
+            value = layer[key]
+            if (
+                not isinstance(value, torch.Tensor)
+                or value.layout != torch.strided
+                or value.device.type != "cpu"
+                or value.shape != parameter.shape
+                or value.dtype != parameter.dtype
+                or not bool(torch.isfinite(value).all())
+            ):
+                raise LoRAError(f"invalid adapter tensor: {name}.{key}")
+            tensors[key] = value.detach().clone()
+            prepared.append((parameter, tensors[key]))
+        if not bool(
+            torch.isfinite((tensors["b"] @ tensors["a"]) * module.config.scaling).all()
+        ):
+            raise LoRAError(f"adapter update overflows at target: {name}")
+    with torch.no_grad():
+        for parameter, value in prepared:
+            parameter.copy_(value)
+            parameter.grad = None

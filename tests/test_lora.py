@@ -1,4 +1,5 @@
 import unittest
+import copy
 
 import torch
 from torch import nn
@@ -13,6 +14,7 @@ from ai_journey.lora import (
     frozen_fingerprint,
     build_adapter_optimizer,
     adapter_state,
+    load_adapter_state,
 )
 from ai_journey.transformer_lab import DecoderLanguageModel, TransformerConfig
 
@@ -231,3 +233,48 @@ class AdapterStateTests(unittest.TestCase):
             model[0].lora_b[0, 0] = float("inf")
         with self.assertRaises(LoRAError):
             adapter_state(model)
+
+
+class AdapterLoadTests(unittest.TestCase):
+    def setUp(self):
+        self.model = inject_adapters(
+            nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4)), ("0", "1"), LoRAConfig()
+        )
+
+    def test_load_reproduces_logits_without_aliasing_source_tensors(self):
+        state = adapter_state(self.model)
+        state["layers"]["0"]["b"].fill_(0.5)
+        load_adapter_state(self.model, state)
+        self.assertTrue(torch.equal(self.model[0].lora_b, state["layers"]["0"]["b"]))
+        state["layers"]["0"]["b"].zero_()
+        self.assertEqual(float(self.model[0].lora_b.detach()[0, 0]), 0.5)
+
+    def test_late_invalid_tensor_never_partially_updates_earlier_layers(self):
+        state = adapter_state(self.model)
+        state["layers"]["0"]["b"].fill_(1)
+        state["layers"]["1"]["b"][0, 0] = float("nan")
+        with self.assertRaises(LoRAError):
+            load_adapter_state(self.model, state)
+        self.assertEqual(float(self.model[0].lora_b.detach().abs().sum()), 0)
+
+    def test_base_identity_target_set_controls_dtype_and_shape_are_bound(self):
+        original = adapter_state(self.model)
+        for mutation in (
+            lambda s: s.update(base_fingerprint="0" * 64),
+            lambda s: s["layers"].pop("1"),
+            lambda s: s["layers"]["0"]["config"].update(alpha=8),
+            lambda s: s["layers"]["0"].update(a=s["layers"]["0"]["a"].double()),
+            lambda s: s["layers"]["0"].update(a=torch.ones(1, 4)),
+            lambda s: s.update(extra=True),
+        ):
+            state = copy.deepcopy(original)
+            mutation(state)
+            with self.assertRaises(LoRAError):
+                load_adapter_state(self.model, state)
+
+    def test_finite_factors_that_overflow_the_update_are_rejected(self):
+        state = adapter_state(self.model)
+        state["layers"]["0"]["a"].fill_(1e30)
+        state["layers"]["0"]["b"].fill_(1e30)
+        with self.assertRaises(LoRAError):
+            load_adapter_state(self.model, state)
