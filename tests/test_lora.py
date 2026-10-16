@@ -389,6 +389,30 @@ class FrozenBufferTests(unittest.TestCase):
         self.assertEqual(frozen_fingerprint(model), before)
 
 
+class DamagedFactorRecoveryTests(unittest.TestCase):
+    def test_valid_state_can_replace_nonfinite_destination_factors(self):
+        model = inject_adapters(nn.Sequential(nn.Linear(4, 4)), ("0",), LoRAConfig())
+        state = adapter_state(model)
+        x = torch.ones(2, 4)
+        expected = model(x).detach().clone()
+        with torch.no_grad():
+            model[0].lora_a.fill_(float("nan"))
+            model[0].lora_b.fill_(float("inf"))
+        load_adapter_state(model, state)
+        self.assertTrue(torch.equal(model(x), expected))
+
+    def test_bad_incoming_state_still_does_not_partially_change_a_damaged_model(self):
+        model = inject_adapters(nn.Sequential(nn.Linear(4, 4)), ("0",), LoRAConfig())
+        state = adapter_state(model)
+        with torch.no_grad():
+            model[0].lora_a.fill_(float("nan"))
+        state["layers"]["0"]["b"].fill_(float("inf"))
+        with self.assertRaises(LoRAError):
+            load_adapter_state(model, state)
+        self.assertTrue(bool(torch.isnan(model[0].lora_a).all()))
+        self.assertEqual(float(model[0].lora_b.detach().abs().sum()), 0)
+
+
 class AdapterGradientAuditTests(unittest.TestCase):
     def setUp(self):
         self.model = inject_adapters(

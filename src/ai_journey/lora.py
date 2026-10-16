@@ -274,26 +274,31 @@ def adapter_state(model: nn.Module):
 
 def load_adapter_state(model: nn.Module, state):
     """Validate the whole checkpoint before changing any adapter parameter."""
-    expected = adapter_state(model)
+    modules = {
+        name: module
+        for name, module in model.named_modules()
+        if isinstance(module, LoRALinear)
+    }
+    if not modules:
+        raise LoRAError("model contains no adapters")
     if (
         not isinstance(state, dict)
         or set(state) != {"schema", "base_fingerprint", "layers"}
-        or state["schema"] != expected["schema"]
-        or state["base_fingerprint"] != expected["base_fingerprint"]
+        or state["schema"] != "lora-state-v1"
+        or state["base_fingerprint"] != frozen_fingerprint(model)
         or not isinstance(state["layers"], dict)
-        or set(state["layers"]) != set(expected["layers"])
+        or set(state["layers"]) != set(modules)
     ):
         raise LoRAError("adapter state does not match the frozen base and target set")
     prepared = []
-    for name, reference in expected["layers"].items():
+    for name, module in modules.items():
         layer = state["layers"][name]
         if (
             not isinstance(layer, dict)
             or set(layer) != {"config", "a", "b"}
-            or layer["config"] != reference["config"]
+            or layer["config"] != asdict(module.config)
         ):
             raise LoRAError(f"adapter controls do not match target: {name}")
-        module = model.get_submodule(name)
         tensors = {}
         for key, parameter in (("a", module.lora_a), ("b", module.lora_b)):
             value = layer[key]
