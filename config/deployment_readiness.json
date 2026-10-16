@@ -1,5 +1,17 @@
 {
   "required_files": [
+    "src/ai_journey/lora.py",
+    "src/ai_journey/lora_artifact.py",
+    "src/ai_journey/lora_data.py",
+    "src/ai_journey/lora_experiment.py",
+    "src/ai_journey/lora_report.py",
+    "src/ai_journey/lora_cli.py",
+    "config/lora-comparison.json",
+    "docs/lora-adapters.md",
+    "docs/lora-experiment.md",
+    "tests/test_lora.py",
+    "tests/test_lora_artifact.py",
+    "tests/test_lora_gradients.py",
     "docs/bpe-model-comparison.md",
     "config/day-41-vocabulary-ablation.json",
     "src/ai_journey/bpe_likelihood.py",

@@ -1,6 +1,6 @@
 # Progress and Evidence
 
-Last updated: 2026-10-14
+Last updated: 2026-10-16
 
 This file separates repository-verifiable work from activities that require the
 learner's own completion evidence.
@@ -50,3 +50,15 @@ learner's own completion evidence.
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,
 or handwritten evidence was produced.
+
+## Engineering milestone: low-rank adaptation, 16 October 2026
+
+An additive CPU experiment pretrains a tiny decoder, forks a shared base into
+frozen, full fine-tuning, rank-one LoRA and rank-two LoRA arms, and measures
+held-out loss with matched schedules across paired seeds. The implementation
+includes independent gradient oracles, frozen-state audits, dense inference
+export, bounded JSON adapter artifacts, and complete experiment replay.
+See [the experiment guide](docs/lora-experiment.md) and
+[the adapter contract](docs/lora-adapters.md) for commands and limits.
+This is engineering evidence on authored synthetic text. It does not mark a
+lecture, personal exercise, hosted run or 90-day tracker entry complete.
