@@ -1,6 +1,7 @@
 import copy
 import math
 import unittest
+from dataclasses import asdict, replace
 
 import torch
 
@@ -10,7 +11,13 @@ from ai_journey.sft_data import (
     authored_chat_fixture,
     sft_training_batches,
 )
-from ai_journey.sft_experiment import evaluate_sft, train_sft_batches
+from ai_journey.sft_experiment import (
+    SFTComparisonConfig,
+    evaluate_sft,
+    sft_config_dict,
+    sft_config_from_dict,
+    train_sft_batches,
+)
 from ai_journey.transformer_lab import (
     DecoderLanguageModel,
     TransformerConfig,
@@ -29,6 +36,50 @@ def tiny_model(split):
             dropout=0.0,
         )
     )
+
+
+class SFTComparisonControlTests(unittest.TestCase):
+    def test_controls_round_trip_complete_protocol(self):
+        config = SFTComparisonConfig()
+        self.assertEqual(sft_config_from_dict(sft_config_dict(config)), config)
+        self.assertEqual(config.model_config(47).vocab_size, 47)
+        self.assertGreater(config.work_units, 0)
+
+    def test_rejects_unpaired_invalid_unknown_and_excessive_controls(self):
+        config = SFTComparisonConfig()
+        for field, value in (
+            ("seeds", (1,)),
+            ("seeds", (1, 1)),
+            ("seeds", [1, 2]),
+            ("seeds", (True, 2)),
+            ("block_size", 7),
+            ("embedding_dim", 15),
+            ("head_count", 0),
+            ("batch_size", 17),
+            ("base_steps", 0),
+            ("sft_steps", 129),
+            ("base_learning_rate", float("nan")),
+            ("sft_learning_rate", True),
+            ("adapter_scale", float("inf")),
+            ("evaluation_batch_size", 129),
+        ):
+            with (
+                self.subTest(field=field, value=value),
+                self.assertRaises(SFTDataError),
+            ):
+                replace(config, **{field: value})
+        with self.assertRaisesRegex(SFTDataError, "work budget"):
+            SFTComparisonConfig(
+                block_size=256,
+                embedding_dim=64,
+                batch_size=16,
+                base_steps=128,
+                sft_steps=128,
+            )
+        payload = asdict(config)
+        payload["unexpected"] = 1
+        with self.assertRaisesRegex(SFTDataError, "exactly all"):
+            sft_config_from_dict(payload)
 
 
 class SFTTrainingTests(unittest.TestCase):

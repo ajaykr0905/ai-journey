@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from contextlib import nullcontext
+from dataclasses import asdict, dataclass, fields
 
 import torch
 from torch.nn import functional as F
@@ -14,6 +15,92 @@ from .sft_data import (
     bounded_integer,
     sft_validation_targets,
 )
+from .transformer_lab import TransformerConfig
+
+
+@dataclass(frozen=True)
+class SFTComparisonConfig:
+    seeds: tuple[int, ...] = (43, 44)
+    block_size: int = 32
+    embedding_dim: int = 16
+    head_count: int = 2
+    batch_size: int = 4
+    base_steps: int = 8
+    sft_steps: int = 8
+    base_learning_rate: float = 0.01
+    sft_learning_rate: float = 0.01
+    adapter_scale: float = 2.0
+    evaluation_batch_size: int = 32
+
+    def __post_init__(self):
+        if not isinstance(self.seeds, tuple) or not 2 <= len(self.seeds) <= 4:
+            raise SFTDataError("seeds require two to four distinct paired seeds")
+        for seed in self.seeds:
+            bounded_integer(seed, "seed", 0, 2**32 - 1)
+        if len(set(self.seeds)) != len(self.seeds):
+            raise SFTDataError("seeds must be distinct")
+        for name, low, high in (
+            ("block_size", 8, 256),
+            ("embedding_dim", 4, 64),
+            ("head_count", 1, 8),
+            ("batch_size", 1, 16),
+            ("base_steps", 1, 128),
+            ("sft_steps", 1, 128),
+            ("evaluation_batch_size", 1, 128),
+        ):
+            bounded_integer(getattr(self, name), name, low, high)
+        if self.embedding_dim % self.head_count:
+            raise SFTDataError("embedding_dim must be divisible by head_count")
+        for name, high in (
+            ("base_learning_rate", 0.1),
+            ("sft_learning_rate", 0.1),
+            ("adapter_scale", 8.0),
+        ):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or not 0 < value <= high
+            ):
+                raise SFTDataError(f"{name} must be finite and in (0, {high}]")
+        if self.work_units > 50_000_000:
+            raise SFTDataError("chat comparison exceeds the CPU work budget")
+
+    @property
+    def work_units(self):
+        return (
+            len(self.seeds)
+            * (self.base_steps + 4 * self.sft_steps)
+            * self.batch_size
+            * self.block_size
+            * self.embedding_dim**2
+        )
+
+    def model_config(self, vocab_size):
+        return TransformerConfig(
+            vocab_size=vocab_size,
+            block_size=self.block_size,
+            embedding_dim=self.embedding_dim,
+            head_count=self.head_count,
+            layer_count=1,
+            feed_forward_expansion=2,
+            dropout=0.0,
+        )
+
+
+def sft_config_dict(config):
+    return {**asdict(config), "seeds": list(config.seeds)}
+
+
+def sft_config_from_dict(value):
+    if (
+        not isinstance(value, dict)
+        or set(value) != {field.name for field in fields(SFTComparisonConfig)}
+        or not isinstance(value["seeds"], list)
+    ):
+        raise SFTDataError("config requires exactly all SFT controls and a seeds list")
+    return SFTComparisonConfig(**{**value, "seeds": tuple(value["seeds"])})
 
 
 def _finite_cpu_model(model):
