@@ -1,7 +1,7 @@
-from dataclasses import replace
 import unittest
+from dataclasses import replace
 
-from ai_journey.sft_data import ChatMessage, Conversation, SFTDataError
+from ai_journey.sft_data import ChatMessage, Conversation, SFTDataError, ToolCall
 
 
 def valid_conversation():
@@ -32,7 +32,9 @@ class ConversationSchemaTests(unittest.TestCase):
                 ChatMessage("assistant", "Cedar is a tree."),
             ),
         )
-        self.assertEqual([row.role for row in conversation.messages], ["user", "assistant"])
+        self.assertEqual(
+            [row.role for row in conversation.messages], ["user", "assistant"]
+        )
 
     def test_rejects_unknown_roles_and_invalid_content(self):
         for role, content in (
@@ -44,10 +46,77 @@ class ConversationSchemaTests(unittest.TestCase):
             ("user", "bad\x00line"),
             ("user", "x" * 4097),
         ):
-            with self.subTest(role=role, content=repr(content)), self.assertRaises(
-                SFTDataError
+            with (
+                self.subTest(role=role, content=repr(content)),
+                self.assertRaises(SFTDataError),
             ):
                 ChatMessage(role, content)
+
+    def test_accepts_a_bound_tool_request_result_and_final_answer(self):
+        call = ToolCall(
+            "call_weather_1", "weather.lookup", '{"unit":"C","city":"Pune"}'
+        )
+        conversation = Conversation(
+            "tool-weather",
+            (
+                ChatMessage("user", "Read Pune temperature."),
+                ChatMessage("assistant", "", tool_call=call),
+                ChatMessage("tool", '{"temperature":18}', tool_call_id=call.call_id),
+                ChatMessage("assistant", "Pune is 18 C."),
+            ),
+        )
+        self.assertEqual(call.canonical_arguments, '{"city":"Pune","unit":"C"}')
+        self.assertEqual(conversation.messages[2].tool_call_id, call.call_id)
+
+    def test_rejects_malformed_tool_metadata_and_json(self):
+        for call_id, name, arguments in (
+            ("bad", "weather.lookup", "{}"),
+            ("call_ok", "bad name", "{}"),
+            ("call_ok", "weather.lookup", "[]"),
+            ("call_ok", "weather.lookup", '{"x":1,"x":2}'),
+            ("call_ok", "weather.lookup", '{"x":NaN}'),
+            ("call_ok", "weather.lookup", "{"),
+        ):
+            with (
+                self.subTest(call_id=call_id, name=name, arguments=arguments),
+                self.assertRaises(SFTDataError),
+            ):
+                ToolCall(call_id, name, arguments)
+        call = ToolCall("call_ok", "weather.lookup", "{}")
+        with self.assertRaises(SFTDataError):
+            ChatMessage("user", "request", tool_call=call)
+        with self.assertRaises(SFTDataError):
+            ChatMessage("assistant", "answer", tool_call_id=call.call_id)
+        with self.assertRaises(SFTDataError):
+            ChatMessage("tool", "result")
+
+    def test_rejects_unmatched_reused_and_unfinished_tool_calls(self):
+        call = ToolCall("call_one", "lookup", "{}")
+        cases = (
+            (
+                ChatMessage("user", "request"),
+                ChatMessage("assistant", "", tool_call=call),
+                ChatMessage("tool", "result", tool_call_id="call_other"),
+                ChatMessage("assistant", "answer"),
+            ),
+            (
+                ChatMessage("user", "request"),
+                ChatMessage("assistant", "", tool_call=call),
+            ),
+            (
+                ChatMessage("user", "request"),
+                ChatMessage("assistant", "", tool_call=call),
+                ChatMessage("tool", "result", tool_call_id=call.call_id),
+                ChatMessage("assistant", "answer"),
+                ChatMessage("user", "again"),
+                ChatMessage("assistant", "", tool_call=call),
+                ChatMessage("tool", "result", tool_call_id=call.call_id),
+                ChatMessage("assistant", "answer"),
+            ),
+        )
+        for messages in cases:
+            with self.subTest(messages=messages), self.assertRaises(SFTDataError):
+                Conversation("invalid-tool", messages)
 
     def test_rejects_invalid_identifiers_and_message_containers(self):
         conversation = valid_conversation()
