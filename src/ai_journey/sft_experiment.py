@@ -11,9 +11,16 @@ from dataclasses import asdict, dataclass, fields
 import torch
 from torch.nn import functional as F
 
-from .lora import parameter_summary
+from .lora import (
+    LoRAConfig,
+    adapter_parameters,
+    frozen_fingerprint,
+    inject_adapters,
+    merge_adapters,
+    parameter_summary,
+)
 from .lora_data import Document, schedule_evidence, training_batches
-from .lora_experiment import isolated_cpu_runtime, train_on_batches
+from .lora_experiment import ADAPTER_TARGETS, isolated_cpu_runtime, train_on_batches
 from .sft_data import (
     CHAT_FIXTURE_ID,
     SFTDataError,
@@ -283,17 +290,38 @@ def _probe(model, batch):
     return logits
 
 
-def _dense_trial(name, model, base, batches, split, codec, config):
+def _trial(name, model, base, batches, split, codec, config, *, adapter_config=None):
     initial = model_fingerprint(model)
+    counts = parameter_summary(model)
+    frozen_before = frozen_fingerprint(model)
     error = float((_probe(model, batches[0]) - _probe(base, batches[0])).abs().max())
     if error != 0:
         raise SFTDataError("chat comparison forks must start from the same function")
     trace = train_sft_batches(model, batches, learning_rate=config.sft_learning_rate)
+    frozen_after = frozen_fingerprint(model)
+    if frozen_before != frozen_after:
+        raise SFTDataError("frozen chat base changed during adaptation")
+    merge = None
+    if adapter_config is not None:
+        adapted_logits = _probe(model, batches[0])
+        merged = merge_adapters(model)
+        merge_error = float((adapted_logits - _probe(merged, batches[0])).abs().max())
+        if not math.isfinite(merge_error) or merge_error > 1e-10:
+            raise SFTDataError("merged chat adapter failed dense equivalence")
+        merge = {
+            "probe_max_abs_error": merge_error,
+            "dense_sha256": model_fingerprint(merged),
+            "parameters": parameter_summary(merged),
+        }
     return {
         "name": name,
-        "parameters": parameter_summary(model),
+        "adapter": asdict(adapter_config) if adapter_config is not None else None,
+        "merge": merge,
+        "parameters": counts,
         "initial_sha256": initial,
         "final_sha256": model_fingerprint(model),
+        "frozen_before_sha256": frozen_before,
+        "frozen_after_sha256": frozen_after,
         "initial_function_max_abs_error": error,
         "training": trace,
         "heldout": evaluate_sft(
@@ -305,8 +333,10 @@ def _dense_trial(name, model, base, batches, split, codec, config):
     }
 
 
-def run_sft_dense_comparison(config=None):
-    """Warm one base per seed, then compare frozen and full chat SFT forks."""
+SFT_ARMS = ("frozen", "full", "lora-rank-1", "lora-rank-2")
+
+
+def _run_sft_comparison(config, arms):
     if config is None:
         config = SFTComparisonConfig()
     if not isinstance(config, SFTComparisonConfig):
@@ -343,12 +373,40 @@ def run_sft_dense_comparison(config=None):
                 base, base_batches, learning_rate=config.base_learning_rate
             )
             warmed = model_fingerprint(base)
-            frozen = copy.deepcopy(base).requires_grad_(False)
-            full = copy.deepcopy(base)
-            trials = [
-                _dense_trial("frozen", frozen, base, sft_batches, split, codec, config),
-                _dense_trial("full", full, base, sft_batches, split, codec, config),
-            ]
+            trials = []
+            for name in arms:
+                adapter_config = None
+                if name.startswith("lora-rank-"):
+                    rank = int(name.rsplit("-", 1)[1])
+                    adapter_config = LoRAConfig(
+                        rank=rank,
+                        alpha=rank * config.adapter_scale,
+                        dropout=0.0,
+                        seed=seed,
+                    )
+                    model = inject_adapters(base, ADAPTER_TARGETS, adapter_config)
+                    if {id(parameter) for parameter in adapter_parameters(model)} != {
+                        id(parameter)
+                        for parameter in model.parameters()
+                        if parameter.requires_grad
+                    }:
+                        raise SFTDataError("only adapter factors may be optimized")
+                else:
+                    model = copy.deepcopy(base)
+                    if name == "frozen":
+                        model.requires_grad_(False)
+                trials.append(
+                    _trial(
+                        name,
+                        model,
+                        base,
+                        sft_batches,
+                        split,
+                        codec,
+                        config,
+                        adapter_config=adapter_config,
+                    )
+                )
             if warmed != model_fingerprint(base):
                 raise SFTDataError("chat adaptation fork mutated the warmed source")
             seeds.append(
@@ -380,3 +438,13 @@ def run_sft_dense_comparison(config=None):
         },
         "limitations": SFT_LIMITATIONS,
     }
+
+
+def run_sft_dense_comparison(config=None):
+    """Warm one base per seed, then compare frozen and full chat SFT forks."""
+    return _run_sft_comparison(config, ("frozen", "full"))
+
+
+def run_sft_comparison(config=None):
+    """Compare full, frozen, and rank-1/rank-2 chat adaptation forks."""
+    return _run_sft_comparison(config, SFT_ARMS)

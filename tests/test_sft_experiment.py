@@ -14,6 +14,7 @@ from ai_journey.sft_data import (
 from ai_journey.sft_experiment import (
     SFTComparisonConfig,
     evaluate_sft,
+    run_sft_comparison,
     run_sft_dense_comparison,
     sft_config_dict,
     sft_config_from_dict,
@@ -241,6 +242,51 @@ class SFTDenseComparisonTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(SFTDataError, "SFTComparisonConfig"):
             run_sft_dense_comparison("bad")
+
+
+class SFTLoRAComparisonTests(unittest.TestCase):
+    def tiny_config(self):
+        return SFTComparisonConfig(
+            block_size=16,
+            embedding_dim=8,
+            head_count=2,
+            batch_size=2,
+            base_steps=1,
+            sft_steps=1,
+            evaluation_batch_size=64,
+        )
+
+    def test_lora_forks_preserve_bases_merge_exactly_and_reduce_trainable_capacity(
+        self,
+    ):
+        result = run_sft_comparison(self.tiny_config())
+        for seed in result["seeds"]:
+            self.assertEqual(
+                [trial["name"] for trial in seed["trials"]],
+                ["frozen", "full", "lora-rank-1", "lora-rank-2"],
+            )
+            full = seed["trials"][1]
+            for rank, trial in enumerate(seed["trials"][2:], start=1):
+                self.assertEqual(trial["adapter"]["rank"], rank)
+                self.assertEqual(trial["adapter"]["alpha"], rank * 2.0)
+                self.assertEqual(trial["initial_function_max_abs_error"], 0)
+                self.assertEqual(
+                    trial["frozen_before_sha256"],
+                    trial["frozen_after_sha256"],
+                )
+                self.assertLess(
+                    trial["parameters"]["trainable"],
+                    full["parameters"]["trainable"],
+                )
+                self.assertLessEqual(trial["merge"]["probe_max_abs_error"], 1e-10)
+                self.assertEqual(
+                    trial["merge"]["parameters"]["total"],
+                    full["parameters"]["total"],
+                )
+
+    def test_complete_lora_comparison_is_exactly_repeatable(self):
+        config = self.tiny_config()
+        self.assertEqual(run_sft_comparison(config), run_sft_comparison(config))
 
 
 if __name__ == "__main__":
