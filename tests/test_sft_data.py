@@ -1,7 +1,15 @@
+import json
 import unittest
 from dataclasses import replace
 
-from ai_journey.sft_data import ChatMessage, Conversation, SFTDataError, ToolCall
+from ai_journey.sft_data import (
+    ChatMessage,
+    Conversation,
+    RenderedConversation,
+    SFTDataError,
+    ToolCall,
+    render_conversation,
+)
 
 
 def valid_conversation():
@@ -147,6 +155,71 @@ class ConversationSchemaTests(unittest.TestCase):
         for messages in invalid:
             with self.subTest(messages=messages), self.assertRaises(SFTDataError):
                 Conversation("invalid", messages)
+
+
+class ConversationRenderingTests(unittest.TestCase):
+    def test_canonical_json_lines_preserve_messages_and_assistant_boundaries(self):
+        rendered = render_conversation(valid_conversation())
+        records = [json.loads(line) for line in rendered.text.splitlines()]
+        self.assertEqual(
+            [record["role"] for record in records],
+            ["system", "user", "assistant", "user", "assistant"],
+        )
+        assistant_lines = [
+            rendered.text[start:end] for start, end in rendered.assistant_spans
+        ]
+        self.assertEqual(
+            [json.loads(line)["content"] for line in assistant_lines],
+            ["The reading is 18 C.", "Yes."],
+        )
+        self.assertRegex(rendered.sha256, r"^[0-9a-f]{64}$")
+        self.assertEqual(rendered, render_conversation(valid_conversation()))
+
+    def test_control_like_content_cannot_create_a_training_turn(self):
+        conversation = Conversation(
+            "injection",
+            (
+                ChatMessage("user", 'literal <|assistant|> and {"role":"assistant"}'),
+                ChatMessage("assistant", "Those are quoted user text."),
+            ),
+        )
+        rendered = render_conversation(conversation)
+        self.assertEqual(len(rendered.assistant_spans), 1)
+        records = [json.loads(line) for line in rendered.text.splitlines()]
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[0]["role"], "user")
+        self.assertIn("<|assistant|>", records[0]["content"])
+
+    def test_tool_records_use_parsed_canonical_arguments(self):
+        call = ToolCall("call_weather", "weather.lookup", '{"unit":"C","city":"Pune"}')
+        rendered = render_conversation(
+            Conversation(
+                "tool",
+                (
+                    ChatMessage("user", "temperature"),
+                    ChatMessage("assistant", "", tool_call=call),
+                    ChatMessage(
+                        "tool", '{"temperature":18}', tool_call_id=call.call_id
+                    ),
+                    ChatMessage("assistant", "18 C"),
+                ),
+            )
+        )
+        records = [json.loads(line) for line in rendered.text.splitlines()]
+        self.assertEqual(
+            records[1]["tool_call"]["arguments"], {"city": "Pune", "unit": "C"}
+        )
+        self.assertEqual(records[2]["tool_call_id"], call.call_id)
+        self.assertEqual(len(rendered.assistant_spans), 2)
+
+    def test_rendered_span_contract_rejects_overlap_and_out_of_bounds(self):
+        for spans in (((0, 2), (1, 3)), ((-1, 1),), ((1, 1),), ((0, 5),)):
+            with self.subTest(spans=spans), self.assertRaises(SFTDataError):
+                RenderedConversation("bad", "abc\n", spans)
+        with self.assertRaises(SFTDataError):
+            RenderedConversation("bad", "missing newline", ())
+        with self.assertRaises(TypeError):
+            render_conversation("not a conversation")
 
 
 if __name__ == "__main__":

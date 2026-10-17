@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from hashlib import sha256
 
 
 class SFTDataError(ValueError):
@@ -161,3 +162,72 @@ class Conversation:
                 expected = "user"
         if dialogue[-1].role != "assistant" or dialogue[-1].tool_call is not None:
             raise SFTDataError("conversation must end with an assistant response")
+
+
+@dataclass(frozen=True)
+class RenderedConversation:
+    conversation_id: str
+    text: str
+    assistant_spans: tuple[tuple[int, int], ...]
+
+    def __post_init__(self):
+        if not isinstance(self.text, str) or not self.text.endswith("\n"):
+            raise SFTDataError("rendered conversations must end with a newline")
+        previous_end = 0
+        for span in self.assistant_spans:
+            if (
+                not isinstance(span, tuple)
+                or len(span) != 2
+                or any(type(value) is not int for value in span)
+                or not previous_end <= span[0] < span[1] <= len(self.text)
+            ):
+                raise SFTDataError("assistant spans must be ordered nonempty intervals")
+            previous_end = span[1]
+
+    @property
+    def sha256(self):
+        return sha256(self.text.encode("utf-8")).hexdigest()
+
+
+def _message_record(message: ChatMessage) -> dict:
+    record = {"content": message.content, "role": message.role}
+    if message.tool_call is not None:
+        record["tool_call"] = {
+            "arguments": _strict_json_object(message.tool_call.arguments),
+            "call_id": message.tool_call.call_id,
+            "name": message.tool_call.name,
+        }
+    if message.tool_call_id is not None:
+        record["tool_call_id"] = message.tool_call_id
+    return record
+
+
+def render_conversation(conversation: Conversation) -> RenderedConversation:
+    """Serialize one conversation as canonical JSON Lines with assistant spans.
+
+    JSON escaping makes user-controlled text unambiguous: content resembling role
+    markers remains a string value and cannot create an additional training turn.
+    """
+    if not isinstance(conversation, Conversation):
+        raise TypeError("conversation must be Conversation")
+    parts = []
+    assistant_spans = []
+    offset = 0
+    for message in conversation.messages:
+        line = (
+            json.dumps(
+                _message_record(message),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            + "\n"
+        )
+        parts.append(line)
+        if message.role == "assistant":
+            assistant_spans.append((offset, offset + len(line)))
+        offset += len(line)
+    return RenderedConversation(
+        conversation.conversation_id, "".join(parts), tuple(assistant_spans)
+    )
