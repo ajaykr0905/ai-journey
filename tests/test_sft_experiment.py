@@ -14,6 +14,7 @@ from ai_journey.sft_data import (
 from ai_journey.sft_experiment import (
     SFTComparisonConfig,
     evaluate_sft,
+    run_sft_dense_comparison,
     sft_config_dict,
     sft_config_from_dict,
     train_sft_batches,
@@ -191,6 +192,55 @@ class SFTEvaluationTests(unittest.TestCase):
                 next(model.parameters()).view(-1)[0] = float("inf")
             with self.assertRaisesRegex(SFTDataError, "finite floating-point"):
                 evaluate_sft(model, split.validation, split.codec())
+
+
+class SFTDenseComparisonTests(unittest.TestCase):
+    def tiny_config(self):
+        return SFTComparisonConfig(
+            block_size=16,
+            embedding_dim=8,
+            head_count=2,
+            batch_size=2,
+            base_steps=1,
+            sft_steps=1,
+            evaluation_batch_size=64,
+        )
+
+    def test_each_seed_warms_once_and_forks_identical_dense_models(self):
+        result = run_sft_dense_comparison(self.tiny_config())
+        self.assertEqual([row["seed"] for row in result["seeds"]], [43, 44])
+        self.assertEqual(result["fixture"]["id"], "authored-weather-tools-v1")
+        self.assertIn("same training conversations", result["limitations"])
+        for seed in result["seeds"]:
+            self.assertNotEqual(seed["initial_sha256"], seed["warmed_sha256"])
+            self.assertEqual(seed["warmed_sha256"], seed["source_after_sha256"])
+            frozen, full = seed["trials"]
+            self.assertEqual([frozen["name"], full["name"]], ["frozen", "full"])
+            self.assertEqual(frozen["initial_sha256"], seed["warmed_sha256"])
+            self.assertEqual(full["initial_sha256"], seed["warmed_sha256"])
+            self.assertEqual(frozen["initial_sha256"], frozen["final_sha256"])
+            self.assertNotEqual(full["initial_sha256"], full["final_sha256"])
+            self.assertEqual(frozen["parameters"]["trainable"], 0)
+            self.assertEqual(
+                full["parameters"]["total"], full["parameters"]["trainable"]
+            )
+            for trial in seed["trials"]:
+                self.assertEqual(
+                    trial["training"]["supervised_tokens"],
+                    seed["sft_schedule"]["supervised_tokens"],
+                )
+                self.assertEqual(
+                    trial["heldout"]["target_tokens"],
+                    result["heldout"]["target_tokens"],
+                )
+
+    def test_dense_comparison_is_exactly_repeatable_and_rejects_wrong_config(self):
+        config = self.tiny_config()
+        self.assertEqual(
+            run_sft_dense_comparison(config), run_sft_dense_comparison(config)
+        )
+        with self.assertRaisesRegex(SFTDataError, "SFTComparisonConfig"):
+            run_sft_dense_comparison("bad")
 
 
 if __name__ == "__main__":

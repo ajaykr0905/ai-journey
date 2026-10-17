@@ -2,20 +2,35 @@
 
 from __future__ import annotations
 
+import copy
 import math
+import platform
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, fields
 
 import torch
 from torch.nn import functional as F
 
+from .lora import parameter_summary
+from .lora_data import Document, schedule_evidence, training_batches
+from .lora_experiment import isolated_cpu_runtime, train_on_batches
 from .sft_data import (
+    CHAT_FIXTURE_ID,
     SFTDataError,
     SFTWindow,
+    authored_chat_fixture,
     bounded_integer,
+    render_conversation,
+    sft_schedule_evidence,
+    sft_training_batches,
+    sft_validation_evidence,
     sft_validation_targets,
 )
-from .transformer_lab import TransformerConfig
+from .transformer_lab import (
+    DecoderLanguageModel,
+    TransformerConfig,
+    model_fingerprint,
+)
 
 
 @dataclass(frozen=True)
@@ -249,4 +264,119 @@ def evaluate_sft(model, conversations, codec, *, batch_size=32):
         "target_tokens": len(targets),
         "mean_nll": mean,
         "perplexity": perplexity,
+    }
+
+
+SFT_LIMITATIONS = (
+    "Authored synthetic JSONL chats; tiny one-layer CPU character decoder; the "
+    "base language-model warm-up and SFT use the same training conversations. "
+    "Paired seeds are descriptive, not confidence intervals. Equal token exposure "
+    "does not imply equal compute, memory, or latency. No claim about factuality, "
+    "tool execution safety, large models, GPUs, production, or learner completion."
+)
+
+
+def _probe(model, batch):
+    model.eval()
+    with torch.inference_mode():
+        logits, _ = model(torch.tensor([row.inputs for row in batch], dtype=torch.long))
+    return logits
+
+
+def _dense_trial(name, model, base, batches, split, codec, config):
+    initial = model_fingerprint(model)
+    error = float((_probe(model, batches[0]) - _probe(base, batches[0])).abs().max())
+    if error != 0:
+        raise SFTDataError("chat comparison forks must start from the same function")
+    trace = train_sft_batches(model, batches, learning_rate=config.sft_learning_rate)
+    return {
+        "name": name,
+        "parameters": parameter_summary(model),
+        "initial_sha256": initial,
+        "final_sha256": model_fingerprint(model),
+        "initial_function_max_abs_error": error,
+        "training": trace,
+        "heldout": evaluate_sft(
+            model,
+            split.validation,
+            codec,
+            batch_size=config.evaluation_batch_size,
+        ),
+    }
+
+
+def run_sft_dense_comparison(config=None):
+    """Warm one base per seed, then compare frozen and full chat SFT forks."""
+    if config is None:
+        config = SFTComparisonConfig()
+    if not isinstance(config, SFTComparisonConfig):
+        raise SFTDataError("chat comparison requires SFTComparisonConfig")
+    split = authored_chat_fixture()
+    codec = split.codec()
+    model_config = config.model_config(len(codec.tokens))
+    base_documents = tuple(
+        Document(row.conversation_id, render_conversation(row).text)
+        for row in split.train
+    )
+    seeds = []
+    for seed in config.seeds:
+        with isolated_cpu_runtime(seed):
+            base = DecoderLanguageModel(model_config)
+            initial = model_fingerprint(base)
+            base_batches = training_batches(
+                base_documents,
+                codec,
+                block_size=config.block_size,
+                batch_size=config.batch_size,
+                steps=config.base_steps,
+                seed=seed ^ 0xB45E,
+            )
+            sft_batches = sft_training_batches(
+                split.train,
+                codec,
+                block_size=config.block_size,
+                batch_size=config.batch_size,
+                steps=config.sft_steps,
+                seed=seed ^ 0x5F7,
+            )
+            base_trace = train_on_batches(
+                base, base_batches, learning_rate=config.base_learning_rate
+            )
+            warmed = model_fingerprint(base)
+            frozen = copy.deepcopy(base).requires_grad_(False)
+            full = copy.deepcopy(base)
+            trials = [
+                _dense_trial("frozen", frozen, base, sft_batches, split, codec, config),
+                _dense_trial("full", full, base, sft_batches, split, codec, config),
+            ]
+            if warmed != model_fingerprint(base):
+                raise SFTDataError("chat adaptation fork mutated the warmed source")
+            seeds.append(
+                {
+                    "seed": seed,
+                    "initial_sha256": initial,
+                    "warmed_sha256": warmed,
+                    "source_after_sha256": model_fingerprint(base),
+                    "base_schedule": schedule_evidence(base_batches),
+                    "sft_schedule": sft_schedule_evidence(sft_batches),
+                    "base_training": base_trace,
+                    "trials": trials,
+                }
+            )
+    return {
+        "config": sft_config_dict(config),
+        "fixture": {"id": CHAT_FIXTURE_ID, **split.evidence()},
+        "model": asdict(model_config),
+        "heldout": sft_validation_evidence(
+            split.validation, codec, block_size=config.block_size
+        ),
+        "seeds": seeds,
+        "runtime": {
+            "python": platform.python_version(),
+            "torch": str(torch.__version__),
+            "device": "cpu",
+            "dtype": "float64",
+            "threads": 1,
+        },
+        "limitations": SFT_LIMITATIONS,
     }
