@@ -3,11 +3,14 @@ import unittest
 from dataclasses import replace
 
 from ai_journey.sft_data import (
+    CHAT_FIXTURE_ID,
     ChatMessage,
     Conversation,
+    ConversationSplit,
     RenderedConversation,
     SFTDataError,
     ToolCall,
+    authored_chat_fixture,
     render_conversation,
 )
 
@@ -220,6 +223,56 @@ class ConversationRenderingTests(unittest.TestCase):
             RenderedConversation("bad", "missing newline", ())
         with self.assertRaises(TypeError):
             render_conversation("not a conversation")
+
+
+class ConversationFixtureTests(unittest.TestCase):
+    def test_fixture_is_deterministic_disjoint_and_publicly_authored(self):
+        split = authored_chat_fixture()
+        self.assertEqual(CHAT_FIXTURE_ID, "authored-weather-tools-v1")
+        self.assertEqual(split, authored_chat_fixture())
+        self.assertEqual(split.evidence(), authored_chat_fixture().evidence())
+        rows = split.train + split.validation
+        self.assertEqual(len(rows), 12)
+        self.assertEqual(len({row.conversation_id for row in rows}), 12)
+        self.assertEqual(len({render_conversation(row).text for row in rows}), 12)
+        self.assertGreater(split.evidence()["train"]["assistant_characters"], 0)
+        self.assertGreater(split.evidence()["validation"]["assistant_characters"], 0)
+
+    def test_codec_is_fit_on_training_and_covers_validation_without_fitting_it(self):
+        split = authored_chat_fixture()
+        training_text = "".join(render_conversation(row).text for row in split.train)
+        self.assertEqual(split.codec().tokens, tuple(sorted(set(training_text))))
+        for conversation in split.validation:
+            rendered = render_conversation(conversation)
+            encoded = split.codec().encode(rendered.text)
+            self.assertEqual(split.codec().decode(encoded), rendered.text)
+        changed_validation = (
+            replace(
+                split.validation[0],
+                messages=(
+                    ChatMessage("user", "snowman"),
+                    ChatMessage("assistant", "☃"),
+                ),
+            ),
+            *split.validation[1:],
+        )
+        with self.assertRaisesRegex(SFTDataError, "absent from training"):
+            replace(split, validation=changed_validation)
+
+    def test_split_rejects_empty_mutable_duplicate_and_leaked_conversations(self):
+        split = authored_chat_fixture()
+        for train, validation in (
+            ((), split.validation),
+            (list(split.train), split.validation),
+            (split.train, ()),
+            (split.train, (split.train[0],)),
+            (split.train, (replace(split.train[0], conversation_id="new-id"),)),
+        ):
+            with (
+                self.subTest(train=train, validation=validation),
+                self.assertRaises(SFTDataError),
+            ):
+                ConversationSplit(train, validation)
 
 
 if __name__ == "__main__":

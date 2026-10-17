@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass
 from hashlib import sha256
 
+from .transformer_lab import CharacterCodec
+
 
 class SFTDataError(ValueError):
     """Conversation data violates the supervised fine-tuning contract."""
@@ -231,3 +233,127 @@ def render_conversation(conversation: Conversation) -> RenderedConversation:
     return RenderedConversation(
         conversation.conversation_id, "".join(parts), tuple(assistant_spans)
     )
+
+
+def canonical_digest(value) -> str:
+    return sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+@dataclass(frozen=True)
+class ConversationSplit:
+    train: tuple[Conversation, ...]
+    validation: tuple[Conversation, ...]
+
+    def __post_init__(self):
+        if any(
+            not isinstance(partition, tuple)
+            or not partition
+            or any(not isinstance(row, Conversation) for row in partition)
+            for partition in (self.train, self.validation)
+        ):
+            raise SFTDataError("chat partitions require nonempty conversation tuples")
+        conversations = self.train + self.validation
+        if len({row.conversation_id for row in conversations}) != len(conversations):
+            raise SFTDataError("conversation ids must be unique across partitions")
+        rendered = tuple(render_conversation(row) for row in conversations)
+        if len({row.text for row in rendered}) != len(rendered):
+            raise SFTDataError("duplicate rendered conversations are not allowed")
+        codec = self.codec()
+        for row in rendered[len(self.train) :]:
+            try:
+                codec.encode(row.text)
+            except ValueError as exc:
+                raise SFTDataError(
+                    "validation contains a character absent from training"
+                ) from exc
+
+    def codec(self) -> CharacterCodec:
+        return CharacterCodec.from_text(
+            "".join(render_conversation(row).text for row in self.train)
+        )
+
+    def evidence(self) -> dict:
+        result = {}
+        for name in ("train", "validation"):
+            rendered = tuple(render_conversation(row) for row in getattr(self, name))
+            result[name] = {
+                "conversation_ids": [row.conversation_id for row in rendered],
+                "sha256": canonical_digest(
+                    [[row.conversation_id, row.text] for row in rendered]
+                ),
+                "characters": sum(len(row.text) for row in rendered),
+                "assistant_characters": sum(
+                    end - start
+                    for row in rendered
+                    for start, end in row.assistant_spans
+                ),
+            }
+        result["vocabulary"] = list(self.codec().tokens)
+        return result
+
+
+CHAT_FIXTURE_ID = "authored-weather-tools-v1"
+
+
+def _plain(conversation_id, place, value):
+    return Conversation(
+        conversation_id,
+        (
+            ChatMessage("system", "Use only supplied readings."),
+            ChatMessage("user", f"What is the {place} reading?"),
+            ChatMessage("assistant", f"The {place} reading is {value} C."),
+            ChatMessage("user", "Is that below 20 C?"),
+            ChatMessage("assistant", "Yes." if value < 20 else "No."),
+        ),
+    )
+
+
+def _tool(conversation_id, place, value):
+    call = ToolCall(
+        f"call_{conversation_id.replace('-', '_')}",
+        "weather.lookup",
+        json.dumps({"place": place}, separators=(",", ":")),
+    )
+    return Conversation(
+        conversation_id,
+        (
+            ChatMessage("system", "Use weather.lookup before answering."),
+            ChatMessage("user", f"Report the {place} reading."),
+            ChatMessage("assistant", "", tool_call=call),
+            ChatMessage(
+                "tool",
+                json.dumps({"reading_c": value}, separators=(",", ":")),
+                tool_call_id=call.call_id,
+            ),
+            ChatMessage("assistant", f"The {place} reading is {value} C."),
+        ),
+    )
+
+
+def authored_chat_fixture() -> ConversationSplit:
+    """Return deterministic artificial chats with no downloaded or personal data."""
+    train = (
+        _plain("plain-east-18", "east", 18),
+        _plain("plain-west-21", "west", 21),
+        _plain("plain-north-17", "north", 17),
+        _plain("plain-south-22", "south", 22),
+        _tool("tool-east-18", "east", 18),
+        _tool("tool-west-21", "west", 21),
+        _tool("tool-north-17", "north", 17),
+        _tool("tool-south-22", "south", 22),
+    )
+    validation = (
+        _plain("heldout-east-21", "east", 21),
+        _plain("heldout-south-17", "south", 17),
+        _tool("heldout-tool-west-18", "west", 18),
+        _tool("heldout-tool-north-22", "north", 22),
+    )
+    return ConversationSplit(train, validation)
