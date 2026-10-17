@@ -383,6 +383,8 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 35 | 2026-10-09 | Causal prefix averaging, masked softmax, and streaming equivalence |
 | 36 | 2026-10-10 | Single-head forward/backward and causal-isolation foundations verified with Day 37 |
 | 37 | 2026-10-11 | Full residual blocks, multi-head audits, controlled configurations, and inference restart |
+| 42 | 2026-10-16 | Low-rank adapter primitives, frozen-base audits, dense merge equivalence, paired comparison, and exact replay |
+| 43 | 2026-10-17 | Validated chat/tool conversations, assistant-only SFT, matched full/LoRA trials, uncertainty, and exact replay |
 
 ## License
 
