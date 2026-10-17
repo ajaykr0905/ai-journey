@@ -6,8 +6,14 @@ import math
 from contextlib import nullcontext
 
 import torch
+from torch.nn import functional as F
 
-from .sft_data import SFTDataError, SFTWindow
+from .sft_data import (
+    SFTDataError,
+    SFTWindow,
+    bounded_integer,
+    sft_validation_targets,
+)
 
 
 def _finite_cpu_model(model):
@@ -103,4 +109,57 @@ def train_sft_batches(model, batches, *, learning_rate):
         "input_tokens": input_tokens,
         "supervised_tokens": supervised_tokens,
         "optimizer_steps": len(losses) if optimizer is not None else 0,
+    }
+
+
+def evaluate_sft(model, conversations, codec, *, batch_size=32):
+    """Score each assistant target once and restore every caller module mode."""
+    _finite_cpu_model(model)
+    bounded_integer(batch_size, "evaluation batch_size", 1, 128)
+    targets = sft_validation_targets(
+        conversations, codec, block_size=model.config.block_size
+    )
+    losses = [None] * len(targets)
+    caller_modes = [(module, module.training) for module in model.modules()]
+    try:
+        model.eval()
+        with torch.inference_mode():
+            for width in range(1, model.config.block_size + 1):
+                indexes = [
+                    index
+                    for index, row in enumerate(targets)
+                    if len(row.context) == width
+                ]
+                for start in range(0, len(indexes), batch_size):
+                    selected = indexes[start : start + batch_size]
+                    inputs = torch.tensor(
+                        [targets[index].context for index in selected],
+                        dtype=torch.long,
+                    )
+                    labels = torch.tensor(
+                        [targets[index].target for index in selected],
+                        dtype=torch.long,
+                    )
+                    logits, _ = model(inputs)
+                    values = F.cross_entropy(
+                        logits[:, -1], labels, reduction="none"
+                    ).tolist()
+                    for index, value in zip(selected, values, strict=True):
+                        losses[index] = value
+    finally:
+        for module, mode in caller_modes:
+            module.training = mode
+    total = math.fsum(losses)
+    mean = total / len(targets)
+    try:
+        perplexity = math.exp(mean)
+    except OverflowError as exc:
+        raise SFTDataError("assistant perplexity overflow") from exc
+    if any(not math.isfinite(value) for value in (*losses, total, mean, perplexity)):
+        raise SFTDataError("assistant evaluation metrics must be finite")
+    return {
+        "nll_sum": total,
+        "target_tokens": len(targets),
+        "mean_nll": mean,
+        "perplexity": perplexity,
     }
