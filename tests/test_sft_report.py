@@ -1,14 +1,20 @@
 import copy
+import json
 import math
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from ai_journey.sft_data import SFTDataError
 from ai_journey.sft_experiment import SFTComparisonConfig, run_sft_comparison
 from ai_journey.sft_report import (
     build_sft_report,
+    render_sft_report,
     sft_report_digest,
     summarize_sft_comparison,
     validate_sft_report,
+    write_sft_report,
 )
 
 
@@ -116,6 +122,40 @@ class SFTReportValidationTests(unittest.TestCase):
         for mutation in mutations:
             with self.subTest(mutation=mutation), self.assertRaises(SFTDataError):
                 validate_sft_report(mutation)
+
+
+class SFTReportPublicationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.report = build_sft_report(result())
+
+    def test_writes_repeatable_canonical_json_to_nested_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "report.json"
+            write_sft_report(path, self.report)
+            before = path.read_bytes()
+            write_sft_report(path, self.report)
+            self.assertEqual(before, path.read_bytes())
+            self.assertEqual(json.loads(before), self.report)
+            self.assertEqual(before.decode(), render_sft_report(self.report))
+            self.assertEqual(list(path.parent.glob(f".{path.name}.tmp-*")), [])
+
+    def test_invalid_report_and_replace_failure_preserve_previous_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "report.json"
+            path.write_bytes(b"previous")
+            invalid = copy.deepcopy(self.report)
+            invalid["sha256"] = "0" * 64
+            with self.assertRaises(SFTDataError):
+                write_sft_report(path, invalid)
+            self.assertEqual(path.read_bytes(), b"previous")
+            with (
+                patch("ai_journey.sft_report.os.replace", side_effect=OSError("stop")),
+                self.assertRaises(OSError),
+            ):
+                write_sft_report(path, self.report)
+            self.assertEqual(path.read_bytes(), b"previous")
+            self.assertEqual(list(path.parent.glob(f".{path.name}.tmp-*")), [])
 
 
 if __name__ == "__main__":

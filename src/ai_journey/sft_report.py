@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import re
+import tempfile
+from pathlib import Path
 
 from .sft_data import (
     CHAT_FIXTURE_ID,
@@ -174,14 +178,18 @@ def sft_report_digest(report):
 
 
 def build_sft_report(result):
-    report = {
-        "schema": SFT_REPORT_SCHEMA,
-        "result": result,
-        "summary": summarize_sft_comparison(result),
-    }
-    report["sha256"] = sft_report_digest(report)
-    validate_sft_report(report)
-    return report
+    try:
+        owned = json.loads(json.dumps(result, allow_nan=False))
+        report = {
+            "schema": SFT_REPORT_SCHEMA,
+            "result": owned,
+            "summary": summarize_sft_comparison(owned),
+        }
+        report["sha256"] = sft_report_digest(report)
+        validate_sft_report(report)
+        return report
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise SFTDataError(f"cannot build SFT report: {exc}") from exc
 
 
 def _validate_training(trace, *, steps, input_tokens, supervised_tokens, frozen):
@@ -375,3 +383,38 @@ def validate_sft_report(report):
         return report
     except (KeyError, TypeError, OverflowError, ZeroDivisionError) as exc:
         raise SFTDataError(f"invalid SFT report: {exc}") from exc
+
+
+def render_sft_report(report):
+    validate_sft_report(report)
+    return json.dumps(report, sort_keys=True, indent=2, allow_nan=False) + "\n"
+
+
+def write_sft_report(path, report):
+    """Durably replace a validated report and clean any failed temporary file."""
+    rendered = render_sft_report(report)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.tmp-",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(rendered)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        temporary = None
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
