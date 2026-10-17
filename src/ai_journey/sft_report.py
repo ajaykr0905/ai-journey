@@ -19,6 +19,7 @@ from .sft_data import (
 from .sft_experiment import (
     SFT_ARMS,
     SFT_LIMITATIONS,
+    run_sft_comparison,
     sft_config_dict,
     sft_config_from_dict,
 )
@@ -418,3 +419,37 @@ def write_sft_report(path, report):
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def _replay_content(report):
+    """Exclude only the digest and explicitly environmental runtime metadata."""
+    return {
+        "schema": report["schema"],
+        "result": {
+            key: value for key, value in report["result"].items() if key != "runtime"
+        },
+        "summary": report["summary"],
+    }
+
+
+def replay_sft_report(report):
+    """Rebuild every paired chat adaptation arm and require exact evidence."""
+    validate_sft_report(report)
+    config = sft_config_from_dict(report["result"]["config"])
+    replay = build_sft_report(run_sft_comparison(config))
+    if canonical_digest(_replay_content(report)) != canonical_digest(
+        _replay_content(replay)
+    ):
+        raise SFTDataError(
+            "exact chat SFT replay mismatch: model fingerprints, training traces, "
+            "assistant metrics, or paired summaries do not reproduce"
+        )
+    return {
+        "sha256": report["sha256"],
+        "verified_bases": len(config.seeds),
+        "verified_trials": len(config.seeds) * len(SFT_ARMS),
+        "policy": (
+            "exact CPU float64 replay; only result.runtime and the report digest "
+            "excluded"
+        ),
+    }

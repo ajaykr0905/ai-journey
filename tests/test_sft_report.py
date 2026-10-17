@@ -6,11 +6,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import torch
+
 from ai_journey.sft_data import SFTDataError
 from ai_journey.sft_experiment import SFTComparisonConfig, run_sft_comparison
 from ai_journey.sft_report import (
     build_sft_report,
     render_sft_report,
+    replay_sft_report,
     sft_report_digest,
     summarize_sft_comparison,
     validate_sft_report,
@@ -156,6 +159,56 @@ class SFTReportPublicationTests(unittest.TestCase):
                 write_sft_report(path, self.report)
             self.assertEqual(path.read_bytes(), b"previous")
             self.assertEqual(list(path.parent.glob(f".{path.name}.tmp-*")), [])
+
+
+class SFTReportReplayTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.report = build_sft_report(result())
+
+    def test_exact_replay_rebuilds_every_base_and_arm_and_preserves_rng(self):
+        state = torch.get_rng_state().clone()
+        verified = replay_sft_report(self.report)
+        self.assertEqual(verified["verified_bases"], 2)
+        self.assertEqual(verified["verified_trials"], 8)
+        self.assertEqual(verified["sha256"], self.report["sha256"])
+        self.assertTrue(torch.equal(state, torch.get_rng_state()))
+
+    def test_only_environmental_version_strings_are_excluded(self):
+        report = copy.deepcopy(self.report)
+        report["result"]["runtime"].update(
+            python="another-python", torch="another-build"
+        )
+        report["sha256"] = sft_report_digest(report)
+        replay_sft_report(report)
+        report["result"]["runtime"]["device"] = "cuda"
+        report["sha256"] = sft_report_digest(report)
+        with self.assertRaisesRegex(SFTDataError, "runtime controls"):
+            replay_sft_report(report)
+
+    def test_self_consistent_rehashed_forgery_fails_exact_replay(self):
+        report = copy.deepcopy(self.report)
+        trial = report["result"]["seeds"][0]["trials"][1]
+        trial["final_sha256"] = "0" * 64
+        report["sha256"] = sft_report_digest(report)
+        validate_sft_report(report)
+        with self.assertRaisesRegex(SFTDataError, "exact chat SFT replay mismatch"):
+            replay_sft_report(report)
+
+    def test_forged_work_budget_is_rejected_before_replay_training(self):
+        report = copy.deepcopy(self.report)
+        report["result"]["config"].update(
+            block_size=256,
+            embedding_dim=64,
+            batch_size=16,
+            base_steps=128,
+            sft_steps=128,
+        )
+        report["sha256"] = sft_report_digest(report)
+        with patch("ai_journey.sft_report.run_sft_comparison") as runner:
+            with self.assertRaisesRegex(SFTDataError, "work budget"):
+                replay_sft_report(report)
+            runner.assert_not_called()
 
 
 if __name__ == "__main__":
