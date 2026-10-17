@@ -4,7 +4,12 @@ import unittest
 
 from ai_journey.sft_data import SFTDataError
 from ai_journey.sft_experiment import SFTComparisonConfig, run_sft_comparison
-from ai_journey.sft_report import summarize_sft_comparison
+from ai_journey.sft_report import (
+    build_sft_report,
+    sft_report_digest,
+    summarize_sft_comparison,
+    validate_sft_report,
+)
 
 
 def result():
@@ -75,6 +80,42 @@ class SFTSummaryTests(unittest.TestCase):
         for mutation in mutations:
             with self.subTest(mutation=mutation), self.assertRaises(SFTDataError):
                 summarize_sft_comparison(mutation)
+
+
+class SFTReportValidationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.report = build_sft_report(result())
+
+    def test_builds_self_verifying_report_with_recomputed_summary(self):
+        self.assertIs(validate_sft_report(self.report), self.report)
+        self.assertEqual(self.report["sha256"], sft_report_digest(self.report))
+        self.assertEqual(self.report["schema"], "ai-journey-chat-sft-comparison-v1")
+
+    def test_rejects_digest_schedule_metric_summary_and_fixture_tampering(self):
+        mutations = []
+        digest = copy.deepcopy(self.report)
+        digest["sha256"] = "0" * 64
+        mutations.append(digest)
+        schedule = copy.deepcopy(self.report)
+        schedule["result"]["seeds"][0]["sft_schedule"]["input_tokens"] += 1
+        schedule["sha256"] = sft_report_digest(schedule)
+        mutations.append(schedule)
+        metric = copy.deepcopy(self.report)
+        metric["result"]["seeds"][0]["trials"][0]["heldout"]["mean_nll"] += 1
+        metric["sha256"] = sft_report_digest(metric)
+        mutations.append(metric)
+        summary = copy.deepcopy(self.report)
+        summary["summary"]["arms"][0]["assistant_mean_nll"]["mean"] += 1
+        summary["sha256"] = sft_report_digest(summary)
+        mutations.append(summary)
+        fixture = copy.deepcopy(self.report)
+        fixture["result"]["fixture"]["train"]["characters"] += 1
+        fixture["sha256"] = sft_report_digest(fixture)
+        mutations.append(fixture)
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), self.assertRaises(SFTDataError):
+                validate_sft_report(mutation)
 
 
 if __name__ == "__main__":
