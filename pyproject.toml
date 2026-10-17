@@ -33,6 +33,8 @@ ai-journey-bpe-model-compare = "ai_journey.bpe_model_cli:main"
 ai-journey-bpe-model-verify = "ai_journey.bpe_model_verify:main"
 ai-journey-lora-compare = "ai_journey.lora_cli:main"
 ai-journey-lora-verify = "ai_journey.lora_cli:verify_main"
+ai-journey-chat-sft-compare = "ai_journey.sft_cli:main"
+ai-journey-chat-sft-verify = "ai_journey.sft_cli:verify_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

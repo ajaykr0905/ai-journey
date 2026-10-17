@@ -666,6 +666,7 @@ class DecoderLanguageModel(nn.Module):
         targets: Tensor | None = None,
         *,
         lengths: Tensor | None = None,
+        loss_mask: Tensor | None = None,
     ) -> tuple[Tensor, Tensor | None]:
         batch, time = self._validate_token_ids(token_ids)
         valid = None
@@ -675,6 +676,19 @@ class DecoderLanguageModel(nn.Module):
             valid = valid_sequence_positions(
                 lengths, batch=batch, time=time, device=token_ids.device
             )
+        loss_positions = valid
+        if loss_mask is not None:
+            if targets is None:
+                raise TransformerLabError("loss_mask requires targets")
+            if (
+                not isinstance(loss_mask, Tensor)
+                or loss_mask.shape != token_ids.shape
+                or loss_mask.dtype != torch.bool
+            ):
+                raise TypeError("loss_mask must match token_ids shape and be boolean")
+            if loss_mask.device != token_ids.device:
+                raise TransformerLabError("loss_mask must match token_ids device")
+            loss_positions = loss_mask if valid is None else loss_mask & valid
         if targets is not None:
             if (
                 not isinstance(targets, Tensor)
@@ -684,7 +698,15 @@ class DecoderLanguageModel(nn.Module):
                 raise TypeError("targets must match token_ids shape and dtype")
             if targets.device != token_ids.device:
                 raise TransformerLabError("targets must match token_ids device")
-            loss_targets = targets.reshape(-1) if valid is None else targets[valid]
+            if loss_positions is not None and not bool(loss_positions.any()):
+                raise TransformerLabError(
+                    "loss selection must include at least one target"
+                )
+            loss_targets = (
+                targets.reshape(-1)
+                if loss_positions is None
+                else targets[loss_positions]
+            )
             if bool(
                 ((loss_targets < 0) | (loss_targets >= self.config.vocab_size)).any()
             ):
@@ -713,8 +735,8 @@ class DecoderLanguageModel(nn.Module):
         if targets is not None:
             loss_logits = (
                 logits.reshape(-1, self.config.vocab_size)
-                if valid is None
-                else logits[valid]
+                if loss_positions is None
+                else logits[loss_positions]
             )
             loss = F.cross_entropy(loss_logits, loss_targets)
         return logits, loss

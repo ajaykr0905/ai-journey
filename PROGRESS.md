@@ -46,6 +46,8 @@ learner's own completion evidence.
 | 38 | Checksum-pinned bounded Tiny Shakespeare transformer training, exact checkpoint replay, deterministic sampling, runtime provenance, tamper-evident report, installed CLI, and repeat-run evidence present | Primary and support lectures pending user confirmation | Learner full-model run, generated-output screenshot, dropout/scaling notes, sample interpretation, and personal closing-remarks reflection pending |
 | 40 | Lossless byte/regex BPE, special-token policy, pinned aligned public corpora, three vocabulary budgets with ten-fold compression, exact tokenizer/model restart, train-only codec, strict UTF-8 cached serving, installed commands and operating guide present | Primary and support lectures pending user confirmation | Learner BPE type-along/rebuild, independent Hindi or Tamil versus English run, and explanations of merge ranks, regex boundaries, special tokens, compression denominators and sampling limits pending |
 | 41 | Document-isolated likelihood, three train-only BPE budgets with matched decoder initialization, 18 public Hindi/English CPU trials, no-learning baselines, paired seed diagnostics, and exact model/metric replay present | Primary and support lectures pending user confirmation | Learner tokenizer finish/rebuild, independent experiment, vocabulary tradeoff explanation and personally written tokenization blog post pending |
+| 42 | LoRA linear adapters, exact gradient oracles, frozen-base audits, dense merge equivalence, bounded artifacts, paired full-versus-low-rank comparison, installed commands, and exact replay present | Primary and support lectures pending user confirmation | Learner LoRA implementation, independent comparison run, parameter-efficiency explanation, and result interpretation pending |
+| 43 | Validated chat/tool state, canonical injection-safe rendering, train-only codec, assistant-only masked SFT, exhaustive held-out assistant scoring, matched full/LoRA comparisons, uncertainty report, installed commands, and exact replay present | Primary and support lectures pending user confirmation | Learner lecture viewing, term-by-term notes, independent run, and personal explanation of SFT, conversation format, hallucination, and tool use pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,
@@ -62,3 +64,14 @@ See [the experiment guide](docs/lora-experiment.md) and
 [the adapter contract](docs/lora-adapters.md) for commands and limits.
 This is engineering evidence on authored synthetic text. It does not mark a
 lecture, personal exercise, hosted run or 90-day tracker entry complete.
+
+## Engineering milestone: assistant-only chat SFT, 17 October 2026
+
+A strict authored fixture models complete system/user/assistant and tool-call
+conversations as canonical JSON lines. Training masks supervise only assistant
+characters, while held-out evaluation covers every assistant target once without
+cross-conversation context. A bounded two-seed CPU protocol compares frozen, full,
+rank-one LoRA and rank-two LoRA arms from matched warmed bases, publishes descriptive
+uncertainty and negative findings, and supports exact full replay. See
+[the chat SFT experiment guide](docs/chat-sft-experiment.md) for commands, measured
+results, limitations, and the learner evidence that remains outstanding.

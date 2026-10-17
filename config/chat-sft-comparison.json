@@ -1,0 +1,16 @@
+{
+  "adapter_scale": 2.0,
+  "base_learning_rate": 0.01,
+  "base_steps": 8,
+  "batch_size": 4,
+  "block_size": 32,
+  "embedding_dim": 16,
+  "evaluation_batch_size": 32,
+  "head_count": 2,
+  "seeds": [
+    43,
+    44
+  ],
+  "sft_learning_rate": 0.01,
+  "sft_steps": 8
+}

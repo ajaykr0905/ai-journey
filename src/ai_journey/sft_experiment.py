@@ -1,0 +1,450 @@
+"""Bounded assistant-only supervised fine-tuning on the tiny CPU decoder."""
+
+from __future__ import annotations
+
+import copy
+import math
+import platform
+from contextlib import nullcontext
+from dataclasses import asdict, dataclass, fields
+
+import torch
+from torch.nn import functional as F
+
+from .lora import (
+    LoRAConfig,
+    adapter_parameters,
+    frozen_fingerprint,
+    inject_adapters,
+    merge_adapters,
+    parameter_summary,
+)
+from .lora_data import Document, schedule_evidence, training_batches
+from .lora_experiment import ADAPTER_TARGETS, isolated_cpu_runtime, train_on_batches
+from .sft_data import (
+    CHAT_FIXTURE_ID,
+    SFTDataError,
+    SFTWindow,
+    authored_chat_fixture,
+    bounded_integer,
+    render_conversation,
+    sft_schedule_evidence,
+    sft_training_batches,
+    sft_validation_evidence,
+    sft_validation_targets,
+)
+from .transformer_lab import (
+    DecoderLanguageModel,
+    TransformerConfig,
+    model_fingerprint,
+)
+
+
+@dataclass(frozen=True)
+class SFTComparisonConfig:
+    seeds: tuple[int, ...] = (43, 44)
+    block_size: int = 32
+    embedding_dim: int = 16
+    head_count: int = 2
+    batch_size: int = 4
+    base_steps: int = 8
+    sft_steps: int = 8
+    base_learning_rate: float = 0.01
+    sft_learning_rate: float = 0.01
+    adapter_scale: float = 2.0
+    evaluation_batch_size: int = 32
+
+    def __post_init__(self):
+        if not isinstance(self.seeds, tuple) or not 2 <= len(self.seeds) <= 4:
+            raise SFTDataError("seeds require two to four distinct paired seeds")
+        for seed in self.seeds:
+            bounded_integer(seed, "seed", 0, 2**32 - 1)
+        if len(set(self.seeds)) != len(self.seeds):
+            raise SFTDataError("seeds must be distinct")
+        for name, low, high in (
+            ("block_size", 8, 256),
+            ("embedding_dim", 4, 64),
+            ("head_count", 1, 8),
+            ("batch_size", 1, 16),
+            ("base_steps", 1, 128),
+            ("sft_steps", 1, 128),
+            ("evaluation_batch_size", 1, 128),
+        ):
+            bounded_integer(getattr(self, name), name, low, high)
+        if self.embedding_dim % self.head_count:
+            raise SFTDataError("embedding_dim must be divisible by head_count")
+        for name, high in (
+            ("base_learning_rate", 0.1),
+            ("sft_learning_rate", 0.1),
+            ("adapter_scale", 8.0),
+        ):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or not 0 < value <= high
+            ):
+                raise SFTDataError(f"{name} must be finite and in (0, {high}]")
+        if self.work_units > 50_000_000:
+            raise SFTDataError("chat comparison exceeds the CPU work budget")
+
+    @property
+    def work_units(self):
+        return (
+            len(self.seeds)
+            * (self.base_steps + 4 * self.sft_steps)
+            * self.batch_size
+            * self.block_size
+            * self.embedding_dim**2
+        )
+
+    def model_config(self, vocab_size):
+        return TransformerConfig(
+            vocab_size=vocab_size,
+            block_size=self.block_size,
+            embedding_dim=self.embedding_dim,
+            head_count=self.head_count,
+            layer_count=1,
+            feed_forward_expansion=2,
+            dropout=0.0,
+        )
+
+
+def sft_config_dict(config):
+    return {**asdict(config), "seeds": list(config.seeds)}
+
+
+def sft_config_from_dict(value):
+    if (
+        not isinstance(value, dict)
+        or set(value) != {field.name for field in fields(SFTComparisonConfig)}
+        or not isinstance(value["seeds"], list)
+    ):
+        raise SFTDataError("config requires exactly all SFT controls and a seeds list")
+    return SFTComparisonConfig(**{**value, "seeds": tuple(value["seeds"])})
+
+
+def _finite_cpu_model(model):
+    if not isinstance(model, torch.nn.Module):
+        raise TypeError("model must be torch.nn.Module")
+    if any(
+        parameter.device.type != "cpu"
+        or not parameter.is_floating_point()
+        or not bool(torch.isfinite(parameter).all())
+        for parameter in model.parameters()
+    ):
+        raise SFTDataError("SFT parameters must be finite floating-point CPU tensors")
+
+
+def _validate_batches(batches):
+    if (
+        not isinstance(batches, tuple)
+        or not batches
+        or any(
+            not isinstance(batch, tuple)
+            or not batch
+            or any(not isinstance(row, SFTWindow) for row in batch)
+            for batch in batches
+        )
+    ):
+        raise SFTDataError("SFT training requires nonempty immutable batches")
+    batch_size = len(batches[0])
+    width = len(batches[0][0].inputs)
+    if any(
+        len(batch) != batch_size or any(len(row.inputs) != width for row in batch)
+        for batch in batches
+    ):
+        raise SFTDataError("SFT batches must have consistent rectangular shapes")
+
+
+def train_sft_batches(model, batches, *, learning_rate):
+    """Optimize exactly the supplied assistant-mask schedule."""
+    _finite_cpu_model(model)
+    _validate_batches(batches)
+    if (
+        isinstance(learning_rate, bool)
+        or not isinstance(learning_rate, (int, float))
+        or not math.isfinite(learning_rate)
+        or not 0 < learning_rate <= 0.1
+    ):
+        raise SFTDataError("learning_rate must be finite and in (0, 0.1]")
+    parameters = tuple(
+        parameter for parameter in model.parameters() if parameter.requires_grad
+    )
+    optimizer = (
+        torch.optim.AdamW(parameters, lr=learning_rate, weight_decay=0.0)
+        if parameters
+        else None
+    )
+    caller_modes = [(module, module.training) for module in model.modules()]
+    losses = []
+    input_tokens = supervised_tokens = 0
+    try:
+        model.train()
+        for batch in batches:
+            inputs = torch.tensor([row.inputs for row in batch], dtype=torch.long)
+            targets = torch.tensor([row.targets for row in batch], dtype=torch.long)
+            mask = torch.tensor([row.target_mask for row in batch], dtype=torch.bool)
+            if optimizer is not None:
+                optimizer.zero_grad(set_to_none=True)
+            with nullcontext() if optimizer is not None else torch.no_grad():
+                _, loss = model(inputs, targets, loss_mask=mask)
+            if loss is None or not bool(torch.isfinite(loss)):
+                raise SFTDataError("SFT loss must remain finite")
+            losses.append(float(loss.detach()))
+            input_tokens += inputs.numel()
+            supervised_tokens += int(mask.sum())
+            if optimizer is not None:
+                loss.backward()
+                if any(
+                    parameter.grad is None
+                    or not bool(torch.isfinite(parameter.grad).all())
+                    for parameter in parameters
+                ):
+                    raise SFTDataError(
+                        "trainable SFT gradients must be present and finite"
+                    )
+                torch.nn.utils.clip_grad_norm_(parameters, 1.0, error_if_nonfinite=True)
+                optimizer.step()
+                _finite_cpu_model(model)
+        if optimizer is not None:
+            optimizer.zero_grad(set_to_none=True)
+    finally:
+        for module, mode in caller_modes:
+            module.training = mode
+    return {
+        "losses": losses,
+        "input_tokens": input_tokens,
+        "supervised_tokens": supervised_tokens,
+        "optimizer_steps": len(losses) if optimizer is not None else 0,
+    }
+
+
+def evaluate_sft(model, conversations, codec, *, batch_size=32):
+    """Score each assistant target once and restore every caller module mode."""
+    _finite_cpu_model(model)
+    bounded_integer(batch_size, "evaluation batch_size", 1, 128)
+    targets = sft_validation_targets(
+        conversations, codec, block_size=model.config.block_size
+    )
+    losses = [None] * len(targets)
+    caller_modes = [(module, module.training) for module in model.modules()]
+    try:
+        model.eval()
+        with torch.inference_mode():
+            for width in range(1, model.config.block_size + 1):
+                indexes = [
+                    index
+                    for index, row in enumerate(targets)
+                    if len(row.context) == width
+                ]
+                for start in range(0, len(indexes), batch_size):
+                    selected = indexes[start : start + batch_size]
+                    inputs = torch.tensor(
+                        [targets[index].context for index in selected],
+                        dtype=torch.long,
+                    )
+                    labels = torch.tensor(
+                        [targets[index].target for index in selected],
+                        dtype=torch.long,
+                    )
+                    logits, _ = model(inputs)
+                    values = F.cross_entropy(
+                        logits[:, -1], labels, reduction="none"
+                    ).tolist()
+                    for index, value in zip(selected, values, strict=True):
+                        losses[index] = value
+    finally:
+        for module, mode in caller_modes:
+            module.training = mode
+    total = math.fsum(losses)
+    mean = total / len(targets)
+    try:
+        perplexity = math.exp(mean)
+    except OverflowError as exc:
+        raise SFTDataError("assistant perplexity overflow") from exc
+    if any(not math.isfinite(value) for value in (*losses, total, mean, perplexity)):
+        raise SFTDataError("assistant evaluation metrics must be finite")
+    return {
+        "nll_sum": total,
+        "target_tokens": len(targets),
+        "mean_nll": mean,
+        "perplexity": perplexity,
+    }
+
+
+SFT_LIMITATIONS = (
+    "Authored synthetic JSONL chats; tiny one-layer CPU character decoder; the "
+    "base language-model warm-up and SFT use the same training conversations. "
+    "Paired seeds are descriptive, not confidence intervals. Equal token exposure "
+    "does not imply equal compute, memory, or latency. No claim about factuality, "
+    "tool execution safety, large models, GPUs, production, or learner completion."
+)
+
+
+def _probe(model, batch):
+    model.eval()
+    with torch.inference_mode():
+        logits, _ = model(torch.tensor([row.inputs for row in batch], dtype=torch.long))
+    return logits
+
+
+def _trial(name, model, base, batches, split, codec, config, *, adapter_config=None):
+    initial = model_fingerprint(model)
+    counts = parameter_summary(model)
+    frozen_before = frozen_fingerprint(model)
+    error = float((_probe(model, batches[0]) - _probe(base, batches[0])).abs().max())
+    if error != 0:
+        raise SFTDataError("chat comparison forks must start from the same function")
+    trace = train_sft_batches(model, batches, learning_rate=config.sft_learning_rate)
+    frozen_after = frozen_fingerprint(model)
+    if frozen_before != frozen_after:
+        raise SFTDataError("frozen chat base changed during adaptation")
+    merge = None
+    if adapter_config is not None:
+        adapted_logits = _probe(model, batches[0])
+        merged = merge_adapters(model)
+        merge_error = float((adapted_logits - _probe(merged, batches[0])).abs().max())
+        if not math.isfinite(merge_error) or merge_error > 1e-10:
+            raise SFTDataError("merged chat adapter failed dense equivalence")
+        merge = {
+            "probe_max_abs_error": merge_error,
+            "dense_sha256": model_fingerprint(merged),
+            "parameters": parameter_summary(merged),
+        }
+    return {
+        "name": name,
+        "adapter": asdict(adapter_config) if adapter_config is not None else None,
+        "merge": merge,
+        "parameters": counts,
+        "initial_sha256": initial,
+        "final_sha256": model_fingerprint(model),
+        "frozen_before_sha256": frozen_before,
+        "frozen_after_sha256": frozen_after,
+        "initial_function_max_abs_error": error,
+        "training": trace,
+        "heldout": evaluate_sft(
+            model,
+            split.validation,
+            codec,
+            batch_size=config.evaluation_batch_size,
+        ),
+    }
+
+
+SFT_ARMS = ("frozen", "full", "lora-rank-1", "lora-rank-2")
+
+
+def _run_sft_comparison(config, arms):
+    if config is None:
+        config = SFTComparisonConfig()
+    if not isinstance(config, SFTComparisonConfig):
+        raise SFTDataError("chat comparison requires SFTComparisonConfig")
+    split = authored_chat_fixture()
+    codec = split.codec()
+    model_config = config.model_config(len(codec.tokens))
+    base_documents = tuple(
+        Document(row.conversation_id, render_conversation(row).text)
+        for row in split.train
+    )
+    seeds = []
+    for seed in config.seeds:
+        with isolated_cpu_runtime(seed):
+            base = DecoderLanguageModel(model_config)
+            initial = model_fingerprint(base)
+            base_batches = training_batches(
+                base_documents,
+                codec,
+                block_size=config.block_size,
+                batch_size=config.batch_size,
+                steps=config.base_steps,
+                seed=seed ^ 0xB45E,
+            )
+            sft_batches = sft_training_batches(
+                split.train,
+                codec,
+                block_size=config.block_size,
+                batch_size=config.batch_size,
+                steps=config.sft_steps,
+                seed=seed ^ 0x5F7,
+            )
+            base_trace = train_on_batches(
+                base, base_batches, learning_rate=config.base_learning_rate
+            )
+            warmed = model_fingerprint(base)
+            trials = []
+            for name in arms:
+                adapter_config = None
+                if name.startswith("lora-rank-"):
+                    rank = int(name.rsplit("-", 1)[1])
+                    adapter_config = LoRAConfig(
+                        rank=rank,
+                        alpha=rank * config.adapter_scale,
+                        dropout=0.0,
+                        seed=seed,
+                    )
+                    model = inject_adapters(base, ADAPTER_TARGETS, adapter_config)
+                    if {id(parameter) for parameter in adapter_parameters(model)} != {
+                        id(parameter)
+                        for parameter in model.parameters()
+                        if parameter.requires_grad
+                    }:
+                        raise SFTDataError("only adapter factors may be optimized")
+                else:
+                    model = copy.deepcopy(base)
+                    if name == "frozen":
+                        model.requires_grad_(False)
+                trials.append(
+                    _trial(
+                        name,
+                        model,
+                        base,
+                        sft_batches,
+                        split,
+                        codec,
+                        config,
+                        adapter_config=adapter_config,
+                    )
+                )
+            if warmed != model_fingerprint(base):
+                raise SFTDataError("chat adaptation fork mutated the warmed source")
+            seeds.append(
+                {
+                    "seed": seed,
+                    "initial_sha256": initial,
+                    "warmed_sha256": warmed,
+                    "source_after_sha256": model_fingerprint(base),
+                    "base_schedule": schedule_evidence(base_batches),
+                    "sft_schedule": sft_schedule_evidence(sft_batches),
+                    "base_training": base_trace,
+                    "trials": trials,
+                }
+            )
+    return {
+        "config": sft_config_dict(config),
+        "fixture": {"id": CHAT_FIXTURE_ID, **split.evidence()},
+        "model": asdict(model_config),
+        "heldout": sft_validation_evidence(
+            split.validation, codec, block_size=config.block_size
+        ),
+        "seeds": seeds,
+        "runtime": {
+            "python": platform.python_version(),
+            "torch": str(torch.__version__),
+            "device": "cpu",
+            "dtype": "float64",
+            "threads": 1,
+        },
+        "limitations": SFT_LIMITATIONS,
+    }
+
+
+def run_sft_dense_comparison(config=None):
+    """Warm one base per seed, then compare frozen and full chat SFT forks."""
+    return _run_sft_comparison(config, ("frozen", "full"))
+
+
+def run_sft_comparison(config=None):
+    """Compare full, frozen, and rank-1/rank-2 chat adaptation forks."""
+    return _run_sft_comparison(config, SFT_ARMS)

@@ -384,6 +384,61 @@ class DecoderLanguageModelTests(unittest.TestCase):
         self.assertIsNotNone(loss)
         self.assertGreater(model.parameter_count, 0)
 
+    def test_assistant_loss_mask_selects_only_supervised_positions(self) -> None:
+        import torch
+        from torch.nn import functional as F
+
+        config = TransformerConfig(
+            vocab_size=7, block_size=5, embedding_dim=12, head_count=3
+        )
+        model = DecoderLanguageModel(config)
+        tokens = torch.tensor([[0, 1, 2, 3, 4], [1, 2, 3, 4, 5]])
+        targets = torch.tensor([[1, 2, 3, 4, 5], [2, 3, 4, 5, 6]])
+        mask = torch.tensor(
+            [[False, False, True, True, False], [False, True, False, False, True]]
+        )
+        logits, loss = model(tokens, targets, loss_mask=mask)
+        expected = F.cross_entropy(logits[mask], targets[mask])
+        self.assertTrue(torch.equal(loss, expected))
+
+    def test_loss_mask_intersects_padded_lengths(self) -> None:
+        import torch
+        from torch.nn import functional as F
+
+        config = TransformerConfig(
+            vocab_size=7, block_size=4, embedding_dim=8, head_count=2
+        )
+        model = DecoderLanguageModel(config)
+        tokens = torch.tensor([[0, 1, 2, 3], [1, 2, 0, 0]])
+        targets = torch.tensor([[1, 2, 3, 4], [2, 3, 0, 0]])
+        lengths = torch.tensor([4, 2])
+        mask = torch.tensor([[False, True, True, True], [True, True, True, True]])
+        logits, loss = model(tokens, targets, lengths=lengths, loss_mask=mask)
+        selected = mask & (torch.arange(4)[None, :] < lengths[:, None])
+        self.assertTrue(
+            torch.equal(loss, F.cross_entropy(logits[selected], targets[selected]))
+        )
+
+    def test_loss_mask_rejects_invalid_or_empty_selections(self) -> None:
+        import torch
+
+        model = DecoderLanguageModel(
+            TransformerConfig(vocab_size=5, block_size=3, embedding_dim=8, head_count=2)
+        )
+        tokens = torch.tensor([[0, 1, 2]])
+        for mask in (
+            torch.zeros_like(tokens, dtype=torch.bool),
+            torch.ones_like(tokens),
+            torch.ones((1, 2), dtype=torch.bool),
+        ):
+            with (
+                self.subTest(mask=mask),
+                self.assertRaises((TypeError, TransformerLabError)),
+            ):
+                model(tokens, tokens, loss_mask=mask)
+        with self.assertRaisesRegex(TransformerLabError, "requires targets"):
+            model(tokens, loss_mask=torch.ones_like(tokens, dtype=torch.bool))
+
     def test_model_rejects_out_of_vocabulary_tokens(self) -> None:
         import torch
 
