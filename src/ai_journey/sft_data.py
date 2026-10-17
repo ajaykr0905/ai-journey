@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import random
 import re
 from dataclasses import dataclass
 from hashlib import sha256
@@ -357,3 +358,127 @@ def authored_chat_fixture() -> ConversationSplit:
         _tool("heldout-tool-north-22", "north", 22),
     )
     return ConversationSplit(train, validation)
+
+
+def bounded_integer(value, name, minimum, maximum):
+    if type(value) is not int or not minimum <= value <= maximum:
+        raise SFTDataError(f"{name} must be an integer in [{minimum}, {maximum}]")
+    return value
+
+
+@dataclass(frozen=True)
+class SFTWindow:
+    conversation_id: str
+    start: int
+    inputs: tuple[int, ...]
+    targets: tuple[int, ...]
+    target_mask: tuple[bool, ...]
+
+    def __post_init__(self):
+        width = len(self.inputs)
+        if (
+            type(self.start) is not int
+            or self.start < 0
+            or width == 0
+            or len(self.targets) != width
+            or len(self.target_mask) != width
+            or any(type(value) is not bool for value in self.target_mask)
+            or not any(self.target_mask)
+        ):
+            raise SFTDataError(
+                "SFT windows require aligned tokens and at least one assistant target"
+            )
+
+    @property
+    def supervised_tokens(self):
+        return sum(self.target_mask)
+
+
+def _assistant_positions(rendered: RenderedConversation) -> frozenset[int]:
+    return frozenset(
+        index for start, end in rendered.assistant_spans for index in range(start, end)
+    )
+
+
+def sft_training_batches(conversations, codec, *, block_size, batch_size, steps, seed):
+    """Sample assistant-bearing document-local windows with a private RNG."""
+    bounded_integer(block_size, "block_size", 1, 256)
+    bounded_integer(batch_size, "batch_size", 1, 16)
+    bounded_integer(steps, "steps", 1, 128)
+    bounded_integer(seed, "seed", 0, 2**32 - 1)
+    if (
+        not isinstance(conversations, tuple)
+        or not conversations
+        or any(not isinstance(row, Conversation) for row in conversations)
+        or len({row.conversation_id for row in conversations}) != len(conversations)
+    ):
+        raise SFTDataError("training requires unique conversation tuples")
+    if not isinstance(codec, CharacterCodec):
+        raise SFTDataError("training requires a CharacterCodec")
+    candidates = []
+    for conversation in conversations:
+        rendered = render_conversation(conversation)
+        tokens = codec.encode(rendered.text)
+        positions = _assistant_positions(rendered)
+        if len(tokens) <= block_size:
+            raise SFTDataError(
+                "every training conversation needs a full block and target"
+            )
+        for start in range(len(tokens) - block_size):
+            mask = tuple(
+                target_index in positions
+                for target_index in range(start + 1, start + block_size + 1)
+            )
+            if any(mask):
+                candidates.append(
+                    SFTWindow(
+                        conversation.conversation_id,
+                        start,
+                        tokens[start : start + block_size],
+                        tokens[start + 1 : start + block_size + 1],
+                        mask,
+                    )
+                )
+    if not candidates:
+        raise SFTDataError("training split has no assistant targets")
+    rng = random.Random(seed)
+    return tuple(
+        tuple(rng.choice(candidates) for _ in range(batch_size)) for _ in range(steps)
+    )
+
+
+def sft_schedule_evidence(batches):
+    if (
+        not isinstance(batches, tuple)
+        or not batches
+        or any(
+            not isinstance(batch, tuple)
+            or not batch
+            or any(not isinstance(row, SFTWindow) for row in batch)
+            for batch in batches
+        )
+    ):
+        raise SFTDataError("schedule evidence requires nonempty SFT batches")
+    return {
+        "steps": len(batches),
+        "windows": sum(len(batch) for batch in batches),
+        "input_tokens": sum(len(row.inputs) for batch in batches for row in batch),
+        "supervised_tokens": sum(
+            row.supervised_tokens for batch in batches for row in batch
+        ),
+        "sha256": canonical_digest(
+            [
+                [
+                    [
+                        row.conversation_id,
+                        row.start,
+                        row.inputs,
+                        row.targets,
+                        row.target_mask,
+                    ]
+                    for row in batch
+                ]
+                for batch in batches
+            ]
+        ),
+    }

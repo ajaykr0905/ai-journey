@@ -1,4 +1,5 @@
 import json
+import random
 import unittest
 from dataclasses import replace
 
@@ -12,6 +13,8 @@ from ai_journey.sft_data import (
     ToolCall,
     authored_chat_fixture,
     render_conversation,
+    sft_schedule_evidence,
+    sft_training_batches,
 )
 
 
@@ -273,6 +276,104 @@ class ConversationFixtureTests(unittest.TestCase):
                 self.assertRaises(SFTDataError),
             ):
                 ConversationSplit(train, validation)
+
+
+class SFTTrainingWindowTests(unittest.TestCase):
+    def test_schedule_is_private_reproducible_and_conversation_local(self):
+        split = authored_chat_fixture()
+        controls = {"block_size": 32, "batch_size": 3, "steps": 5, "seed": 43}
+        before = random.getstate()
+        first = sft_training_batches(split.train, split.codec(), **controls)
+        self.assertEqual(before, random.getstate())
+        self.assertEqual(
+            first, sft_training_batches(split.train, split.codec(), **controls)
+        )
+        self.assertNotEqual(
+            first,
+            sft_training_batches(
+                split.train, split.codec(), **{**controls, "seed": 44}
+            ),
+        )
+        rendered = {
+            row.conversation_id: render_conversation(row) for row in split.train
+        }
+        codec = split.codec()
+        for batch in first:
+            for window in batch:
+                source = rendered[window.conversation_id]
+                tokens = codec.encode(source.text)
+                self.assertEqual(
+                    window.inputs,
+                    tokens[window.start : window.start + controls["block_size"]],
+                )
+                self.assertEqual(
+                    window.targets,
+                    tokens[
+                        window.start + 1 : window.start + controls["block_size"] + 1
+                    ],
+                )
+                positions = {
+                    index
+                    for start, end in source.assistant_spans
+                    for index in range(start, end)
+                }
+                self.assertEqual(
+                    window.target_mask,
+                    tuple(
+                        index in positions
+                        for index in range(
+                            window.start + 1,
+                            window.start + controls["block_size"] + 1,
+                        )
+                    ),
+                )
+                self.assertGreater(window.supervised_tokens, 0)
+
+    def test_schedule_evidence_counts_only_assistant_targets(self):
+        split = authored_chat_fixture()
+        batches = sft_training_batches(
+            split.train,
+            split.codec(),
+            block_size=16,
+            batch_size=2,
+            steps=3,
+            seed=1,
+        )
+        evidence = sft_schedule_evidence(batches)
+        self.assertEqual(evidence["steps"], 3)
+        self.assertEqual(evidence["windows"], 6)
+        self.assertEqual(evidence["input_tokens"], 96)
+        self.assertEqual(
+            evidence["supervised_tokens"],
+            sum(row.supervised_tokens for batch in batches for row in batch),
+        )
+        self.assertRegex(evidence["sha256"], r"^[0-9a-f]{64}$")
+
+    def test_window_controls_and_inputs_fail_before_sampling(self):
+        split = authored_chat_fixture()
+        controls = {"block_size": 8, "batch_size": 2, "steps": 2, "seed": 1}
+        for field, value in (
+            ("block_size", True),
+            ("block_size", 257),
+            ("batch_size", 17),
+            ("steps", 0),
+            ("seed", -1),
+        ):
+            with (
+                self.subTest(field=field, value=value),
+                self.assertRaises(SFTDataError),
+            ):
+                sft_training_batches(
+                    split.train,
+                    split.codec(),
+                    **{**controls, field: value},
+                )
+        with self.assertRaises(SFTDataError):
+            sft_training_batches(list(split.train), split.codec(), **controls)
+        with self.assertRaises(SFTDataError):
+            sft_training_batches(split.train, "not-codec", **controls)
+        with self.assertRaises(SFTDataError):
+            sft_schedule_evidence(())
 
 
 if __name__ == "__main__":
