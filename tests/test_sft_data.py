@@ -15,6 +15,8 @@ from ai_journey.sft_data import (
     render_conversation,
     sft_schedule_evidence,
     sft_training_batches,
+    sft_validation_evidence,
+    sft_validation_targets,
 )
 
 
@@ -374,6 +376,63 @@ class SFTTrainingWindowTests(unittest.TestCase):
             sft_training_batches(split.train, "not-codec", **controls)
         with self.assertRaises(SFTDataError):
             sft_schedule_evidence(())
+
+
+class SFTValidationTargetTests(unittest.TestCase):
+    def test_each_assistant_character_is_scored_once_with_local_context(self):
+        split = authored_chat_fixture()
+        codec = split.codec()
+        targets = sft_validation_targets(split.validation, codec, block_size=19)
+        expected = []
+        rendered = {}
+        for conversation in split.validation:
+            row = render_conversation(conversation)
+            rendered[conversation.conversation_id] = row
+            expected.extend(
+                (conversation.conversation_id, index)
+                for start, end in row.assistant_spans
+                for index in range(start, end)
+            )
+        self.assertEqual(
+            [(row.conversation_id, row.target_index) for row in targets], expected
+        )
+        self.assertEqual(len(set(expected)), len(expected))
+        for target in targets:
+            source = rendered[target.conversation_id]
+            tokens = codec.encode(source.text)
+            self.assertEqual(
+                target.context,
+                tokens[max(0, target.target_index - 19) : target.target_index],
+            )
+            self.assertEqual(target.target, tokens[target.target_index])
+
+    def test_validation_evidence_reconciles_partition_counts(self):
+        split = authored_chat_fixture()
+        evidence = sft_validation_evidence(
+            split.validation, split.codec(), block_size=32
+        )
+        self.assertEqual(
+            evidence["target_tokens"],
+            split.evidence()["validation"]["assistant_characters"],
+        )
+        self.assertEqual(
+            sum(row["target_tokens"] for row in evidence["per_conversation"]),
+            evidence["target_tokens"],
+        )
+        self.assertRegex(evidence["sha256"], r"^[0-9a-f]{64}$")
+        self.assertIn("conversation-local", evidence["policy"])
+
+    def test_validation_rejects_bad_controls_containers_and_codecs(self):
+        split = authored_chat_fixture()
+        for value in (0, True, 257):
+            with self.subTest(value=value), self.assertRaises(SFTDataError):
+                sft_validation_targets(
+                    split.validation, split.codec(), block_size=value
+                )
+        with self.assertRaises(SFTDataError):
+            sft_validation_targets(list(split.validation), split.codec(), block_size=8)
+        with self.assertRaises(SFTDataError):
+            sft_validation_targets(split.validation, "bad", block_size=8)
 
 
 if __name__ == "__main__":

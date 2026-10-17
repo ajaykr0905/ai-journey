@@ -482,3 +482,78 @@ def sft_schedule_evidence(batches):
             ]
         ),
     }
+
+
+@dataclass(frozen=True)
+class SFTTarget:
+    conversation_id: str
+    target_index: int
+    context: tuple[int, ...]
+    target: int
+
+    def __post_init__(self):
+        if (
+            type(self.target_index) is not int
+            or self.target_index <= 0
+            or not isinstance(self.context, tuple)
+            or not self.context
+            or any(type(token) is not int for token in self.context)
+            or type(self.target) is not int
+        ):
+            raise SFTDataError("SFT targets require a nonempty causal context")
+
+
+def sft_validation_targets(conversations, codec, *, block_size):
+    """Enumerate each assistant character once with bounded local context."""
+    bounded_integer(block_size, "block_size", 1, 256)
+    if (
+        not isinstance(conversations, tuple)
+        or not conversations
+        or any(not isinstance(row, Conversation) for row in conversations)
+        or len({row.conversation_id for row in conversations}) != len(conversations)
+    ):
+        raise SFTDataError("validation requires unique conversation tuples")
+    if not isinstance(codec, CharacterCodec):
+        raise SFTDataError("validation requires a CharacterCodec")
+    targets = []
+    for conversation in conversations:
+        rendered = render_conversation(conversation)
+        tokens = codec.encode(rendered.text)
+        for start, end in rendered.assistant_spans:
+            for index in range(start, end):
+                if index == 0:
+                    raise SFTDataError("assistant targets require preceding context")
+                targets.append(
+                    SFTTarget(
+                        conversation.conversation_id,
+                        index,
+                        tokens[max(0, index - block_size) : index],
+                        tokens[index],
+                    )
+                )
+    if not targets:
+        raise SFTDataError("validation split has no assistant targets")
+    return tuple(targets)
+
+
+def sft_validation_evidence(conversations, codec, *, block_size):
+    targets = sft_validation_targets(conversations, codec, block_size=block_size)
+    per_conversation = []
+    for conversation in conversations:
+        count = sum(
+            row.conversation_id == conversation.conversation_id for row in targets
+        )
+        per_conversation.append(
+            {"conversation_id": conversation.conversation_id, "target_tokens": count}
+        )
+    return {
+        "target_tokens": len(targets),
+        "per_conversation": per_conversation,
+        "sha256": canonical_digest(
+            [
+                [row.conversation_id, row.target_index, row.context, row.target]
+                for row in targets
+            ]
+        ),
+        "policy": "assistant-json-lines-only; one-last-logit-per-character; conversation-local context",
+    }
