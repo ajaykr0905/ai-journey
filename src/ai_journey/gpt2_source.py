@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 import json
 from pathlib import Path
 import re
 from typing import Any
+
+from .gpt2_config import GPT2Config, config_from_hugging_face, require_variant
 
 
 class GPT2SourceError(ValueError):
@@ -96,3 +99,53 @@ def load_source_manifest(path: str | Path, *, max_bytes: int = 16_384) -> GPT2So
             f"source manifest fields must be exactly {sorted(expected)}"
         )
     return GPT2Source(**payload)
+
+
+def _sha256_file(path: Path, *, expected_bytes: int, chunk_bytes: int = 1 << 20) -> str:
+    if path.is_symlink() or not path.is_file():
+        raise GPT2SourceError(
+            f"artifact must be a regular non-symlink file: {path.name}"
+        )
+    if path.stat().st_size != expected_bytes:
+        raise GPT2SourceError(
+            f"artifact size mismatch for {path.name}: "
+            f"expected {expected_bytes}, found {path.stat().st_size}"
+        )
+    digest = sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(chunk_bytes):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_source_artifacts(
+    source: GPT2Source, directory: str | Path, *, variant: str = "gpt2"
+) -> GPT2Config:
+    """Verify pinned artifact sizes and hashes, then return the exact config."""
+
+    if not isinstance(source, GPT2Source):
+        raise TypeError("source must be GPT2Source")
+    root = Path(directory)
+    if root.is_symlink() or not root.is_dir():
+        raise GPT2SourceError("artifact directory must be a non-symlink directory")
+    config_path = root / source.config_filename
+    config_bytes = config_path.stat().st_size if config_path.exists() else -1
+    if config_bytes <= 0 or config_bytes > 65_536:
+        raise GPT2SourceError("config artifact must be in (0, 65536] bytes")
+    config_digest = _sha256_file(config_path, expected_bytes=config_bytes)
+    if config_digest != source.config_sha256:
+        raise GPT2SourceError("config artifact SHA-256 mismatch")
+    try:
+        config_payload = json.loads(
+            config_path.read_bytes(), object_pairs_hook=_reject_duplicate_keys
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise GPT2SourceError("config artifact must be strict UTF-8 JSON") from exc
+    config = config_from_hugging_face(config_payload)
+    require_variant(config, variant)
+
+    weights_path = root / source.weights_filename
+    weights_digest = _sha256_file(weights_path, expected_bytes=source.weights_bytes)
+    if weights_digest != source.weights_sha256:
+        raise GPT2SourceError("weights artifact SHA-256 mismatch")
+    return config

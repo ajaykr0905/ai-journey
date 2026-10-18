@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
 
-from ai_journey.gpt2_source import GPT2Source, GPT2SourceError, load_source_manifest
+from ai_journey.gpt2_source import (
+    GPT2Source,
+    GPT2SourceError,
+    load_source_manifest,
+    verify_source_artifacts,
+)
 
 
 def _payload() -> dict[str, object]:
@@ -88,3 +94,67 @@ def test_rejects_symlinked_manifests_and_undeclared_artifacts(tmp_path: Path) ->
         load_source_manifest(symlink)
     with pytest.raises(GPT2SourceError, match="not declared"):
         GPT2Source(**_payload()).artifact_url("tokenizer.json")
+
+
+def _write_artifacts(tmp_path: Path) -> GPT2Source:
+    config = {
+        "model_type": "gpt2",
+        "vocab_size": 50_257,
+        "n_positions": 1_024,
+        "n_embd": 768,
+        "n_head": 12,
+        "n_layer": 12,
+        "layer_norm_epsilon": 1e-5,
+        "embd_pdrop": 0.1,
+        "attn_pdrop": 0.1,
+        "resid_pdrop": 0.1,
+        "activation_function": "gelu_new",
+    }
+    config_bytes = json.dumps(config, sort_keys=True).encode()
+    weights_bytes = b"bounded-fixture-weights"
+    (tmp_path / "config.json").write_bytes(config_bytes)
+    (tmp_path / "pytorch_model.bin").write_bytes(weights_bytes)
+    return GPT2Source(
+        model_id="openai-community/gpt2",
+        revision="6" * 40,
+        config_filename="config.json",
+        config_sha256=sha256(config_bytes).hexdigest(),
+        weights_filename="pytorch_model.bin",
+        weights_sha256=sha256(weights_bytes).hexdigest(),
+        weights_bytes=len(weights_bytes),
+    )
+
+
+def test_verifies_artifact_bytes_and_exact_gpt2_configuration(tmp_path: Path) -> None:
+    source = _write_artifacts(tmp_path)
+
+    config = verify_source_artifacts(source, tmp_path)
+
+    assert config.vocab_size == 50_257
+    assert config.layer_count == 12
+
+
+def test_rejects_wrong_artifact_size_and_hash(tmp_path: Path) -> None:
+    source = _write_artifacts(tmp_path)
+    (tmp_path / "pytorch_model.bin").write_bytes(b"short")
+
+    with pytest.raises(GPT2SourceError, match="size mismatch"):
+        verify_source_artifacts(source, tmp_path)
+
+    source = _write_artifacts(tmp_path)
+    (tmp_path / "pytorch_model.bin").write_bytes(b"tampered-fixture-weights")
+    source = GPT2Source(
+        **{**source.__dict__, "weights_bytes": len(b"tampered-fixture-weights")}
+    )
+    with pytest.raises(GPT2SourceError, match="SHA-256 mismatch"):
+        verify_source_artifacts(source, tmp_path)
+
+
+def test_rejects_symlinked_artifact_files(tmp_path: Path) -> None:
+    source = _write_artifacts(tmp_path)
+    original = tmp_path / "actual.bin"
+    (tmp_path / "pytorch_model.bin").replace(original)
+    (tmp_path / "pytorch_model.bin").symlink_to(original)
+
+    with pytest.raises(GPT2SourceError, match="non-symlink"):
+        verify_source_artifacts(source, tmp_path)
