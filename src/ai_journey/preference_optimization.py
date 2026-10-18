@@ -282,3 +282,64 @@ def train_preference_batches(
         "reference_after_sha256": reference_after,
         "trace": trace,
     }
+
+
+def evaluate_preferences(
+    policy: DecoderLanguageModel,
+    reference: DecoderLanguageModel,
+    pairs: tuple[PreferencePair, ...],
+    codec: CharacterCodec,
+    *,
+    beta: float,
+) -> dict:
+    """Evaluate every held-out pair once with response-only normalized scores."""
+    _finite_cpu_decoder(policy)
+    _finite_cpu_decoder(reference)
+    if (
+        not isinstance(pairs, tuple)
+        or not pairs
+        or any(not isinstance(pair, PreferencePair) for pair in pairs)
+        or len({pair.pair_id for pair in pairs}) != len(pairs)
+    ):
+        raise PreferenceDataError("evaluation requires unique preference pairs")
+    rows = []
+    for pair in pairs:
+        policy_chosen = evaluate_candidate_logprob(policy, pair, "chosen", codec)
+        policy_rejected = evaluate_candidate_logprob(policy, pair, "rejected", codec)
+        reference_chosen = evaluate_candidate_logprob(reference, pair, "chosen", codec)
+        reference_rejected = evaluate_candidate_logprob(
+            reference, pair, "rejected", codec
+        )
+        objective = direct_preference_objective(
+            torch.tensor(policy_chosen, dtype=torch.float64),
+            torch.tensor(policy_rejected, dtype=torch.float64),
+            torch.tensor(reference_chosen, dtype=torch.float64),
+            torch.tensor(reference_rejected, dtype=torch.float64),
+            beta=beta,
+        )
+        rows.append(
+            {
+                "pair_id": pair.pair_id,
+                "policy_chosen_mean_logprob": policy_chosen,
+                "policy_rejected_mean_logprob": policy_rejected,
+                "reference_chosen_mean_logprob": reference_chosen,
+                "reference_rejected_mean_logprob": reference_rejected,
+                "policy_margin": float(objective.policy_margin),
+                "reference_margin": float(objective.reference_margin),
+                "reward_margin": float(objective.reward_margin),
+                "loss": float(objective.loss),
+                "preferred": policy_chosen > policy_rejected,
+            }
+        )
+    return {
+        "pairs": len(rows),
+        "preference_accuracy": sum(row["preferred"] for row in rows) / len(rows),
+        "mean_policy_margin": math.fsum(row["policy_margin"] for row in rows)
+        / len(rows),
+        "mean_reference_margin": math.fsum(row["reference_margin"] for row in rows)
+        / len(rows),
+        "mean_reward_margin": math.fsum(row["reward_margin"] for row in rows)
+        / len(rows),
+        "mean_loss": math.fsum(row["loss"] for row in rows) / len(rows),
+        "rows": rows,
+    }

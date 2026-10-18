@@ -15,6 +15,7 @@ from ai_journey.preference_optimization import (
     candidate_mean_logprob,
     direct_preference_objective,
     evaluate_candidate_logprob,
+    evaluate_preferences,
     train_preference_batches,
 )
 from ai_journey.transformer_lab import (
@@ -172,3 +173,49 @@ def test_preference_training_restores_mixed_module_modes():
 
     assert [module.training for module in policy.modules()] == policy_modes
     assert [module.training for module in reference.modules()] == reference_modes
+
+
+def test_preference_evaluation_covers_each_pair_once():
+    policy, _, codec = decoder_and_data()
+    reference = copy.deepcopy(policy).requires_grad_(False)
+    pairs = authored_preference_fixture().pairs[:4]
+
+    result = evaluate_preferences(policy, reference, pairs, codec, beta=0.2)
+
+    assert result["pairs"] == 4
+    assert [row["pair_id"] for row in result["rows"]] == [
+        pair.pair_id for pair in pairs
+    ]
+    assert 0 <= result["preference_accuracy"] <= 1
+    assert result["mean_reward_margin"] == pytest.approx(0, abs=1e-12)
+    assert result["mean_loss"] == pytest.approx(math.log(2), abs=1e-12)
+    assert all(
+        math.isfinite(result[name])
+        for name in (
+            "mean_policy_margin",
+            "mean_reference_margin",
+            "mean_reward_margin",
+            "mean_loss",
+        )
+    )
+
+
+def test_preference_evaluation_restores_modes():
+    policy, _, codec = decoder_and_data()
+    reference = copy.deepcopy(policy).requires_grad_(False)
+    policy.train()
+    policy.blocks[0].eval()
+    reference.eval()
+    reference.blocks[0].train()
+    modules = [*policy.modules(), *reference.modules()]
+    before = [module.training for module in modules]
+
+    evaluate_preferences(
+        policy,
+        reference,
+        authored_preference_fixture().pairs[:2],
+        codec,
+        beta=0.2,
+    )
+
+    assert [module.training for module in modules] == before
