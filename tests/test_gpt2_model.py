@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from ai_journey.gpt2_config import GPT2Config, GPT2ConfigError
-from ai_journey.gpt2_model import GPT2SelfAttention, gelu_new
+from ai_journey.gpt2_model import GPT2MLP, GPT2SelfAttention, gelu_new
 
 
 def test_gelu_new_matches_the_published_tanh_equation() -> None:
@@ -106,3 +106,39 @@ def test_attention_rejects_invalid_input_contracts(
 ) -> None:
     with pytest.raises(GPT2ConfigError, match=message):
         GPT2SelfAttention(_tiny_config())(inputs)
+
+
+def test_mlp_matches_explicit_expand_activate_project_equation() -> None:
+    mlp = GPT2MLP(_tiny_config()).double().eval()
+    with torch.no_grad():
+        mlp.c_fc.weight.copy_(torch.arange(64, dtype=torch.float64).view(16, 4) / 100)
+        mlp.c_fc.bias.copy_(torch.arange(16, dtype=torch.float64) / 100)
+        mlp.c_proj.weight.copy_(torch.arange(64, dtype=torch.float64).view(4, 16) / 200)
+        mlp.c_proj.bias.copy_(torch.arange(4, dtype=torch.float64) / 100)
+    inputs = torch.arange(24, dtype=torch.float64).view(2, 3, 4) / 20
+
+    expected = torch.nn.functional.linear(
+        gelu_new(torch.nn.functional.linear(inputs, mlp.c_fc.weight, mlp.c_fc.bias)),
+        mlp.c_proj.weight,
+        mlp.c_proj.bias,
+    )
+
+    torch.testing.assert_close(mlp(inputs), expected, rtol=0, atol=0)
+
+
+def test_mlp_uses_a_four_times_expansion() -> None:
+    mlp = GPT2MLP(_tiny_config())
+
+    assert mlp.c_fc.weight.shape == (16, 4)
+    assert mlp.c_proj.weight.shape == (4, 16)
+
+
+def test_mlp_rejects_wrong_rank_width_and_dtype() -> None:
+    mlp = GPT2MLP(_tiny_config())
+
+    with pytest.raises(GPT2ConfigError, match="shape"):
+        mlp(torch.ones(2, 4))
+    with pytest.raises(GPT2ConfigError, match="shape"):
+        mlp(torch.ones(1, 2, 3))
+    with pytest.raises(GPT2ConfigError, match="dtype"):
+        mlp(torch.ones(1, 2, 4, dtype=torch.float64))

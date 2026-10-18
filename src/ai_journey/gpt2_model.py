@@ -78,3 +78,29 @@ class GPT2SelfAttention(nn.Module):
         attended = weights @ value
         attended = attended.transpose(1, 2).contiguous().view(batch, time, channels)
         return self.resid_dropout(self.c_proj(attended))
+
+
+class GPT2MLP(nn.Module):
+    """GPT-2 position-wise feed-forward network."""
+
+    def __init__(self, config: GPT2Config) -> None:
+        super().__init__()
+        if not isinstance(config, GPT2Config):
+            raise TypeError("config must be GPT2Config")
+        hidden_dim = 4 * config.embedding_dim
+        self.c_fc = nn.Linear(config.embedding_dim, hidden_dim)
+        self.c_proj = nn.Linear(hidden_dim, config.embedding_dim)
+        self.dropout = nn.Dropout(config.residual_dropout)
+
+    def forward(self, inputs: Tensor) -> Tensor:
+        if not isinstance(inputs, Tensor):
+            raise TypeError("MLP inputs must be a torch.Tensor")
+        if inputs.ndim != 3 or inputs.shape[-1] != self.c_fc.in_features:
+            raise GPT2ConfigError(
+                "MLP inputs must have (batch, time, embedding_dim) shape"
+            )
+        if inputs.dtype != self.c_fc.weight.dtype:
+            raise GPT2ConfigError("MLP inputs must match parameter dtype")
+        if inputs.device != self.c_fc.weight.device:
+            raise GPT2ConfigError("MLP inputs must match parameter device")
+        return self.dropout(self.c_proj(gelu_new(self.c_fc(inputs))))
