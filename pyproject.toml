@@ -35,6 +35,8 @@ ai-journey-lora-compare = "ai_journey.lora_cli:main"
 ai-journey-lora-verify = "ai_journey.lora_cli:verify_main"
 ai-journey-chat-sft-compare = "ai_journey.sft_cli:main"
 ai-journey-chat-sft-verify = "ai_journey.sft_cli:verify_main"
+ai-journey-preference-compare = "ai_journey.preference_cli:main"
+ai-journey-preference-verify = "ai_journey.preference_cli:verify_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
