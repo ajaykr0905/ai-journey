@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -e .
       - name: Install pinned static checker
-        run: python -m pip install ruff==0.6.9
+        run: python -m pip install ruff==0.6.9 pytest==9.0.2
       - name: Check transformer reliability source and tests
         run: |
           ruff check src/ai_journey/transformer_lab.py src/ai_journey/transformer_cache.py src/ai_journey/attention_audit.py src/ai_journey/transformer_certification.py src/ai_journey/transformer_evidence.py src/ai_journey/day37_cli.py src/ai_journey/ablation_protocol.py scripts/run_day_37.py tests/test_transformer_attention_contracts.py tests/test_transformer_block_controls.py tests/test_transformer_cache.py tests/test_transformer_cache_restart.py tests/test_attention_audit.py tests/test_transformer_certification.py tests/test_transformer_evidence.py tests/test_run_day_37.py tests/test_day37_head_ablation.py tests/test_ablation_config_compatibility.py
@@ -61,6 +61,18 @@ jobs:
         run: |
           ai-journey-chat-sft-compare --config config/chat-sft-comparison.json --output /tmp/ai-journey-artifacts/chat-sft-comparison.json
           ai-journey-chat-sft-verify --report /tmp/ai-journey-artifacts/chat-sft-comparison.json
+      - name: Check preference optimization source and tests
+        run: |
+          ruff check src/ai_journey/preference*.py tests/test_preference*.py
+          ruff format --check src/ai_journey/preference*.py tests/test_preference*.py
+          python -m pytest -q tests/test_preference*.py
+      - name: Compare and replay grouped preference optimization
+        env:
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+        run: |
+          ai-journey-preference-compare --config config/preference-comparison.json --output /tmp/ai-journey-artifacts/preference-comparison.json
+          ai-journey-preference-verify --report /tmp/ai-journey-artifacts/preference-comparison.json
       - name: Check BPE source tests and pipeline formatting
         run: |
           ruff check src/ai_journey/bpe*.py src/ai_journey/token*.py src/ai_journey/parallel*.py src/ai_journey/export_verification.py src/ai_journey/day40_cli.py tests/test_bpe*.py tests/test_tokenizer*.py tests/test_parallel*.py tests/test_export_verification.py tests/test_run_day_40.py scripts/verify_bpe_lab.py

@@ -1,0 +1,204 @@
+import copy
+import json
+
+import pytest
+
+from ai_journey.preference_data import PreferenceDataError
+from ai_journey.preference_experiment import (
+    PREFERENCE_ARMS,
+    PreferenceComparisonConfig,
+    run_preference_comparison,
+)
+from ai_journey.preference_report import summarize_preference_comparison
+from ai_journey.preference_report import (
+    PREFERENCE_REPORT_SCHEMA,
+    build_preference_report,
+    preference_report_digest,
+    replay_preference_report,
+    render_preference_report,
+    validate_preference_report,
+    write_preference_report,
+)
+
+
+@pytest.fixture(scope="module")
+def comparison():
+    return run_preference_comparison(
+        PreferenceComparisonConfig(fold_count=2, sft_steps=1, preference_steps=1)
+    )
+
+
+def test_summary_preserves_seed_fold_pairing_and_uncertainty(comparison):
+    summary = summarize_preference_comparison(comparison)
+
+    assert summary["observations"] == 4
+    assert [arm["name"] for arm in summary["arms"]] == list(PREFERENCE_ARMS)
+    assert len(summary["paired"]) == 6
+    assert all(arm["preference_accuracy"]["count"] == 4 for arm in summary["arms"])
+    assert all(len(row["observations"]) == 4 for row in summary["paired"])
+    assert all(0 <= row["candidate_accuracy_wins"] <= 4 for row in summary["paired"])
+    assert summary["negative_findings"]
+    assert all(
+        "did not" in finding or "non-positive" in finding
+        for finding in summary["negative_findings"]
+    )
+
+
+def test_summary_records_low_rank_trainable_fractions(comparison):
+    summary = summarize_preference_comparison(comparison)
+    arms = {arm["name"]: arm for arm in summary["arms"]}
+
+    assert arms["full"]["trainable_fraction_of_full"] == 1
+    assert arms["frozen"]["trainable_fraction_of_full"] == 0
+    assert 0 < arms["lora-rank-1"]["trainable_fraction_of_full"] < 1
+    assert (
+        arms["lora-rank-1"]["trainable_fraction_of_full"]
+        < arms["lora-rank-2"]["trainable_fraction_of_full"]
+        < 1
+    )
+
+
+def test_summary_rejects_missing_fold_coverage(comparison):
+    damaged = copy.deepcopy(comparison)
+    damaged["seeds"][0]["folds"].pop()
+
+    with pytest.raises(PreferenceDataError, match="every cross-validation fold"):
+        summarize_preference_comparison(damaged)
+
+
+def test_summary_rejects_inconsistent_parameter_counts(comparison):
+    damaged = copy.deepcopy(comparison)
+    damaged["seeds"][1]["folds"][0]["trials"][1]["parameters"]["trainable"] += 1
+
+    with pytest.raises(PreferenceDataError, match="parameter counts"):
+        summarize_preference_comparison(damaged)
+
+
+def test_report_binds_protocol_sources_summary_and_digest(comparison):
+    report = build_preference_report(comparison)
+
+    assert report["schema"] == PREFERENCE_REPORT_SCHEMA
+    assert report["sha256"] == preference_report_digest(report)
+    assert validate_preference_report(report) is report
+    assert report["summary"] == summarize_preference_comparison(report["result"])
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "match"),
+    [
+        (("schema",), "wrong", "schema"),
+        (("sha256",), "0" * 64, "digest"),
+        (("result", "context", "preference_fixture", "pairs"), 11, "context"),
+        (("result", "runtime", "threads"), 2, "runtime controls"),
+        (("summary", "observations"), 99, "summary"),
+    ],
+)
+def test_report_rejects_tampered_owned_evidence(comparison, path, value, match):
+    report = build_preference_report(comparison)
+    current = report
+    for key in path[:-1]:
+        current = current[key]
+    current[path[-1]] = value
+    if path != ("sha256",):
+        report["sha256"] = preference_report_digest(report)
+
+    with pytest.raises(PreferenceDataError, match=match):
+        validate_preference_report(report)
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "match"),
+    [
+        (("result", "seeds", 0, "folds", 0, "schedule", "steps"), 99, "schedule"),
+        (
+            (
+                "result",
+                "seeds",
+                0,
+                "folds",
+                0,
+                "trials",
+                1,
+                "training",
+                "optimizer_steps",
+            ),
+            0,
+            "optimizer steps",
+        ),
+        (
+            (
+                "result",
+                "seeds",
+                0,
+                "folds",
+                0,
+                "trials",
+                0,
+                "heldout",
+                "preference_accuracy",
+            ),
+            0.125,
+            "held-out accuracy",
+        ),
+        (
+            ("result", "seeds", 0, "folds", 0, "reference_sha256"),
+            "0" * 64,
+            "reference fingerprint",
+        ),
+    ],
+)
+def test_report_rejects_inconsistent_trial_accounting(comparison, path, value, match):
+    report = build_preference_report(comparison)
+    current = report
+    for key in path[:-1]:
+        current = current[key]
+    current[path[-1]] = value
+    report["sha256"] = preference_report_digest(report)
+
+    with pytest.raises(PreferenceDataError, match=match):
+        validate_preference_report(report)
+
+
+def test_report_write_is_durable_and_round_trips(comparison, tmp_path):
+    report = build_preference_report(comparison)
+    destination = tmp_path / "nested" / "preference.json"
+
+    write_preference_report(destination, report)
+
+    assert json.loads(destination.read_text()) == report
+    assert destination.read_text().endswith("\n")
+    assert list(destination.parent.glob(".preference.json.tmp-*")) == []
+    assert render_preference_report(report) == destination.read_text()
+
+
+def test_invalid_report_cannot_replace_existing_evidence(comparison, tmp_path):
+    destination = tmp_path / "preference.json"
+    destination.write_text("preserve me\n")
+    report = build_preference_report(comparison)
+    report["summary"]["observations"] = 99
+
+    with pytest.raises(PreferenceDataError, match="digest|summary"):
+        write_preference_report(destination, report)
+
+    assert destination.read_text() == "preserve me\n"
+
+
+def test_report_replay_rebuilds_every_seed_fold_arm(comparison):
+    report = build_preference_report(comparison)
+
+    verified = replay_preference_report(report)
+
+    assert verified["sha256"] == report["sha256"]
+    assert verified["verified_bases"] == 2
+    assert verified["verified_folds"] == 4
+    assert verified["verified_trials"] == 16
+
+
+def test_report_replay_rejects_validly_redigested_fingerprint_change(comparison):
+    report = build_preference_report(comparison)
+    report["result"]["seeds"][0]["folds"][0]["trials"][0]["final_sha256"] = "0" * 64
+    report["sha256"] = preference_report_digest(report)
+    validate_preference_report(report)
+
+    with pytest.raises(PreferenceDataError, match="exact preference replay mismatch"):
+        replay_preference_report(report)

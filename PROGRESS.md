@@ -1,6 +1,6 @@
 # Progress and Evidence
 
-Last updated: 2026-10-16
+Last updated: 2026-10-18
 
 This file separates repository-verifiable work from activities that require the
 learner's own completion evidence.
@@ -48,6 +48,7 @@ learner's own completion evidence.
 | 41 | Document-isolated likelihood, three train-only BPE budgets with matched decoder initialization, 18 public Hindi/English CPU trials, no-learning baselines, paired seed diagnostics, and exact model/metric replay present | Primary and support lectures pending user confirmation | Learner tokenizer finish/rebuild, independent experiment, vocabulary tradeoff explanation and personally written tokenization blog post pending |
 | 42 | LoRA linear adapters, exact gradient oracles, frozen-base audits, dense merge equivalence, bounded artifacts, paired full-versus-low-rank comparison, installed commands, and exact replay present | Primary and support lectures pending user confirmation | Learner LoRA implementation, independent comparison run, parameter-efficiency explanation, and result interpretation pending |
 | 43 | Validated chat/tool state, canonical injection-safe rendering, train-only codec, assistant-only masked SFT, exhaustive held-out assistant scoring, matched full/LoRA comparisons, uncertainty report, installed commands, and exact replay present | Primary and support lectures pending user confirmation | Learner lecture viewing, term-by-term notes, independent run, and personal explanation of SFT, conversation format, hallucination, and tool use pending |
+| 44 | Authored grounded preferences, group-isolated cross-validation, response-only DPO-style scoring, matched frozen/full/LoRA trials, negative-result reporting, installed commands, and exact replay present | Primary and support lectures pending user confirmation | Learner lecture viewing, independent run, training-stack diagram, and personal explanation of RL, RLHF, reasoning-model capabilities and failure modes pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,
@@ -75,3 +76,15 @@ rank-one LoRA and rank-two LoRA arms from matched warmed bases, publishes descri
 uncertainty and negative findings, and supports exact full replay. See
 [the chat SFT experiment guide](docs/chat-sft-experiment.md) for commands, measured
 results, limitations, and the learner evidence that remains outstanding.
+
+## Engineering milestone: grouped preference optimization, 18 October 2026
+
+The Day 44 lab holds complete prompt families out together, warms one shared
+assistant-only SFT reference, and compares frozen, full, rank-one LoRA, and
+rank-two LoRA policies with matched schedules. The checked-in two-seed,
+three-fold CPU protocol retains the negative result that no adapted arm exceeded
+the frozen control's mean held-out preference accuracy. See
+[the preference optimization guide](docs/preference-optimization.md) for the
+commands, measured table, replay contract, and explicit limits. This repository
+evidence does not claim lecture viewing, a personal diagram, RLHF at scale, or a
+learner-run experiment.
