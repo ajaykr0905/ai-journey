@@ -9,6 +9,7 @@ from ai_journey.gpt2_interop import (
     TensorSpec,
     convert_hugging_face_state_dict,
     expected_hugging_face_tensors,
+    fingerprint_hugging_face_state,
     known_hugging_face_buffers,
     load_hugging_face_weights,
     validate_tied_embedding_alias,
@@ -187,3 +188,25 @@ def test_loading_rejects_implicit_dtype_conversion() -> None:
 
     with pytest.raises(GPT2InteropError, match="dtype"):
         load_hugging_face_weights(model, state)
+
+
+def test_state_fingerprint_is_order_independent_and_covers_tensor_values() -> None:
+    state = _valid_state_dict()
+    reversed_state = dict(reversed(list(state.items())))
+
+    baseline = fingerprint_hugging_face_state(state, _tiny_config())
+    reordered = fingerprint_hugging_face_state(reversed_state, _tiny_config())
+    state["transformer.h.1.mlp.c_proj.bias"][2] = 0.25
+    changed = fingerprint_hugging_face_state(state, _tiny_config())
+
+    assert baseline == reordered
+    assert baseline != changed
+    assert len(baseline) == 64
+
+
+def test_state_fingerprint_excludes_nonlearned_legacy_masks() -> None:
+    state = _valid_state_dict()
+    baseline = fingerprint_hugging_face_state(state, _tiny_config())
+    state["transformer.h.0.attn.bias"] = torch.zeros(1, 1, 4, 4)
+
+    assert fingerprint_hugging_face_state(state, _tiny_config()) == baseline

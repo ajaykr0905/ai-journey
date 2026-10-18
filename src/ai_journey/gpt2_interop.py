@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import Mapping
+from hashlib import sha256
+import json
 
 import torch
 from torch import Tensor
@@ -191,3 +193,26 @@ def load_hugging_face_weights(
         raise GPT2InteropError("strict GPT-2 state loading reported incompatible keys")
     if model.lm_head.weight is not model.wte.weight:
         raise GPT2InteropError("GPT-2 weight loading broke embedding parameter tying")
+
+
+def fingerprint_hugging_face_state(
+    state_dict: Mapping[str, Tensor], config: GPT2Config
+) -> str:
+    """Fingerprint every learned tensor independently of mapping insertion order."""
+
+    validate_hugging_face_state_dict(state_dict, config)
+    digest = sha256()
+    specs = expected_hugging_face_tensors(config)
+    for key in sorted(specs):
+        tensor = state_dict[key].detach().cpu().contiguous()
+        metadata = json.dumps(
+            {"key": key, "dtype": str(tensor.dtype), "shape": list(tensor.shape)},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        digest.update(len(metadata).to_bytes(8, "big"))
+        digest.update(metadata)
+        raw = tensor.view(torch.uint8).numpy().tobytes()
+        digest.update(len(raw).to_bytes(8, "big"))
+        digest.update(raw)
+    return digest.hexdigest()
