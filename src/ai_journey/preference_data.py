@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
+import json
 import re
 
 from .sft_data import ChatMessage
@@ -66,3 +68,91 @@ class PreferencePair:
                 raise PreferenceDataError(f"{name} must be a plain assistant message")
         if self.chosen.content == self.rejected.content:
             raise PreferenceDataError("chosen and rejected responses must differ")
+
+
+def canonical_digest(value) -> str:
+    """Hash JSON-compatible evidence using one stable public representation."""
+    try:
+        encoded = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
+        raise PreferenceDataError(f"value is not canonical JSON: {exc}") from exc
+    return sha256(encoded).hexdigest()
+
+
+def _message_line(message: ChatMessage) -> str:
+    return (
+        json.dumps(
+            {"content": message.content, "role": message.role},
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        + "\n"
+    )
+
+
+@dataclass(frozen=True)
+class RenderedCandidate:
+    pair_id: str
+    label: str
+    prompt_text: str
+    response_text: str
+
+    def __post_init__(self):
+        if self.label not in {"chosen", "rejected"}:
+            raise PreferenceDataError("candidate label must be chosen or rejected")
+        if not self.prompt_text or not self.response_text:
+            raise PreferenceDataError("rendered candidate sections must be nonempty")
+        if not self.prompt_text.endswith("\n") or not self.response_text.endswith("\n"):
+            raise PreferenceDataError("rendered candidate sections must end in newline")
+
+    @property
+    def text(self):
+        return self.prompt_text + self.response_text
+
+    @property
+    def response_span(self):
+        return (len(self.prompt_text), len(self.text))
+
+    @property
+    def sha256(self):
+        return sha256(self.text.encode("utf-8")).hexdigest()
+
+
+def render_candidate(pair: PreferencePair, label: str) -> RenderedCandidate:
+    """Render one branch as injection-safe canonical JSON Lines."""
+    if not isinstance(pair, PreferencePair):
+        raise TypeError("pair must be PreferencePair")
+    if label not in {"chosen", "rejected"}:
+        raise PreferenceDataError("candidate label must be chosen or rejected")
+    prompt = "".join(_message_line(message) for message in pair.prompt)
+    return RenderedCandidate(
+        pair_id=pair.pair_id,
+        label=label,
+        prompt_text=prompt,
+        response_text=_message_line(getattr(pair, label)),
+    )
+
+
+def pair_evidence(pair: PreferencePair) -> dict:
+    """Bind prompt and both labeled candidates without exposing mutable objects."""
+    if not isinstance(pair, PreferencePair):
+        raise TypeError("pair must be PreferencePair")
+    chosen = render_candidate(pair, "chosen")
+    rejected = render_candidate(pair, "rejected")
+    return {
+        "pair_id": pair.pair_id,
+        "group_id": pair.group_id,
+        "prompt_sha256": sha256(chosen.prompt_text.encode("utf-8")).hexdigest(),
+        "chosen_sha256": chosen.sha256,
+        "rejected_sha256": rejected.sha256,
+        "chosen_characters": len(chosen.response_text),
+        "rejected_characters": len(rejected.response_text),
+    }

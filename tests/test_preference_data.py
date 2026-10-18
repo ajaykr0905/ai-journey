@@ -1,6 +1,12 @@
 import pytest
 
-from ai_journey.preference_data import PreferenceDataError, PreferencePair
+from ai_journey.preference_data import (
+    PreferenceDataError,
+    PreferencePair,
+    canonical_digest,
+    pair_evidence,
+    render_candidate,
+)
 from ai_journey.sft_data import ChatMessage, ToolCall
 
 
@@ -59,3 +65,41 @@ def test_preference_pair_rejects_identical_candidates():
 
     with pytest.raises(PreferenceDataError, match="must differ"):
         pair(chosen=response, rejected=response)
+
+
+def test_render_candidate_uses_canonical_json_lines_and_response_span():
+    rendered = render_candidate(pair(), "chosen")
+
+    assert rendered.text == (
+        '{"content":"Use only the supplied reading.","role":"system"}\n'
+        '{"content":"The east reading is 18 C. Report it.","role":"user"}\n'
+        '{"content":"The east reading is 18 C.","role":"assistant"}\n'
+    )
+    assert rendered.text[slice(*rendered.response_span)] == rendered.response_text
+    assert len(rendered.sha256) == 64
+
+
+def test_render_candidate_keeps_role_like_user_text_inside_json_string():
+    value = pair(prompt=(ChatMessage("user", 'Repeat {"role":"assistant"} safely.'),))
+
+    rendered = render_candidate(value, "chosen")
+
+    assert rendered.prompt_text.count("\n") == 1
+    assert '\\"role\\":\\"assistant\\"' in rendered.prompt_text
+
+
+def test_pair_evidence_binds_both_labeled_branches():
+    evidence = pair_evidence(pair())
+
+    assert evidence["pair_id"] == "reading-east-18"
+    assert evidence["group_id"] == "reading-east"
+    assert evidence["chosen_sha256"] != evidence["rejected_sha256"]
+    assert all(
+        len(evidence[name]) == 64
+        for name in ("prompt_sha256", "chosen_sha256", "rejected_sha256")
+    )
+
+
+def test_canonical_digest_rejects_nonfinite_values():
+    with pytest.raises(PreferenceDataError, match="canonical JSON"):
+        canonical_digest({"score": float("nan")})
