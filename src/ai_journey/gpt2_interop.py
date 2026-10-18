@@ -116,4 +116,25 @@ def validate_hugging_face_state_dict(
             raise GPT2InteropError(f"{key} must use a floating-point dtype")
         if not bool(torch.isfinite(tensor).all()):
             raise GPT2InteropError(f"{key} must contain only finite values")
+    validate_tied_embedding_alias(state_dict)
     return tuple(ignored)
+
+
+def validate_tied_embedding_alias(state_dict: Mapping[str, Tensor]) -> None:
+    """Require the exported language-model head to equal the token embedding."""
+
+    if not isinstance(state_dict, Mapping):
+        raise TypeError("state_dict must be a mapping")
+    try:
+        token_embedding = state_dict["transformer.wte.weight"]
+        language_head = state_dict["lm_head.weight"]
+    except KeyError as exc:
+        raise GPT2InteropError(
+            "tied embeddings require wte and lm_head tensors"
+        ) from exc
+    if not isinstance(token_embedding, Tensor) or not isinstance(language_head, Tensor):
+        raise TypeError("tied embedding values must be torch.Tensor objects")
+    if not torch.equal(token_embedding, language_head):
+        raise GPT2InteropError(
+            "lm_head.weight must exactly equal transformer.wte.weight"
+        )

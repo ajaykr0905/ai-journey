@@ -9,6 +9,7 @@ from ai_journey.gpt2_interop import (
     TensorSpec,
     expected_hugging_face_tensors,
     known_hugging_face_buffers,
+    validate_tied_embedding_alias,
     validate_hugging_face_state_dict,
 )
 
@@ -104,3 +105,16 @@ def test_rejects_wrong_shape_dtype_and_nonfinite_tensors() -> None:
         validate_hugging_face_state_dict(integer, _tiny_config())
     with pytest.raises(GPT2InteropError, match="finite"):
         validate_hugging_face_state_dict(nonfinite, _tiny_config())
+
+
+def test_requires_the_language_head_to_match_the_token_embedding_exactly() -> None:
+    state = _valid_state_dict()
+    state["lm_head.weight"][0, 0] = 1
+
+    with pytest.raises(GPT2InteropError, match="exactly equal"):
+        validate_hugging_face_state_dict(state, _tiny_config())
+
+
+def test_tied_embedding_check_rejects_missing_alias_inputs() -> None:
+    with pytest.raises(GPT2InteropError, match="require wte and lm_head"):
+        validate_tied_embedding_alias({})
