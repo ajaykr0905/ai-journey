@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
+import json
 import math
+import re
 
-from .preference_data import PreferenceDataError
-from .preference_experiment import PREFERENCE_ARMS
+from .lora_experiment import ADAPTER_TARGETS
+from .preference_data import PreferenceDataError, canonical_digest
+from .preference_experiment import (
+    PREFERENCE_ARMS,
+    PREFERENCE_LIMITATIONS,
+    prepare_preference_context,
+    preference_config_from_dict,
+)
 
 
 UNCERTAINTY_POLICY = (
@@ -217,3 +226,105 @@ def summarize_preference_comparison(result):
         }
     except (KeyError, TypeError, OverflowError, ZeroDivisionError) as exc:
         raise PreferenceDataError(f"invalid preference summary: {exc}") from exc
+
+
+PREFERENCE_REPORT_SCHEMA = "ai-journey-preference-comparison-v1"
+
+
+def preference_report_digest(report):
+    if not isinstance(report, dict):
+        raise PreferenceDataError("preference report must be an object")
+    return canonical_digest(
+        {key: value for key, value in report.items() if key != "sha256"}
+    )
+
+
+def build_preference_report(result):
+    """Own, summarize, digest, and validate one complete experiment result."""
+    try:
+        owned = json.loads(json.dumps(result, allow_nan=False))
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise PreferenceDataError(f"cannot own preference result: {exc}") from exc
+    report = {
+        "schema": PREFERENCE_REPORT_SCHEMA,
+        "result": owned,
+        "summary": summarize_preference_comparison(owned),
+    }
+    report["sha256"] = preference_report_digest(report)
+    validate_preference_report(report)
+    return report
+
+
+def _expect(actual, expected, name):
+    if canonical_digest(actual) != canonical_digest(expected):
+        raise PreferenceDataError(f"inconsistent {name}")
+
+
+def validate_preference_report(report):
+    """Validate the fixed protocol, source evidence, summary, and report digest."""
+    try:
+        if not isinstance(report, dict) or set(report) != {
+            "schema",
+            "result",
+            "summary",
+            "sha256",
+        }:
+            raise PreferenceDataError("invalid preference report fields")
+        _expect(report["schema"], PREFERENCE_REPORT_SCHEMA, "report schema")
+        if (
+            not isinstance(report["sha256"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", report["sha256"]) is None
+        ):
+            raise PreferenceDataError("invalid preference report digest")
+        _expect(report["sha256"], preference_report_digest(report), "report digest")
+        result = report["result"]
+        if not isinstance(result, dict) or set(result) != {
+            "config",
+            "context",
+            "model",
+            "adapter_targets",
+            "seeds",
+            "runtime",
+            "limitations",
+        }:
+            raise PreferenceDataError("invalid preference result fields")
+        config = preference_config_from_dict(result["config"])
+        context = prepare_preference_context(config)
+        _expect(result["context"], context.evidence(), "preference context")
+        _expect(
+            result["model"],
+            asdict(config.model_config(len(context.codec.tokens))),
+            "preference model controls",
+        )
+        _expect(
+            result["adapter_targets"],
+            list(ADAPTER_TARGETS),
+            "preference adapter targets",
+        )
+        _expect(result["limitations"], PREFERENCE_LIMITATIONS, "limitations")
+        runtime = result["runtime"]
+        if not isinstance(runtime, dict) or set(runtime) != {
+            "python",
+            "torch",
+            "device",
+            "dtype",
+            "threads",
+        }:
+            raise PreferenceDataError("invalid preference runtime fields")
+        _expect(
+            {key: runtime[key] for key in ("device", "dtype", "threads")},
+            {"device": "cpu", "dtype": "float64", "threads": 1},
+            "preference runtime controls",
+        )
+        if not isinstance(result["seeds"], list) or [
+            row["seed"] for row in result["seeds"]
+        ] != list(config.seeds):
+            raise PreferenceDataError("preference report requires every seed in order")
+        _expect(
+            report["summary"],
+            summarize_preference_comparison(result),
+            "preference summary",
+        )
+        return report
+    except (KeyError, TypeError, OverflowError, ZeroDivisionError) as exc:
+        raise PreferenceDataError(f"invalid preference report: {exc}") from exc

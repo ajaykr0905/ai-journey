@@ -9,6 +9,12 @@ from ai_journey.preference_experiment import (
     run_preference_comparison,
 )
 from ai_journey.preference_report import summarize_preference_comparison
+from ai_journey.preference_report import (
+    PREFERENCE_REPORT_SCHEMA,
+    build_preference_report,
+    preference_report_digest,
+    validate_preference_report,
+)
 
 
 @pytest.fixture(scope="module")
@@ -58,3 +64,35 @@ def test_summary_rejects_inconsistent_parameter_counts(comparison):
 
     with pytest.raises(PreferenceDataError, match="parameter counts"):
         summarize_preference_comparison(damaged)
+
+
+def test_report_binds_protocol_sources_summary_and_digest(comparison):
+    report = build_preference_report(comparison)
+
+    assert report["schema"] == PREFERENCE_REPORT_SCHEMA
+    assert report["sha256"] == preference_report_digest(report)
+    assert validate_preference_report(report) is report
+    assert report["summary"] == summarize_preference_comparison(report["result"])
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "match"),
+    [
+        (("schema",), "wrong", "schema"),
+        (("sha256",), "0" * 64, "digest"),
+        (("result", "context", "preference_fixture", "pairs"), 11, "context"),
+        (("result", "runtime", "threads"), 2, "runtime controls"),
+        (("summary", "observations"), 99, "summary"),
+    ],
+)
+def test_report_rejects_tampered_owned_evidence(comparison, path, value, match):
+    report = build_preference_report(comparison)
+    current = report
+    for key in path[:-1]:
+        current = current[key]
+    current[path[-1]] = value
+    if path != ("sha256",):
+        report["sha256"] = preference_report_digest(report)
+
+    with pytest.raises(PreferenceDataError, match=match):
+        validate_preference_report(report)
