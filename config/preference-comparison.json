@@ -1,0 +1,16 @@
+{
+  "seeds": [44, 45],
+  "fold_count": 3,
+  "fold_seed": 4403,
+  "block_size": 32,
+  "embedding_dim": 16,
+  "head_count": 2,
+  "sft_batch_size": 4,
+  "sft_steps": 4,
+  "preference_batch_size": 2,
+  "preference_steps": 4,
+  "sft_learning_rate": 0.01,
+  "preference_learning_rate": 0.01,
+  "beta": 0.2,
+  "adapter_scale": 2.0
+}

@@ -1,5 +1,7 @@
 import random
 from dataclasses import asdict
+import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -28,6 +30,15 @@ def test_preference_config_round_trips_all_controls():
     assert restored == config
     assert isinstance(preference_config_dict(config)["seeds"], list)
     assert config.work_units <= 80_000_000
+
+
+def test_checked_in_preference_protocol_matches_the_validated_default():
+    path = Path(__file__).parents[1] / "config" / "preference-comparison.json"
+
+    value = json.loads(path.read_text())
+
+    assert preference_config_from_dict(value) == PreferenceComparisonConfig()
+    assert value == preference_config_dict(PreferenceComparisonConfig())
 
 
 def test_preference_config_builds_a_bounded_layer_norm_decoder():
