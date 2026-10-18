@@ -140,7 +140,19 @@ class GPT2LanguageModel(nn.Module):
         self.lm_head.weight = self.wte.weight
 
     def forward(self, token_ids: Tensor) -> Tensor:
+        if not isinstance(token_ids, Tensor):
+            raise TypeError("token_ids must be a torch.Tensor")
+        if token_ids.dtype != torch.long or token_ids.ndim != 2:
+            raise TypeError("token_ids must be a rank-two torch.long tensor")
         batch, time = token_ids.shape
+        if batch == 0 or time == 0:
+            raise GPT2ConfigError("token batch and time dimensions must be non-empty")
+        if time > self.config.context_length:
+            raise GPT2ConfigError("token sequence exceeds context_length")
+        if token_ids.device != self.wte.weight.device:
+            raise GPT2ConfigError("token_ids must match the model device")
+        if int(token_ids.min()) < 0 or int(token_ids.max()) >= self.config.vocab_size:
+            raise GPT2ConfigError("token_ids contain an out-of-range id")
         positions = torch.arange(time, device=token_ids.device)
         hidden = self.drop(self.wte(token_ids) + self.wpe(positions))
         for block in self.h:

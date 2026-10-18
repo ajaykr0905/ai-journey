@@ -206,3 +206,23 @@ def test_learned_position_embeddings_affect_repeated_tokens() -> None:
     logits = model(token_ids)
 
     assert not torch.equal(logits[:, 0], logits[:, 1])
+
+
+@pytest.mark.parametrize(
+    ("token_ids", "error", "message"),
+    [
+        (torch.tensor([1, 2]), TypeError, "rank-two"),
+        (torch.tensor([[1.0]]), TypeError, "torch.long"),
+        (torch.empty((0, 2), dtype=torch.long), GPT2ConfigError, "non-empty"),
+        (torch.tensor([[1, 2, 3, 4, 5]]), GPT2ConfigError, "context_length"),
+        (torch.tensor([[-1]]), GPT2ConfigError, "out-of-range"),
+        (torch.tensor([[11]]), GPT2ConfigError, "out-of-range"),
+    ],
+)
+def test_language_model_rejects_invalid_token_batches(
+    token_ids: torch.Tensor, error: type[Exception], message: str
+) -> None:
+    model = GPT2LanguageModel(_tiny_config())
+
+    with pytest.raises(error, match=message):
+        model(token_ids)
