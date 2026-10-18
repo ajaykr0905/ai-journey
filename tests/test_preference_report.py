@@ -37,7 +37,11 @@ def test_summary_preserves_seed_fold_pairing_and_uncertainty(comparison):
     assert all(arm["preference_accuracy"]["count"] == 4 for arm in summary["arms"])
     assert all(len(row["observations"]) == 4 for row in summary["paired"])
     assert all(0 <= row["candidate_accuracy_wins"] <= 4 for row in summary["paired"])
-    assert isinstance(summary["negative_findings"], list)
+    assert summary["negative_findings"]
+    assert all(
+        "did not" in finding or "non-positive" in finding
+        for finding in summary["negative_findings"]
+    )
 
 
 def test_summary_records_low_rank_trainable_fractions(comparison):

@@ -214,18 +214,25 @@ def summarize_preference_comparison(result):
                         "accuracy_ties": sum(value == 0 for value in accuracy_deltas),
                     }
                 )
-        full_accuracy = next(
-            arm["preference_accuracy"]["mean"] for arm in arms if arm["name"] == "full"
-        )
-        negative_findings = [
-            (
-                f"{arm['name']} did not exceed the full arm's mean held-out "
-                "preference accuracy."
+        frozen_accuracy = arms[0]["preference_accuracy"]["mean"]
+        negative_findings = []
+        for arm in arms[1:]:
+            if arm["preference_accuracy"]["mean"] <= frozen_accuracy:
+                negative_findings.append(
+                    f"{arm['name']} did not exceed the frozen arm's mean held-out "
+                    "preference accuracy."
+                )
+            if arm["mean_reward_margin"]["mean"] <= 0:
+                negative_findings.append(
+                    f"{arm['name']} had a non-positive mean held-out reward margin."
+                )
+        rank1 = next(arm for arm in arms if arm["name"] == "lora-rank-1")
+        rank2 = next(arm for arm in arms if arm["name"] == "lora-rank-2")
+        if rank2["preference_accuracy"]["mean"] <= rank1["preference_accuracy"]["mean"]:
+            negative_findings.append(
+                "lora-rank-2 did not exceed lora-rank-1 mean held-out preference "
+                "accuracy."
             )
-            for arm in arms
-            if arm["name"].startswith("lora-")
-            and arm["preference_accuracy"]["mean"] <= full_accuracy
-        ]
         return {
             "observations": expected,
             "arms": arms,
