@@ -216,3 +216,23 @@ def fingerprint_hugging_face_state(
         digest.update(len(raw).to_bytes(8, "big"))
         digest.update(raw)
     return digest.hexdigest()
+
+
+def export_hugging_face_state(model: GPT2LanguageModel) -> dict[str, Tensor]:
+    """Export the independent model using Hugging Face names and Conv1D layouts."""
+
+    if not isinstance(model, GPT2LanguageModel):
+        raise TypeError("model must be GPT2LanguageModel")
+    internal = model.state_dict()
+    specs = expected_hugging_face_tensors(model.config)
+    exported: dict[str, Tensor] = {}
+    for external_key, spec in specs.items():
+        internal_key = external_key.removeprefix("transformer.")
+        value = internal[internal_key].detach()
+        exported[external_key] = (
+            value.transpose(0, 1).contiguous().clone()
+            if spec.transpose
+            else value.contiguous().clone()
+        )
+    validate_hugging_face_state_dict(exported, model.config)
+    return exported

@@ -9,6 +9,7 @@ from ai_journey.gpt2_interop import (
     TensorSpec,
     convert_hugging_face_state_dict,
     expected_hugging_face_tensors,
+    export_hugging_face_state,
     fingerprint_hugging_face_state,
     known_hugging_face_buffers,
     load_hugging_face_weights,
@@ -210,3 +211,28 @@ def test_state_fingerprint_excludes_nonlearned_legacy_masks() -> None:
     state["transformer.h.0.attn.bias"] = torch.zeros(1, 1, 4, 4)
 
     assert fingerprint_hugging_face_state(state, _tiny_config()) == baseline
+
+
+def test_import_then_export_round_trips_every_hugging_face_tensor() -> None:
+    state = _valid_state_dict()
+    generator = torch.Generator().manual_seed(45)
+    for key, tensor in state.items():
+        tensor.copy_(torch.randn(tensor.shape, generator=generator))
+    state["lm_head.weight"] = state["transformer.wte.weight"].clone()
+    model = GPT2LanguageModel(_tiny_config())
+
+    load_hugging_face_weights(model, state)
+    exported = export_hugging_face_state(model)
+
+    assert set(exported) == set(state)
+    for key, expected in state.items():
+        torch.testing.assert_close(exported[key], expected, rtol=0, atol=0)
+
+
+def test_exported_state_has_independent_writable_storage() -> None:
+    model = GPT2LanguageModel(_tiny_config())
+    exported = export_hugging_face_state(model)
+
+    exported["transformer.wte.weight"][0, 0] += 10
+
+    assert not torch.equal(exported["transformer.wte.weight"], model.wte.weight)
