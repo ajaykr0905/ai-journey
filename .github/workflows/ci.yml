@@ -39,6 +39,12 @@ jobs:
           ruff format --check src/ai_journey/day38_serving.py src/ai_journey/day38_inference_cli.py src/ai_journey/day38_ablation.py tests/test_day38_serving.py tests/test_day38_ablation.py tests/test_transformer_runtime_safety.py
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
+      - name: Check GPT-2 interoperability contracts
+        run: |
+          ruff check src/ai_journey/gpt2*.py tests/test_gpt2*.py
+          ruff format --check src/ai_journey/gpt2*.py tests/test_gpt2*.py
+          python -m pytest -q tests/test_gpt2*.py
+          ai-journey-gpt2 --help
       - name: Check low-rank adapter source and numerical oracles
         run: |
           ruff check src/ai_journey/lora*.py tests/test_lora*.py

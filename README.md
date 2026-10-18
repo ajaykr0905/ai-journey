@@ -388,6 +388,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 37 | 2026-10-11 | Full residual blocks, multi-head audits, controlled configurations, and inference restart |
 | 42 | 2026-10-16 | Low-rank adapter primitives, frozen-base audits, dense merge equivalence, paired comparison, and exact replay |
 | 43 | 2026-10-17 | Validated chat/tool conversations, assistant-only SFT, matched full/LoRA trials, uncertainty, and exact replay |
+| 45 | 2026-10-19 | Exact GPT-2 architecture, public checkpoint import, full-logit parity, and tamper-evident evidence |
 
 ## License
 

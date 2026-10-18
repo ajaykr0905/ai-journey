@@ -49,6 +49,7 @@ learner's own completion evidence.
 | 42 | LoRA linear adapters, exact gradient oracles, frozen-base audits, dense merge equivalence, bounded artifacts, paired full-versus-low-rank comparison, installed commands, and exact replay present | Primary and support lectures pending user confirmation | Learner LoRA implementation, independent comparison run, parameter-efficiency explanation, and result interpretation pending |
 | 43 | Validated chat/tool state, canonical injection-safe rendering, train-only codec, assistant-only masked SFT, exhaustive held-out assistant scoring, matched full/LoRA comparisons, uncertainty report, installed commands, and exact replay present | Primary and support lectures pending user confirmation | Learner lecture viewing, term-by-term notes, independent run, and personal explanation of SFT, conversation format, hallucination, and tool use pending |
 | 44 | Authored grounded preferences, group-isolated cross-validation, response-only DPO-style scoring, matched frozen/full/LoRA trials, negative-result reporting, installed commands, and exact replay present | Primary and support lectures pending user confirmation | Learner lecture viewing, independent run, training-stack diagram, and personal explanation of RL, RLHF, reasoning-model capabilities and failure modes pending |
+| 45 | Exact 124,439,808-parameter GPT-2 decoder, immutable public checkpoint identities, safe legacy import, complete tensor fingerprint, independent full-logit parity, installed command, tamper-evident evidence, and CI gate present | Primary and support lectures pending user confirmation | Learner lecture viewing, type-along, independent checkpoint load, architecture explanation, and personal interpretation pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,
@@ -88,3 +89,13 @@ the frozen control's mean held-out preference accuracy. See
 commands, measured table, replay contract, and explicit limits. This repository
 evidence does not claim lecture viewing, a personal diagram, RLHF at scale, or a
 learner-run experiment.
+
+## Engineering milestone: exact GPT-2 interoperability, 19 October 2026
+
+The Day 45 lab implements the 124M GPT-2 decoder independently, pins the public
+checkpoint to immutable source bytes, normalizes its legacy state layout, and
+checks every output logit against an independent Transformers reference. The
+five-token CPU probe matched all five top-1 predictions across 251,285 logits;
+maximum absolute error was 0.000106812 and mean absolute error was 0.0000122083.
+See [the GPT-2 interoperability guide](docs/gpt2-interoperability.md) for source
+identities, commands, measured evidence, limitations, and outstanding learner work.
