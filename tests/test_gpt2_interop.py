@@ -10,9 +10,11 @@ from ai_journey.gpt2_interop import (
     convert_hugging_face_state_dict,
     expected_hugging_face_tensors,
     known_hugging_face_buffers,
+    load_hugging_face_weights,
     validate_tied_embedding_alias,
     validate_hugging_face_state_dict,
 )
+from ai_journey.gpt2_model import GPT2LanguageModel
 
 
 def _tiny_config() -> GPT2Config:
@@ -148,3 +150,40 @@ def test_conversion_does_not_share_writable_tensor_storage() -> None:
     converted["ln_f.weight"][0] = 9
 
     assert state["transformer.ln_f.weight"][0] == 0
+
+
+def test_loads_complete_hugging_face_state_and_preserves_weight_tying() -> None:
+    model = GPT2LanguageModel(_tiny_config())
+    state = _valid_state_dict()
+    tied = torch.arange(44, dtype=torch.float32).view(11, 4) / 100
+    state["transformer.wte.weight"] = tied.clone()
+    state["lm_head.weight"] = tied.clone()
+    state["transformer.wpe.weight"] = torch.arange(16).view(4, 4).float()
+
+    load_hugging_face_weights(model, state)
+
+    torch.testing.assert_close(model.wte.weight, tied)
+    torch.testing.assert_close(model.wpe.weight, state["transformer.wpe.weight"])
+    assert model.lm_head.weight is model.wte.weight
+
+
+def test_invalid_external_state_does_not_partially_mutate_the_model() -> None:
+    torch.manual_seed(45)
+    model = GPT2LanguageModel(_tiny_config())
+    before = {key: value.clone() for key, value in model.state_dict().items()}
+    state = _valid_state_dict()
+    state["transformer.h.1.mlp.c_fc.weight"] = torch.zeros(3, 3)
+
+    with pytest.raises(GPT2InteropError, match="shape"):
+        load_hugging_face_weights(model, state)
+
+    for key, expected in before.items():
+        assert torch.equal(model.state_dict()[key], expected), key
+
+
+def test_loading_rejects_implicit_dtype_conversion() -> None:
+    model = GPT2LanguageModel(_tiny_config())
+    state = {key: value.double() for key, value in _valid_state_dict().items()}
+
+    with pytest.raises(GPT2InteropError, match="dtype"):
+        load_hugging_face_weights(model, state)

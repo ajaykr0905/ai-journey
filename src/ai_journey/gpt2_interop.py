@@ -9,6 +9,7 @@ import torch
 from torch import Tensor
 
 from .gpt2_config import GPT2Config
+from .gpt2_model import GPT2LanguageModel
 
 
 class GPT2InteropError(ValueError):
@@ -160,3 +161,33 @@ def convert_hugging_face_state_dict(
             else value.contiguous().clone()
         )
     return converted
+
+
+def load_hugging_face_weights(
+    model: GPT2LanguageModel, state_dict: Mapping[str, Tensor]
+) -> None:
+    """Load a complete validated Hugging Face state into the independent model."""
+
+    if not isinstance(model, GPT2LanguageModel):
+        raise TypeError("model must be GPT2LanguageModel")
+    converted = convert_hugging_face_state_dict(state_dict, model.config)
+    destination = model.state_dict()
+    if set(converted) != set(destination):
+        missing = sorted(set(destination) - set(converted))
+        unexpected = sorted(set(converted) - set(destination))
+        raise GPT2InteropError(
+            f"converted state mismatch; missing={missing}, unexpected={unexpected}"
+        )
+    for key, value in converted.items():
+        target = destination[key]
+        if value.shape != target.shape:
+            raise GPT2InteropError(f"converted {key} shape does not match the model")
+        if value.dtype != target.dtype:
+            raise GPT2InteropError(f"converted {key} dtype does not match the model")
+        if value.device.type != "cpu" or target.device.type != "cpu":
+            raise GPT2InteropError("GPT-2 import requires CPU source and destination")
+    incompatible = model.load_state_dict(converted, strict=True)
+    if incompatible.missing_keys or incompatible.unexpected_keys:
+        raise GPT2InteropError("strict GPT-2 state loading reported incompatible keys")
+    if model.lm_head.weight is not model.wte.weight:
+        raise GPT2InteropError("GPT-2 weight loading broke embedding parameter tying")
