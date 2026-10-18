@@ -8,7 +8,12 @@ import math
 import re
 
 from .lora_experiment import ADAPTER_TARGETS
-from .preference_data import PreferenceDataError, canonical_digest
+from .preference_data import (
+    PreferenceDataError,
+    canonical_digest,
+    preference_schedule_evidence,
+    preference_training_batches,
+)
 from .preference_experiment import (
     PREFERENCE_ARMS,
     PREFERENCE_LIMITATIONS,
@@ -260,6 +265,137 @@ def _expect(actual, expected, name):
         raise PreferenceDataError(f"inconsistent {name}")
 
 
+def _sha(value, name):
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise PreferenceDataError(f"invalid {name} digest")
+
+
+def _validate_training(training, *, config, frozen, reference_sha256):
+    if not isinstance(training, dict) or set(training) != {
+        "steps",
+        "comparisons",
+        "optimizer_steps",
+        "reference_before_sha256",
+        "reference_after_sha256",
+        "trace",
+    }:
+        raise PreferenceDataError("invalid preference training fields")
+    _expect(training["steps"], config.preference_steps, "training steps")
+    _expect(
+        training["comparisons"],
+        config.preference_steps * config.preference_batch_size,
+        "training comparisons",
+    )
+    _expect(
+        training["optimizer_steps"],
+        0 if frozen else config.preference_steps,
+        "preference optimizer steps",
+    )
+    _expect(
+        training["reference_before_sha256"],
+        reference_sha256,
+        "reference before training",
+    )
+    _expect(
+        training["reference_after_sha256"],
+        reference_sha256,
+        "reference after training",
+    )
+    trace = training["trace"]
+    if not isinstance(trace, list) or len(trace) != config.preference_steps:
+        raise PreferenceDataError("preference trace must cover every step")
+    for row in trace:
+        if not isinstance(row, dict) or set(row) != {
+            "loss",
+            "policy_margin",
+            "reference_margin",
+            "reward_margin",
+            "preference_accuracy",
+            "gradient_norm",
+        }:
+            raise PreferenceDataError("invalid preference trace fields")
+        _finite(row["loss"], "training loss", minimum=0)
+        _finite(row["policy_margin"], "training policy margin")
+        _finite(row["reference_margin"], "training reference margin")
+        _finite(row["reward_margin"], "training reward margin")
+        _finite(
+            row["preference_accuracy"],
+            "training preference accuracy",
+            minimum=0,
+            maximum=1,
+        )
+        gradient = _finite(row["gradient_norm"], "gradient norm", minimum=0)
+        if frozen and gradient != 0:
+            raise PreferenceDataError("frozen preference arm cannot have gradients")
+
+
+def _validate_heldout(heldout, pair_ids):
+    if not isinstance(heldout, dict) or set(heldout) != {
+        "pairs",
+        "preference_accuracy",
+        "mean_policy_margin",
+        "mean_reference_margin",
+        "mean_reward_margin",
+        "mean_loss",
+        "rows",
+    }:
+        raise PreferenceDataError("invalid held-out preference fields")
+    _expect(heldout["pairs"], len(pair_ids), "held-out pair count")
+    rows = heldout["rows"]
+    if not isinstance(rows, list) or [row.get("pair_id") for row in rows] != pair_ids:
+        raise PreferenceDataError("held-out rows must cover every pair once in order")
+    numeric = (
+        "policy_chosen_mean_logprob",
+        "policy_rejected_mean_logprob",
+        "reference_chosen_mean_logprob",
+        "reference_rejected_mean_logprob",
+        "policy_margin",
+        "reference_margin",
+        "reward_margin",
+        "loss",
+    )
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {"pair_id", *numeric, "preferred"}:
+            raise PreferenceDataError("invalid held-out preference row fields")
+        for name in numeric:
+            _finite(
+                row[name], f"held-out {name}", minimum=0 if name == "loss" else None
+            )
+        if type(row["preferred"]) is not bool:
+            raise PreferenceDataError("held-out preference decision must be boolean")
+        _expect(
+            row["policy_margin"],
+            row["policy_chosen_mean_logprob"] - row["policy_rejected_mean_logprob"],
+            "held-out policy margin",
+        )
+        _expect(
+            row["reference_margin"],
+            row["reference_chosen_mean_logprob"]
+            - row["reference_rejected_mean_logprob"],
+            "held-out reference margin",
+        )
+        _expect(
+            row["preferred"], row["policy_margin"] > 0, "held-out preference decision"
+        )
+    count = len(rows)
+    _expect(
+        heldout["preference_accuracy"],
+        sum(row["preferred"] for row in rows) / count,
+        "held-out accuracy",
+    )
+    for output, row_name in (
+        ("mean_policy_margin", "policy_margin"),
+        ("mean_reference_margin", "reference_margin"),
+        ("mean_reward_margin", "reward_margin"),
+        ("mean_loss", "loss"),
+    ):
+        _expect(
+            heldout[output],
+            math.fsum(row[row_name] for row in rows) / count,
+            f"held-out {output}",
+        )
+
+
 def validate_preference_report(report):
     """Validate the fixed protocol, source evidence, summary, and report digest."""
     try:
@@ -320,6 +456,135 @@ def validate_preference_report(report):
             row["seed"] for row in result["seeds"]
         ] != list(config.seeds):
             raise PreferenceDataError("preference report requires every seed in order")
+        for seed_row in result["seeds"]:
+            if not isinstance(seed_row, dict) or set(seed_row) != {
+                "seed",
+                "warmup",
+                "source_after_sha256",
+                "folds",
+            }:
+                raise PreferenceDataError("invalid preference seed fields")
+            warmup = seed_row["warmup"]
+            if not isinstance(warmup, dict) or set(warmup) != {
+                "initial_sha256",
+                "final_sha256",
+                "schedule",
+                "training",
+            }:
+                raise PreferenceDataError("invalid preference warmup fields")
+            for name in ("initial_sha256", "final_sha256", "source_after_sha256"):
+                _sha(
+                    seed_row[name] if name == "source_after_sha256" else warmup[name],
+                    name,
+                )
+            _expect(
+                seed_row["source_after_sha256"],
+                warmup["final_sha256"],
+                "warmed source fingerprint",
+            )
+            _expect(warmup["schedule"]["steps"], config.sft_steps, "warmup steps")
+            folds = seed_row["folds"]
+            if not isinstance(folds, list) or len(folds) != config.fold_count:
+                raise PreferenceDataError("seed must contain every preference fold")
+            for fold_index, fold_result in enumerate(folds):
+                if not isinstance(fold_result, dict) or set(fold_result) != {
+                    "fold",
+                    "schedule",
+                    "reference_sha256",
+                    "trials",
+                }:
+                    raise PreferenceDataError("invalid preference fold fields")
+                fold = context.folds[fold_index]
+                _expect(fold_result["fold"], fold.evidence(), "fold evidence")
+                expected_schedule = preference_schedule_evidence(
+                    preference_training_batches(
+                        fold.train,
+                        batch_size=config.preference_batch_size,
+                        steps=config.preference_steps,
+                        seed=seed_row["seed"] ^ (fold.index + 1) ^ 0xD90,
+                    )
+                )
+                _expect(
+                    fold_result["schedule"], expected_schedule, "preference schedule"
+                )
+                _expect(
+                    fold_result["reference_sha256"],
+                    warmup["final_sha256"],
+                    "fold reference fingerprint",
+                )
+                trials = fold_result["trials"]
+                if not isinstance(trials, list) or [
+                    trial.get("name") for trial in trials
+                ] != list(PREFERENCE_ARMS):
+                    raise PreferenceDataError("fold must contain every arm once")
+                pair_ids = [pair.pair_id for pair in fold.heldout]
+                for trial in trials:
+                    if not isinstance(trial, dict) or set(trial) != {
+                        "name",
+                        "adapter",
+                        "parameters",
+                        "initial_function_max_abs_error",
+                        "final_sha256",
+                        "frozen_before_sha256",
+                        "frozen_after_sha256",
+                        "training",
+                        "heldout",
+                        "merge",
+                    }:
+                        raise PreferenceDataError("invalid preference trial fields")
+                    for name in (
+                        "final_sha256",
+                        "frozen_before_sha256",
+                        "frozen_after_sha256",
+                    ):
+                        _sha(trial[name], name)
+                    _expect(
+                        trial["frozen_after_sha256"],
+                        trial["frozen_before_sha256"],
+                        "frozen preference state",
+                    )
+                    if (
+                        _finite(
+                            trial["initial_function_max_abs_error"],
+                            "matched initial policy function",
+                            minimum=0,
+                        )
+                        != 0
+                    ):
+                        raise PreferenceDataError(
+                            "inconsistent matched initial policy function"
+                        )
+                    _validate_training(
+                        trial["training"],
+                        config=config,
+                        frozen=trial["name"] == "frozen",
+                        reference_sha256=fold_result["reference_sha256"],
+                    )
+                    _validate_heldout(trial["heldout"], pair_ids)
+                    is_adapter = trial["name"].startswith("lora-rank-")
+                    if is_adapter:
+                        rank = int(trial["name"].rsplit("-", 1)[1])
+                        _expect(trial["adapter"]["rank"], rank, "adapter rank")
+                        if not isinstance(trial["merge"], dict) or set(
+                            trial["merge"]
+                        ) != {"probe_max_abs_error", "dense_sha256", "parameters"}:
+                            raise PreferenceDataError(
+                                "invalid preference merge evidence"
+                            )
+                        _sha(trial["merge"]["dense_sha256"], "merged dense")
+                        error = _finite(
+                            trial["merge"]["probe_max_abs_error"],
+                            "preference merge error",
+                            minimum=0,
+                        )
+                        if error > 1e-10:
+                            raise PreferenceDataError(
+                                "preference merge equivalence failed"
+                            )
+                    elif trial["adapter"] is not None or trial["merge"] is not None:
+                        raise PreferenceDataError(
+                            "dense preference arms cannot contain adapter evidence"
+                        )
         _expect(
             report["summary"],
             summarize_preference_comparison(result),

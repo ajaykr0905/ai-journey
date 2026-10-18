@@ -96,3 +96,56 @@ def test_report_rejects_tampered_owned_evidence(comparison, path, value, match):
 
     with pytest.raises(PreferenceDataError, match=match):
         validate_preference_report(report)
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "match"),
+    [
+        (("result", "seeds", 0, "folds", 0, "schedule", "steps"), 99, "schedule"),
+        (
+            (
+                "result",
+                "seeds",
+                0,
+                "folds",
+                0,
+                "trials",
+                1,
+                "training",
+                "optimizer_steps",
+            ),
+            0,
+            "optimizer steps",
+        ),
+        (
+            (
+                "result",
+                "seeds",
+                0,
+                "folds",
+                0,
+                "trials",
+                0,
+                "heldout",
+                "preference_accuracy",
+            ),
+            0.125,
+            "held-out accuracy",
+        ),
+        (
+            ("result", "seeds", 0, "folds", 0, "reference_sha256"),
+            "0" * 64,
+            "reference fingerprint",
+        ),
+    ],
+)
+def test_report_rejects_inconsistent_trial_accounting(comparison, path, value, match):
+    report = build_preference_report(comparison)
+    current = report
+    for key in path[:-1]:
+        current = current[key]
+    current[path[-1]] = value
+    report["sha256"] = preference_report_digest(report)
+
+    with pytest.raises(PreferenceDataError, match=match):
+        validate_preference_report(report)
