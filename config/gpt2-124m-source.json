@@ -1,0 +1,9 @@
+{
+  "model_id": "openai-community/gpt2",
+  "revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+  "config_filename": "config.json",
+  "config_sha256": "0daed7749b4f02b8f76240d5444551d7b08712dab4d0adb8239c56ba823bb7b4",
+  "weights_filename": "pytorch_model.bin",
+  "weights_sha256": "7c5d3f4b8b76583b422fcb9189ad6c89d5d97a094541ce8932dce3ecabde1421",
+  "weights_bytes": 548118077
+}

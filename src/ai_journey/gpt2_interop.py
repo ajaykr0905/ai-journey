@@ -1,0 +1,279 @@
+"""Strict Hugging Face state-dict interoperability for the GPT-2 decoder."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from collections.abc import Mapping
+from hashlib import sha256
+import json
+
+import torch
+from torch import Tensor
+
+from .gpt2_config import GPT2Config
+from .gpt2_model import GPT2LanguageModel
+
+
+class GPT2InteropError(ValueError):
+    """Raised when external GPT-2 state violates the interop contract."""
+
+
+@dataclass(frozen=True)
+class TensorSpec:
+    """Expected Hugging Face tensor shape and required conversion."""
+
+    shape: tuple[int, ...]
+    transpose: bool = False
+
+
+def expected_hugging_face_tensors(config: GPT2Config) -> dict[str, TensorSpec]:
+    """Return the complete expected GPT-2 Hugging Face tensor contract."""
+
+    if not isinstance(config, GPT2Config):
+        raise TypeError("config must be GPT2Config")
+    width = config.embedding_dim
+    specs = {
+        "transformer.wte.weight": TensorSpec((config.vocab_size, width)),
+        "transformer.wpe.weight": TensorSpec((config.context_length, width)),
+    }
+    for index in range(config.layer_count):
+        prefix = f"transformer.h.{index}"
+        specs.update(
+            {
+                f"{prefix}.ln_1.weight": TensorSpec((width,)),
+                f"{prefix}.ln_1.bias": TensorSpec((width,)),
+                f"{prefix}.attn.c_attn.weight": TensorSpec(
+                    (width, 3 * width), transpose=True
+                ),
+                f"{prefix}.attn.c_attn.bias": TensorSpec((3 * width,)),
+                f"{prefix}.attn.c_proj.weight": TensorSpec(
+                    (width, width), transpose=True
+                ),
+                f"{prefix}.attn.c_proj.bias": TensorSpec((width,)),
+                f"{prefix}.ln_2.weight": TensorSpec((width,)),
+                f"{prefix}.ln_2.bias": TensorSpec((width,)),
+                f"{prefix}.mlp.c_fc.weight": TensorSpec(
+                    (width, 4 * width), transpose=True
+                ),
+                f"{prefix}.mlp.c_fc.bias": TensorSpec((4 * width,)),
+                f"{prefix}.mlp.c_proj.weight": TensorSpec(
+                    (4 * width, width), transpose=True
+                ),
+                f"{prefix}.mlp.c_proj.bias": TensorSpec((width,)),
+            }
+        )
+    specs.update(
+        {
+            "transformer.ln_f.weight": TensorSpec((width,)),
+            "transformer.ln_f.bias": TensorSpec((width,)),
+            "lm_head.weight": TensorSpec((config.vocab_size, width)),
+        }
+    )
+    return specs
+
+
+def known_hugging_face_buffers(config: GPT2Config) -> frozenset[str]:
+    """Return legacy causal-mask buffers that carry no learned state."""
+
+    if not isinstance(config, GPT2Config):
+        raise TypeError("config must be GPT2Config")
+    return frozenset(
+        key
+        for index in range(config.layer_count)
+        for key in (
+            f"transformer.h.{index}.attn.bias",
+            f"transformer.h.{index}.attn.masked_bias",
+        )
+    )
+
+
+def normalize_hugging_face_checkpoint(
+    state_dict: Mapping[str, Tensor], config: GPT2Config
+) -> dict[str, Tensor]:
+    """Normalize the public legacy base-model checkpoint to LM-head names."""
+
+    if not isinstance(state_dict, Mapping):
+        raise TypeError("state_dict must be a mapping")
+    if not isinstance(config, GPT2Config):
+        raise TypeError("config must be GPT2Config")
+    if any(not isinstance(key, str) for key in state_dict):
+        raise TypeError("state_dict keys must be strings")
+    if any(
+        key.startswith("transformer.") or key == "lm_head.weight" for key in state_dict
+    ):
+        raise GPT2InteropError("legacy checkpoint must not mix LM-head tensor names")
+
+    specs = expected_hugging_face_tensors(config)
+    learned = {
+        key.removeprefix("transformer.")
+        for key in specs
+        if key.startswith("transformer.")
+    }
+    buffers = {
+        key.removeprefix("transformer.") for key in known_hugging_face_buffers(config)
+    }
+    keys = set(state_dict)
+    missing = sorted(learned - keys)
+    if missing:
+        raise GPT2InteropError("missing legacy GPT-2 tensors: " + ", ".join(missing))
+    unexpected = sorted(keys - learned - buffers)
+    if unexpected:
+        raise GPT2InteropError(
+            "unexpected legacy GPT-2 tensors: " + ", ".join(unexpected)
+        )
+
+    normalized = {f"transformer.{key}": value for key, value in state_dict.items()}
+    normalized["lm_head.weight"] = state_dict["wte.weight"]
+    validate_hugging_face_state_dict(normalized, config)
+    return normalized
+
+
+def validate_hugging_face_state_dict(
+    state_dict: Mapping[str, Tensor], config: GPT2Config
+) -> tuple[str, ...]:
+    """Validate the complete external key, shape, dtype, and value contract."""
+
+    if not isinstance(state_dict, Mapping):
+        raise TypeError("state_dict must be a mapping")
+    specs = expected_hugging_face_tensors(config)
+    keys = set(state_dict)
+    if any(not isinstance(key, str) for key in keys):
+        raise TypeError("state_dict keys must be strings")
+    missing = sorted(set(specs) - keys)
+    if missing:
+        raise GPT2InteropError("missing Hugging Face tensors: " + ", ".join(missing))
+    ignored = sorted(keys & known_hugging_face_buffers(config))
+    unexpected = sorted(keys - set(specs) - set(ignored))
+    if unexpected:
+        raise GPT2InteropError(
+            "unexpected Hugging Face tensors: " + ", ".join(unexpected)
+        )
+    for key, spec in specs.items():
+        tensor = state_dict[key]
+        if not isinstance(tensor, Tensor):
+            raise TypeError(f"{key} must be a torch.Tensor")
+        if tuple(tensor.shape) != spec.shape:
+            raise GPT2InteropError(
+                f"{key} has shape {tuple(tensor.shape)}, expected {spec.shape}"
+            )
+        if not tensor.is_floating_point():
+            raise GPT2InteropError(f"{key} must use a floating-point dtype")
+        if not bool(torch.isfinite(tensor).all()):
+            raise GPT2InteropError(f"{key} must contain only finite values")
+    validate_tied_embedding_alias(state_dict)
+    return tuple(ignored)
+
+
+def validate_tied_embedding_alias(state_dict: Mapping[str, Tensor]) -> None:
+    """Require the exported language-model head to equal the token embedding."""
+
+    if not isinstance(state_dict, Mapping):
+        raise TypeError("state_dict must be a mapping")
+    try:
+        token_embedding = state_dict["transformer.wte.weight"]
+        language_head = state_dict["lm_head.weight"]
+    except KeyError as exc:
+        raise GPT2InteropError(
+            "tied embeddings require wte and lm_head tensors"
+        ) from exc
+    if not isinstance(token_embedding, Tensor) or not isinstance(language_head, Tensor):
+        raise TypeError("tied embedding values must be torch.Tensor objects")
+    if not torch.equal(token_embedding, language_head):
+        raise GPT2InteropError(
+            "lm_head.weight must exactly equal transformer.wte.weight"
+        )
+
+
+def convert_hugging_face_state_dict(
+    state_dict: Mapping[str, Tensor], config: GPT2Config
+) -> dict[str, Tensor]:
+    """Convert validated Hugging Face names and Conv1D layouts to PyTorch."""
+
+    validate_hugging_face_state_dict(state_dict, config)
+    specs = expected_hugging_face_tensors(config)
+    converted: dict[str, Tensor] = {}
+    for external_key, spec in specs.items():
+        if external_key.startswith("transformer."):
+            internal_key = external_key.removeprefix("transformer.")
+        else:
+            internal_key = external_key
+        value = state_dict[external_key].detach()
+        converted[internal_key] = (
+            value.transpose(0, 1).contiguous().clone()
+            if spec.transpose
+            else value.contiguous().clone()
+        )
+    return converted
+
+
+def load_hugging_face_weights(
+    model: GPT2LanguageModel, state_dict: Mapping[str, Tensor]
+) -> None:
+    """Load a complete validated Hugging Face state into the independent model."""
+
+    if not isinstance(model, GPT2LanguageModel):
+        raise TypeError("model must be GPT2LanguageModel")
+    converted = convert_hugging_face_state_dict(state_dict, model.config)
+    destination = model.state_dict()
+    if set(converted) != set(destination):
+        missing = sorted(set(destination) - set(converted))
+        unexpected = sorted(set(converted) - set(destination))
+        raise GPT2InteropError(
+            f"converted state mismatch; missing={missing}, unexpected={unexpected}"
+        )
+    for key, value in converted.items():
+        target = destination[key]
+        if value.shape != target.shape:
+            raise GPT2InteropError(f"converted {key} shape does not match the model")
+        if value.dtype != target.dtype:
+            raise GPT2InteropError(f"converted {key} dtype does not match the model")
+        if value.device.type != "cpu" or target.device.type != "cpu":
+            raise GPT2InteropError("GPT-2 import requires CPU source and destination")
+    incompatible = model.load_state_dict(converted, strict=True)
+    if incompatible.missing_keys or incompatible.unexpected_keys:
+        raise GPT2InteropError("strict GPT-2 state loading reported incompatible keys")
+    if model.lm_head.weight is not model.wte.weight:
+        raise GPT2InteropError("GPT-2 weight loading broke embedding parameter tying")
+
+
+def fingerprint_hugging_face_state(
+    state_dict: Mapping[str, Tensor], config: GPT2Config
+) -> str:
+    """Fingerprint every learned tensor independently of mapping insertion order."""
+
+    validate_hugging_face_state_dict(state_dict, config)
+    digest = sha256()
+    specs = expected_hugging_face_tensors(config)
+    for key in sorted(specs):
+        tensor = state_dict[key].detach().cpu().contiguous()
+        metadata = json.dumps(
+            {"key": key, "dtype": str(tensor.dtype), "shape": list(tensor.shape)},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        digest.update(len(metadata).to_bytes(8, "big"))
+        digest.update(metadata)
+        raw = tensor.view(torch.uint8).numpy().tobytes()
+        digest.update(len(raw).to_bytes(8, "big"))
+        digest.update(raw)
+    return digest.hexdigest()
+
+
+def export_hugging_face_state(model: GPT2LanguageModel) -> dict[str, Tensor]:
+    """Export the independent model using Hugging Face names and Conv1D layouts."""
+
+    if not isinstance(model, GPT2LanguageModel):
+        raise TypeError("model must be GPT2LanguageModel")
+    internal = model.state_dict()
+    specs = expected_hugging_face_tensors(model.config)
+    exported: dict[str, Tensor] = {}
+    for external_key, spec in specs.items():
+        internal_key = external_key.removeprefix("transformer.")
+        value = internal[internal_key].detach()
+        exported[external_key] = (
+            value.transpose(0, 1).contiguous().clone()
+            if spec.transpose
+            else value.contiguous().clone()
+        )
+    validate_hugging_face_state_dict(exported, model.config)
+    return exported
