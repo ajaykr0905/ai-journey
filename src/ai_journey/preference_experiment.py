@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import asdict, dataclass, fields
 import math
 
+from .lora import (
+    LoRAConfig,
+    frozen_fingerprint,
+    inject_adapters,
+    merge_adapters,
+    parameter_summary,
+)
+from .lora_experiment import ADAPTER_TARGETS
 from .lora_experiment import isolated_cpu_runtime
 from .preference_data import (
     PreferenceDataError,
@@ -14,6 +23,13 @@ from .preference_data import (
     fold_evidence,
     grouped_preference_folds,
     preference_codec,
+    preference_schedule_evidence,
+    preference_training_batches,
+)
+from .preference_optimization import (
+    evaluate_candidate_logprob,
+    evaluate_preferences,
+    train_preference_batches,
 )
 from .sft_data import (
     CHAT_FIXTURE_ID,
@@ -197,4 +213,123 @@ def warm_preference_base(
         "final_sha256": final,
         "schedule": sft_schedule_evidence(batches),
         "training": trace,
+    }
+
+
+PREFERENCE_ARMS = ("frozen", "full", "lora-rank-1", "lora-rank-2")
+
+
+def _arm_model(base, name, config, seed):
+    if name == "frozen":
+        return copy.deepcopy(base).requires_grad_(False), None
+    if name == "full":
+        return copy.deepcopy(base).requires_grad_(True), None
+    if name.startswith("lora-rank-"):
+        rank = int(name.rsplit("-", 1)[1])
+        adapter = LoRAConfig(
+            rank=rank,
+            alpha=rank * config.adapter_scale,
+            dropout=0.0,
+            seed=seed,
+        )
+        return inject_adapters(base, ADAPTER_TARGETS, adapter), adapter
+    raise PreferenceDataError(f"unknown preference arm: {name}")
+
+
+def run_preference_fold(
+    base: DecoderLanguageModel,
+    fold: PreferenceFold,
+    config: PreferenceComparisonConfig,
+    context: PreferenceContext,
+    *,
+    seed: int,
+) -> dict:
+    """Run matched frozen, dense, and two LoRA policies on one held-out fold."""
+    if not isinstance(base, DecoderLanguageModel):
+        raise TypeError("base must be DecoderLanguageModel")
+    if not isinstance(fold, PreferenceFold) or not isinstance(
+        context, PreferenceContext
+    ):
+        raise TypeError("fold and context must use preference experiment types")
+    source_before = model_fingerprint(base)
+    reference = copy.deepcopy(base).requires_grad_(False)
+    schedule = preference_training_batches(
+        fold.train,
+        batch_size=config.preference_batch_size,
+        steps=config.preference_steps,
+        seed=seed ^ (fold.index + 1) ^ 0xD90,
+    )
+    probe_pair = fold.train[0]
+    trials = []
+    for name in PREFERENCE_ARMS:
+        policy, adapter = _arm_model(base, name, config, seed)
+        frozen_before = frozen_fingerprint(policy)
+        initial_errors = [
+            abs(
+                evaluate_candidate_logprob(policy, probe_pair, label, context.codec)
+                - evaluate_candidate_logprob(base, probe_pair, label, context.codec)
+            )
+            for label in ("chosen", "rejected")
+        ]
+        initial_error = max(initial_errors)
+        if initial_error != 0:
+            raise PreferenceDataError(
+                "preference arms must start from the same policy function"
+            )
+        training = train_preference_batches(
+            policy,
+            reference,
+            schedule,
+            context.codec,
+            learning_rate=config.preference_learning_rate,
+            beta=config.beta,
+        )
+        frozen_after = frozen_fingerprint(policy)
+        if frozen_before != frozen_after:
+            raise PreferenceDataError("frozen preference state changed during training")
+        heldout = evaluate_preferences(
+            policy, reference, fold.heldout, context.codec, beta=config.beta
+        )
+        merge = None
+        if adapter is not None:
+            policy.eval()
+            dense = merge_adapters(policy)
+            merge_errors = [
+                abs(
+                    evaluate_candidate_logprob(policy, probe_pair, label, context.codec)
+                    - evaluate_candidate_logprob(
+                        dense, probe_pair, label, context.codec
+                    )
+                )
+                for label in ("chosen", "rejected")
+            ]
+            merge_error = max(merge_errors)
+            if not math.isfinite(merge_error) or merge_error > 1e-10:
+                raise PreferenceDataError("merged preference adapter is not equivalent")
+            merge = {
+                "probe_max_abs_error": merge_error,
+                "dense_sha256": model_fingerprint(dense),
+                "parameters": parameter_summary(dense),
+            }
+        trials.append(
+            {
+                "name": name,
+                "adapter": asdict(adapter) if adapter is not None else None,
+                "parameters": parameter_summary(policy),
+                "initial_function_max_abs_error": initial_error,
+                "final_sha256": model_fingerprint(policy),
+                "frozen_before_sha256": frozen_before,
+                "frozen_after_sha256": frozen_after,
+                "training": training,
+                "heldout": heldout,
+                "merge": merge,
+            }
+        )
+    if model_fingerprint(base) != source_before:
+        raise PreferenceDataError("source base changed while running fold arms")
+    return {
+        "fold": fold.evidence(),
+        "schedule": preference_schedule_evidence(schedule),
+        "reference_sha256": model_fingerprint(reference),
+        "trials": trials,
     }

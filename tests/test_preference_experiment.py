@@ -8,9 +8,11 @@ import torch
 from ai_journey.preference_data import PreferenceDataError
 from ai_journey.preference_experiment import (
     PreferenceComparisonConfig,
+    PREFERENCE_ARMS,
     prepare_preference_context,
     preference_config_dict,
     preference_config_from_dict,
+    run_preference_fold,
     warm_preference_base,
 )
 from ai_journey.transformer_lab import model_fingerprint
@@ -95,3 +97,33 @@ def test_sft_warmup_is_exact_and_restores_caller_runtime_state():
     assert random.getstate() == states[0]
     assert np.array_equal(np.random.get_state()[1], states[1][1])
     assert torch.equal(torch.get_rng_state(), states[2])
+
+
+def test_fold_run_compares_matched_full_and_low_rank_policies():
+    config = PreferenceComparisonConfig(sft_steps=1, preference_steps=1)
+    context = prepare_preference_context(config)
+    base, _ = warm_preference_base(config, context, seed=44)
+    before = model_fingerprint(base)
+
+    result = run_preference_fold(base, context.folds[0], config, context, seed=44)
+
+    assert model_fingerprint(base) == before
+    assert result["fold"] == context.folds[0].evidence()
+    assert result["schedule"]["steps"] == 1
+    assert [trial["name"] for trial in result["trials"]] == list(PREFERENCE_ARMS)
+    for trial in result["trials"]:
+        assert trial["initial_function_max_abs_error"] == 0
+        assert trial["frozen_before_sha256"] == trial["frozen_after_sha256"]
+        assert trial["heldout"]["pairs"] == len(context.folds[0].heldout)
+        assert (
+            trial["training"]["reference_before_sha256"] == result["reference_sha256"]
+        )
+        assert trial["training"]["reference_after_sha256"] == result["reference_sha256"]
+    assert result["trials"][0]["training"]["optimizer_steps"] == 0
+    assert result["trials"][1]["training"]["optimizer_steps"] == 1
+    for trial in result["trials"][2:]:
+        assert trial["merge"]["probe_max_abs_error"] <= 1e-10
+        assert (
+            trial["parameters"]["trainable"]
+            < result["trials"][1]["parameters"]["trainable"]
+        )
