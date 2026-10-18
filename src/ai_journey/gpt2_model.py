@@ -158,3 +158,21 @@ class GPT2LanguageModel(nn.Module):
         for block in self.h:
             hidden = block(hidden)
         return self.lm_head(self.ln_f(hidden))
+
+    @property
+    def parameter_count(self) -> int:
+        """Count unique trainable values, excluding the tied head alias."""
+
+        return sum(parameter.numel() for parameter in self.parameters())
+
+
+def expected_gpt2_parameter_count(config: GPT2Config) -> int:
+    """Calculate the exact unique parameter count without allocating a model."""
+
+    if not isinstance(config, GPT2Config):
+        raise TypeError("config must be GPT2Config")
+    width = config.embedding_dim
+    embeddings = width * (config.vocab_size + config.context_length)
+    block = 12 * width**2 + 13 * width
+    final_norm = 2 * width
+    return embeddings + config.layer_count * block + final_norm

@@ -5,9 +5,15 @@ import math
 import pytest
 import torch
 
-from ai_journey.gpt2_config import GPT2Config, GPT2ConfigError
-from ai_journey.gpt2_model import GPT2Block, GPT2MLP, GPT2SelfAttention, gelu_new
-from ai_journey.gpt2_model import GPT2LanguageModel
+from ai_journey.gpt2_config import GPT2_VARIANTS, GPT2Config, GPT2ConfigError
+from ai_journey.gpt2_model import (
+    GPT2Block,
+    GPT2LanguageModel,
+    GPT2MLP,
+    GPT2SelfAttention,
+    expected_gpt2_parameter_count,
+    gelu_new,
+)
 
 
 def test_gelu_new_matches_the_published_tanh_equation() -> None:
@@ -226,3 +232,14 @@ def test_language_model_rejects_invalid_token_batches(
 
     with pytest.raises(error, match=message):
         model(token_ids)
+
+
+def test_analytical_parameter_count_matches_allocated_unique_parameters() -> None:
+    model = GPT2LanguageModel(_tiny_config())
+
+    assert model.parameter_count == expected_gpt2_parameter_count(_tiny_config())
+    assert model.parameter_count == 312
+
+
+def test_gpt2_124m_has_the_published_unique_parameter_budget() -> None:
+    assert expected_gpt2_parameter_count(GPT2_VARIANTS["gpt2"]) == 124_439_808
