@@ -9,9 +9,11 @@ from ai_journey.preference_data import PreferenceDataError
 from ai_journey.preference_experiment import (
     PreferenceComparisonConfig,
     PREFERENCE_ARMS,
+    PREFERENCE_LIMITATIONS,
     prepare_preference_context,
     preference_config_dict,
     preference_config_from_dict,
+    run_preference_comparison,
     run_preference_fold,
     warm_preference_base,
 )
@@ -127,3 +129,25 @@ def test_fold_run_compares_matched_full_and_low_rank_policies():
             trial["parameters"]["trainable"]
             < result["trials"][1]["parameters"]["trainable"]
         )
+
+
+def test_complete_comparison_runs_every_seed_fold_and_arm_exactly():
+    config = PreferenceComparisonConfig(fold_count=2, sft_steps=1, preference_steps=1)
+
+    first = run_preference_comparison(config)
+    second = run_preference_comparison(config)
+
+    assert first == second
+    assert first["config"] == preference_config_dict(config)
+    assert first["limitations"] == PREFERENCE_LIMITATIONS
+    assert first["runtime"]["device"] == "cpu"
+    assert first["runtime"]["dtype"] == "float64"
+    assert first["runtime"]["threads"] == 1
+    assert [row["seed"] for row in first["seeds"]] == list(config.seeds)
+    assert sum(
+        len(fold["trials"]) for seed in first["seeds"] for fold in seed["folds"]
+    ) == len(config.seeds) * config.fold_count * len(PREFERENCE_ARMS)
+    assert all(
+        seed["warmup"]["final_sha256"] == seed["source_after_sha256"]
+        for seed in first["seeds"]
+    )

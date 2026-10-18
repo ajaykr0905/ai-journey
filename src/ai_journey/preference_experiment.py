@@ -5,6 +5,9 @@ from __future__ import annotations
 import copy
 from dataclasses import asdict, dataclass, fields
 import math
+import platform
+
+import torch
 
 from .lora import (
     LoRAConfig,
@@ -218,6 +221,15 @@ def warm_preference_base(
 
 PREFERENCE_ARMS = ("frozen", "full", "lora-rank-1", "lora-rank-2")
 
+PREFERENCE_LIMITATIONS = (
+    "Authored grounded-reading pairs and assistant-only warmup chats; tiny one-layer "
+    "CPU character decoder; response scores are length-normalized before a DPO-style "
+    "objective. Grouped folds and paired seeds are descriptive, not population "
+    "confidence intervals. This is offline preference optimization, not reward-model "
+    "training, on-policy reinforcement learning, PPO, human annotation, chain-of-thought "
+    "evaluation, or evidence about large models, GPUs, production, or learner completion."
+)
+
 
 def _arm_model(base, name, config, seed):
     if name == "frozen":
@@ -332,4 +344,47 @@ def run_preference_fold(
         "schedule": preference_schedule_evidence(schedule),
         "reference_sha256": model_fingerprint(reference),
         "trials": trials,
+    }
+
+
+def run_preference_comparison(config=None) -> dict:
+    """Run every declared seed, group fold, and matched adaptation arm."""
+    if config is None:
+        config = PreferenceComparisonConfig()
+    if not isinstance(config, PreferenceComparisonConfig):
+        raise TypeError("config must be PreferenceComparisonConfig")
+    context = prepare_preference_context(config)
+    seeds = []
+    for seed in config.seeds:
+        with isolated_cpu_runtime(seed):
+            base, warmup = warm_preference_base(config, context, seed=seed)
+            source_before = model_fingerprint(base)
+            fold_results = [
+                run_preference_fold(base, fold, config, context, seed=seed)
+                for fold in context.folds
+            ]
+            if model_fingerprint(base) != source_before:
+                raise PreferenceDataError("warmed source changed between fold runs")
+            seeds.append(
+                {
+                    "seed": seed,
+                    "warmup": warmup,
+                    "source_after_sha256": model_fingerprint(base),
+                    "folds": fold_results,
+                }
+            )
+    return {
+        "config": preference_config_dict(config),
+        "context": context.evidence(),
+        "model": asdict(config.model_config(len(context.codec.tokens))),
+        "adapter_targets": list(ADAPTER_TARGETS),
+        "seeds": seeds,
+        "runtime": {
+            "python": platform.python_version(),
+            "torch": torch.__version__,
+            "device": "cpu",
+            "dtype": "float64",
+            "threads": 1,
+        },
+        "limitations": PREFERENCE_LIMITATIONS,
     }
