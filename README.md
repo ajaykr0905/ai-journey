@@ -1,4 +1,4 @@
-# AI Journey: Days 0–38
+# AI Journey: Reproducible Transformer Training and Serving Lab
 
 This repository is a public-safe, executable record of an added setup day plus the
 selected work through Day 37 of a 90-day AI engineering learning plan. It combines
@@ -18,6 +18,9 @@ then grow these exercises into production-quality training and inference project
 
 - Explicit LoRA adapters, gradient audits, dense inference export, and bounded
   JSON checkpoints in the [adapter operating guide](docs/lora-adapters.md)
+- Grouped preference cross-validation with response-only DPO-style scoring,
+  matched full/LoRA arms, negative findings, and exact replay in the
+  [preference optimization guide](docs/preference-optimization.md)
 - Day-by-day notes in [`days/`](days/)
 - Reusable Python 3.11 code in [`src/ai_journey/`](src/ai_journey/)
 - One command to run Days 0–11 in [`scripts/run_days_00_11.py`](scripts/run_days_00_11.py)
