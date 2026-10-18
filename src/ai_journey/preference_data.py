@@ -156,3 +156,95 @@ def pair_evidence(pair: PreferencePair) -> dict:
         "chosen_characters": len(chosen.response_text),
         "rejected_characters": len(rejected.response_text),
     }
+
+
+PREFERENCE_FIXTURE_ID = "authored-grounded-readings-v1"
+
+
+@dataclass(frozen=True)
+class PreferenceDataset:
+    pairs: tuple[PreferencePair, ...]
+
+    def __post_init__(self):
+        if (
+            not isinstance(self.pairs, tuple)
+            or not 6 <= len(self.pairs) <= 64
+            or any(not isinstance(pair, PreferencePair) for pair in self.pairs)
+        ):
+            raise PreferenceDataError("dataset requires six to 64 preference pairs")
+        if len({pair.pair_id for pair in self.pairs}) != len(self.pairs):
+            raise PreferenceDataError("preference pair ids must be unique")
+        group_counts = {
+            group: sum(pair.group_id == group for pair in self.pairs)
+            for group in {pair.group_id for pair in self.pairs}
+        }
+        if len(group_counts) < 3 or any(count < 2 for count in group_counts.values()):
+            raise PreferenceDataError(
+                "dataset requires at least three groups with two pairs each"
+            )
+        branches = [
+            render_candidate(pair, label).text
+            for pair in self.pairs
+            for label in ("chosen", "rejected")
+        ]
+        if len(set(branches)) != len(branches):
+            raise PreferenceDataError("rendered preference branches must be unique")
+
+    def evidence(self) -> dict:
+        rows = [pair_evidence(pair) for pair in self.pairs]
+        return {
+            "id": PREFERENCE_FIXTURE_ID,
+            "pairs": len(rows),
+            "groups": sorted({pair.group_id for pair in self.pairs}),
+            "rows": rows,
+            "sha256": canonical_digest(rows),
+        }
+
+
+def _reading_pair(
+    place: str, value: int, *, threshold: int
+) -> tuple[PreferencePair, ...]:
+    group = f"reading-{place}"
+    system = ChatMessage("system", "Answer only from the supplied reading.")
+    report = PreferencePair(
+        f"{group}-report",
+        group,
+        (
+            system,
+            ChatMessage("user", f"Evidence: {place} is {value} C. Report the reading."),
+        ),
+        ChatMessage("assistant", f"The {place} reading is {value} C."),
+        ChatMessage("assistant", f"The {place} reading is {value + 7} C."),
+    )
+    below = value < threshold
+    compare = PreferencePair(
+        f"{group}-threshold",
+        group,
+        (
+            system,
+            ChatMessage(
+                "user",
+                f"Evidence: {place} is {value} C. Is it below {threshold} C?",
+            ),
+        ),
+        ChatMessage("assistant", "Yes." if below else "No."),
+        ChatMessage("assistant", "No." if below else "Yes."),
+    )
+    return report, compare
+
+
+def authored_preference_fixture() -> PreferenceDataset:
+    """Return artificial grounded choices with no downloaded or personal data."""
+    pairs = tuple(
+        pair
+        for controls in (
+            ("east", 18, 20),
+            ("west", 21, 20),
+            ("north", 17, 19),
+            ("south", 22, 23),
+            ("upper", 16, 15),
+            ("lower", 24, 25),
+        )
+        for pair in _reading_pair(controls[0], controls[1], threshold=controls[2])
+    )
+    return PreferenceDataset(pairs)

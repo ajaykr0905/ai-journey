@@ -1,8 +1,11 @@
 import pytest
 
 from ai_journey.preference_data import (
+    PREFERENCE_FIXTURE_ID,
     PreferenceDataError,
+    PreferenceDataset,
     PreferencePair,
+    authored_preference_fixture,
     canonical_digest,
     pair_evidence,
     render_candidate,
@@ -103,3 +106,33 @@ def test_pair_evidence_binds_both_labeled_branches():
 def test_canonical_digest_rejects_nonfinite_values():
     with pytest.raises(PreferenceDataError, match="canonical JSON"):
         canonical_digest({"score": float("nan")})
+
+
+def test_authored_fixture_has_grouped_public_safe_choices():
+    dataset = authored_preference_fixture()
+    evidence = dataset.evidence()
+
+    assert len(dataset.pairs) == 12
+    assert evidence["id"] == PREFERENCE_FIXTURE_ID
+    assert evidence["pairs"] == 12
+    assert len(evidence["groups"]) == 6
+    assert all(
+        sum(pair.group_id == group for pair in dataset.pairs) == 2
+        for group in evidence["groups"]
+    )
+    assert len(evidence["sha256"]) == 64
+
+
+def test_preference_dataset_rejects_duplicate_pair_ids():
+    original = authored_preference_fixture().pairs
+
+    with pytest.raises(PreferenceDataError, match="ids must be unique"):
+        PreferenceDataset(original[:-1] + (original[0],))
+
+
+def test_preference_dataset_rejects_singleton_groups():
+    original = authored_preference_fixture().pairs
+    singleton = pair(pair_id="unique-report", group_id="unique")
+
+    with pytest.raises(PreferenceDataError, match="two pairs each"):
+        PreferenceDataset(original[:-1] + (singleton,))
