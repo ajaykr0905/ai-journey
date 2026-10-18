@@ -121,3 +121,28 @@ class GPT2Block(nn.Module):
     def forward(self, inputs: Tensor) -> Tensor:
         hidden = inputs + self.attn(self.ln_1(inputs))
         return hidden + self.mlp(self.ln_2(hidden))
+
+
+class GPT2LanguageModel(nn.Module):
+    """Decoder-only GPT-2 with learned positions and tied token logits."""
+
+    def __init__(self, config: GPT2Config) -> None:
+        super().__init__()
+        if not isinstance(config, GPT2Config):
+            raise TypeError("config must be GPT2Config")
+        self.config = config
+        self.wte = nn.Embedding(config.vocab_size, config.embedding_dim)
+        self.wpe = nn.Embedding(config.context_length, config.embedding_dim)
+        self.drop = nn.Dropout(config.embedding_dropout)
+        self.h = nn.ModuleList([GPT2Block(config) for _ in range(config.layer_count)])
+        self.ln_f = nn.LayerNorm(config.embedding_dim, eps=config.layer_norm_epsilon)
+        self.lm_head = nn.Linear(config.embedding_dim, config.vocab_size, bias=False)
+        self.lm_head.weight = self.wte.weight
+
+    def forward(self, token_ids: Tensor) -> Tensor:
+        batch, time = token_ids.shape
+        positions = torch.arange(time, device=token_ids.device)
+        hidden = self.drop(self.wte(token_ids) + self.wpe(positions))
+        for block in self.h:
+            hidden = block(hidden)
+        return self.lm_head(self.ln_f(hidden))

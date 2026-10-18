@@ -7,6 +7,7 @@ import torch
 
 from ai_journey.gpt2_config import GPT2Config, GPT2ConfigError
 from ai_journey.gpt2_model import GPT2Block, GPT2MLP, GPT2SelfAttention, gelu_new
+from ai_journey.gpt2_model import GPT2LanguageModel
 
 
 def test_gelu_new_matches_the_published_tanh_equation() -> None:
@@ -177,3 +178,31 @@ def test_block_uses_the_declared_layer_norm_epsilon() -> None:
 
     assert block.ln_1.eps == config.layer_norm_epsilon
     assert block.ln_2.eps == config.layer_norm_epsilon
+
+
+def test_language_model_ties_token_embeddings_to_output_logits() -> None:
+    model = GPT2LanguageModel(_tiny_config())
+
+    assert model.lm_head.weight is model.wte.weight
+    assert model.lm_head.weight.data_ptr() == model.wte.weight.data_ptr()
+
+
+def test_language_model_produces_logits_for_every_token_position() -> None:
+    torch.manual_seed(45)
+    model = GPT2LanguageModel(_tiny_config()).eval()
+    token_ids = torch.tensor([[1, 2, 3], [4, 5, 6]])
+
+    logits = model(token_ids)
+
+    assert logits.shape == (2, 3, 11)
+    assert torch.isfinite(logits).all()
+
+
+def test_learned_position_embeddings_affect_repeated_tokens() -> None:
+    torch.manual_seed(45)
+    model = GPT2LanguageModel(_tiny_config()).eval()
+    token_ids = torch.tensor([[2, 2, 2]])
+
+    logits = model(token_ids)
+
+    assert not torch.equal(logits[:, 0], logits[:, 1])
