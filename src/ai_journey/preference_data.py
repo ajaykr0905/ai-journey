@@ -415,3 +415,56 @@ def target_evidence(
         "target_tokens": sum(row["target_tokens"] for row in rows),
         "sha256": canonical_digest(rows),
     }
+
+
+def preference_training_batches(
+    pairs: tuple[PreferencePair, ...], *, batch_size: int, steps: int, seed: int
+) -> tuple[tuple[PreferencePair, ...], ...]:
+    """Sample a fixed pair schedule without consuming the caller's RNG."""
+    if (
+        not isinstance(pairs, tuple)
+        or not pairs
+        or any(not isinstance(pair, PreferencePair) for pair in pairs)
+        or len({pair.pair_id for pair in pairs}) != len(pairs)
+    ):
+        raise PreferenceDataError("training requires unique preference pairs")
+    for name, value, minimum, maximum in (
+        ("batch_size", batch_size, 1, 16),
+        ("steps", steps, 1, 128),
+        ("seed", seed, 0, 2**32 - 1),
+    ):
+        if type(value) is not int or not minimum <= value <= maximum:
+            raise PreferenceDataError(
+                f"{name} must be an integer in [{minimum}, {maximum}]"
+            )
+    rng = random.Random(seed)
+    return tuple(
+        tuple(rng.choice(pairs) for _ in range(batch_size)) for _ in range(steps)
+    )
+
+
+def preference_schedule_evidence(
+    batches: tuple[tuple[PreferencePair, ...], ...],
+) -> dict:
+    if (
+        not isinstance(batches, tuple)
+        or not batches
+        or any(
+            not isinstance(batch, tuple)
+            or not batch
+            or any(not isinstance(pair, PreferencePair) for pair in batch)
+            for batch in batches
+        )
+    ):
+        raise PreferenceDataError("schedule evidence requires preference batches")
+    width = len(batches[0])
+    if any(len(batch) != width for batch in batches):
+        raise PreferenceDataError("preference batches must have a fixed width")
+    pair_ids = [[pair.pair_id for pair in batch] for batch in batches]
+    return {
+        "steps": len(batches),
+        "batch_size": width,
+        "comparisons": len(batches) * width,
+        "pair_ids": pair_ids,
+        "sha256": canonical_digest(pair_ids),
+    }

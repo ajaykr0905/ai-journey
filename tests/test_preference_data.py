@@ -1,3 +1,5 @@
+import random
+
 import pytest
 
 from ai_journey.preference_data import (
@@ -13,6 +15,8 @@ from ai_journey.preference_data import (
     grouped_preference_folds,
     pair_evidence,
     preference_codec,
+    preference_schedule_evidence,
+    preference_training_batches,
     render_candidate,
     target_evidence,
 )
@@ -225,4 +229,42 @@ def test_candidate_targets_rejects_invalid_block_size():
     with pytest.raises(PreferenceDataError, match="block_size"):
         candidate_targets(
             dataset.pairs[0], "chosen", preference_codec(dataset), block_size=0
+        )
+
+
+def test_preference_schedule_is_deterministic_and_rng_isolated():
+    pairs = authored_preference_fixture().pairs
+    random.seed(901)
+    before = random.getstate()
+
+    first = preference_training_batches(pairs, batch_size=3, steps=4, seed=44)
+    second = preference_training_batches(pairs, batch_size=3, steps=4, seed=44)
+
+    assert first == second
+    assert random.getstate() == before
+    evidence = preference_schedule_evidence(first)
+    assert evidence["steps"] == 4
+    assert evidence["batch_size"] == 3
+    assert evidence["comparisons"] == 12
+    assert len(evidence["sha256"]) == 64
+
+
+def test_preference_schedule_changes_with_seed():
+    pairs = authored_preference_fixture().pairs
+    first = preference_training_batches(pairs, batch_size=3, steps=4, seed=44)
+    second = preference_training_batches(pairs, batch_size=3, steps=4, seed=45)
+
+    assert preference_schedule_evidence(first) != preference_schedule_evidence(second)
+
+
+@pytest.mark.parametrize(
+    ("batch_size", "steps", "seed"), [(0, 2, 44), (2, 0, 44), (2, 2, -1)]
+)
+def test_preference_schedule_rejects_invalid_controls(batch_size, steps, seed):
+    with pytest.raises(PreferenceDataError):
+        preference_training_batches(
+            authored_preference_fixture().pairs,
+            batch_size=batch_size,
+            steps=steps,
+            seed=seed,
         )
