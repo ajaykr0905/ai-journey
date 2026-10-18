@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import math
 
 import torch
@@ -82,3 +83,52 @@ def evaluate_candidate_logprob(model, pair, label, codec) -> float:
     if not math.isfinite(value):
         raise PreferenceDataError("evaluated candidate score must be finite")
     return value
+
+
+@dataclass(frozen=True)
+class PreferenceObjective:
+    loss: torch.Tensor
+    policy_margin: torch.Tensor
+    reference_margin: torch.Tensor
+    reward_margin: torch.Tensor
+
+
+def direct_preference_objective(
+    policy_chosen: torch.Tensor,
+    policy_rejected: torch.Tensor,
+    reference_chosen: torch.Tensor,
+    reference_rejected: torch.Tensor,
+    *,
+    beta: float,
+) -> PreferenceObjective:
+    """Compute a stable length-normalized DPO-style pair objective."""
+    values = (
+        policy_chosen,
+        policy_rejected,
+        reference_chosen,
+        reference_rejected,
+    )
+    if any(
+        not isinstance(value, torch.Tensor)
+        or value.numel() != 1
+        or not value.is_floating_point()
+        or not bool(torch.isfinite(value))
+        for value in values
+    ):
+        raise PreferenceDataError("preference objective requires finite scalar tensors")
+    if len({value.device for value in values}) != 1:
+        raise PreferenceDataError("preference objective tensors must share a device")
+    if (
+        isinstance(beta, bool)
+        or not isinstance(beta, (int, float))
+        or not math.isfinite(beta)
+        or not 0 < beta <= 10
+    ):
+        raise PreferenceDataError("beta must be finite and in (0, 10]")
+    policy_margin = policy_chosen - policy_rejected
+    reference_margin = reference_chosen.detach() - reference_rejected.detach()
+    reward_margin = beta * (policy_margin - reference_margin)
+    loss = -F.logsigmoid(reward_margin)
+    if not bool(torch.isfinite(loss)):
+        raise PreferenceDataError("preference loss must be finite")
+    return PreferenceObjective(loss, policy_margin, reference_margin, reward_margin)
