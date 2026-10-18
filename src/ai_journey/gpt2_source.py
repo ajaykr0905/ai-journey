@@ -170,12 +170,22 @@ def load_checkpoint_state_dict(
     config = verify_source_artifacts(source, directory, variant=variant)
     weights_path = Path(directory) / source.weights_filename
     try:
-        payload = torch.load(
-            weights_path,
-            map_location="cpu",
-            weights_only=True,
-            mmap=True,
-        )
+        try:
+            payload = torch.load(
+                weights_path,
+                map_location="cpu",
+                weights_only=True,
+                mmap=True,
+            )
+        except RuntimeError as exc:
+            if "mmap can only be used with files saved with" not in str(exc):
+                raise
+            payload = torch.load(
+                weights_path,
+                map_location="cpu",
+                weights_only=True,
+                mmap=False,
+            )
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         raise GPT2SourceError(
             "weights artifact is not a supported tensor archive"

@@ -179,11 +179,17 @@ def test_rejects_symlinked_artifact_files(tmp_path: Path) -> None:
         verify_source_artifacts(source, tmp_path)
 
 
-def _write_torch_checkpoint(tmp_path: Path, payload: object) -> GPT2Source:
+def _write_torch_checkpoint(
+    tmp_path: Path, payload: object, *, legacy_serialization: bool = False
+) -> GPT2Source:
     source = _write_artifacts(tmp_path)
     weights_path = tmp_path / "pytorch_model.bin"
     torch = pytest.importorskip("torch")
-    torch.save(payload, weights_path)
+    torch.save(
+        payload,
+        weights_path,
+        _use_new_zipfile_serialization=not legacy_serialization,
+    )
     weights_bytes = weights_path.read_bytes()
     return GPT2Source(
         **{
@@ -205,6 +211,21 @@ def test_loads_verified_checkpoint_with_the_weights_only_unpickler(
     assert config.layer_count == 12
     torch.testing.assert_close(state["weight"], torch.arange(4).float())
     assert state["weight"].device.type == "cpu"
+
+
+def test_loads_legacy_checkpoint_without_weakening_the_weights_only_boundary(
+    tmp_path: Path,
+) -> None:
+    torch = pytest.importorskip("torch")
+    source = _write_torch_checkpoint(
+        tmp_path,
+        {"weight": torch.arange(3).float()},
+        legacy_serialization=True,
+    )
+
+    _, state = load_checkpoint_state_dict(source, tmp_path)
+
+    torch.testing.assert_close(state["weight"], torch.arange(3).float())
 
 
 def test_rejects_non_tensor_checkpoint_values_and_tensor_count_overflow(
