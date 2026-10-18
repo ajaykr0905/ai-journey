@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import random
 import re
 
 from .sft_data import ChatMessage
@@ -248,3 +249,77 @@ def authored_preference_fixture() -> PreferenceDataset:
         for pair in _reading_pair(controls[0], controls[1], threshold=controls[2])
     )
     return PreferenceDataset(pairs)
+
+
+@dataclass(frozen=True)
+class PreferenceFold:
+    index: int
+    train: tuple[PreferencePair, ...]
+    heldout: tuple[PreferencePair, ...]
+
+    def __post_init__(self):
+        if type(self.index) is not int or self.index < 0:
+            raise PreferenceDataError("fold index must be a nonnegative integer")
+        for name, partition in (("train", self.train), ("heldout", self.heldout)):
+            if (
+                not isinstance(partition, tuple)
+                or not partition
+                or any(not isinstance(pair, PreferencePair) for pair in partition)
+            ):
+                raise PreferenceDataError(f"fold {name} partition must be nonempty")
+        train_ids = {pair.pair_id for pair in self.train}
+        heldout_ids = {pair.pair_id for pair in self.heldout}
+        train_groups = {pair.group_id for pair in self.train}
+        heldout_groups = {pair.group_id for pair in self.heldout}
+        if train_ids & heldout_ids or train_groups & heldout_groups:
+            raise PreferenceDataError("fold train and heldout groups must be disjoint")
+
+    def evidence(self) -> dict:
+        return {
+            "index": self.index,
+            "train_pair_ids": [pair.pair_id for pair in self.train],
+            "heldout_pair_ids": [pair.pair_id for pair in self.heldout],
+            "train_groups": sorted({pair.group_id for pair in self.train}),
+            "heldout_groups": sorted({pair.group_id for pair in self.heldout}),
+        }
+
+
+def grouped_preference_folds(
+    dataset: PreferenceDataset, *, fold_count: int, seed: int
+) -> tuple[PreferenceFold, ...]:
+    """Split whole prompt families so related pairs never cross a fold boundary."""
+    if not isinstance(dataset, PreferenceDataset):
+        raise TypeError("dataset must be PreferenceDataset")
+    if type(fold_count) is not int or not 2 <= fold_count <= 8:
+        raise PreferenceDataError("fold_count must be an integer in [2, 8]")
+    if type(seed) is not int or not 0 <= seed < 2**32:
+        raise PreferenceDataError("fold seed must be an integer in [0, 2**32)")
+    groups = sorted({pair.group_id for pair in dataset.pairs})
+    if fold_count > len(groups):
+        raise PreferenceDataError("fold_count cannot exceed the number of groups")
+    random.Random(seed).shuffle(groups)
+    heldout_groups = [set() for _ in range(fold_count)]
+    for index, group in enumerate(groups):
+        heldout_groups[index % fold_count].add(group)
+    folds = []
+    for index, selected in enumerate(heldout_groups):
+        heldout = tuple(pair for pair in dataset.pairs if pair.group_id in selected)
+        train = tuple(pair for pair in dataset.pairs if pair.group_id not in selected)
+        folds.append(PreferenceFold(index, train, heldout))
+    if {pair.pair_id for fold in folds for pair in fold.heldout} != {
+        pair.pair_id for pair in dataset.pairs
+    }:
+        raise PreferenceDataError("cross-validation must hold out every pair once")
+    return tuple(folds)
+
+
+def fold_evidence(folds: tuple[PreferenceFold, ...]) -> dict:
+    if (
+        not isinstance(folds, tuple)
+        or len(folds) < 2
+        or any(not isinstance(fold, PreferenceFold) for fold in folds)
+        or tuple(fold.index for fold in folds) != tuple(range(len(folds)))
+    ):
+        raise PreferenceDataError("fold evidence requires ordered preference folds")
+    rows = [fold.evidence() for fold in folds]
+    return {"folds": rows, "sha256": canonical_digest(rows)}

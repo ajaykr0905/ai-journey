@@ -4,9 +4,12 @@ from ai_journey.preference_data import (
     PREFERENCE_FIXTURE_ID,
     PreferenceDataError,
     PreferenceDataset,
+    PreferenceFold,
     PreferencePair,
     authored_preference_fixture,
     canonical_digest,
+    fold_evidence,
+    grouped_preference_folds,
     pair_evidence,
     render_candidate,
 )
@@ -136,3 +139,45 @@ def test_preference_dataset_rejects_singleton_groups():
 
     with pytest.raises(PreferenceDataError, match="two pairs each"):
         PreferenceDataset(original[:-1] + (singleton,))
+
+
+def test_grouped_folds_are_deterministic_complete_and_leak_free():
+    dataset = authored_preference_fixture()
+
+    folds = grouped_preference_folds(dataset, fold_count=3, seed=44)
+
+    assert folds == grouped_preference_folds(dataset, fold_count=3, seed=44)
+    assert len(folds) == 3
+    assert sorted(pair.pair_id for fold in folds for pair in fold.heldout) == sorted(
+        pair.pair_id for pair in dataset.pairs
+    )
+    for fold in folds:
+        assert {pair.group_id for pair in fold.train}.isdisjoint(
+            pair.group_id for pair in fold.heldout
+        )
+        assert len(fold.train) == 8
+        assert len(fold.heldout) == 4
+    assert len(fold_evidence(folds)["sha256"]) == 64
+
+
+def test_grouped_folds_change_assignment_with_seed():
+    dataset = authored_preference_fixture()
+    first = grouped_preference_folds(dataset, fold_count=3, seed=44)
+    second = grouped_preference_folds(dataset, fold_count=3, seed=45)
+
+    assert fold_evidence(first)["sha256"] != fold_evidence(second)["sha256"]
+
+
+@pytest.mark.parametrize(("fold_count", "seed"), [(1, 44), (9, 44), (3, -1)])
+def test_grouped_folds_reject_invalid_controls(fold_count, seed):
+    with pytest.raises(PreferenceDataError):
+        grouped_preference_folds(
+            authored_preference_fixture(), fold_count=fold_count, seed=seed
+        )
+
+
+def test_preference_fold_rejects_group_leakage():
+    pairs = authored_preference_fixture().pairs
+
+    with pytest.raises(PreferenceDataError, match="disjoint"):
+        PreferenceFold(0, pairs[:4], pairs[1:3])
