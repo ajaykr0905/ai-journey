@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from ai_journey.gpt2_config import GPT2Config, GPT2ConfigError
-from ai_journey.gpt2_model import GPT2MLP, GPT2SelfAttention, gelu_new
+from ai_journey.gpt2_model import GPT2Block, GPT2MLP, GPT2SelfAttention, gelu_new
 
 
 def test_gelu_new_matches_the_published_tanh_equation() -> None:
@@ -142,3 +142,38 @@ def test_mlp_rejects_wrong_rank_width_and_dtype() -> None:
         mlp(torch.ones(1, 2, 3))
     with pytest.raises(GPT2ConfigError, match="dtype"):
         mlp(torch.ones(1, 2, 4, dtype=torch.float64))
+
+
+def test_block_applies_pre_normalized_attention_and_mlp_residuals() -> None:
+    torch.manual_seed(45)
+    block = GPT2Block(_tiny_config()).double().eval()
+    inputs = torch.randn(2, 3, 4, dtype=torch.float64)
+
+    after_attention = inputs + block.attn(block.ln_1(inputs))
+    expected = after_attention + block.mlp(block.ln_2(after_attention))
+
+    torch.testing.assert_close(block(inputs), expected, rtol=0, atol=0)
+
+
+def test_zero_projection_block_is_an_exact_residual_identity() -> None:
+    block = GPT2Block(_tiny_config()).double().eval()
+    with torch.no_grad():
+        for projection in (
+            block.attn.c_attn,
+            block.attn.c_proj,
+            block.mlp.c_fc,
+            block.mlp.c_proj,
+        ):
+            projection.weight.zero_()
+            projection.bias.zero_()
+    inputs = torch.randn(2, 3, 4, dtype=torch.float64)
+
+    assert torch.equal(block(inputs), inputs)
+
+
+def test_block_uses_the_declared_layer_norm_epsilon() -> None:
+    config = _tiny_config()
+    block = GPT2Block(config)
+
+    assert block.ln_1.eps == config.layer_norm_epsilon
+    assert block.ln_2.eps == config.layer_norm_epsilon

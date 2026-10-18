@@ -104,3 +104,20 @@ class GPT2MLP(nn.Module):
         if inputs.device != self.c_fc.weight.device:
             raise GPT2ConfigError("MLP inputs must match parameter device")
         return self.dropout(self.c_proj(gelu_new(self.c_fc(inputs))))
+
+
+class GPT2Block(nn.Module):
+    """One pre-normalized GPT-2 attention and MLP residual block."""
+
+    def __init__(self, config: GPT2Config) -> None:
+        super().__init__()
+        if not isinstance(config, GPT2Config):
+            raise TypeError("config must be GPT2Config")
+        self.ln_1 = nn.LayerNorm(config.embedding_dim, eps=config.layer_norm_epsilon)
+        self.attn = GPT2SelfAttention(config)
+        self.ln_2 = nn.LayerNorm(config.embedding_dim, eps=config.layer_norm_epsilon)
+        self.mlp = GPT2MLP(config)
+
+    def forward(self, inputs: Tensor) -> Tensor:
+        hidden = inputs + self.attn(self.ln_1(inputs))
+        return hidden + self.mlp(self.ln_2(hidden))
