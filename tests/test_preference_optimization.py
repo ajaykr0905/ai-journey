@@ -1,4 +1,5 @@
 import math
+import copy
 
 import pytest
 import torch
@@ -8,13 +9,19 @@ from ai_journey.preference_data import (
     authored_preference_fixture,
     candidate_targets,
     preference_codec,
+    preference_training_batches,
 )
 from ai_journey.preference_optimization import (
     candidate_mean_logprob,
     direct_preference_objective,
     evaluate_candidate_logprob,
+    train_preference_batches,
 )
-from ai_journey.transformer_lab import DecoderLanguageModel, TransformerConfig
+from ai_journey.transformer_lab import (
+    DecoderLanguageModel,
+    TransformerConfig,
+    model_fingerprint,
+)
 
 
 def decoder_and_data():
@@ -105,3 +112,63 @@ def test_preference_objective_rejects_invalid_beta(beta):
 
     with pytest.raises(PreferenceDataError, match="beta"):
         direct_preference_objective(value, value, value, value, beta=beta)
+
+
+def test_preference_training_updates_policy_and_preserves_reference():
+    policy, _, codec = decoder_and_data()
+    reference = copy.deepcopy(policy).requires_grad_(False)
+    pairs = authored_preference_fixture().pairs
+    batches = preference_training_batches(pairs, batch_size=2, steps=2, seed=44)
+    policy_before = model_fingerprint(policy)
+    reference_before = model_fingerprint(reference)
+
+    trace = train_preference_batches(
+        policy, reference, batches, codec, learning_rate=0.01, beta=0.2
+    )
+
+    assert model_fingerprint(policy) != policy_before
+    assert model_fingerprint(reference) == reference_before
+    assert trace["steps"] == 2
+    assert trace["comparisons"] == 4
+    assert trace["optimizer_steps"] == 2
+    assert trace["reference_before_sha256"] == trace["reference_after_sha256"]
+    assert all(math.isfinite(row["loss"]) for row in trace["trace"])
+
+
+def test_frozen_preference_control_runs_without_updates():
+    source, _, codec = decoder_and_data()
+    policy = copy.deepcopy(source).requires_grad_(False)
+    reference = copy.deepcopy(source).requires_grad_(False)
+    batches = preference_training_batches(
+        authored_preference_fixture().pairs, batch_size=2, steps=2, seed=44
+    )
+    before = model_fingerprint(policy)
+
+    trace = train_preference_batches(
+        policy, reference, batches, codec, learning_rate=0.01, beta=0.2
+    )
+
+    assert model_fingerprint(policy) == before
+    assert trace["optimizer_steps"] == 0
+    assert all(row["gradient_norm"] == 0 for row in trace["trace"])
+
+
+def test_preference_training_restores_mixed_module_modes():
+    policy, _, codec = decoder_and_data()
+    reference = copy.deepcopy(policy).requires_grad_(False)
+    policy.train()
+    policy.blocks[0].eval()
+    reference.eval()
+    reference.blocks[0].train()
+    policy_modes = [module.training for module in policy.modules()]
+    reference_modes = [module.training for module in reference.modules()]
+    batches = preference_training_batches(
+        authored_preference_fixture().pairs, batch_size=1, steps=1, seed=44
+    )
+
+    train_preference_batches(
+        policy, reference, batches, codec, learning_rate=0.01, beta=0.2
+    )
+
+    assert [module.training for module in policy.modules()] == policy_modes
+    assert [module.training for module in reference.modules()] == reference_modes

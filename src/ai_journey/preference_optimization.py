@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+from contextlib import nullcontext
 
 import torch
 from torch.nn import functional as F
@@ -13,7 +14,7 @@ from .preference_data import (
     PreferencePair,
     candidate_targets,
 )
-from .transformer_lab import CharacterCodec, DecoderLanguageModel
+from .transformer_lab import CharacterCodec, DecoderLanguageModel, model_fingerprint
 
 
 def _finite_cpu_decoder(model):
@@ -132,3 +133,152 @@ def direct_preference_objective(
     if not bool(torch.isfinite(loss)):
         raise PreferenceDataError("preference loss must be finite")
     return PreferenceObjective(loss, policy_margin, reference_margin, reward_margin)
+
+
+def _validate_batches(batches):
+    if (
+        not isinstance(batches, tuple)
+        or not batches
+        or any(
+            not isinstance(batch, tuple)
+            or not batch
+            or any(not isinstance(pair, PreferencePair) for pair in batch)
+            for batch in batches
+        )
+    ):
+        raise PreferenceDataError("preference training requires nonempty pair batches")
+    width = len(batches[0])
+    if any(len(batch) != width for batch in batches):
+        raise PreferenceDataError("preference training batches must be rectangular")
+
+
+def train_preference_batches(
+    policy: DecoderLanguageModel,
+    reference: DecoderLanguageModel,
+    batches: tuple[tuple[PreferencePair, ...], ...],
+    codec: CharacterCodec,
+    *,
+    learning_rate: float,
+    beta: float,
+) -> dict:
+    """Optimize exactly one fixed pair schedule against an immutable reference."""
+    _finite_cpu_decoder(policy)
+    _finite_cpu_decoder(reference)
+    _validate_batches(batches)
+    if policy is reference or {id(parameter) for parameter in policy.parameters()} & {
+        id(parameter) for parameter in reference.parameters()
+    }:
+        raise PreferenceDataError(
+            "policy and reference must own independent parameters"
+        )
+    if any(parameter.requires_grad for parameter in reference.parameters()):
+        raise PreferenceDataError("reference parameters must be frozen")
+    if (
+        isinstance(learning_rate, bool)
+        or not isinstance(learning_rate, (int, float))
+        or not math.isfinite(learning_rate)
+        or not 0 < learning_rate <= 0.1
+    ):
+        raise PreferenceDataError("learning_rate must be finite and in (0, 0.1]")
+    trainable = tuple(
+        parameter for parameter in policy.parameters() if parameter.requires_grad
+    )
+    optimizer = (
+        torch.optim.AdamW(trainable, lr=learning_rate, weight_decay=0.0)
+        if trainable
+        else None
+    )
+    policy_modes = [(module, module.training) for module in policy.modules()]
+    reference_modes = [(module, module.training) for module in reference.modules()]
+    reference_before = model_fingerprint(reference)
+    trace = []
+    try:
+        policy.train()
+        reference.eval()
+        for batch in batches:
+            if optimizer is not None:
+                optimizer.zero_grad(set_to_none=True)
+            losses = []
+            margins = []
+            for pair in batch:
+                with torch.no_grad():
+                    reference_chosen = candidate_mean_logprob(
+                        reference, pair, "chosen", codec
+                    )
+                    reference_rejected = candidate_mean_logprob(
+                        reference, pair, "rejected", codec
+                    )
+                with nullcontext() if optimizer is not None else torch.no_grad():
+                    policy_chosen = candidate_mean_logprob(
+                        policy, pair, "chosen", codec
+                    )
+                    policy_rejected = candidate_mean_logprob(
+                        policy, pair, "rejected", codec
+                    )
+                    objective = direct_preference_objective(
+                        policy_chosen,
+                        policy_rejected,
+                        reference_chosen,
+                        reference_rejected,
+                        beta=beta,
+                    )
+                losses.append(objective.loss)
+                margins.append(
+                    (
+                        float(objective.policy_margin.detach()),
+                        float(objective.reference_margin.detach()),
+                        float(objective.reward_margin.detach()),
+                    )
+                )
+            loss = torch.stack(losses).mean()
+            if optimizer is not None:
+                loss.backward()
+                if any(
+                    parameter.grad is None
+                    or not bool(torch.isfinite(parameter.grad).all())
+                    for parameter in trainable
+                ):
+                    raise PreferenceDataError(
+                        "trainable preference gradients must be present and finite"
+                    )
+                gradient_norm = float(
+                    torch.nn.utils.clip_grad_norm_(
+                        trainable, 1.0, error_if_nonfinite=True
+                    )
+                )
+                optimizer.step()
+                _finite_cpu_decoder(policy)
+            else:
+                gradient_norm = 0.0
+            trace.append(
+                {
+                    "loss": float(loss.detach()),
+                    "policy_margin": math.fsum(row[0] for row in margins)
+                    / len(margins),
+                    "reference_margin": math.fsum(row[1] for row in margins)
+                    / len(margins),
+                    "reward_margin": math.fsum(row[2] for row in margins)
+                    / len(margins),
+                    "preference_accuracy": sum(row[0] > 0 for row in margins)
+                    / len(margins),
+                    "gradient_norm": gradient_norm,
+                }
+            )
+        if optimizer is not None:
+            optimizer.zero_grad(set_to_none=True)
+    finally:
+        for module, mode in policy_modes:
+            module.training = mode
+        for module, mode in reference_modes:
+            module.training = mode
+    reference_after = model_fingerprint(reference)
+    if reference_after != reference_before:
+        raise PreferenceDataError("reference model changed during preference training")
+    return {
+        "steps": len(batches),
+        "comparisons": sum(len(batch) for batch in batches),
+        "optimizer_steps": len(batches) if optimizer is not None else 0,
+        "reference_before_sha256": reference_before,
+        "reference_after_sha256": reference_after,
+        "trace": trace,
+    }
