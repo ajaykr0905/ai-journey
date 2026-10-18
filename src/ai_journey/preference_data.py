@@ -9,6 +9,7 @@ import random
 import re
 
 from .sft_data import ChatMessage
+from .transformer_lab import CharacterCodec
 
 
 class PreferenceDataError(ValueError):
@@ -323,3 +324,94 @@ def fold_evidence(folds: tuple[PreferenceFold, ...]) -> dict:
         raise PreferenceDataError("fold evidence requires ordered preference folds")
     rows = [fold.evidence() for fold in folds]
     return {"folds": rows, "sha256": canonical_digest(rows)}
+
+
+def preference_codec(dataset: PreferenceDataset, *, extra_text: str = ""):
+    """Build one explicit character vocabulary for every labeled branch."""
+    if not isinstance(dataset, PreferenceDataset):
+        raise TypeError("dataset must be PreferenceDataset")
+    if not isinstance(extra_text, str):
+        raise TypeError("extra_text must be text")
+    text = "".join(
+        render_candidate(pair, label).text
+        for pair in dataset.pairs
+        for label in ("chosen", "rejected")
+    )
+    return CharacterCodec.from_text(text + extra_text)
+
+
+@dataclass(frozen=True)
+class CandidateTargets:
+    pair_id: str
+    label: str
+    contexts: tuple[tuple[int, ...], ...]
+    targets: tuple[int, ...]
+
+    def __post_init__(self):
+        if self.label not in {"chosen", "rejected"}:
+            raise PreferenceDataError("candidate target label is invalid")
+        if (
+            not isinstance(self.contexts, tuple)
+            or not self.contexts
+            or not isinstance(self.targets, tuple)
+            or len(self.contexts) != len(self.targets)
+            or any(
+                not context or any(type(token) is not int for token in context)
+                for context in self.contexts
+            )
+            or any(type(token) is not int for token in self.targets)
+        ):
+            raise PreferenceDataError(
+                "candidate targets require aligned causal contexts"
+            )
+
+    @property
+    def target_tokens(self):
+        return len(self.targets)
+
+
+def candidate_targets(
+    pair: PreferencePair, label: str, codec: CharacterCodec, *, block_size: int
+) -> CandidateTargets:
+    """Enumerate each response character once with bounded prompt-local context."""
+    if not isinstance(codec, CharacterCodec):
+        raise TypeError("codec must be CharacterCodec")
+    if type(block_size) is not int or not 1 <= block_size <= 256:
+        raise PreferenceDataError("block_size must be an integer in [1, 256]")
+    rendered = render_candidate(pair, label)
+    tokens = codec.encode(rendered.text)
+    start, end = rendered.response_span
+    contexts = tuple(
+        tokens[max(0, index - block_size) : index] for index in range(start, end)
+    )
+    targets = tuple(tokens[index] for index in range(start, end))
+    return CandidateTargets(pair.pair_id, label, contexts, targets)
+
+
+def target_evidence(
+    pairs: tuple[PreferencePair, ...], codec: CharacterCodec, *, block_size: int
+) -> dict:
+    if (
+        not isinstance(pairs, tuple)
+        or not pairs
+        or any(not isinstance(pair, PreferencePair) for pair in pairs)
+    ):
+        raise PreferenceDataError("target evidence requires preference pairs")
+    rows = []
+    for pair in pairs:
+        for label in ("chosen", "rejected"):
+            targets = candidate_targets(pair, label, codec, block_size=block_size)
+            rows.append(
+                {
+                    "pair_id": pair.pair_id,
+                    "label": label,
+                    "target_tokens": targets.target_tokens,
+                    "sha256": canonical_digest([targets.contexts, targets.targets]),
+                }
+            )
+    return {
+        "policy": "response-json-line-only; one last-logit score per character",
+        "rows": rows,
+        "target_tokens": sum(row["target_tokens"] for row in rows),
+        "sha256": canonical_digest(rows),
+    }

@@ -7,11 +7,14 @@ from ai_journey.preference_data import (
     PreferenceFold,
     PreferencePair,
     authored_preference_fixture,
+    candidate_targets,
     canonical_digest,
     fold_evidence,
     grouped_preference_folds,
     pair_evidence,
+    preference_codec,
     render_candidate,
+    target_evidence,
 )
 from ai_journey.sft_data import ChatMessage, ToolCall
 
@@ -181,3 +184,45 @@ def test_preference_fold_rejects_group_leakage():
 
     with pytest.raises(PreferenceDataError, match="disjoint"):
         PreferenceFold(0, pairs[:4], pairs[1:3])
+
+
+def test_candidate_targets_score_every_response_character_once():
+    dataset = authored_preference_fixture()
+    value = dataset.pairs[0]
+    codec = preference_codec(dataset)
+    rendered = render_candidate(value, "chosen")
+
+    targets = candidate_targets(value, "chosen", codec, block_size=16)
+
+    assert targets.target_tokens == len(rendered.response_text)
+    assert codec.decode(targets.targets) == rendered.response_text
+    assert all(1 <= len(context) <= 16 for context in targets.contexts)
+    assert targets.contexts[-1] == codec.encode(rendered.text)[-17:-1]
+
+
+def test_preference_codec_can_include_warmup_text():
+    dataset = authored_preference_fixture()
+
+    codec = preference_codec(dataset, extra_text="₹")
+
+    assert codec.decode(codec.encode("₹")) == "₹"
+
+
+def test_target_evidence_binds_both_labels_and_context_policy():
+    dataset = authored_preference_fixture()
+    evidence = target_evidence(dataset.pairs, preference_codec(dataset), block_size=32)
+
+    assert len(evidence["rows"]) == len(dataset.pairs) * 2
+    assert evidence["target_tokens"] == sum(
+        row["target_tokens"] for row in evidence["rows"]
+    )
+    assert len(evidence["sha256"]) == 64
+
+
+def test_candidate_targets_rejects_invalid_block_size():
+    dataset = authored_preference_fixture()
+
+    with pytest.raises(PreferenceDataError, match="block_size"):
+        candidate_targets(
+            dataset.pairs[0], "chosen", preference_codec(dataset), block_size=0
+        )
