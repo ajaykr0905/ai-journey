@@ -9,6 +9,7 @@ import pytest
 from ai_journey.gpt2_source import (
     GPT2Source,
     GPT2SourceError,
+    load_checkpoint_state_dict,
     load_source_manifest,
     verify_source_artifacts,
 )
@@ -158,3 +159,46 @@ def test_rejects_symlinked_artifact_files(tmp_path: Path) -> None:
 
     with pytest.raises(GPT2SourceError, match="non-symlink"):
         verify_source_artifacts(source, tmp_path)
+
+
+def _write_torch_checkpoint(tmp_path: Path, payload: object) -> GPT2Source:
+    source = _write_artifacts(tmp_path)
+    weights_path = tmp_path / "pytorch_model.bin"
+    torch = pytest.importorskip("torch")
+    torch.save(payload, weights_path)
+    weights_bytes = weights_path.read_bytes()
+    return GPT2Source(
+        **{
+            **source.__dict__,
+            "weights_sha256": sha256(weights_bytes).hexdigest(),
+            "weights_bytes": len(weights_bytes),
+        }
+    )
+
+
+def test_loads_verified_checkpoint_with_the_weights_only_unpickler(
+    tmp_path: Path,
+) -> None:
+    torch = pytest.importorskip("torch")
+    source = _write_torch_checkpoint(tmp_path, {"weight": torch.arange(4).float()})
+
+    config, state = load_checkpoint_state_dict(source, tmp_path)
+
+    assert config.layer_count == 12
+    torch.testing.assert_close(state["weight"], torch.arange(4).float())
+    assert state["weight"].device.type == "cpu"
+
+
+def test_rejects_non_tensor_checkpoint_values_and_tensor_count_overflow(
+    tmp_path: Path,
+) -> None:
+    torch = pytest.importorskip("torch")
+    source = _write_torch_checkpoint(tmp_path, {"weight": "not-a-tensor"})
+    with pytest.raises(GPT2SourceError, match="string keys to tensors"):
+        load_checkpoint_state_dict(source, tmp_path)
+
+    source = _write_torch_checkpoint(
+        tmp_path, {"one": torch.ones(1), "two": torch.ones(1)}
+    )
+    with pytest.raises(GPT2SourceError, match="tensor-count"):
+        load_checkpoint_state_dict(source, tmp_path, max_tensors=1)

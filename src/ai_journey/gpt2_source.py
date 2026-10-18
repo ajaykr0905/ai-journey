@@ -9,6 +9,9 @@ from pathlib import Path
 import re
 from typing import Any
 
+import torch
+from torch import Tensor
+
 from .gpt2_config import GPT2Config, config_from_hugging_face, require_variant
 
 
@@ -149,3 +152,43 @@ def verify_source_artifacts(
     if weights_digest != source.weights_sha256:
         raise GPT2SourceError("weights artifact SHA-256 mismatch")
     return config
+
+
+def load_checkpoint_state_dict(
+    source: GPT2Source,
+    directory: str | Path,
+    *,
+    variant: str = "gpt2",
+    max_tensors: int = 512,
+) -> tuple[GPT2Config, dict[str, Tensor]]:
+    """Load a verified CPU checkpoint using PyTorch's weights-only unpickler."""
+
+    if isinstance(max_tensors, bool) or not isinstance(max_tensors, int):
+        raise TypeError("max_tensors must be an integer")
+    if max_tensors <= 0:
+        raise GPT2SourceError("max_tensors must be positive")
+    config = verify_source_artifacts(source, directory, variant=variant)
+    weights_path = Path(directory) / source.weights_filename
+    try:
+        payload = torch.load(
+            weights_path,
+            map_location="cpu",
+            weights_only=True,
+            mmap=True,
+        )
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise GPT2SourceError(
+            "weights artifact is not a supported tensor archive"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise GPT2SourceError("weights artifact must contain a state-dict object")
+    if len(payload) > max_tensors:
+        raise GPT2SourceError("weights artifact exceeds the tensor-count limit")
+    state: dict[str, Tensor] = {}
+    for key, value in payload.items():
+        if not isinstance(key, str) or not isinstance(value, Tensor):
+            raise GPT2SourceError("weights artifact must map string keys to tensors")
+        if value.device.type != "cpu":
+            raise GPT2SourceError("weights artifact tensors must load on CPU")
+        state[key] = value
+    return config, state
