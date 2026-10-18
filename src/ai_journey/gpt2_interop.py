@@ -87,6 +87,47 @@ def known_hugging_face_buffers(config: GPT2Config) -> frozenset[str]:
     )
 
 
+def normalize_hugging_face_checkpoint(
+    state_dict: Mapping[str, Tensor], config: GPT2Config
+) -> dict[str, Tensor]:
+    """Normalize the public legacy base-model checkpoint to LM-head names."""
+
+    if not isinstance(state_dict, Mapping):
+        raise TypeError("state_dict must be a mapping")
+    if not isinstance(config, GPT2Config):
+        raise TypeError("config must be GPT2Config")
+    if any(not isinstance(key, str) for key in state_dict):
+        raise TypeError("state_dict keys must be strings")
+    if any(
+        key.startswith("transformer.") or key == "lm_head.weight" for key in state_dict
+    ):
+        raise GPT2InteropError("legacy checkpoint must not mix LM-head tensor names")
+
+    specs = expected_hugging_face_tensors(config)
+    learned = {
+        key.removeprefix("transformer.")
+        for key in specs
+        if key.startswith("transformer.")
+    }
+    buffers = {
+        key.removeprefix("transformer.") for key in known_hugging_face_buffers(config)
+    }
+    keys = set(state_dict)
+    missing = sorted(learned - keys)
+    if missing:
+        raise GPT2InteropError("missing legacy GPT-2 tensors: " + ", ".join(missing))
+    unexpected = sorted(keys - learned - buffers)
+    if unexpected:
+        raise GPT2InteropError(
+            "unexpected legacy GPT-2 tensors: " + ", ".join(unexpected)
+        )
+
+    normalized = {f"transformer.{key}": value for key, value in state_dict.items()}
+    normalized["lm_head.weight"] = state_dict["wte.weight"]
+    validate_hugging_face_state_dict(normalized, config)
+    return normalized
+
+
 def validate_hugging_face_state_dict(
     state_dict: Mapping[str, Tensor], config: GPT2Config
 ) -> tuple[str, ...]:

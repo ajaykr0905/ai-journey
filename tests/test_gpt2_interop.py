@@ -13,6 +13,7 @@ from ai_journey.gpt2_interop import (
     fingerprint_hugging_face_state,
     known_hugging_face_buffers,
     load_hugging_face_weights,
+    normalize_hugging_face_checkpoint,
     validate_tied_embedding_alias,
     validate_hugging_face_state_dict,
 )
@@ -82,6 +83,38 @@ def test_validates_complete_finite_hugging_face_state() -> None:
 
     assert ignored == ("transformer.h.0.attn.bias",)
     assert len(known_hugging_face_buffers(_tiny_config())) == 4
+
+
+def test_normalizes_public_legacy_checkpoint_names_and_synthesizes_tied_head() -> None:
+    external = _valid_state_dict()
+    legacy = {
+        key.removeprefix("transformer."): value
+        for key, value in external.items()
+        if key != "lm_head.weight"
+    }
+    legacy["h.0.attn.bias"] = torch.ones(1, 1, 4, 4)
+
+    normalized = normalize_hugging_face_checkpoint(legacy, _tiny_config())
+
+    assert set(expected_hugging_face_tensors(_tiny_config())) <= set(normalized)
+    assert normalized["lm_head.weight"] is normalized["transformer.wte.weight"]
+    assert "transformer.h.0.attn.bias" in normalized
+
+
+def test_rejects_mixed_or_unexpected_legacy_checkpoint_names() -> None:
+    external = _valid_state_dict()
+    legacy = {
+        key.removeprefix("transformer."): value
+        for key, value in external.items()
+        if key != "lm_head.weight"
+    }
+    mixed = {**legacy, "transformer.wte.weight": legacy["wte.weight"]}
+    unexpected = {**legacy, "secret.weight": torch.ones(1)}
+
+    with pytest.raises(GPT2InteropError, match="must not mix"):
+        normalize_hugging_face_checkpoint(mixed, _tiny_config())
+    with pytest.raises(GPT2InteropError, match="unexpected legacy"):
+        normalize_hugging_face_checkpoint(unexpected, _tiny_config())
 
 
 def test_rejects_missing_and_unexpected_state_dict_keys() -> None:
