@@ -5,8 +5,31 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, fields
 import math
 
-from .preference_data import PreferenceDataError
-from .transformer_lab import TransformerConfig
+from .lora_experiment import isolated_cpu_runtime
+from .preference_data import (
+    PreferenceDataError,
+    PreferenceDataset,
+    PreferenceFold,
+    authored_preference_fixture,
+    fold_evidence,
+    grouped_preference_folds,
+    preference_codec,
+)
+from .sft_data import (
+    CHAT_FIXTURE_ID,
+    ConversationSplit,
+    authored_chat_fixture,
+    render_conversation,
+    sft_schedule_evidence,
+    sft_training_batches,
+)
+from .sft_experiment import train_sft_batches
+from .transformer_lab import (
+    CharacterCodec,
+    DecoderLanguageModel,
+    TransformerConfig,
+    model_fingerprint,
+)
 
 
 @dataclass(frozen=True)
@@ -108,3 +131,70 @@ def preference_config_from_dict(value):
             "config requires exactly all preference controls and a seeds list"
         )
     return PreferenceComparisonConfig(**{**value, "seeds": tuple(value["seeds"])})
+
+
+@dataclass(frozen=True)
+class PreferenceContext:
+    dataset: PreferenceDataset
+    folds: tuple[PreferenceFold, ...]
+    sft_split: ConversationSplit
+    codec: CharacterCodec
+
+    def evidence(self) -> dict:
+        return {
+            "preference_fixture": self.dataset.evidence(),
+            "folds": fold_evidence(self.folds),
+            "sft_fixture_id": CHAT_FIXTURE_ID,
+            "sft_fixture": self.sft_split.evidence(),
+            "vocabulary": list(self.codec.tokens),
+        }
+
+
+def prepare_preference_context(config: PreferenceComparisonConfig) -> PreferenceContext:
+    """Create fixed data, leakage-safe folds, and one shared character codec."""
+    if not isinstance(config, PreferenceComparisonConfig):
+        raise TypeError("config must be PreferenceComparisonConfig")
+    dataset = authored_preference_fixture()
+    folds = grouped_preference_folds(
+        dataset, fold_count=config.fold_count, seed=config.fold_seed
+    )
+    sft_split = authored_chat_fixture()
+    sft_text = "".join(
+        render_conversation(conversation).text
+        for conversation in sft_split.train + sft_split.validation
+    )
+    codec = preference_codec(dataset, extra_text=sft_text)
+    return PreferenceContext(dataset, folds, sft_split, codec)
+
+
+def warm_preference_base(
+    config: PreferenceComparisonConfig, context: PreferenceContext, *, seed: int
+) -> tuple[DecoderLanguageModel, dict]:
+    """Build one deterministic assistant-only SFT reference for all fold arms."""
+    if not isinstance(config, PreferenceComparisonConfig):
+        raise TypeError("config must be PreferenceComparisonConfig")
+    if not isinstance(context, PreferenceContext):
+        raise TypeError("context must be PreferenceContext")
+    if seed not in config.seeds:
+        raise PreferenceDataError("warmup seed must be declared in the protocol")
+    with isolated_cpu_runtime(seed):
+        model = DecoderLanguageModel(config.model_config(len(context.codec.tokens)))
+        initial = model_fingerprint(model)
+        batches = sft_training_batches(
+            context.sft_split.train,
+            context.codec,
+            block_size=config.block_size,
+            batch_size=config.sft_batch_size,
+            steps=config.sft_steps,
+            seed=seed ^ 0x5F7,
+        )
+        trace = train_sft_batches(
+            model, batches, learning_rate=config.sft_learning_rate
+        )
+        final = model_fingerprint(model)
+    return model, {
+        "initial_sha256": initial,
+        "final_sha256": final,
+        "schedule": sft_schedule_evidence(batches),
+        "training": trace,
+    }

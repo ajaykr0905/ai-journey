@@ -1,13 +1,19 @@
+import random
 from dataclasses import asdict
 
+import numpy as np
 import pytest
+import torch
 
 from ai_journey.preference_data import PreferenceDataError
 from ai_journey.preference_experiment import (
     PreferenceComparisonConfig,
+    prepare_preference_context,
     preference_config_dict,
     preference_config_from_dict,
+    warm_preference_base,
 )
+from ai_journey.transformer_lab import model_fingerprint
 
 
 def test_preference_config_round_trips_all_controls():
@@ -58,3 +64,34 @@ def test_preference_config_rejects_unknown_fields():
 
     with pytest.raises(PreferenceDataError, match="exactly"):
         preference_config_from_dict(value)
+
+
+def test_preference_context_binds_folds_sft_and_shared_vocabulary():
+    context = prepare_preference_context(PreferenceComparisonConfig())
+    evidence = context.evidence()
+
+    assert len(context.folds) == 3
+    assert evidence["preference_fixture"]["pairs"] == 12
+    assert evidence["sft_fixture_id"] == "authored-weather-tools-v1"
+    assert evidence["sft_fixture"]["train"]["conversation_ids"]
+    assert evidence["folds"]["sha256"]
+    assert evidence["vocabulary"] == list(context.codec.tokens)
+
+
+def test_sft_warmup_is_exact_and_restores_caller_runtime_state():
+    config = PreferenceComparisonConfig()
+    context = prepare_preference_context(config)
+    random.seed(811)
+    np.random.seed(812)
+    torch.manual_seed(813)
+    states = (random.getstate(), np.random.get_state(), torch.get_rng_state().clone())
+
+    first, first_evidence = warm_preference_base(config, context, seed=44)
+    second, second_evidence = warm_preference_base(config, context, seed=44)
+
+    assert model_fingerprint(first) == model_fingerprint(second)
+    assert first_evidence == second_evidence
+    assert first_evidence["initial_sha256"] != first_evidence["final_sha256"]
+    assert random.getstate() == states[0]
+    assert np.array_equal(np.random.get_state()[1], states[1][1])
+    assert torch.equal(torch.get_rng_state(), states[2])
