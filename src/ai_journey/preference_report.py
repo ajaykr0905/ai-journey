@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import asdict
 import json
 import math
+import os
+from pathlib import Path
 import re
+import tempfile
 
 from .lora_experiment import ADAPTER_TARGETS
 from .preference_data import (
@@ -593,3 +596,38 @@ def validate_preference_report(report):
         return report
     except (KeyError, TypeError, OverflowError, ZeroDivisionError) as exc:
         raise PreferenceDataError(f"invalid preference report: {exc}") from exc
+
+
+def render_preference_report(report):
+    validate_preference_report(report)
+    return json.dumps(report, sort_keys=True, indent=2, allow_nan=False) + "\n"
+
+
+def write_preference_report(path, report):
+    """Durably replace a validated report and clean a failed temporary file."""
+    rendered = render_preference_report(report)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.tmp-",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(rendered)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        temporary = None
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)

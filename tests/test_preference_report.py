@@ -1,4 +1,5 @@
 import copy
+import json
 
 import pytest
 
@@ -13,7 +14,9 @@ from ai_journey.preference_report import (
     PREFERENCE_REPORT_SCHEMA,
     build_preference_report,
     preference_report_digest,
+    render_preference_report,
     validate_preference_report,
+    write_preference_report,
 )
 
 
@@ -149,3 +152,27 @@ def test_report_rejects_inconsistent_trial_accounting(comparison, path, value, m
 
     with pytest.raises(PreferenceDataError, match=match):
         validate_preference_report(report)
+
+
+def test_report_write_is_durable_and_round_trips(comparison, tmp_path):
+    report = build_preference_report(comparison)
+    destination = tmp_path / "nested" / "preference.json"
+
+    write_preference_report(destination, report)
+
+    assert json.loads(destination.read_text()) == report
+    assert destination.read_text().endswith("\n")
+    assert list(destination.parent.glob(".preference.json.tmp-*")) == []
+    assert render_preference_report(report) == destination.read_text()
+
+
+def test_invalid_report_cannot_replace_existing_evidence(comparison, tmp_path):
+    destination = tmp_path / "preference.json"
+    destination.write_text("preserve me\n")
+    report = build_preference_report(comparison)
+    report["summary"]["observations"] = 99
+
+    with pytest.raises(PreferenceDataError, match="digest|summary"):
+        write_preference_report(destination, report)
+
+    assert destination.read_text() == "preserve me\n"
