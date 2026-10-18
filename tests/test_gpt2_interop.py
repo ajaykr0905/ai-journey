@@ -7,6 +7,7 @@ import torch
 from ai_journey.gpt2_interop import (
     GPT2InteropError,
     TensorSpec,
+    convert_hugging_face_state_dict,
     expected_hugging_face_tensors,
     known_hugging_face_buffers,
     validate_tied_embedding_alias,
@@ -118,3 +119,32 @@ def test_requires_the_language_head_to_match_the_token_embedding_exactly() -> No
 def test_tied_embedding_check_rejects_missing_alias_inputs() -> None:
     with pytest.raises(GPT2InteropError, match="require wte and lm_head"):
         validate_tied_embedding_alias({})
+
+
+def test_converts_names_and_transposes_only_hugging_face_conv1d_weights() -> None:
+    state = _valid_state_dict()
+    state["transformer.h.0.attn.c_attn.weight"] = torch.arange(48).view(4, 12).float()
+    state["transformer.h.0.attn.c_proj.weight"] = torch.arange(16).view(4, 4).float()
+
+    converted = convert_hugging_face_state_dict(state, _tiny_config())
+
+    assert "transformer.wte.weight" not in converted
+    assert converted["wte.weight"].shape == (11, 4)
+    assert converted["h.0.attn.c_attn.weight"].shape == (12, 4)
+    torch.testing.assert_close(
+        converted["h.0.attn.c_attn.weight"],
+        state["transformer.h.0.attn.c_attn.weight"].T,
+    )
+    torch.testing.assert_close(
+        converted["h.0.attn.c_proj.weight"],
+        state["transformer.h.0.attn.c_proj.weight"].T,
+    )
+
+
+def test_conversion_does_not_share_writable_tensor_storage() -> None:
+    state = _valid_state_dict()
+    converted = convert_hugging_face_state_dict(state, _tiny_config())
+
+    converted["ln_f.weight"][0] = 9
+
+    assert state["transformer.ln_f.weight"][0] == 0

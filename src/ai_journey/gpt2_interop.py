@@ -138,3 +138,25 @@ def validate_tied_embedding_alias(state_dict: Mapping[str, Tensor]) -> None:
         raise GPT2InteropError(
             "lm_head.weight must exactly equal transformer.wte.weight"
         )
+
+
+def convert_hugging_face_state_dict(
+    state_dict: Mapping[str, Tensor], config: GPT2Config
+) -> dict[str, Tensor]:
+    """Convert validated Hugging Face names and Conv1D layouts to PyTorch."""
+
+    validate_hugging_face_state_dict(state_dict, config)
+    specs = expected_hugging_face_tensors(config)
+    converted: dict[str, Tensor] = {}
+    for external_key, spec in specs.items():
+        if external_key.startswith("transformer."):
+            internal_key = external_key.removeprefix("transformer.")
+        else:
+            internal_key = external_key
+        value = state_dict[external_key].detach()
+        converted[internal_key] = (
+            value.transpose(0, 1).contiguous().clone()
+            if spec.transpose
+            else value.contiguous().clone()
+        )
+    return converted
