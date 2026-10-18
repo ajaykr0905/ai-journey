@@ -22,6 +22,7 @@ from .preference_experiment import (
     PREFERENCE_LIMITATIONS,
     prepare_preference_context,
     preference_config_from_dict,
+    run_preference_comparison,
 )
 
 
@@ -631,3 +632,36 @@ def write_preference_report(path, report):
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def _replay_content(report):
+    return {
+        "schema": report["schema"],
+        "result": {
+            key: value for key, value in report["result"].items() if key != "runtime"
+        },
+        "summary": report["summary"],
+    }
+
+
+def replay_preference_report(report):
+    """Rebuild every seed-fold arm and require exact non-environmental evidence."""
+    validate_preference_report(report)
+    config = preference_config_from_dict(report["result"]["config"])
+    replay = build_preference_report(run_preference_comparison(config))
+    if canonical_digest(_replay_content(report)) != canonical_digest(
+        _replay_content(replay)
+    ):
+        raise PreferenceDataError(
+            "exact preference replay mismatch: fingerprints, schedules, traces, "
+            "held-out metrics, or paired summaries do not reproduce"
+        )
+    return {
+        "sha256": report["sha256"],
+        "verified_bases": len(config.seeds),
+        "verified_folds": len(config.seeds) * config.fold_count,
+        "verified_trials": len(config.seeds) * config.fold_count * len(PREFERENCE_ARMS),
+        "policy": (
+            "exact CPU float64 replay; only result.runtime and the report digest excluded"
+        ),
+    }

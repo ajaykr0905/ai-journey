@@ -14,6 +14,7 @@ from ai_journey.preference_report import (
     PREFERENCE_REPORT_SCHEMA,
     build_preference_report,
     preference_report_digest,
+    replay_preference_report,
     render_preference_report,
     validate_preference_report,
     write_preference_report,
@@ -176,3 +177,24 @@ def test_invalid_report_cannot_replace_existing_evidence(comparison, tmp_path):
         write_preference_report(destination, report)
 
     assert destination.read_text() == "preserve me\n"
+
+
+def test_report_replay_rebuilds_every_seed_fold_arm(comparison):
+    report = build_preference_report(comparison)
+
+    verified = replay_preference_report(report)
+
+    assert verified["sha256"] == report["sha256"]
+    assert verified["verified_bases"] == 2
+    assert verified["verified_folds"] == 4
+    assert verified["verified_trials"] == 16
+
+
+def test_report_replay_rejects_validly_redigested_fingerprint_change(comparison):
+    report = build_preference_report(comparison)
+    report["result"]["seeds"][0]["folds"][0]["trials"][0]["final_sha256"] = "0" * 64
+    report["sha256"] = preference_report_digest(report)
+    validate_preference_report(report)
+
+    with pytest.raises(PreferenceDataError, match="exact preference replay mismatch"):
+        replay_preference_report(report)
