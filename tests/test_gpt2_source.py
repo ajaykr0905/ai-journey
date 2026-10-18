@@ -40,6 +40,24 @@ def test_loads_an_immutable_public_source_manifest(tmp_path: Path) -> None:
     )
 
 
+def test_repository_manifest_pins_verified_public_gpt2_bytes() -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+
+    source = load_source_manifest(repository_root / "config/gpt2-124m-source.json")
+
+    assert source.model_id == "openai-community/gpt2"
+    assert source.revision == "607a30d783dfa663caf39e06633721c8d4cfcd7e"
+    assert source.config_sha256 == (
+        "0daed7749b4f02b8f76240d5444551d7b08712dab4d0adb8239c56ba823bb7b4"
+    )
+    assert source.weights_sha256 == (
+        "7c5d3f4b8b76583b422fcb9189ad6c89d5d97a094541ce8932dce3ecabde1421"
+    )
+    assert source.weights_bytes == 548_118_077
+    for filename in (source.config_filename, source.weights_filename):
+        assert source.revision in source.artifact_url(filename)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
