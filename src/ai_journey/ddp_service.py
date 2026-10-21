@@ -7,10 +7,57 @@ import re
 import copy
 import threading
 from collections import OrderedDict
+import time
+import math
 
 from .ddp_contracts import integer
 from .ddp_generation import SamplingConfig, generate_tokens
 from .gpt2_training import gpt2_model_fingerprint
+
+
+class AdmissionRejected(RuntimeError):
+    def __init__(self, retry_after: float):
+        super().__init__("generation token budget exhausted")
+        self.retry_after = retry_after
+
+
+class TokenBucket:
+    def __init__(
+        self,
+        capacity: int = 8192,
+        refill_per_second: float = 4096,
+        *,
+        clock=time.monotonic,
+    ):
+        integer(capacity, "capacity", 1)
+        if (
+            isinstance(refill_per_second, bool)
+            or not math.isfinite(refill_per_second)
+            or refill_per_second <= 0
+        ):
+            raise ValueError("refill rate must be positive and finite")
+        self.capacity = capacity
+        self.rate = refill_per_second
+        self.tokens = float(capacity)
+        self.clock = clock
+        self.updated = clock()
+        self.lock = threading.Lock()
+
+    def consume(self, cost: int):
+        integer(cost, "cost", 1)
+        if cost > self.capacity:
+            raise ValueError("request cannot fit the admission capacity")
+        with self.lock:
+            now = self.clock()
+            if now < self.updated:
+                raise RuntimeError("admission clock moved backwards")
+            self.tokens = min(
+                self.capacity, self.tokens + (now - self.updated) * self.rate
+            )
+            self.updated = now
+            if cost > self.tokens:
+                raise AdmissionRejected((cost - self.tokens) / self.rate)
+            self.tokens -= cost
 
 
 @dataclass(frozen=True)
@@ -63,7 +110,7 @@ class GenerationRequest:
 class GenerationService:
     """Serve a frozen checkpoint snapshot under one serialized inference lock."""
 
-    def __init__(self, model, *, cache_capacity: int = 128):
+    def __init__(self, model, *, cache_capacity: int = 128, admission=None):
         integer(cache_capacity, "cache_capacity", 1)
         if cache_capacity > 4096:
             raise ValueError("response cache exceeds lab budget")
@@ -75,6 +122,7 @@ class GenerationService:
         self.generated_tokens = 0
         self._responses = OrderedDict()
         self._cache_capacity = cache_capacity
+        self._admission = admission if admission is not None else TokenBucket()
 
     def generate(self, request: GenerationRequest) -> dict:
         if not isinstance(request, GenerationRequest):
@@ -89,6 +137,9 @@ class GenerationService:
                     raise ValueError("request_id was already used with different input")
                 self._responses.move_to_end(request.request_id)
                 return copy.deepcopy(previous_output)
+            self._admission.consume(
+                len(request.prompt) + request.sampling.max_new_tokens
+            )
             output = generate_tokens(
                 self._model, request.prompt, request.sampling, use_cache=True
             )

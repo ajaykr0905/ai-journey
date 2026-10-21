@@ -1,6 +1,7 @@
 import pytest
 from ai_journey.ddp_service import GenerationRequest
 from ai_journey.ddp_service import GenerationService
+from ai_journey.ddp_service import TokenBucket, AdmissionRejected
 from ai_journey.ddp_generation import SamplingConfig
 from ai_journey.gpt2_model import GPT2LanguageModel
 from ai_journey.gpt2_config import GPT2Config
@@ -64,3 +65,19 @@ def test_idempotent_retries_are_isolated_and_conflicting_ids_fail():
     service.generate(request("another"))
     service.generate(conflicting)
     assert service.health()["completed_requests"] == 3
+
+
+def test_admission_budgets_refill_and_idempotent_retries_cost_nothing():
+    clock = [0.0]
+    bucket = TokenBucket(5, 1, clock=lambda: clock[0])
+    service = GenerationService(
+        GPT2LanguageModel(GPT2Config(8, 4, 8, 2, 1)), admission=bucket
+    )
+    service.generate(request())
+    service.generate(request())
+    with pytest.raises(AdmissionRejected) as error:
+        service.generate(request("second"))
+    assert error.value.retry_after == 5
+    clock[0] = 5
+    service.generate(request("second"))
+    assert service.health()["completed_requests"] == 2
