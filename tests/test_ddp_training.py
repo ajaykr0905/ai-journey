@@ -44,6 +44,7 @@ def test_ddp_accumulation_matches_a_complete_batch(tmp_path):
     torch.nn.functional.cross_entropy(
         reference(inputs).reshape(-1, 8), targets.reshape(-1)
     ).backward()
+    torch.nn.utils.clip_grad_norm_(reference.parameters(), 1.0)
     ref_opt.step()
     with process_group(Topology(0, 1), rendezvous=(tmp_path / "rdzv").as_uri()):
         result = accumulated_update(
