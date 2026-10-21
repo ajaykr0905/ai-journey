@@ -52,6 +52,16 @@ def test_generation_obeys_eos_budget_sliding_context_and_mode_restoration():
     )
 
 
+@pytest.mark.parametrize("temperature", [0, 1])
+def test_cached_generation_matches_uncached_across_context_rollover(temperature):
+    torch.manual_seed(48)
+    model = GPT2LanguageModel(GPT2Config(16, 4, 8, 2, 2)).double()
+    config = SamplingConfig(max_new_tokens=8, temperature=temperature, seed=48)
+    reference = generate_tokens(model, [1, 2], config)
+    actual = generate_tokens(model, [1, 2], config, use_cache=True)
+    assert actual == reference
+
+
 def test_repetition_penalty_is_sign_aware_and_applied_once_per_unique_id():
     logits = torch.tensor([[4.0, -2.0, 1.0]])
     result = process_logits(

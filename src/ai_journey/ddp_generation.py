@@ -132,6 +132,7 @@ def generate_tokens(
     eos_token: int | None = None,
     banned_tokens=(),
     repetition_penalty: float = 1.0,
+    use_cache: bool = False,
 ) -> dict:
     """Generate under a bounded sliding context while preserving caller modes."""
     prompt = tuple(prompt)
@@ -149,6 +150,7 @@ def generate_tokens(
     sampler = TokenSampler(config)
     history = list(prompt)
     reason = "length"
+    cache = None
     try:
         model.eval()
         with torch.inference_mode():
@@ -156,8 +158,17 @@ def generate_tokens(
                 inputs = torch.tensor(
                     [history[-model.config.context_length :]], dtype=torch.long
                 )
+                if use_cache:
+                    from .ddp_cache import cached_forward
+
+                    if cache is None or cache.length == model.config.context_length:
+                        output, cache = cached_forward(model, inputs)
+                    else:
+                        output, cache = cached_forward(model, inputs[:, -1:], cache)
+                else:
+                    output = model(inputs)
                 logits = process_logits(
-                    model(inputs)[:, -1, :],
+                    output[:, -1, :],
                     torch.tensor([history]),
                     banned_tokens=banned_tokens,
                     repetition_penalty=repetition_penalty,
