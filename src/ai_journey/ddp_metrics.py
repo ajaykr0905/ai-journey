@@ -79,3 +79,59 @@ def binary_metrics(labels, predictions) -> dict:
         "specificity": tn / (tn + fp) if tn + fp else None,
         "precision": tp / (tp + fp) if tp + fp else None,
     }
+
+
+def calibration_metrics(probabilities, labels, *, bins: int = 10) -> dict:
+    """Compute multiclass Brier score and empirical confidence-bin error."""
+    integer(bins, "bins", 1)
+    probabilities = torch.as_tensor(probabilities, dtype=torch.float64)
+    labels = torch.as_tensor(labels)
+    if (
+        probabilities.ndim != 2
+        or probabilities.shape[0] == 0
+        or probabilities.shape[1] < 2
+        or labels.dtype != torch.long
+        or labels.shape != (probabilities.shape[0],)
+    ):
+        raise ValueError("probabilities and integer labels must have matching examples")
+    if (
+        not torch.isfinite(probabilities).all()
+        or (probabilities < 0).any()
+        or (probabilities > 1).any()
+        or not torch.allclose(
+            probabilities.sum(1),
+            torch.ones(probabilities.shape[0], dtype=torch.float64),
+            atol=1e-10,
+            rtol=0,
+        )
+    ):
+        raise ValueError("each probability row must sum to one")
+    if labels.min() < 0 or labels.max() >= probabilities.shape[1]:
+        raise ValueError("label is outside the probability vocabulary")
+    targets = torch.nn.functional.one_hot(labels, probabilities.shape[1]).double()
+    confidence, prediction = probabilities.max(1)
+    correct = (prediction == labels).double()
+    assigned = (confidence * bins).long().clamp(max=bins - 1)
+    records = []
+    error = 0.0
+    for index in range(bins):
+        mask = assigned == index
+        count = int(mask.sum())
+        if count:
+            mean_confidence = confidence[mask].mean().item()
+            accuracy = correct[mask].mean().item()
+            error += count / len(labels) * abs(mean_confidence - accuracy)
+            records.append(
+                {
+                    "bin": index,
+                    "count": count,
+                    "confidence": mean_confidence,
+                    "accuracy": accuracy,
+                }
+            )
+    return {
+        "brier_score": ((probabilities - targets) ** 2).sum(1).mean().item(),
+        "expected_calibration_error": error,
+        "bins": records,
+        "examples": len(labels),
+    }
