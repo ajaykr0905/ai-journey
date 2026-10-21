@@ -1,6 +1,7 @@
 import pytest
 import torch
 from ai_journey.ddp_checkpoint import save_checkpoint
+from ai_journey.ddp_checkpoint import load_checkpoint
 from ai_journey.ddp_contracts import Topology
 from ai_journey.ddp_runtime import process_group
 from ai_journey.gpt2_config import GPT2Config
@@ -59,3 +60,32 @@ def test_publication_failure_is_a_collective_error(tmp_path):
                 step=0,
             )
     assert parent.read_bytes() == b"keep"
+
+
+def test_checkpoint_restores_state_and_rejects_another_corpus(tmp_path):
+    model, optimizer, config = setup_state()
+    original = {name: tensor.clone() for name, tensor in model.state_dict().items()}
+    path = tmp_path / "state.pt"
+    with process_group(Topology(0, 1), rendezvous=(tmp_path / "rdzv").as_uri()):
+        save_checkpoint(
+            path,
+            model=model,
+            optimizer=optimizer,
+            config=config,
+            source=b"public",
+            step=1,
+        )
+        with torch.no_grad():
+            model.wte.weight.add_(1)
+        assert (
+            load_checkpoint(
+                path, model=model, optimizer=optimizer, config=config, source=b"public"
+            )
+            == 1
+        )
+        with pytest.raises(RuntimeError, match="checkpoint validation"):
+            load_checkpoint(
+                path, model=model, optimizer=optimizer, config=config, source=b"other"
+            )
+    for name, value in model.state_dict().items():
+        assert torch.equal(value, original[name])
