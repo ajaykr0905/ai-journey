@@ -124,7 +124,9 @@ class GenerationService:
         self._cache_capacity = cache_capacity
         self._admission = admission if admission is not None else TokenBucket()
 
-    def generate(self, request: GenerationRequest) -> dict:
+    def generate(
+        self, request: GenerationRequest, *, cancelled=None, deadline=None
+    ) -> dict:
         if not isinstance(request, GenerationRequest):
             raise TypeError("request must be GenerationRequest")
         with self._lock:
@@ -141,7 +143,12 @@ class GenerationService:
                 len(request.prompt) + request.sampling.max_new_tokens
             )
             output = generate_tokens(
-                self._model, request.prompt, request.sampling, use_cache=True
+                self._model,
+                request.prompt,
+                request.sampling,
+                use_cache=True,
+                cancelled=cancelled,
+                deadline=deadline,
             )
             self.completed_requests += 1
             self.generated_tokens += len(output["tokens"])
@@ -150,7 +157,11 @@ class GenerationService:
                 "model_sha256": self.model_sha256,
                 **output,
             }
-            self._responses[request.request_id] = (fingerprint, copy.deepcopy(response))
+            if output["finish_reason"] in ("length", "eos"):
+                self._responses[request.request_id] = (
+                    fingerprint,
+                    copy.deepcopy(response),
+                )
             while len(self._responses) > self._cache_capacity:
                 self._responses.popitem(last=False)
             return response

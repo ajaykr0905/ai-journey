@@ -62,6 +62,21 @@ def test_cached_generation_matches_uncached_across_context_rollover(temperature)
     assert actual == reference
 
 
+def test_cancellation_and_deadline_stop_before_another_decode():
+    model = GPT2LanguageModel(GPT2Config(8, 4, 8, 2, 1)).train()
+    result = generate_tokens(
+        model, [1], SamplingConfig(max_new_tokens=8), cancelled=lambda: True
+    )
+    assert result["tokens"] == []
+    assert result["finish_reason"] == "cancelled"
+    result = generate_tokens(
+        model, [1], SamplingConfig(max_new_tokens=8), deadline=5, clock=lambda: 5
+    )
+    assert result["tokens"] == []
+    assert result["finish_reason"] == "deadline"
+    assert model.training
+
+
 def test_repetition_penalty_is_sign_aware_and_applied_once_per_unique_id():
     logits = torch.tensor([[4.0, -2.0, 1.0]])
     result = process_logits(

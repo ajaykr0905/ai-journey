@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import math
+import time
 
 import torch
 
@@ -133,9 +134,20 @@ def generate_tokens(
     banned_tokens=(),
     repetition_penalty: float = 1.0,
     use_cache: bool = False,
+    cancelled=None,
+    deadline: float | None = None,
+    clock=time.monotonic,
 ) -> dict:
     """Generate under a bounded sliding context while preserving caller modes."""
     prompt = tuple(prompt)
+    if cancelled is not None and not callable(cancelled):
+        raise TypeError("cancelled must be a callable")
+    if deadline is not None and (
+        isinstance(deadline, bool)
+        or not isinstance(deadline, (int, float))
+        or not math.isfinite(deadline)
+    ):
+        raise ValueError("deadline must be a finite monotonic timestamp")
     if not prompt or len(prompt) > 4096:
         raise ValueError("prompt requires 1 to 4096 token ids")
     for token in prompt:
@@ -155,6 +167,12 @@ def generate_tokens(
         model.eval()
         with torch.inference_mode():
             for _ in range(config.max_new_tokens):
+                if cancelled is not None and cancelled():
+                    reason = "cancelled"
+                    break
+                if deadline is not None and clock() >= deadline:
+                    reason = "deadline"
+                    break
                 inputs = torch.tensor(
                     [history[-model.config.context_length :]], dtype=torch.long
                 )
