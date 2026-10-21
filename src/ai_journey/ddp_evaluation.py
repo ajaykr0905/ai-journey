@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from hashlib import sha256
 
+from .ddp_contracts import integer
+
 
 @dataclass(frozen=True)
 class Document:
@@ -38,3 +40,20 @@ def documents_from_lines(source: bytes) -> tuple[Document, ...]:
     ):
         raise ValueError("documents must be nonempty and content-distinct")
     return documents
+
+
+def split_documents(documents, *, validation_count: int, seed: int = 48):
+    """Assign whole documents using keyed hashes, independent of input order."""
+    documents = tuple(documents)
+    integer(validation_count, "validation_count", 1)
+    integer(seed, "seed")
+    if validation_count >= len(documents):
+        raise ValueError("training and validation must both contain documents")
+    if len({doc.digest for doc in documents}) != len(documents) or len(
+        {doc.identifier for doc in documents}
+    ) != len(documents):
+        raise ValueError("document identities and contents must be distinct")
+    order = sorted(
+        documents, key=lambda doc: sha256(f"{seed}:{doc.digest}".encode()).digest()
+    )
+    return tuple(order[validation_count:]), tuple(order[:validation_count])

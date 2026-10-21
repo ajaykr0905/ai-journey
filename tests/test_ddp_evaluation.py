@@ -1,5 +1,6 @@
 import pytest
 from ai_journey.ddp_evaluation import Document, documents_from_lines
+from ai_journey.ddp_evaluation import split_documents
 
 
 def test_public_lines_keep_individual_document_boundaries():
@@ -18,3 +19,11 @@ def test_empty_or_duplicated_public_documents_are_rejected(source):
 def test_one_byte_document_cannot_supply_a_next_token_target():
     with pytest.raises(ValueError):
         Document("short", b"x")
+
+
+def test_document_split_is_disjoint_and_invariant_to_input_order():
+    documents = documents_from_lines(b"alice\nbob\ncarol\ndave\n")
+    train, valid = split_documents(documents, validation_count=2)
+    assert not {doc.digest for doc in train} & {doc.digest for doc in valid}
+    assert (train, valid) == split_documents(reversed(documents), validation_count=2)
+    assert len(train) == len(valid) == 2
