@@ -1,6 +1,9 @@
 import pytest
 import torch
 from ai_journey.ddp_cache import KVCache
+from ai_journey.ddp_cache import cached_attention
+from ai_journey.gpt2_model import GPT2SelfAttention
+from ai_journey.gpt2_config import GPT2Config
 
 
 def test_cache_accounts_storage_and_clones_without_aliases():
@@ -22,3 +25,16 @@ def test_cache_rejects_shape_mismatch_and_nonfinite_storage():
             (torch.full((1, 2, 3, 4), float("nan")),),
             (torch.ones(1, 2, 3, 4),),
         )
+
+
+def test_cached_attention_matches_full_prefix_for_multi_token_decode():
+    torch.manual_seed(48)
+    attention = GPT2SelfAttention(GPT2Config(16, 8, 8, 2, 1)).double().eval()
+    inputs = torch.randn(2, 6, 8, dtype=torch.float64)
+    full = attention(inputs)
+    first, state = cached_attention(attention, inputs[:, :3])
+    rest, state = cached_attention(attention, inputs[:, 3:], state)
+    torch.testing.assert_close(
+        torch.cat((first, rest), 1), full, atol=1e-12, rtol=1e-12
+    )
+    assert state[0].shape == (2, 2, 6, 4)
