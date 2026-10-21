@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "model": {
+    "vocab_size": 256,
+    "context_length": 8,
+    "embedding_dim": 16,
+    "head_count": 2,
+    "layer_count": 1,
+    "layer_norm_epsilon": 1e-05,
+    "embedding_dropout": 0.0,
+    "attention_dropout": 0.0,
+    "residual_dropout": 0.0,
+    "activation_function": "gelu_new"
+  },
+  "training": {
+    "optimizer_steps": 12,
+    "micro_batch_size": 2,
+    "accumulation_steps": 4,
+    "sequence_length": 8,
+    "max_learning_rate": 0.003,
+    "min_learning_rate": 0.0003,
+    "warmup_steps": 2,
+    "weight_decay": 0.1,
+    "gradient_clip": 1.0,
+    "seed": 47
+  },
+  "source": {
+    "name": "Synthetic public name-like tokens",
+    "url": "https://github.com/ajaykr0905/ai-journey/blob/main/data/day-19-demo-names.txt",
+    "revision": "sha256:f3670d269756a7b8800389c29599c25b2eccc63ca16e7b4f84b532d21f973411",
+    "license": "CC0-1.0",
+    "sha256": "f3670d269756a7b8800389c29599c25b2eccc63ca16e7b4f84b532d21f973411"
+  }
+}
