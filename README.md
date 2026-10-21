@@ -1,7 +1,7 @@
 # AI Journey: Reproducible Transformer Training and Serving Lab
 
 This repository is a public-safe, executable record of an added setup day plus the
-selected work through Day 37 of a 90-day AI engineering learning plan. It combines
+selected verified code through Day 47 of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -18,6 +18,9 @@ then grow these exercises into production-quality training and inference project
 
 - Explicit LoRA adapters, gradient audits, dense inference export, and bounded
   JSON checkpoints in the [adapter operating guide](docs/lora-adapters.md)
+- Deterministic GPT-2-style gradient accumulation, AdamW grouping, warmup and
+  cosine scheduling, clipping, rollback, exact checkpoint resume, and fresh-run
+  evidence replay in the [training controls guide](docs/gpt2-training-controls.md)
 - Grouped preference cross-validation with response-only DPO-style scoring,
   matched full/LoRA arms, negative findings, and exact replay in the
   [preference optimization guide](docs/preference-optimization.md)
@@ -184,6 +187,11 @@ ai-journey-day-38 \
   --download \
   --output artifacts/day-38-transformer.json \
   --checkpoint artifacts/day-38-transformer.pt
+ai-journey-gpt2-train verify \
+  --report artifacts/gpt2-training-2026-10-21/training-evidence.json
+ai-journey-gpt2-train replay \
+  --source data/day-19-demo-names.txt \
+  --report artifacts/gpt2-training-2026-10-21/training-evidence.json
 python -m unittest discover -s tests -v
 ```
 
