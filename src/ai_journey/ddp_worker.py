@@ -12,7 +12,8 @@ from .ddp_contracts import Topology
 from .ddp_runtime import process_group
 from .ddp_training import train_segment
 from .gpt2_model import GPT2LanguageModel
-from .gpt2_training import load_training_spec, build_gpt2_optimizer
+from .gpt2_training import build_gpt2_optimizer
+from .ddp_limits import preflight
 
 
 def main(argv=None):
@@ -33,7 +34,9 @@ def main(argv=None):
 
         time.sleep(30)
     topology = Topology(args.rank, args.world_size, args.rank)
-    spec = load_training_spec(args.spec)
+    spec = preflight(
+        args.source, args.spec, world_size=args.world_size, steps=args.steps
+    )
     source = args.source.read_bytes()
     from hashlib import sha256
 

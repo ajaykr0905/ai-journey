@@ -8,6 +8,7 @@ import tempfile
 import time
 
 from .ddp_contracts import integer
+from .ddp_limits import preflight
 
 
 def launch_training(
@@ -30,6 +31,11 @@ def launch_training(
     integer(timeout_seconds, "timeout_seconds", 1)
     if world_size > 4:
         raise ValueError("CPU lab permits at most four workers")
+    preflight(source, spec, world_size=world_size, steps=steps)
+    if not isinstance(resume, bool):
+        raise TypeError("resume must be boolean")
+    if checkpoint.resolve() in (source.resolve(), spec.resolve()):
+        raise ValueError("checkpoint output must not overwrite an input")
     if failure_rank is not None:
         integer(failure_rank, "failure_rank")
         if failure_rank >= world_size or failure_mode not in ("exit", "stall"):
