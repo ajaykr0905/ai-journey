@@ -502,3 +502,18 @@ def train_optimizer_step(
         for module, mode in caller_modes:
             module.training = mode
     return metric
+
+
+def gpt2_model_fingerprint(model: GPT2LanguageModel) -> str:
+    """Hash GPT-2 state names, dtypes, shapes, and canonical CPU bytes."""
+
+    if not isinstance(model, GPT2LanguageModel):
+        raise TypeError("model must be GPT2LanguageModel")
+    digest = sha256()
+    for name, tensor in sorted(model.state_dict().items()):
+        value = tensor.detach().cpu().contiguous()
+        digest.update(name.encode())
+        digest.update(str(value.dtype).encode())
+        digest.update(str(tuple(value.shape)).encode())
+        digest.update(value.view(torch.uint8).numpy().tobytes())
+    return digest.hexdigest()

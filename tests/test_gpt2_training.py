@@ -11,6 +11,7 @@ from ai_journey.gpt2_training import (
     GPT2TrainingConfig,
     GPT2TrainingError,
     build_gpt2_optimizer,
+    gpt2_model_fingerprint,
     language_model_loss,
     learning_rate_at,
     optimizer_group_summary,
@@ -384,3 +385,13 @@ def test_optimizer_step_rolls_back_model_optimizer_cursor_rng_and_mode(monkeypat
     assert torch.equal(torch.get_rng_state(), rng_before)
     for name, value in model.state_dict().items():
         torch.testing.assert_close(value, model_before[name], rtol=0, atol=0)
+
+
+def test_model_fingerprint_binds_names_shapes_dtypes_and_values():
+    model = make_model()
+    original = gpt2_model_fingerprint(model)
+
+    assert original == gpt2_model_fingerprint(make_model())
+    with torch.no_grad():
+        model.h[0].ln_1.weight[0] += 1
+    assert gpt2_model_fingerprint(model) != original
