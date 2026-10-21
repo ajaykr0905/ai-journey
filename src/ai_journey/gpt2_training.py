@@ -8,6 +8,9 @@ from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 import math
+import os
+from pathlib import Path
+import tempfile
 from typing import Any
 
 import torch
@@ -19,6 +22,9 @@ from .gpt2_model import GPT2LanguageModel
 
 class GPT2TrainingError(ValueError):
     """Raised when a GPT-2 training contract or run is invalid."""
+
+
+GPT2_TRAINING_CHECKPOINT_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -549,3 +555,69 @@ def train_optimizer_steps(
         )
         for step in range(start_step, start_step + count)
     )
+
+
+def save_training_checkpoint(
+    path: Path,
+    *,
+    model: GPT2LanguageModel,
+    optimizer: torch.optim.Optimizer,
+    cursor: GPT2BatchCursor,
+    config: GPT2TrainingConfig,
+    corpus_fingerprint: str,
+    step: int,
+) -> None:
+    """Atomically and durably save exact GPT-2 training restart state."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if isinstance(step, bool) or not isinstance(step, int):
+        raise TypeError("step must be an integer")
+    if not 0 <= step <= config.optimizer_steps:
+        raise GPT2TrainingError("checkpoint step must fit the optimizer schedule")
+    if (
+        not isinstance(corpus_fingerprint, str)
+        or len(corpus_fingerprint) != 64
+        or any(character not in "0123456789abcdef" for character in corpus_fingerprint)
+    ):
+        raise GPT2TrainingError("corpus_fingerprint must be a SHA-256 digest")
+    _validate_optimizer_binding(model, optimizer)
+    payload = {
+        "schema_version": GPT2_TRAINING_CHECKPOINT_SCHEMA_VERSION,
+        "step": step,
+        "model_config": asdict(model.config),
+        "training_config": asdict(config),
+        "training_fingerprint": config.fingerprint(),
+        "corpus_fingerprint": corpus_fingerprint,
+        "cursor_fingerprint": cursor.fingerprint(),
+        "model_fingerprint": gpt2_model_fingerprint(model),
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "cursor_state": cursor.state_dict(),
+        "torch_rng_state": torch.get_rng_state(),
+    }
+    _require_finite_state(payload, "checkpoint")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            torch.save(payload, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        temporary = None
+        descriptor = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)

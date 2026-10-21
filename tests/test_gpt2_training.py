@@ -15,6 +15,7 @@ from ai_journey.gpt2_training import (
     language_model_loss,
     learning_rate_at,
     optimizer_group_summary,
+    save_training_checkpoint,
     train_optimizer_step,
     train_optimizer_steps,
 )
@@ -440,4 +441,55 @@ def test_training_loop_rejects_invalid_schedule_segments(start_step, step_count)
             config,
             start_step=start_step,
             step_count=step_count,
+        )
+
+
+def test_checkpoint_atomically_records_exact_restart_contract(tmp_path):
+    config = make_config(
+        optimizer_steps=2,
+        warmup_steps=0,
+        micro_batch_size=2,
+        accumulation_steps=2,
+    )
+    corpus = GPT2ByteCorpus.from_bytes(bytes(range(100)))
+    model = make_model()
+    cursor = GPT2BatchCursor(corpus, config)
+    optimizer = build_gpt2_optimizer(model, config)
+    metric = train_optimizer_step(model, cursor, optimizer, config, step=0)
+    path = tmp_path / "checkpoint.pt"
+
+    save_training_checkpoint(
+        path,
+        model=model,
+        optimizer=optimizer,
+        cursor=cursor,
+        config=config,
+        corpus_fingerprint=corpus.fingerprint(),
+        step=metric.step,
+    )
+
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    assert payload["schema_version"] == 1
+    assert payload["step"] == 1
+    assert payload["training_fingerprint"] == config.fingerprint()
+    assert payload["corpus_fingerprint"] == corpus.fingerprint()
+    assert payload["cursor_fingerprint"] == cursor.fingerprint()
+    assert payload["model_fingerprint"] == gpt2_model_fingerprint(model)
+    assert payload["cursor_state"] == cursor.state_dict()
+    assert not list(tmp_path.glob(".checkpoint.pt.*.tmp"))
+
+
+def test_checkpoint_rejects_step_outside_schedule(tmp_path):
+    config = make_config(optimizer_steps=2)
+    corpus = GPT2ByteCorpus.from_bytes(bytes(range(100)))
+    model = make_model()
+    with pytest.raises(GPT2TrainingError, match="step must fit"):
+        save_training_checkpoint(
+            tmp_path / "checkpoint.pt",
+            model=model,
+            optimizer=build_gpt2_optimizer(model, config),
+            cursor=GPT2BatchCursor(corpus, config),
+            config=config,
+            corpus_fingerprint=corpus.fingerprint(),
+            step=3,
         )
