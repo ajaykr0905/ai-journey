@@ -1,6 +1,7 @@
 """Executable acceptance oracles for real multi-process training and recovery."""
 
 from pathlib import Path
+import json
 
 import torch
 
@@ -79,4 +80,53 @@ def certify_recovery(
         "model_sha256": continuous[0]["model_sha256"],
         "initial_worker_pids": [rank["pid"] for rank in first],
         "resumed_worker_pids": [rank["pid"] for rank in resumed],
+    }
+
+
+def certify_batch_equivalence(
+    *, source: Path, spec: Path, directory: Path, world_size=2, steps=2, tolerance=1e-10
+) -> dict:
+    """Compare DDP against one process with the same effective global batch."""
+    directory.mkdir(parents=True, exist_ok=True)
+    payload = json.loads(spec.read_text())
+    payload["training"]["micro_batch_size"] *= world_size
+    serial_spec = directory / "serial-spec.json"
+    serial_spec.write_text(json.dumps(payload))
+    distributed_path, serial_path = (
+        directory / "distributed.pt",
+        directory / "serial.pt",
+    )
+    distributed = launch_training(
+        source=source,
+        spec=spec,
+        checkpoint=distributed_path,
+        output_dir=directory / "distributed",
+        world_size=world_size,
+        steps=steps,
+    )
+    serial = launch_training(
+        source=source,
+        spec=serial_spec,
+        checkpoint=serial_path,
+        output_dir=directory / "serial",
+        world_size=1,
+        steps=steps,
+    )
+    expected = bounded_checkpoint_load(serial_path, 64 * 1024 * 1024)["model"]
+    actual = bounded_checkpoint_load(distributed_path, 64 * 1024 * 1024)["model"]
+    maximum_error = max(
+        (expected[name] - actual[name]).abs().max().item() for name in expected
+    )
+    if maximum_error > tolerance or [
+        metric["tokens"] for metric in distributed[0]["metrics"]
+    ] != [metric["tokens"] for metric in serial[0]["metrics"]]:
+        raise RuntimeError("DDP does not match the equivalent global-batch oracle")
+    return {
+        "world_size": world_size,
+        "steps": steps,
+        "max_parameter_error": maximum_error,
+        "absolute_tolerance": tolerance,
+        "global_batch_size": payload["training"]["micro_batch_size"]
+        * payload["training"]["accumulation_steps"],
+        "equivalent": True,
     }
