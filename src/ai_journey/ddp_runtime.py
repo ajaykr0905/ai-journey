@@ -4,6 +4,9 @@ from contextlib import contextmanager
 from datetime import timedelta
 
 import torch.distributed as dist
+import torch
+
+from .ddp_metrics import weighted_mean
 
 from .ddp_contracts import Topology, integer
 
@@ -32,3 +35,12 @@ def process_group(topology: Topology, *, rendezvous: str, timeout_seconds: int =
         yield topology
     finally:
         dist.destroy_process_group()
+
+
+def reduce_token_totals(loss_sum: float, tokens: int) -> tuple[float, int, float]:
+    """Reduce additive statistics; never average rank means."""
+    weighted_mean([(loss_sum, tokens)])
+    values = torch.tensor([loss_sum, tokens], dtype=torch.float64)
+    dist.all_reduce(values, op=dist.ReduceOp.SUM)
+    total_loss, total_tokens = values.tolist()
+    return total_loss, int(total_tokens), total_loss / total_tokens
