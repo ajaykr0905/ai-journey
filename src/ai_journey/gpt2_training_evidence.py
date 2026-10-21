@@ -6,8 +6,10 @@ from dataclasses import asdict
 from hashlib import sha256
 import json
 import math
+from pathlib import Path
 import platform
 import re
+import tempfile
 from typing import Any, Mapping
 
 import torch
@@ -17,6 +19,7 @@ from .gpt2_training import (
     GPT2StepMetric,
     GPT2TrainingError,
     GPT2TrainingRun,
+    run_training_experiment,
     training_spec_from_mapping,
 )
 
@@ -240,3 +243,22 @@ def verify_training_evidence(payload: Mapping[str, Any]) -> dict[str, Any]:
     if payload["limitations"] != list(GPT2_TRAINING_LIMITATIONS):
         raise GPT2TrainingError("training evidence limitations are invalid")
     return dict(payload)
+
+
+def verify_training_replay(source: bytes, payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Re-run a fresh process-equivalent experiment and require exact evidence."""
+
+    if not isinstance(source, bytes):
+        raise TypeError("source must be bytes")
+    expected = verify_training_evidence(payload)
+    spec = training_spec_from_mapping(expected["spec"])
+    with tempfile.TemporaryDirectory(prefix="gpt2-training-replay-") as directory:
+        run = run_training_experiment(
+            source,
+            spec,
+            checkpoint_path=Path(directory) / "checkpoint.pt",
+        )
+    actual = build_training_evidence(run)
+    if actual != expected:
+        raise GPT2TrainingError("fresh GPT-2 training replay does not match evidence")
+    return actual

@@ -15,6 +15,7 @@ from ai_journey.gpt2_training_evidence import (
     GPT2_TRAINING_LIMITATIONS,
     build_training_evidence,
     verify_training_evidence,
+    verify_training_replay,
 )
 
 
@@ -100,3 +101,17 @@ def test_training_evidence_preserves_declared_spec(tmp_path):
     assert evidence["spec"]["model"] == asdict(run.spec.model)
     assert evidence["spec"]["training"] == asdict(run.spec.training)
     assert evidence["spec"]["source"] == asdict(run.spec.source)
+
+
+def test_training_evidence_replays_exactly_from_source_bytes(tmp_path):
+    source = b"public training text\n" * 8
+    evidence = build_training_evidence(run_fixture(tmp_path))
+
+    assert verify_training_replay(source, evidence) == evidence
+
+
+def test_training_replay_rejects_different_source_bytes(tmp_path):
+    evidence = build_training_evidence(run_fixture(tmp_path))
+
+    with pytest.raises(GPT2TrainingError, match="source bytes"):
+        verify_training_replay(b"different source bytes", evidence)
