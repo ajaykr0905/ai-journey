@@ -350,3 +350,37 @@ def test_optimizer_step_records_schedule_and_gradient_clipping():
     assert metric.gradient_norm_after_clip <= config.gradient_clip
     assert metric.clipped is True
     assert metric.micro_batches == 2
+
+
+def test_optimizer_step_rolls_back_model_optimizer_cursor_rng_and_mode(monkeypatch):
+    config = make_config(
+        optimizer_steps=2,
+        warmup_steps=0,
+        micro_batch_size=2,
+        accumulation_steps=2,
+    )
+    corpus = GPT2ByteCorpus.from_bytes(bytes(range(100)))
+    model = make_model().eval()
+    cursor = GPT2BatchCursor(corpus, config)
+    optimizer = build_gpt2_optimizer(model, config)
+    model_before = {name: value.clone() for name, value in model.state_dict().items()}
+    optimizer_before = optimizer.state_dict()
+    cursor_before = cursor.state_dict()
+    rng_before = torch.get_rng_state().clone()
+    real_step = optimizer.step
+
+    def corrupt_step():
+        real_step()
+        with torch.no_grad():
+            next(model.parameters()).view(-1)[0] = float("inf")
+
+    monkeypatch.setattr(optimizer, "step", corrupt_step)
+    with pytest.raises(GPT2TrainingError, match=r"updated model.*must be finite"):
+        train_optimizer_step(model, cursor, optimizer, config, step=0)
+
+    assert model.training is False
+    assert cursor.state_dict() == cursor_before
+    assert optimizer.state_dict() == optimizer_before
+    assert torch.equal(torch.get_rng_state(), rng_before)
+    for name, value in model.state_dict().items():
+        torch.testing.assert_close(value, model_before[name], rtol=0, atol=0)

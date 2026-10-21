@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import copy
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 import math
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -405,6 +408,22 @@ def _gradient_norm(parameters: tuple[Tensor, ...]) -> float:
     return math.sqrt(total)
 
 
+def _require_finite_state(value: Any, name: str) -> None:
+    if isinstance(value, Tensor):
+        if (value.is_floating_point() or value.is_complex()) and not bool(
+            torch.isfinite(value).all()
+        ):
+            raise GPT2TrainingError(f"{name} must be finite")
+    elif isinstance(value, float) and not math.isfinite(value):
+        raise GPT2TrainingError(f"{name} must be finite")
+    elif isinstance(value, Mapping):
+        for key, item in value.items():
+            _require_finite_state(item, f"{name}.{key}")
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _require_finite_state(item, f"{name}[{index}]")
+
+
 def train_optimizer_step(
     model: GPT2LanguageModel,
     cursor: GPT2BatchCursor,
@@ -424,36 +443,62 @@ def train_optimizer_step(
     if cursor.sequence_length > model.config.context_length:
         raise GPT2TrainingError("cursor sequence exceeds model context length")
     _validate_optimizer_binding(model, optimizer)
-    learning_rate = learning_rate_at(step, config)
-    for group in optimizer.param_groups:
-        group["lr"] = learning_rate
-    optimizer.zero_grad(set_to_none=True)
-    losses: list[float] = []
-    for _ in range(config.accumulation_steps):
-        inputs, targets = cursor.next()
-        loss = language_model_loss(model, inputs, targets)
-        losses.append(float(loss.detach()))
-        (loss / config.accumulation_steps).backward()
     parameters = tuple(model.parameters())
-    if any(
-        parameter.grad is None or not bool(torch.isfinite(parameter.grad).all())
+    saved_model = copy.deepcopy(model.state_dict())
+    saved_optimizer = copy.deepcopy(optimizer.state_dict())
+    saved_cursor = cursor.state_dict()
+    saved_rng = torch.get_rng_state().clone()
+    saved_gradients = [
+        None if parameter.grad is None else parameter.grad.detach().clone()
         for parameter in parameters
-    ):
-        raise GPT2TrainingError("all GPT-2 gradients must be present and finite")
-    norm_before = float(
-        torch.nn.utils.clip_grad_norm_(
-            parameters, config.gradient_clip, error_if_nonfinite=True
+    ]
+    caller_modes = [(module, module.training) for module in model.modules()]
+    try:
+        model.train()
+        learning_rate = learning_rate_at(step, config)
+        for group in optimizer.param_groups:
+            group["lr"] = learning_rate
+        optimizer.zero_grad(set_to_none=True)
+        losses: list[float] = []
+        for _ in range(config.accumulation_steps):
+            inputs, targets = cursor.next()
+            loss = language_model_loss(model, inputs, targets)
+            losses.append(float(loss.detach()))
+            (loss / config.accumulation_steps).backward()
+        if any(
+            parameter.grad is None or not bool(torch.isfinite(parameter.grad).all())
+            for parameter in parameters
+        ):
+            raise GPT2TrainingError("all GPT-2 gradients must be present and finite")
+        norm_before = float(
+            torch.nn.utils.clip_grad_norm_(
+                parameters, config.gradient_clip, error_if_nonfinite=True
+            )
         )
-    )
-    norm_after = _gradient_norm(parameters)
-    optimizer.step()
-    return GPT2StepMetric(
-        step=step + 1,
-        mean_loss=math.fsum(losses) / len(losses),
-        learning_rate=learning_rate,
-        gradient_norm_before_clip=norm_before,
-        gradient_norm_after_clip=norm_after,
-        clipped=norm_before > config.gradient_clip,
-        micro_batches=config.accumulation_steps,
-        target_tokens=config.tokens_per_step,
-    )
+        norm_after = _gradient_norm(parameters)
+        optimizer.step()
+        _require_finite_state(model.state_dict(), "updated model")
+        _require_finite_state(optimizer.state_dict(), "updated optimizer")
+        metric = GPT2StepMetric(
+            step=step + 1,
+            mean_loss=math.fsum(losses) / len(losses),
+            learning_rate=learning_rate,
+            gradient_norm_before_clip=norm_before,
+            gradient_norm_after_clip=norm_after,
+            clipped=norm_before > config.gradient_clip,
+            micro_batches=config.accumulation_steps,
+            target_tokens=config.tokens_per_step,
+        )
+        optimizer.zero_grad(set_to_none=True)
+    except Exception:
+        model.load_state_dict(saved_model)
+        optimizer.load_state_dict(saved_optimizer)
+        cursor.load_state_dict(saved_cursor)
+        torch.set_rng_state(saved_rng)
+        for parameter, gradient in zip(parameters, saved_gradients, strict=True):
+            parameter.grad = gradient
+        raise
+    finally:
+        for module, mode in caller_modes:
+            module.training = mode
+    return metric
