@@ -66,3 +66,27 @@ def test_empty_accumulation_fails_before_optimizer_work(tmp_path):
                 torch.optim.SGD(model.parameters(), lr=0.1),
                 [],
             )
+
+
+def test_partial_optimizer_failure_restores_parameters_rng_and_modes(tmp_path):
+    model = make_model().eval()
+    original = copy.deepcopy(model.state_dict())
+
+    class FailingSGD(torch.optim.SGD):
+        def step(self, closure=None):
+            super().step(closure)
+            torch.rand(3)
+            raise RuntimeError("injected optimizer failure")
+
+    optimizer = FailingSGD(model.parameters(), lr=0.1)
+    with process_group(Topology(0, 1), rendezvous=(tmp_path / "rdzv").as_uri()):
+        wrapped = DistributedDataParallel(model)
+        rng = torch.get_rng_state().clone()
+        with pytest.raises(RuntimeError, match="optimizer update"):
+            accumulated_update(
+                wrapped, optimizer, [(torch.tensor([[0, 1]]), torch.tensor([[1, 2]]))]
+            )
+        assert torch.equal(torch.get_rng_state(), rng)
+    assert not model.training
+    for name, value in model.state_dict().items():
+        assert torch.equal(value, original[name])

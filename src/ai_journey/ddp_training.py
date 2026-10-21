@@ -1,6 +1,7 @@
 """Replicated GPT-2 optimizer steps with explicit accumulation boundaries."""
 
 from contextlib import nullcontext
+import copy
 
 import torch
 import torch.distributed as dist
@@ -10,7 +11,7 @@ from .ddp_metrics import token_nll
 from .ddp_runtime import require_all_ranks
 
 
-def accumulated_update(
+def _accumulated_update(
     model: DistributedDataParallel, optimizer, batches, *, gradient_clip: float = 1.0
 ) -> dict:
     """Synchronize only the final micro-batch and perform one optimizer update."""
@@ -73,7 +74,12 @@ def accumulated_update(
     norm = torch.nn.utils.clip_grad_norm_(
         model.parameters(), gradient_clip, error_if_nonfinite=True
     ).item()
-    optimizer.step()
+    stepped = True
+    try:
+        optimizer.step()
+    except (RuntimeError, ValueError):
+        stepped = False
+    require_all_ranks(stepped, phase="optimizer update")
     return {
         "loss_sum": total_loss,
         "tokens": tokens,
@@ -81,3 +87,27 @@ def accumulated_update(
         "gradient_norm": norm,
         "clipped": norm > gradient_clip,
     }
+
+
+def accumulated_update(model, optimizer, batches, *, gradient_clip=1.0) -> dict:
+    """Restore caller state if any rank rejects a synchronous optimizer update."""
+    parameters = tuple(model.parameters())
+    saved_model = copy.deepcopy(model.state_dict())
+    saved_optimizer = copy.deepcopy(optimizer.state_dict())
+    saved_rng = torch.get_rng_state().clone()
+    saved_gradients = [None if p.grad is None else p.grad.clone() for p in parameters]
+    modes = [(module, module.training) for module in model.modules()]
+    try:
+        return _accumulated_update(
+            model, optimizer, batches, gradient_clip=gradient_clip
+        )
+    except Exception:
+        model.load_state_dict(saved_model)
+        optimizer.load_state_dict(saved_optimizer)
+        torch.set_rng_state(saved_rng)
+        for parameter, gradient in zip(parameters, saved_gradients, strict=True):
+            parameter.grad = gradient
+        raise
+    finally:
+        for module, mode in modes:
+            module.training = mode
