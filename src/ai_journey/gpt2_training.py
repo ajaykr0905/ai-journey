@@ -33,6 +33,20 @@ class GPT2OptimizerGroups:
 
 
 @dataclass(frozen=True)
+class GPT2StepMetric:
+    """Inspectable outcome of one accumulated optimizer update."""
+
+    step: int
+    mean_loss: float
+    learning_rate: float
+    gradient_norm_before_clip: float
+    gradient_norm_after_clip: float
+    clipped: bool
+    micro_batches: int
+    target_tokens: int
+
+
+@dataclass(frozen=True)
 class GPT2ByteCorpus:
     """Immutable byte-token corpus with exact source provenance."""
 
@@ -367,3 +381,79 @@ def language_model_loss(
     if not bool(torch.isfinite(loss)):
         raise GPT2TrainingError("training loss must be finite")
     return loss
+
+
+def _validate_optimizer_binding(
+    model: GPT2LanguageModel, optimizer: torch.optim.Optimizer
+) -> None:
+    if not isinstance(optimizer, torch.optim.Optimizer):
+        raise TypeError("optimizer must be torch.optim.Optimizer")
+    actual = [
+        id(parameter)
+        for group in optimizer.param_groups
+        for parameter in group["params"]
+    ]
+    expected = {id(parameter) for parameter in model.parameters()}
+    if len(actual) != len(set(actual)) or set(actual) != expected:
+        raise GPT2TrainingError("optimizer parameters must match the complete model")
+
+
+def _gradient_norm(parameters: tuple[Tensor, ...]) -> float:
+    total = math.fsum(
+        float(parameter.grad.detach().double().pow(2).sum()) for parameter in parameters
+    )
+    return math.sqrt(total)
+
+
+def train_optimizer_step(
+    model: GPT2LanguageModel,
+    cursor: GPT2BatchCursor,
+    optimizer: torch.optim.Optimizer,
+    config: GPT2TrainingConfig,
+    *,
+    step: int,
+) -> GPT2StepMetric:
+    """Accumulate exact mean gradients and apply one scheduled clipped update."""
+
+    if not isinstance(model, GPT2LanguageModel):
+        raise TypeError("model must be GPT2LanguageModel")
+    if not isinstance(cursor, GPT2BatchCursor):
+        raise TypeError("cursor must be GPT2BatchCursor")
+    if not isinstance(config, GPT2TrainingConfig):
+        raise TypeError("config must be GPT2TrainingConfig")
+    if cursor.sequence_length > model.config.context_length:
+        raise GPT2TrainingError("cursor sequence exceeds model context length")
+    _validate_optimizer_binding(model, optimizer)
+    learning_rate = learning_rate_at(step, config)
+    for group in optimizer.param_groups:
+        group["lr"] = learning_rate
+    optimizer.zero_grad(set_to_none=True)
+    losses: list[float] = []
+    for _ in range(config.accumulation_steps):
+        inputs, targets = cursor.next()
+        loss = language_model_loss(model, inputs, targets)
+        losses.append(float(loss.detach()))
+        (loss / config.accumulation_steps).backward()
+    parameters = tuple(model.parameters())
+    if any(
+        parameter.grad is None or not bool(torch.isfinite(parameter.grad).all())
+        for parameter in parameters
+    ):
+        raise GPT2TrainingError("all GPT-2 gradients must be present and finite")
+    norm_before = float(
+        torch.nn.utils.clip_grad_norm_(
+            parameters, config.gradient_clip, error_if_nonfinite=True
+        )
+    )
+    norm_after = _gradient_norm(parameters)
+    optimizer.step()
+    return GPT2StepMetric(
+        step=step + 1,
+        mean_loss=math.fsum(losses) / len(losses),
+        learning_rate=learning_rate,
+        gradient_norm_before_clip=norm_before,
+        gradient_norm_after_clip=norm_after,
+        clipped=norm_before > config.gradient_clip,
+        micro_batches=config.accumulation_steps,
+        target_tokens=config.tokens_per_step,
+    )

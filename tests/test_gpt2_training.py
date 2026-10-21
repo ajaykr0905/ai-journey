@@ -14,6 +14,7 @@ from ai_journey.gpt2_training import (
     language_model_loss,
     learning_rate_at,
     optimizer_group_summary,
+    train_optimizer_step,
 )
 
 
@@ -276,3 +277,76 @@ def test_language_model_loss_matches_direct_cross_entropy():
 def test_language_model_loss_rejects_invalid_batches(inputs, targets, message):
     with pytest.raises((GPT2TrainingError, TypeError), match=message):
         language_model_loss(make_model(), inputs, targets)
+
+
+def test_gradient_accumulation_matches_one_large_batch_update():
+    corpus = GPT2ByteCorpus.from_bytes(bytes(range(100)))
+    accumulated_config = make_config(
+        optimizer_steps=2,
+        micro_batch_size=2,
+        accumulation_steps=2,
+        warmup_steps=0,
+        gradient_clip=1_000.0,
+    )
+    large_batch_config = make_config(
+        optimizer_steps=2,
+        micro_batch_size=4,
+        accumulation_steps=1,
+        warmup_steps=0,
+        gradient_clip=1_000.0,
+    )
+    accumulated = make_model()
+    large_batch = make_model()
+    accumulated_optimizer = build_gpt2_optimizer(accumulated, accumulated_config)
+    large_batch_optimizer = build_gpt2_optimizer(large_batch, large_batch_config)
+
+    accumulated_metric = train_optimizer_step(
+        accumulated,
+        GPT2BatchCursor(corpus, accumulated_config),
+        accumulated_optimizer,
+        accumulated_config,
+        step=0,
+    )
+    large_batch_metric = train_optimizer_step(
+        large_batch,
+        GPT2BatchCursor(corpus, large_batch_config),
+        large_batch_optimizer,
+        large_batch_config,
+        step=0,
+    )
+
+    assert accumulated_metric.target_tokens == large_batch_metric.target_tokens == 32
+    assert accumulated_metric.mean_loss == pytest.approx(
+        large_batch_metric.mean_loss, abs=2e-6
+    )
+    for accumulated_parameter, large_batch_parameter in zip(
+        accumulated.parameters(), large_batch.parameters(), strict=True
+    ):
+        torch.testing.assert_close(
+            accumulated_parameter, large_batch_parameter, rtol=2e-6, atol=5e-7
+        )
+
+
+def test_optimizer_step_records_schedule_and_gradient_clipping():
+    config = make_config(
+        optimizer_steps=2,
+        warmup_steps=0,
+        gradient_clip=1e-3,
+        micro_batch_size=2,
+        accumulation_steps=2,
+    )
+    model = make_model()
+    metric = train_optimizer_step(
+        model,
+        GPT2BatchCursor(GPT2ByteCorpus.from_bytes(bytes(range(100))), config),
+        build_gpt2_optimizer(model, config),
+        config,
+        step=0,
+    )
+
+    assert metric.step == 1
+    assert metric.learning_rate == pytest.approx(config.max_learning_rate)
+    assert metric.gradient_norm_before_clip > config.gradient_clip
+    assert metric.gradient_norm_after_clip <= config.gradient_clip
+    assert metric.clipped is True
+    assert metric.micro_batches == 2
