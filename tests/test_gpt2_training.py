@@ -8,6 +8,7 @@ from ai_journey.gpt2_training import (
     GPT2BatchCursor,
     GPT2TrainingConfig,
     GPT2TrainingError,
+    learning_rate_at,
 )
 
 
@@ -151,3 +152,36 @@ def test_batch_cursor_rejects_invalid_restart_boundaries(state):
     )
     with pytest.raises((GPT2TrainingError, TypeError)):
         cursor.load_state_dict(state)
+
+
+def test_learning_rate_warms_up_and_cosine_decays_to_floor():
+    config = make_config(optimizer_steps=6, warmup_steps=2)
+    rates = [learning_rate_at(step, config) for step in range(6)]
+
+    assert rates[:2] == pytest.approx([1.5e-3, 3e-3])
+    assert rates[2] == pytest.approx(config.max_learning_rate)
+    assert rates[-1] == pytest.approx(config.min_learning_rate)
+    assert rates[2:] == sorted(rates[2:], reverse=True)
+
+
+def test_learning_rate_supports_no_warmup_and_all_warmup():
+    no_warmup = make_config(optimizer_steps=3, warmup_steps=0)
+    all_warmup = make_config(optimizer_steps=3, warmup_steps=3)
+
+    assert [learning_rate_at(step, no_warmup) for step in range(3)] == pytest.approx(
+        [3e-3, 1.65e-3, 3e-4]
+    )
+    assert [learning_rate_at(step, all_warmup) for step in range(3)] == pytest.approx(
+        [1e-3, 2e-3, 3e-3]
+    )
+
+
+def test_single_decay_step_uses_learning_rate_floor():
+    config = make_config(optimizer_steps=3, warmup_steps=2)
+    assert learning_rate_at(2, config) == pytest.approx(config.min_learning_rate)
+
+
+@pytest.mark.parametrize("step", [-1, 12, True, 1.5])
+def test_learning_rate_rejects_steps_outside_schedule(step):
+    with pytest.raises((GPT2TrainingError, TypeError)):
+        learning_rate_at(step, make_config())

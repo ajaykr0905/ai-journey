@@ -259,3 +259,24 @@ class GPT2TrainingConfig:
 
         payload = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
         return sha256(payload.encode()).hexdigest()
+
+
+def learning_rate_at(step: int, config: GPT2TrainingConfig) -> float:
+    """Return linear warmup followed by cosine decay to the declared floor."""
+
+    if isinstance(step, bool) or not isinstance(step, int):
+        raise TypeError("step must be an integer")
+    if not isinstance(config, GPT2TrainingConfig):
+        raise TypeError("config must be GPT2TrainingConfig")
+    if not 0 <= step < config.optimizer_steps:
+        raise GPT2TrainingError("step must be in the configured optimizer schedule")
+    if step < config.warmup_steps:
+        return config.max_learning_rate * (step + 1) / config.warmup_steps
+    decay_steps = config.optimizer_steps - config.warmup_steps
+    if decay_steps == 1:
+        return config.min_learning_rate
+    progress = (step - config.warmup_steps) / (decay_steps - 1)
+    coefficient = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return config.min_learning_rate + coefficient * (
+        config.max_learning_rate - config.min_learning_rate
+    )
