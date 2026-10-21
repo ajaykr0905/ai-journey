@@ -5,6 +5,8 @@ from torch.nn.parallel import DistributedDataParallel
 from ai_journey.ddp_contracts import Topology
 from ai_journey.ddp_runtime import process_group
 from ai_journey.ddp_training import accumulated_update
+from ai_journey.ddp_training import train_segment
+from ai_journey.gpt2_training import GPT2TrainingConfig
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 
@@ -16,6 +18,36 @@ def make_model():
             8, 4, 8, 2, 1, embedding_dropout=0, attention_dropout=0, residual_dropout=0
         )
     ).double()
+
+
+def test_schedule_segments_reconstruct_epoch_boundaries(tmp_path):
+    model = make_model()
+    config = GPT2TrainingConfig(
+        optimizer_steps=3,
+        micro_batch_size=1,
+        accumulation_steps=2,
+        sequence_length=4,
+        max_learning_rate=0.01,
+        min_learning_rate=0.001,
+        warmup_steps=0,
+        weight_decay=0,
+        gradient_clip=1,
+        seed=48,
+    )
+    source = bytes(range(8)) * 3
+    with process_group(Topology(0, 1), rendezvous=(tmp_path / "rdzv").as_uri()):
+        metrics = train_segment(
+            DistributedDataParallel(model),
+            torch.optim.SGD(model.parameters(), lr=0.01),
+            source,
+            config,
+            Topology(0, 1),
+            start_step=0,
+            steps=3,
+        )
+    assert [metric["step"] for metric in metrics] == [1, 2, 3]
+    assert [metric["tokens"] for metric in metrics] == [8, 8, 8]
+    assert metrics[0]["model_sha256"] != metrics[-1]["model_sha256"]
 
 
 def test_nonfinite_gradient_cannot_advance_any_optimizer(tmp_path):

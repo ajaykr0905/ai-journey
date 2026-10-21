@@ -9,6 +9,10 @@ from torch.nn.parallel import DistributedDataParallel
 
 from .ddp_metrics import token_nll
 from .ddp_runtime import require_all_ranks
+from .ddp_runtime import reduce_token_totals, require_model_consensus
+from .ddp_data import byte_batches
+from .ddp_contracts import integer
+from .gpt2_training import learning_rate_at
 
 
 def _accumulated_update(
@@ -111,3 +115,57 @@ def accumulated_update(model, optimizer, batches, *, gradient_clip=1.0) -> dict:
     finally:
         for module, mode in modes:
             module.training = mode
+
+
+def train_segment(
+    model, optimizer, source: bytes, config, topology, *, start_step: int, steps: int
+) -> list[dict]:
+    """Reconstruct rank-local epoch cursors from the durable global update count."""
+    integer(start_step, "start_step")
+    integer(steps, "steps", 1)
+    if start_step + steps > config.optimizer_steps:
+        raise ValueError("segment exceeds the optimizer schedule")
+    metrics = []
+    for step in range(start_step, start_step + steps):
+        batches, plan = byte_batches(
+            source,
+            sequence_length=config.sequence_length,
+            topology=topology,
+            micro_batch_size=config.micro_batch_size,
+            accumulation_steps=config.accumulation_steps,
+            seed=config.seed,
+        )
+        epoch, offset = divmod(step, plan.updates_per_epoch)
+        if epoch:
+            batches, _ = byte_batches(
+                source,
+                sequence_length=config.sequence_length,
+                topology=topology,
+                micro_batch_size=config.micro_batch_size,
+                accumulation_steps=config.accumulation_steps,
+                seed=config.seed,
+                epoch=epoch,
+            )
+        learning_rate = learning_rate_at(step, config)
+        for group in optimizer.param_groups:
+            group["lr"] = learning_rate
+        begin = offset * config.accumulation_steps
+        result = accumulated_update(
+            model,
+            optimizer,
+            batches[begin : begin + config.accumulation_steps],
+            gradient_clip=config.gradient_clip,
+        )
+        loss, tokens, mean = reduce_token_totals(result["loss_sum"], result["tokens"])
+        metrics.append(
+            {
+                **result,
+                "step": step + 1,
+                "loss_sum": loss,
+                "tokens": tokens,
+                "mean_loss": mean,
+                "learning_rate": learning_rate,
+                "model_sha256": require_model_consensus(model.module),
+            }
+        )
+    return metrics
