@@ -60,7 +60,7 @@ def test_ddp_accumulation_matches_a_complete_batch(tmp_path):
 def test_empty_accumulation_fails_before_optimizer_work(tmp_path):
     model = make_model()
     with process_group(Topology(0, 1), rendezvous=(tmp_path / "rdzv").as_uri()):
-        with pytest.raises(ValueError, match="micro-batch"):
+        with pytest.raises(RuntimeError, match="micro-batch"):
             accumulated_update(
                 DistributedDataParallel(model),
                 torch.optim.SGD(model.parameters(), lr=0.1),

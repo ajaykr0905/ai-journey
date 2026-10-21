@@ -3,6 +3,7 @@
 from contextlib import nullcontext
 
 import torch
+import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 
 from .ddp_metrics import token_nll
@@ -22,10 +23,37 @@ def accumulated_update(
     ):
         raise ValueError("gradient_clip must be positive and finite")
     batches = tuple(batches)
-    if not batches:
-        raise ValueError("at least one micro-batch is required")
-    if len({tuple(inputs.shape) for inputs, _ in batches}) != 1:
-        raise ValueError("accumulation requires equal micro-batch shapes")
+    valid = bool(batches)
+    for inputs, targets in batches:
+        valid = (
+            valid
+            and isinstance(inputs, torch.Tensor)
+            and isinstance(targets, torch.Tensor)
+        )
+        if not valid:
+            break
+        valid = (
+            inputs.dtype == targets.dtype == torch.long
+            and inputs.ndim == 2
+            and inputs.shape == targets.shape
+            and 0 < inputs.shape[1] <= model.module.config.context_length
+            and inputs.numel() > 0
+        )
+        if valid:
+            valid = (
+                min(inputs.min().item(), targets.min().item()) >= 0
+                and max(inputs.max().item(), targets.max().item())
+                < model.module.config.vocab_size
+            )
+    require_all_ranks(valid, phase="micro-batch validation")
+    signature = (len(batches), tuple(batches[0][0].shape))
+    signatures = [None] * dist.get_world_size()
+    dist.all_gather_object(signatures, signature)
+    local_shapes_equal = len({tuple(inputs.shape) for inputs, _ in batches}) == 1
+    require_all_ranks(
+        local_shapes_equal and all(value == signature for value in signatures),
+        phase="micro-batch schedule agreement",
+    )
     optimizer.zero_grad(set_to_none=True)
     total_loss = 0.0
     tokens = 0
