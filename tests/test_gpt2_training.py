@@ -1,6 +1,13 @@
-import pytest
+from hashlib import sha256
 
-from ai_journey.gpt2_training import GPT2TrainingConfig, GPT2TrainingError
+import pytest
+import torch
+
+from ai_journey.gpt2_training import (
+    GPT2ByteCorpus,
+    GPT2TrainingConfig,
+    GPT2TrainingError,
+)
 
 
 def make_config(**overrides):
@@ -52,3 +59,33 @@ def test_training_config_accounts_for_effective_batch_and_tokens():
 def test_training_config_rejects_invalid_controls(name, value, exception):
     with pytest.raises(exception):
         make_config(**{name: value})
+
+
+def test_byte_corpus_preserves_source_and_owns_its_tokens():
+    source = b"public training text\n"
+    corpus = GPT2ByteCorpus.from_bytes(source)
+
+    assert corpus.tokens.tolist() == list(source)
+    assert corpus.source_sha256 == sha256(source).hexdigest()
+    assert corpus.fingerprint() == GPT2ByteCorpus.from_bytes(source).fingerprint()
+
+    caller_tokens = torch.tensor(list(source), dtype=torch.long)
+    independent = GPT2ByteCorpus(caller_tokens, sha256(source).hexdigest())
+    caller_tokens.zero_()
+    assert independent.tokens.tolist() == list(source)
+
+
+@pytest.mark.parametrize("source", [b"", b"x"])
+def test_byte_corpus_rejects_too_short_sources(source):
+    with pytest.raises(GPT2TrainingError, match="at least two bytes"):
+        GPT2ByteCorpus.from_bytes(source)
+
+
+def test_byte_corpus_enforces_input_budget():
+    with pytest.raises(GPT2TrainingError, match="exceeds max_bytes"):
+        GPT2ByteCorpus.from_bytes(b"abc", max_bytes=2)
+
+
+def test_byte_corpus_rejects_out_of_range_tokens():
+    with pytest.raises(GPT2TrainingError, match=r"in \[0, 255\]"):
+        GPT2ByteCorpus(torch.tensor([0, 256]), "0" * 64)

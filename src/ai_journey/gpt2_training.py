@@ -7,9 +7,72 @@ from hashlib import sha256
 import json
 import math
 
+import torch
+from torch import Tensor
+
 
 class GPT2TrainingError(ValueError):
     """Raised when a GPT-2 training contract or run is invalid."""
+
+
+@dataclass(frozen=True)
+class GPT2ByteCorpus:
+    """Immutable byte-token corpus with exact source provenance."""
+
+    tokens: Tensor
+    source_sha256: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.tokens, Tensor)
+            or self.tokens.layout != torch.strided
+            or self.tokens.device.type != "cpu"
+            or self.tokens.dtype != torch.long
+            or self.tokens.ndim != 1
+        ):
+            raise TypeError("tokens must be a dense one-dimensional CPU long tensor")
+        if self.tokens.numel() < 2:
+            raise GPT2TrainingError("byte corpus requires at least two tokens")
+        if bool(((self.tokens < 0) | (self.tokens > 255)).any()):
+            raise GPT2TrainingError("byte corpus token ids must be in [0, 255]")
+        if (
+            not isinstance(self.source_sha256, str)
+            or len(self.source_sha256) != 64
+            or any(
+                character not in "0123456789abcdef" for character in self.source_sha256
+            )
+        ):
+            raise GPT2TrainingError("source_sha256 must be a lowercase SHA-256 digest")
+        object.__setattr__(self, "tokens", self.tokens.detach().clone())
+
+    @classmethod
+    def from_bytes(
+        cls, source: bytes, *, max_bytes: int = 16 * 1024 * 1024
+    ) -> "GPT2ByteCorpus":
+        """Build a byte-token corpus under an explicit input-size budget."""
+
+        if not isinstance(source, bytes):
+            raise TypeError("source must be bytes")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int):
+            raise TypeError("max_bytes must be an integer")
+        if max_bytes <= 0:
+            raise GPT2TrainingError("max_bytes must be positive")
+        if len(source) < 2:
+            raise GPT2TrainingError("source must contain at least two bytes")
+        if len(source) > max_bytes:
+            raise GPT2TrainingError("source exceeds max_bytes")
+        return cls(
+            tokens=torch.tensor(tuple(source), dtype=torch.long),
+            source_sha256=sha256(source).hexdigest(),
+        )
+
+    def fingerprint(self) -> str:
+        """Bind the declared source digest to the materialized token sequence."""
+
+        digest = sha256()
+        digest.update(self.source_sha256.encode())
+        digest.update(self.tokens.numpy().tobytes())
+        return digest.hexdigest()
 
 
 @dataclass(frozen=True)
