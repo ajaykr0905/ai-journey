@@ -44,3 +44,15 @@ def reduce_token_totals(loss_sum: float, tokens: int) -> tuple[float, int, float
     dist.all_reduce(values, op=dist.ReduceOp.SUM)
     total_loss, total_tokens = values.tolist()
     return total_loss, int(total_tokens), total_loss / total_tokens
+
+
+def require_all_ranks(success: bool, *, phase: str) -> None:
+    """Make rank-local validation failure a common exception before the next phase."""
+    if not isinstance(success, bool):
+        raise TypeError("success must be boolean")
+    if not isinstance(phase, str) or not phase or len(phase) > 120:
+        raise ValueError("phase must be a bounded label")
+    status = torch.tensor(int(success), dtype=torch.int64)
+    dist.all_reduce(status, op=dist.ReduceOp.MIN)
+    if status.item() == 0:
+        raise RuntimeError(f"at least one rank failed {phase}")

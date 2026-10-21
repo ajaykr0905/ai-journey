@@ -4,6 +4,7 @@ import torch.distributed as dist
 from ai_journey.ddp_contracts import Topology
 from ai_journey.ddp_runtime import process_group
 from ai_journey.ddp_runtime import reduce_token_totals
+from ai_journey.ddp_runtime import require_all_ranks
 
 
 def test_owned_group_is_destroyed_when_work_raises(tmp_path):
@@ -27,3 +28,11 @@ def test_nested_group_cannot_destroy_its_caller(tmp_path):
 def test_collective_reduction_preserves_token_accounting(tmp_path):
     with process_group(Topology(0, 1), rendezvous=(tmp_path / "rdzv").as_uri()):
         assert reduce_token_totals(12.0, 3) == (12.0, 3, 4.0)
+
+
+def test_quorum_failure_is_raised_before_the_next_phase(tmp_path):
+    with process_group(Topology(0, 1), rendezvous=(tmp_path / "rdzv").as_uri()):
+        require_all_ranks(True, phase="input validation")
+        with pytest.raises(RuntimeError, match="input validation"):
+            require_all_ranks(False, phase="input validation")
+        require_all_ranks(True, phase="recovered collective")
