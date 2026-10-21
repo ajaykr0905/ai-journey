@@ -18,7 +18,7 @@ from torch import Tensor
 from torch.nn import functional as F
 
 from .gpt2_config import GPT2Config
-from .gpt2_model import GPT2LanguageModel
+from .gpt2_model import GPT2LanguageModel, expected_gpt2_parameter_count
 
 
 class GPT2TrainingError(ValueError):
@@ -27,6 +27,7 @@ class GPT2TrainingError(ValueError):
 
 GPT2_TRAINING_CHECKPOINT_SCHEMA_VERSION = 1
 GPT2_TRAINING_SPEC_SCHEMA_VERSION = 1
+GPT2_TRAINING_TORCH_THREADS = 1
 _GPT2_TRAINING_CHECKPOINT_FIELDS = {
     "schema_version",
     "step",
@@ -133,6 +134,24 @@ class GPT2TrainingSpec:
         return sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
+
+
+@dataclass(frozen=True)
+class GPT2TrainingRun:
+    """Measured state transition for one fresh or resumed training segment."""
+
+    spec: GPT2TrainingSpec
+    corpus_fingerprint: str
+    corpus_bytes: int
+    discarded_samples_per_epoch: int
+    optimizer_groups: GPT2OptimizerGroups
+    parameter_count: int
+    torch_threads: int
+    started_step: int
+    completed_step: int
+    initial_model_fingerprint: str
+    final_model_fingerprint: str
+    metrics: tuple[GPT2StepMetric, ...]
 
 
 @dataclass(frozen=True)
@@ -830,3 +849,88 @@ def load_training_spec(path: Path, *, max_bytes: int = 1024 * 1024) -> GPT2Train
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise GPT2TrainingError("training spec must be valid UTF-8 JSON") from exc
     return training_spec_from_mapping(payload)
+
+
+def run_training_experiment(
+    source: bytes,
+    spec: GPT2TrainingSpec,
+    *,
+    checkpoint_path: Path,
+    resume: bool = False,
+    max_parameters: int = 5_000_000,
+) -> GPT2TrainingRun:
+    """Run or resume a bounded deterministic byte-level GPT-2 experiment."""
+
+    if not isinstance(spec, GPT2TrainingSpec):
+        raise TypeError("spec must be GPT2TrainingSpec")
+    if not isinstance(checkpoint_path, Path):
+        raise TypeError("checkpoint_path must be pathlib.Path")
+    if not isinstance(resume, bool):
+        raise TypeError("resume must be a boolean")
+    if isinstance(max_parameters, bool) or not isinstance(max_parameters, int):
+        raise TypeError("max_parameters must be an integer")
+    if max_parameters <= 0:
+        raise GPT2TrainingError("max_parameters must be positive")
+    parameter_count = expected_gpt2_parameter_count(spec.model)
+    if parameter_count > max_parameters:
+        raise GPT2TrainingError("model exceeds the declared parameter budget")
+    corpus = GPT2ByteCorpus.from_bytes(source)
+    if corpus.source_sha256 != spec.source.sha256:
+        raise GPT2TrainingError("source bytes do not match the training spec")
+    caller_rng = torch.get_rng_state().clone()
+    caller_threads = torch.get_num_threads()
+    try:
+        torch.set_num_threads(GPT2_TRAINING_TORCH_THREADS)
+        torch.manual_seed(spec.training.seed)
+        model = GPT2LanguageModel(spec.model)
+        cursor = GPT2BatchCursor(corpus, spec.training)
+        optimizer = build_gpt2_optimizer(model, spec.training)
+        started_step = 0
+        if resume:
+            started_step = load_training_checkpoint(
+                checkpoint_path,
+                model=model,
+                optimizer=optimizer,
+                cursor=cursor,
+                config=spec.training,
+                corpus_fingerprint=corpus.fingerprint(),
+            )
+        initial_fingerprint = gpt2_model_fingerprint(model)
+        metrics = (
+            ()
+            if started_step == spec.training.optimizer_steps
+            else train_optimizer_steps(
+                model,
+                cursor,
+                optimizer,
+                spec.training,
+                start_step=started_step,
+            )
+        )
+        completed_step = metrics[-1].step if metrics else started_step
+        save_training_checkpoint(
+            checkpoint_path,
+            model=model,
+            optimizer=optimizer,
+            cursor=cursor,
+            config=spec.training,
+            corpus_fingerprint=corpus.fingerprint(),
+            step=completed_step,
+        )
+        return GPT2TrainingRun(
+            spec=spec,
+            corpus_fingerprint=corpus.fingerprint(),
+            corpus_bytes=len(source),
+            discarded_samples_per_epoch=cursor.discarded_samples_per_epoch,
+            optimizer_groups=optimizer_group_summary(model),
+            parameter_count=parameter_count,
+            torch_threads=GPT2_TRAINING_TORCH_THREADS,
+            started_step=started_step,
+            completed_step=completed_step,
+            initial_model_fingerprint=initial_fingerprint,
+            final_model_fingerprint=gpt2_model_fingerprint(model),
+            metrics=metrics,
+        )
+    finally:
+        torch.set_rng_state(caller_rng)
+        torch.set_num_threads(caller_threads)

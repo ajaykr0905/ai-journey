@@ -21,6 +21,7 @@ from ai_journey.gpt2_training import (
     load_training_spec,
     load_training_checkpoint,
     optimizer_group_summary,
+    run_training_experiment,
     save_training_checkpoint,
     train_optimizer_step,
     train_optimizer_steps,
@@ -647,4 +648,42 @@ def test_training_spec_requires_byte_vocabulary_and_deterministic_dropout():
             model=GPT2Config(**{**asdict(spec.model), "embedding_dropout": 0.1}),
             training=spec.training,
             source=spec.source,
+        )
+
+
+def test_training_experiment_publishes_final_checkpoint_and_preserves_rng(tmp_path):
+    source = b"public training text\n" * 8
+    spec = make_spec(optimizer_steps=2, warmup_steps=0)
+    spec = GPT2TrainingSpec(
+        model=spec.model,
+        training=spec.training,
+        source=GPT2TrainingSource(
+            **{**asdict(spec.source), "sha256": sha256(source).hexdigest()}
+        ),
+    )
+    rng_before = torch.get_rng_state().clone()
+    threads_before = torch.get_num_threads()
+    checkpoint = tmp_path / "checkpoint.pt"
+
+    run = run_training_experiment(source, spec, checkpoint_path=checkpoint)
+
+    assert checkpoint.is_file()
+    assert run.started_step == 0
+    assert run.completed_step == 2
+    assert [metric.step for metric in run.metrics] == [1, 2]
+    assert run.initial_model_fingerprint != run.final_model_fingerprint
+    assert run.parameter_count == make_model().parameter_count
+    assert run.optimizer_groups.total_parameters == run.parameter_count
+    assert run.torch_threads == 1
+    assert run.corpus_bytes == len(source)
+    assert torch.equal(torch.get_rng_state(), rng_before)
+    assert torch.get_num_threads() == threads_before
+
+
+def test_training_experiment_rejects_source_digest_mismatch(tmp_path):
+    with pytest.raises(GPT2TrainingError, match="source bytes"):
+        run_training_experiment(
+            b"different source bytes",
+            make_spec(optimizer_steps=1, warmup_steps=0),
+            checkpoint_path=tmp_path / "checkpoint.pt",
         )
