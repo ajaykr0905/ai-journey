@@ -135,3 +135,49 @@ def evaluate_distributed(model, documents, topology, *, batch_size: int = 4) -> 
         "mean_nll": mean,
         "bits_per_byte": mean / math.log(2),
     }
+
+
+def score_choices(model, prompt: bytes, choices) -> dict:
+    """Rank candidates by completion-only mean NLL with sliding context."""
+    choices = tuple(choices)
+    if not isinstance(prompt, bytes) or not prompt or len(prompt) > 4096:
+        raise ValueError("prompt must contain 1 to 4096 bytes")
+    if not 2 <= len(choices) <= 8 or any(
+        not isinstance(choice, bytes) or not 1 <= len(choice) <= 1024
+        for choice in choices
+    ):
+        raise ValueError("provide two to eight bounded nonempty completions")
+    if len(set(choices)) != len(choices):
+        raise ValueError("completion candidates must be distinct")
+    modes = [(module, module.training) for module in model.modules()]
+    scores = []
+    try:
+        model.eval()
+        with torch.inference_mode():
+            for choice in choices:
+                context = list(prompt)
+                losses = []
+                for target in choice:
+                    inputs = torch.tensor(
+                        [context[-model.config.context_length :]], dtype=torch.long
+                    )
+                    logits = model(inputs)[:, -1:, :]
+                    losses.append(token_nll(logits, torch.tensor([[target]])).item())
+                    context.append(target)
+                scores.append(
+                    {
+                        "tokens": len(choice),
+                        "loss_sum": math.fsum(losses),
+                        "mean_nll": math.fsum(losses) / len(choice),
+                    }
+                )
+    finally:
+        for module, mode in modes:
+            module.training = mode
+    return {
+        "prediction": min(
+            range(len(scores)), key=lambda index: scores[index]["mean_nll"]
+        ),
+        "scores": scores,
+        "normalization": "completion_mean_nll",
+    }

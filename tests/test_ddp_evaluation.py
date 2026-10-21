@@ -4,6 +4,7 @@ from ai_journey.ddp_evaluation import split_documents
 from ai_journey.ddp_evaluation import evaluation_batches
 from ai_journey.ddp_evaluation import evaluate_documents
 from ai_journey.ddp_evaluation import evaluate_distributed
+from ai_journey.ddp_evaluation import score_choices
 from ai_journey.ddp_contracts import Topology
 from ai_journey.ddp_runtime import process_group
 from ai_journey.gpt2_config import GPT2Config
@@ -71,3 +72,16 @@ def test_distributed_evaluation_reduces_every_document_target(tmp_path):
         actual = evaluate_distributed(model, documents, Topology(0, 1))
     assert actual["tokens"] == reference["tokens"]
     assert actual["mean_nll"] == reference["mean_nll"]
+
+
+def test_choice_scoring_excludes_prompt_and_normalizes_candidate_lengths():
+    model = GPT2LanguageModel(GPT2Config(256, 4, 8, 2, 1)).double()
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.zero_()
+    result = score_choices(model, b"long public prompt", [b"a", b"bbbb"])
+    assert [score["tokens"] for score in result["scores"]] == [1, 4]
+    assert [score["mean_nll"] for score in result["scores"]] == pytest.approx(
+        [math.log(256)] * 2
+    )
+    assert result["prediction"] == 0
