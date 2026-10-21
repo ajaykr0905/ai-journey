@@ -2,6 +2,8 @@ import pytest
 import torch
 from ai_journey.ddp_checkpoint import save_checkpoint
 from ai_journey.ddp_checkpoint import load_checkpoint
+from ai_journey.ddp_checkpoint import bounded_checkpoint_load
+import zipfile
 from ai_journey.ddp_contracts import Topology
 from ai_journey.ddp_runtime import process_group
 from ai_journey.gpt2_config import GPT2Config
@@ -89,3 +91,20 @@ def test_checkpoint_restores_state_and_rejects_another_corpus(tmp_path):
             )
     for name, value in model.state_dict().items():
         assert torch.equal(value, original[name])
+
+
+def test_compressed_archive_is_rejected_before_torch_load(tmp_path, monkeypatch):
+    path = tmp_path / "compressed.pt"
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("storage", b"x" * 100000)
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("deserialization must not run")
+
+    monkeypatch.setattr(torch, "load", unexpected)
+    with pytest.raises(ValueError, match="expanded storage"):
+        bounded_checkpoint_load(path, 200000)
+    link = tmp_path / "alias.pt"
+    link.symlink_to(path)
+    with pytest.raises(OSError):
+        bounded_checkpoint_load(link, 200000)
