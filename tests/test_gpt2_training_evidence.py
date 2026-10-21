@@ -68,6 +68,8 @@ def test_training_evidence_records_complete_measured_contract(tmp_path):
     assert len(evidence["metrics"]) == 2
     assert evidence["parameter_count"] == run.parameter_count
     assert evidence["runtime"]["torch_threads"] == 1
+    assert evidence["runtime"]["machine"]
+    assert len(evidence["runtime"]["torch_config_sha256"]) == 64
     assert evidence["limitations"] == list(GPT2_TRAINING_LIMITATIONS)
 
 
@@ -115,3 +117,13 @@ def test_training_replay_rejects_different_source_bytes(tmp_path):
 
     with pytest.raises(GPT2TrainingError, match="source bytes"):
         verify_training_replay(b"different source bytes", evidence)
+
+
+def test_training_replay_rejects_a_different_runtime(tmp_path, monkeypatch):
+    evidence = build_training_evidence(run_fixture(tmp_path))
+    monkeypatch.setattr(
+        "ai_journey.gpt2_training_evidence.platform.machine", lambda: "other-arch"
+    )
+
+    with pytest.raises(GPT2TrainingError, match="exact replay environment"):
+        verify_training_replay(b"public training text\n" * 8, evidence)

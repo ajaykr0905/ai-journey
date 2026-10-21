@@ -23,7 +23,7 @@ from .gpt2_training import (
     training_spec_from_mapping,
 )
 
-GPT2_TRAINING_EVIDENCE_SCHEMA_VERSION = 1
+GPT2_TRAINING_EVIDENCE_SCHEMA_VERSION = 2
 GPT2_TRAINING_LIMITATIONS = (
     "Scale-limited byte-level CPU run on a tiny GPT-2-style decoder.",
     "This does not establish GPU throughput, distributed scaling, or production readiness.",
@@ -62,6 +62,23 @@ def _spec_payload(run: GPT2TrainingRun) -> dict[str, Any]:
     }
 
 
+def _runtime_payload(*, torch_threads: int) -> dict[str, Any]:
+    torch_config = torch.__config__.show()
+    cpu_capability = getattr(
+        torch.backends.cpu, "get_cpu_capability", lambda: "unknown"
+    )()
+    return {
+        "python": platform.python_version(),
+        "torch": torch.__version__,
+        "device": "cpu",
+        "torch_threads": torch_threads,
+        "operating_system": platform.system(),
+        "machine": platform.machine(),
+        "cpu_capability": cpu_capability,
+        "torch_config_sha256": sha256(torch_config.encode()).hexdigest(),
+    }
+
+
 def build_training_evidence(run: GPT2TrainingRun) -> dict[str, Any]:
     """Build a complete self-authenticating report from one measured run."""
 
@@ -91,12 +108,7 @@ def build_training_evidence(run: GPT2TrainingRun) -> dict[str, Any]:
             "final": run.final_model_fingerprint,
         },
         "metrics": [asdict(metric) for metric in run.metrics],
-        "runtime": {
-            "python": platform.python_version(),
-            "torch": torch.__version__,
-            "device": "cpu",
-            "torch_threads": run.torch_threads,
-        },
+        "runtime": _runtime_payload(torch_threads=run.torch_threads),
         "limitations": list(GPT2_TRAINING_LIMITATIONS),
     }
     payload["evidence_sha256"] = _canonical_digest(payload)
@@ -231,13 +243,24 @@ def verify_training_evidence(payload: Mapping[str, Any]) -> dict[str, Any]:
         "torch",
         "device",
         "torch_threads",
+        "operating_system",
+        "machine",
+        "cpu_capability",
+        "torch_config_sha256",
     }:
         raise GPT2TrainingError("training evidence runtime fields are invalid")
     if runtime["device"] != "cpu" or any(
         not isinstance(runtime[name], str) or not runtime[name]
-        for name in ("python", "torch")
+        for name in (
+            "python",
+            "torch",
+            "operating_system",
+            "machine",
+            "cpu_capability",
+        )
     ):
         raise GPT2TrainingError("training evidence runtime is invalid")
+    _require_digest(runtime["torch_config_sha256"], "torch config sha256")
     if runtime["torch_threads"] != 1:
         raise GPT2TrainingError("training evidence thread control is invalid")
     if payload["limitations"] != list(GPT2_TRAINING_LIMITATIONS):
@@ -246,11 +269,16 @@ def verify_training_evidence(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def verify_training_replay(source: bytes, payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Re-run a fresh process-equivalent experiment and require exact evidence."""
+    """Re-run in a compatible runtime and require exact evidence."""
 
     if not isinstance(source, bytes):
         raise TypeError("source must be bytes")
     expected = verify_training_evidence(payload)
+    current_runtime = _runtime_payload(torch_threads=1)
+    if expected["runtime"] != current_runtime:
+        raise GPT2TrainingError(
+            "training evidence runtime does not match the exact replay environment"
+        )
     spec = training_spec_from_mapping(expected["spec"])
     with tempfile.TemporaryDirectory(prefix="gpt2-training-replay-") as directory:
         run = run_training_experiment(

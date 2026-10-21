@@ -72,7 +72,7 @@ def verify_report(path: Path) -> dict[str, Any]:
 
 
 def replay_report(*, source_path: Path, report_path: Path) -> dict[str, Any]:
-    """Repeat a saved experiment and require byte-for-byte evidence equality."""
+    """Repeat a saved experiment in its runtime and require exact evidence."""
 
     source = load_source_bytes(source_path)
     report = load_training_evidence(report_path)

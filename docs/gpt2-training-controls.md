@@ -42,7 +42,11 @@ ai-journey-gpt2-train replay \
 `verify` checks the report digest, source and spec fingerprints, parameter grouping,
 step sequence, token accounting, schedule values, clipping bounds, and runtime
 metadata. `replay` repeats the full experiment in a temporary directory and requires
-the complete regenerated report to match.
+the complete regenerated report to match. Exact replay is intentionally limited to
+the recorded Python, PyTorch build, operating system, machine architecture, CPU
+capability, and thread count because floating-point kernels can differ across those
+boundaries. CI therefore integrity-checks the published report, then trains and
+replays a temporary report inside the CI runtime.
 
 The checked run recorded mean loss `12.200964450836182` on update 1 and
 `10.875006675720215` on update 12. Every update crossed the clipping threshold. This

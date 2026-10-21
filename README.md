@@ -195,6 +195,11 @@ ai-journey-gpt2-train replay \
 python -m unittest discover -s tests -v
 ```
 
+The GPT-2 training report records the exact Python, PyTorch build, operating
+system, machine architecture, CPU capability, and thread count. Replay requires
+that environment because floating-point kernels can differ across platforms;
+`verify` remains portable and checks the published report without re-execution.
+
 ## Train the Day 38 full transformer
 
 The installed Day 38 command verifies the pinned Tiny Shakespeare bytes, keeps

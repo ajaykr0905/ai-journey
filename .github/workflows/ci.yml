@@ -51,7 +51,8 @@ jobs:
           MKL_NUM_THREADS: "1"
         run: |
           ai-journey-gpt2-train verify --report artifacts/gpt2-training-2026-10-21/training-evidence.json
-          ai-journey-gpt2-train replay --source data/day-19-demo-names.txt --report artifacts/gpt2-training-2026-10-21/training-evidence.json
+          ai-journey-gpt2-train train --source data/day-19-demo-names.txt --spec config/gpt2-training.json --checkpoint /tmp/gpt2-training.pt --report /tmp/gpt2-training.json
+          ai-journey-gpt2-train replay --source data/day-19-demo-names.txt --report /tmp/gpt2-training.json
       - name: Check low-rank adapter source and numerical oracles
         run: |
           ruff check src/ai_journey/lora*.py tests/test_lora*.py
