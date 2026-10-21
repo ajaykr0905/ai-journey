@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from hashlib import sha256
+import torch
 
 from .ddp_contracts import integer
 
@@ -57,3 +58,25 @@ def split_documents(documents, *, validation_count: int, seed: int = 48):
         documents, key=lambda doc: sha256(f"{seed}:{doc.digest}".encode()).digest()
     )
     return tuple(order[validation_count:]), tuple(order[:validation_count])
+
+
+def evaluation_batches(documents, *, context_length: int, batch_size: int = 4):
+    """Score each within-document target once using masked right-padded windows."""
+    integer(context_length, "context_length", 1)
+    integer(batch_size, "batch_size", 1)
+    windows = []
+    for document in documents:
+        for start in range(0, len(document.content) - 1, context_length):
+            piece = document.content[start : start + context_length + 1]
+            windows.append((list(piece[:-1]), list(piece[1:])))
+    for offset in range(0, len(windows), batch_size):
+        chunk = windows[offset : offset + batch_size]
+        width = max(len(inputs) for inputs, _ in chunk)
+        inputs = torch.zeros((len(chunk), width), dtype=torch.long)
+        targets = torch.zeros_like(inputs)
+        mask = torch.zeros_like(inputs, dtype=torch.bool)
+        for row, (prefix, suffix) in enumerate(chunk):
+            inputs[row, : len(prefix)] = torch.tensor(prefix)
+            targets[row, : len(suffix)] = torch.tensor(suffix)
+            mask[row, : len(prefix)] = True
+        yield inputs, targets, mask
