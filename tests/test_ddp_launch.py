@@ -1,5 +1,7 @@
 from hashlib import sha256
 import json
+import subprocess
+import pytest
 from pathlib import Path
 
 from ai_journey.ddp_launch import launch_training
@@ -33,3 +35,35 @@ def test_real_two_process_training_agrees_on_replicated_state(tmp_path):
     assert all(
         [step["tokens"] for step in rank["metrics"]] == [16, 16] for rank in ranks
     )
+
+
+@pytest.mark.parametrize(
+    "mode,expected", [("exit", RuntimeError), ("stall", TimeoutError)]
+)
+def test_failed_or_stalled_worker_reaps_every_owned_process(
+    tmp_path, monkeypatch, mode, expected
+):
+    source, spec = prepare_run(tmp_path)
+    owned = []
+    real_popen = subprocess.Popen
+
+    def tracked(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        owned.append(process)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", tracked)
+    with pytest.raises(expected):
+        launch_training(
+            source=source,
+            spec=spec,
+            checkpoint=tmp_path / "state.pt",
+            output_dir=tmp_path / "failure",
+            steps=2,
+            failure_rank=1,
+            failure_mode=mode,
+            timeout_seconds=1 if mode == "stall" else 10,
+        )
+    assert len(owned) == 2
+    assert all(process.poll() is not None for process in owned)
+    assert not (tmp_path / "state.pt").exists()

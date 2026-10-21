@@ -24,7 +24,14 @@ def main(argv=None):
     parser.add_argument("--rendezvous", required=True)
     parser.add_argument("--steps", type=int, required=True)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--inject-failure", choices=("exit", "stall"))
     args = parser.parse_args(argv)
+    if args.inject_failure == "exit":
+        raise RuntimeError("injected worker exit before process-group initialization")
+    if args.inject_failure == "stall":
+        import time
+
+        time.sleep(30)
     topology = Topology(args.rank, args.world_size, args.rank)
     spec = load_training_spec(args.spec)
     source = args.source.read_bytes()

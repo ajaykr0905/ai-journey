@@ -20,6 +20,8 @@ def launch_training(
     steps: int = 2,
     resume: bool = False,
     timeout_seconds: int = 60,
+    failure_rank: int | None = None,
+    failure_mode: str = "exit",
 ) -> list[dict]:
     import json
 
@@ -28,6 +30,12 @@ def launch_training(
     integer(timeout_seconds, "timeout_seconds", 1)
     if world_size > 4:
         raise ValueError("CPU lab permits at most four workers")
+    if failure_rank is not None:
+        integer(failure_rank, "failure_rank")
+        if failure_rank >= world_size or failure_mode not in ("exit", "stall"):
+            raise ValueError(
+                "failure injection requires an existing rank and supported mode"
+            )
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="ai-journey-ddp-") as temporary:
         rendezvous = (Path(temporary) / "rendezvous").as_uri()
@@ -60,6 +68,8 @@ def launch_training(
                 ]
                 if resume:
                     command.append("--resume")
+                if rank == failure_rank:
+                    command.extend(["--inject-failure", failure_mode])
                 environment = dict(os.environ, OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
                 processes.append(
                     subprocess.Popen(
