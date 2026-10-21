@@ -125,7 +125,12 @@ class GenerationService:
         self._admission = admission if admission is not None else TokenBucket()
 
     def generate(
-        self, request: GenerationRequest, *, cancelled=None, deadline=None
+        self,
+        request: GenerationRequest,
+        *,
+        cancelled=None,
+        deadline=None,
+        on_token=None,
     ) -> dict:
         if not isinstance(request, GenerationRequest):
             raise TypeError("request must be GenerationRequest")
@@ -138,6 +143,9 @@ class GenerationService:
                 if previous_fingerprint != fingerprint:
                     raise ValueError("request_id was already used with different input")
                 self._responses.move_to_end(request.request_id)
+                if on_token is not None:
+                    for index, token in enumerate(previous_output["tokens"]):
+                        on_token(index, token)
                 return copy.deepcopy(previous_output)
             self._admission.consume(
                 len(request.prompt) + request.sampling.max_new_tokens
@@ -149,6 +157,7 @@ class GenerationService:
                 use_cache=True,
                 cancelled=cancelled,
                 deadline=deadline,
+                on_token=on_token,
             )
             self.completed_requests += 1
             self.generated_tokens += len(output["tokens"])
@@ -175,3 +184,17 @@ class GenerationService:
                 "completed_requests": self.completed_requests,
                 "generated_tokens": self.generated_tokens,
             }
+
+
+def event_frame(event: str, payload: dict) -> bytes:
+    """Encode one SSE event without permitting event-name or data-line injection."""
+    if event not in ("token", "done", "error"):
+        raise ValueError("unsupported generation stream event")
+    data = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
+    return f"event: {event}\ndata: {data}\n\n".encode("ascii")

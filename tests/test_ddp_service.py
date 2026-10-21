@@ -2,6 +2,7 @@ import pytest
 from ai_journey.ddp_service import GenerationRequest
 from ai_journey.ddp_service import GenerationService
 from ai_journey.ddp_service import TokenBucket, AdmissionRejected
+from ai_journey.ddp_service import event_frame
 from ai_journey.ddp_generation import SamplingConfig
 from ai_journey.gpt2_model import GPT2LanguageModel
 from ai_journey.gpt2_config import GPT2Config
@@ -81,3 +82,21 @@ def test_admission_budgets_refill_and_idempotent_retries_cost_nothing():
     clock[0] = 5
     service.generate(request("second"))
     assert service.health()["completed_requests"] == 2
+
+
+def test_token_stream_frames_match_response_and_replay_on_retry():
+    service = GenerationService(GPT2LanguageModel(GPT2Config(8, 4, 8, 2, 1)))
+    emitted = []
+    result = service.generate(
+        request(), on_token=lambda index, token: emitted.append((index, token))
+    )
+    assert emitted == list(enumerate(result["tokens"]))
+    replayed = []
+    service.generate(
+        request(), on_token=lambda index, token: replayed.append((index, token))
+    )
+    assert replayed == emitted
+    assert (
+        event_frame("done", {"text": "\nattack"})
+        == b'event: done\ndata: {"text":"\\nattack"}\n\n'
+    )

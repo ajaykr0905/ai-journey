@@ -137,11 +137,14 @@ def generate_tokens(
     cancelled=None,
     deadline: float | None = None,
     clock=time.monotonic,
+    on_token=None,
 ) -> dict:
     """Generate under a bounded sliding context while preserving caller modes."""
     prompt = tuple(prompt)
     if cancelled is not None and not callable(cancelled):
         raise TypeError("cancelled must be a callable")
+    if on_token is not None and not callable(on_token):
+        raise TypeError("on_token must be callable")
     if deadline is not None and (
         isinstance(deadline, bool)
         or not isinstance(deadline, (int, float))
@@ -193,6 +196,8 @@ def generate_tokens(
                 )
                 token = sampler.sample(logits).item()
                 history.append(token)
+                if on_token is not None:
+                    on_token(len(history) - len(prompt) - 1, token)
                 if token == eos_token:
                     reason = "eos"
                     break
