@@ -14,6 +14,7 @@ from ai_journey.gpt2_training import (
     gpt2_model_fingerprint,
     language_model_loss,
     learning_rate_at,
+    load_training_checkpoint,
     optimizer_group_summary,
     save_training_checkpoint,
     train_optimizer_step,
@@ -493,3 +494,93 @@ def test_checkpoint_rejects_step_outside_schedule(tmp_path):
             corpus_fingerprint=corpus.fingerprint(),
             step=3,
         )
+
+
+def test_checkpoint_resume_matches_uninterrupted_training_exactly(tmp_path):
+    config = make_config(
+        optimizer_steps=2,
+        warmup_steps=0,
+        micro_batch_size=2,
+        accumulation_steps=2,
+    )
+    corpus = GPT2ByteCorpus.from_bytes(bytes(range(100)))
+
+    uninterrupted = make_model()
+    uninterrupted_cursor = GPT2BatchCursor(corpus, config)
+    uninterrupted_optimizer = build_gpt2_optimizer(uninterrupted, config)
+    uninterrupted_metrics = train_optimizer_steps(
+        uninterrupted, uninterrupted_cursor, uninterrupted_optimizer, config
+    )
+
+    partial = make_model()
+    partial_cursor = GPT2BatchCursor(corpus, config)
+    partial_optimizer = build_gpt2_optimizer(partial, config)
+    first = train_optimizer_step(
+        partial, partial_cursor, partial_optimizer, config, step=0
+    )
+    checkpoint = tmp_path / "checkpoint.pt"
+    save_training_checkpoint(
+        checkpoint,
+        model=partial,
+        optimizer=partial_optimizer,
+        cursor=partial_cursor,
+        config=config,
+        corpus_fingerprint=corpus.fingerprint(),
+        step=first.step,
+    )
+
+    resumed = make_model()
+    resumed_cursor = GPT2BatchCursor(corpus, config)
+    resumed_optimizer = build_gpt2_optimizer(resumed, config)
+    restored_step = load_training_checkpoint(
+        checkpoint,
+        model=resumed,
+        optimizer=resumed_optimizer,
+        cursor=resumed_cursor,
+        config=config,
+        corpus_fingerprint=corpus.fingerprint(),
+    )
+    resumed_metrics = train_optimizer_steps(
+        resumed,
+        resumed_cursor,
+        resumed_optimizer,
+        config,
+        start_step=restored_step,
+    )
+
+    assert restored_step == 1
+    assert resumed_metrics == uninterrupted_metrics[1:]
+    assert gpt2_model_fingerprint(resumed) == gpt2_model_fingerprint(uninterrupted)
+    assert resumed_cursor.state_dict() == uninterrupted_cursor.state_dict()
+
+
+def test_checkpoint_rejects_mismatched_corpus_without_mutation(tmp_path):
+    config = make_config(optimizer_steps=2)
+    corpus = GPT2ByteCorpus.from_bytes(bytes(range(100)))
+    model = make_model()
+    cursor = GPT2BatchCursor(corpus, config)
+    optimizer = build_gpt2_optimizer(model, config)
+    checkpoint = tmp_path / "checkpoint.pt"
+    save_training_checkpoint(
+        checkpoint,
+        model=model,
+        optimizer=optimizer,
+        cursor=cursor,
+        config=config,
+        corpus_fingerprint=corpus.fingerprint(),
+        step=0,
+    )
+    before = gpt2_model_fingerprint(model)
+
+    with pytest.raises(GPT2TrainingError, match="corpus fingerprint"):
+        load_training_checkpoint(
+            checkpoint,
+            model=model,
+            optimizer=optimizer,
+            cursor=cursor,
+            config=config,
+            corpus_fingerprint="0" * 64,
+        )
+
+    assert gpt2_model_fingerprint(model) == before
+    assert cursor.state_dict() == {"epoch": 0, "offset": 0}

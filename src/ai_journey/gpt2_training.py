@@ -25,6 +25,20 @@ class GPT2TrainingError(ValueError):
 
 
 GPT2_TRAINING_CHECKPOINT_SCHEMA_VERSION = 1
+_GPT2_TRAINING_CHECKPOINT_FIELDS = {
+    "schema_version",
+    "step",
+    "model_config",
+    "training_config",
+    "training_fingerprint",
+    "corpus_fingerprint",
+    "cursor_fingerprint",
+    "model_fingerprint",
+    "model_state",
+    "optimizer_state",
+    "cursor_state",
+    "torch_rng_state",
+}
 
 
 @dataclass(frozen=True)
@@ -621,3 +635,86 @@ def save_training_checkpoint(
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def load_training_checkpoint(
+    path: Path,
+    *,
+    model: GPT2LanguageModel,
+    optimizer: torch.optim.Optimizer,
+    cursor: GPT2BatchCursor,
+    config: GPT2TrainingConfig,
+    corpus_fingerprint: str,
+    max_checkpoint_bytes: int = 64 * 1024 * 1024,
+) -> int:
+    """Validate and transactionally restore an exact GPT-2 training checkpoint."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if isinstance(max_checkpoint_bytes, bool) or not isinstance(
+        max_checkpoint_bytes, int
+    ):
+        raise TypeError("max_checkpoint_bytes must be an integer")
+    if max_checkpoint_bytes <= 0:
+        raise GPT2TrainingError("max_checkpoint_bytes must be positive")
+    if path.is_symlink() or not path.is_file():
+        raise GPT2TrainingError("checkpoint must be a regular non-symlink file")
+    if path.stat().st_size <= 0 or path.stat().st_size > max_checkpoint_bytes:
+        raise GPT2TrainingError("checkpoint exceeds its byte budget")
+    _validate_optimizer_binding(model, optimizer)
+    try:
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise GPT2TrainingError("checkpoint is not a weights-only archive") from exc
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != _GPT2_TRAINING_CHECKPOINT_FIELDS
+    ):
+        raise GPT2TrainingError("checkpoint fields do not match the schema")
+    if payload["schema_version"] != GPT2_TRAINING_CHECKPOINT_SCHEMA_VERSION:
+        raise GPT2TrainingError("checkpoint schema version is unsupported")
+    if payload["model_config"] != asdict(model.config):
+        raise GPT2TrainingError("checkpoint model configuration does not match")
+    if (
+        payload["training_config"] != asdict(config)
+        or payload["training_fingerprint"] != config.fingerprint()
+    ):
+        raise GPT2TrainingError("checkpoint training configuration does not match")
+    if payload["corpus_fingerprint"] != corpus_fingerprint:
+        raise GPT2TrainingError("checkpoint corpus fingerprint does not match")
+    if payload["cursor_fingerprint"] != cursor.fingerprint():
+        raise GPT2TrainingError("checkpoint cursor fingerprint does not match")
+    step = payload["step"]
+    if isinstance(step, bool) or not isinstance(step, int):
+        raise TypeError("checkpoint step must be an integer")
+    if not 0 <= step <= config.optimizer_steps:
+        raise GPT2TrainingError("checkpoint step is outside the optimizer schedule")
+    rng_state = payload["torch_rng_state"]
+    if (
+        not isinstance(rng_state, Tensor)
+        or rng_state.device.type != "cpu"
+        or rng_state.dtype != torch.uint8
+        or rng_state.ndim != 1
+    ):
+        raise GPT2TrainingError("checkpoint RNG state is invalid")
+    _require_finite_state(payload, "checkpoint")
+    saved_model = copy.deepcopy(model.state_dict())
+    saved_optimizer = copy.deepcopy(optimizer.state_dict())
+    saved_cursor = cursor.state_dict()
+    saved_rng = torch.get_rng_state().clone()
+    try:
+        model.load_state_dict(payload["model_state"], strict=True)
+        optimizer.load_state_dict(payload["optimizer_state"])
+        cursor.load_state_dict(payload["cursor_state"])
+        torch.set_rng_state(rng_state)
+        _validate_optimizer_binding(model, optimizer)
+        _require_finite_state(optimizer.state_dict(), "restored optimizer")
+        if gpt2_model_fingerprint(model) != payload["model_fingerprint"]:
+            raise GPT2TrainingError("checkpoint model fingerprint does not match")
+    except Exception:
+        model.load_state_dict(saved_model)
+        optimizer.load_state_dict(saved_optimizer)
+        cursor.load_state_dict(saved_cursor)
+        torch.set_rng_state(saved_rng)
+        raise
+    return step
