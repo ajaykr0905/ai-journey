@@ -47,5 +47,20 @@ def test_service_isolated_snapshot_survives_caller_model_mutation():
     with torch.no_grad():
         model.wte.weight.zero_()
     assert service.generate(request()) == expected
-    assert service.health()["completed_requests"] == 2
-    assert service.health()["generated_tokens"] == 6
+    assert service.health()["completed_requests"] == 1
+    assert service.health()["generated_tokens"] == 3
+
+
+def test_idempotent_retries_are_isolated_and_conflicting_ids_fail():
+    service = GenerationService(
+        GPT2LanguageModel(GPT2Config(8, 4, 8, 2, 1)), cache_capacity=1
+    )
+    first = service.generate(request())
+    first["tokens"].clear()
+    assert len(service.generate(request())["tokens"]) == 3
+    conflicting = GenerationRequest("request-1", (3, 4), request().sampling)
+    with pytest.raises(ValueError, match="already used"):
+        service.generate(conflicting)
+    service.generate(request("another"))
+    service.generate(conflicting)
+    assert service.health()["completed_requests"] == 3

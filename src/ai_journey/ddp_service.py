@@ -6,6 +6,7 @@ import json
 import re
 import copy
 import threading
+from collections import OrderedDict
 
 from .ddp_contracts import integer
 from .ddp_generation import SamplingConfig, generate_tokens
@@ -62,28 +63,46 @@ class GenerationRequest:
 class GenerationService:
     """Serve a frozen checkpoint snapshot under one serialized inference lock."""
 
-    def __init__(self, model):
+    def __init__(self, model, *, cache_capacity: int = 128):
+        integer(cache_capacity, "cache_capacity", 1)
+        if cache_capacity > 4096:
+            raise ValueError("response cache exceeds lab budget")
         self._model = copy.deepcopy(model).eval()
         self._model.requires_grad_(False)
         self.model_sha256 = gpt2_model_fingerprint(self._model)
         self._lock = threading.RLock()
         self.completed_requests = 0
         self.generated_tokens = 0
+        self._responses = OrderedDict()
+        self._cache_capacity = cache_capacity
 
     def generate(self, request: GenerationRequest) -> dict:
         if not isinstance(request, GenerationRequest):
             raise TypeError("request must be GenerationRequest")
         with self._lock:
+            fingerprint = request.fingerprint()
+            if request.request_id in self._responses:
+                previous_fingerprint, previous_output = self._responses[
+                    request.request_id
+                ]
+                if previous_fingerprint != fingerprint:
+                    raise ValueError("request_id was already used with different input")
+                self._responses.move_to_end(request.request_id)
+                return copy.deepcopy(previous_output)
             output = generate_tokens(
                 self._model, request.prompt, request.sampling, use_cache=True
             )
             self.completed_requests += 1
             self.generated_tokens += len(output["tokens"])
-            return {
+            response = {
                 "request_id": request.request_id,
                 "model_sha256": self.model_sha256,
                 **output,
             }
+            self._responses[request.request_id] = (fingerprint, copy.deepcopy(response))
+            while len(self._responses) > self._cache_capacity:
+                self._responses.popitem(last=False)
+            return response
 
     def health(self) -> dict:
         with self._lock:
