@@ -2,6 +2,7 @@ import pytest
 import torch
 from ai_journey.ddp_generation import SamplingConfig, filter_logits
 from ai_journey.ddp_generation import process_logits
+from ai_journey.ddp_generation import TokenSampler
 
 
 def test_nucleus_retains_the_probability_crossing_token():
@@ -39,3 +40,21 @@ def test_repetition_penalty_is_sign_aware_and_applied_once_per_unique_id():
     assert logits.tolist() == [[4, -2, 1]]
     with pytest.raises(ValueError, match="every possible"):
         process_logits(logits, torch.tensor([[0]]), banned_tokens=[0, 1, 2])
+
+
+def test_request_sampling_restarts_exactly_without_global_rng_changes():
+    before = torch.get_rng_state().clone()
+    sampler = TokenSampler(SamplingConfig(seed=48))
+    logits = torch.zeros(1, 256)
+    sampler.sample(logits)
+    saved = sampler.state()
+    expected = [sampler.sample(logits).item() for _ in range(8)]
+    sampler.restore(saved)
+    assert [sampler.sample(logits).item() for _ in range(8)] == expected
+    assert torch.equal(torch.get_rng_state(), before)
+    assert (
+        TokenSampler(SamplingConfig(temperature=0))
+        .sample(torch.tensor([[1.0, 2.0]]))
+        .item()
+        == 1
+    )

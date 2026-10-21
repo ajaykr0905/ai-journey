@@ -97,3 +97,28 @@ def process_logits(
     if not torch.isfinite(values).any(dim=1).all():
         raise ValueError("token exclusions removed every possible output")
     return values
+
+
+class TokenSampler:
+    """Request-local sampling RNG that can be checkpointed without global effects."""
+
+    def __init__(self, config: SamplingConfig):
+        self.config = config
+        self.generator = torch.Generator(device="cpu").manual_seed(config.seed)
+
+    def sample(self, logits: torch.Tensor) -> torch.Tensor:
+        values = filter_logits(logits, self.config).cpu()
+        if self.config.temperature == 0:
+            return values.argmax(-1, keepdim=True)
+        return torch.multinomial(values.softmax(-1), 1, generator=self.generator)
+
+    def state(self) -> torch.Tensor:
+        return self.generator.get_state().clone()
+
+    def restore(self, state: torch.Tensor) -> None:
+        before = self.state()
+        try:
+            self.generator.set_state(state.clone())
+        except (RuntimeError, TypeError):
+            self.generator.set_state(before)
+            raise ValueError("invalid request RNG state") from None
