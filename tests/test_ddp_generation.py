@@ -3,6 +3,9 @@ import torch
 from ai_journey.ddp_generation import SamplingConfig, filter_logits
 from ai_journey.ddp_generation import process_logits
 from ai_journey.ddp_generation import TokenSampler
+from ai_journey.ddp_generation import generate_tokens
+from ai_journey.gpt2_model import GPT2LanguageModel
+from ai_journey.gpt2_config import GPT2Config
 
 
 def test_nucleus_retains_the_probability_crossing_token():
@@ -28,6 +31,25 @@ def test_top_k_ties_have_stable_exact_cardinality():
 def test_invalid_sampling_budgets_fail(kwargs):
     with pytest.raises(ValueError):
         SamplingConfig(**kwargs)
+
+
+def test_generation_obeys_eos_budget_sliding_context_and_mode_restoration():
+    model = GPT2LanguageModel(GPT2Config(8, 3, 8, 2, 1)).train()
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.zero_()
+    result = generate_tokens(
+        model,
+        [1, 2, 3, 4],
+        SamplingConfig(max_new_tokens=5, temperature=0),
+        eos_token=0,
+    )
+    assert result == {"prompt_tokens": 4, "tokens": [0], "finish_reason": "eos"}
+    assert model.training
+    assert (
+        len(generate_tokens(model, [1], SamplingConfig(max_new_tokens=5))["tokens"])
+        == 5
+    )
 
 
 def test_repetition_penalty_is_sign_aware_and_applied_once_per_unique_id():

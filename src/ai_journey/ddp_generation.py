@@ -122,3 +122,56 @@ class TokenSampler:
         except (RuntimeError, TypeError):
             self.generator.set_state(before)
             raise ValueError("invalid request RNG state") from None
+
+
+def generate_tokens(
+    model,
+    prompt,
+    config: SamplingConfig,
+    *,
+    eos_token: int | None = None,
+    banned_tokens=(),
+    repetition_penalty: float = 1.0,
+) -> dict:
+    """Generate under a bounded sliding context while preserving caller modes."""
+    prompt = tuple(prompt)
+    if not prompt or len(prompt) > 4096:
+        raise ValueError("prompt requires 1 to 4096 token ids")
+    for token in prompt:
+        integer(token, "prompt token")
+        if token >= model.config.vocab_size:
+            raise ValueError("prompt token exceeds vocabulary")
+    if eos_token is not None:
+        integer(eos_token, "eos_token")
+        if eos_token >= model.config.vocab_size:
+            raise ValueError("eos_token exceeds vocabulary")
+    modes = [(module, module.training) for module in model.modules()]
+    sampler = TokenSampler(config)
+    history = list(prompt)
+    reason = "length"
+    try:
+        model.eval()
+        with torch.inference_mode():
+            for _ in range(config.max_new_tokens):
+                inputs = torch.tensor(
+                    [history[-model.config.context_length :]], dtype=torch.long
+                )
+                logits = process_logits(
+                    model(inputs)[:, -1, :],
+                    torch.tensor([history]),
+                    banned_tokens=banned_tokens,
+                    repetition_penalty=repetition_penalty,
+                )
+                token = sampler.sample(logits).item()
+                history.append(token)
+                if token == eos_token:
+                    reason = "eos"
+                    break
+    finally:
+        for module, mode in modes:
+            module.training = mode
+    return {
+        "prompt_tokens": len(prompt),
+        "tokens": history[len(prompt) :],
+        "finish_reason": reason,
+    }
