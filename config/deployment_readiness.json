@@ -5,6 +5,7 @@
     "src/ai_journey/gpt2_training_evidence_io.py",
     "src/ai_journey/gpt2_training_cli.py",
     "config/gpt2-training.json",
+    "docs/gpt2-training-controls.md",
     "artifacts/gpt2-training-2026-10-21/training-evidence.json",
     "tests/test_gpt2_training.py",
     "tests/test_gpt2_training_config.py",
