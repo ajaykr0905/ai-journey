@@ -3,8 +3,10 @@
 from dataclasses import dataclass
 from hashlib import sha256
 import torch
+import math
 
 from .ddp_contracts import integer
+from .ddp_metrics import token_nll
 
 
 @dataclass(frozen=True)
@@ -80,3 +82,36 @@ def evaluation_batches(documents, *, context_length: int, batch_size: int = 4):
             targets[row, : len(suffix)] = torch.tensor(suffix)
             mask[row, : len(prefix)] = True
         yield inputs, targets, mask
+
+
+def evaluate_documents(model, documents, *, batch_size: int = 4) -> dict:
+    """Measure additive NLL without changing gradients, RNG or module modes."""
+    modes = [(module, module.training) for module in model.modules()]
+    rng = torch.get_rng_state().clone()
+    loss_sum = 0.0
+    tokens = 0
+    try:
+        model.eval()
+        with torch.inference_mode():
+            for inputs, targets, mask in evaluation_batches(
+                documents,
+                context_length=model.config.context_length,
+                batch_size=batch_size,
+            ):
+                losses = token_nll(model(inputs), targets)
+                loss_sum += losses[mask].double().sum().item()
+                tokens += int(mask.sum())
+    finally:
+        torch.set_rng_state(rng)
+        for module, mode in modes:
+            module.training = mode
+    if tokens == 0:
+        raise ValueError("evaluation requires at least one target")
+    mean = loss_sum / tokens
+    return {
+        "loss_sum": loss_sum,
+        "tokens": tokens,
+        "mean_nll": mean,
+        "bits_per_byte": mean / math.log(2),
+        "perplexity": math.exp(mean) if mean < 700 else None,
+    }
