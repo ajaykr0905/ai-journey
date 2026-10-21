@@ -38,12 +38,59 @@ def bounded_checkpoint_load(path: Path, max_bytes: int):
         return torch.load(stream, map_location="cpu", weights_only=True)
 
 
+def validate_optimizer_state(model, optimizer, *, step: int):
+    """Require finite AdamW moments bound to the restored parameter tensors."""
+    if not isinstance(optimizer, torch.optim.AdamW):
+        raise ValueError("distributed checkpoints require AdamW optimizer state")
+    parameters = tuple(model.parameters())
+    bound = tuple(
+        parameter for group in optimizer.param_groups for parameter in group["params"]
+    )
+    if len(bound) != len(parameters) or {id(parameter) for parameter in bound} != {
+        id(parameter) for parameter in parameters
+    }:
+        raise ValueError("optimizer is not bound to the complete model")
+    if any(not torch.isfinite(parameter).all() for parameter in parameters):
+        raise ValueError("checkpoint model contains nonfinite values")
+    for parameter in parameters:
+        state = optimizer.state.get(parameter, {})
+        if not state and step == 0:
+            continue
+        required = {"step", "exp_avg", "exp_avg_sq"}
+        if not required <= set(state) or set(state) - (required | {"max_exp_avg_sq"}):
+            raise ValueError("AdamW moment fields do not match")
+        counter = state["step"]
+        if (
+            not isinstance(counter, torch.Tensor)
+            or counter.numel() != 1
+            or not torch.isfinite(counter).all()
+            or counter.item() != step
+        ):
+            raise ValueError("AdamW step counter does not match durable progress")
+        for name in set(state) - {"step"}:
+            value = state[name]
+            if (
+                not isinstance(value, torch.Tensor)
+                or value.shape != parameter.shape
+                or value.dtype != parameter.dtype
+                or not torch.isfinite(value).all()
+                or (name != "exp_avg" and (value < 0).any())
+            ):
+                raise ValueError("AdamW moment tensor is invalid")
+
+
 def save_checkpoint(
     path: Path, *, model, optimizer, config, source: bytes, step: int
 ) -> str:
     integer(step, "step")
     if step > config.optimizer_steps:
         raise ValueError("step exceeds schedule")
+    valid = True
+    try:
+        validate_optimizer_state(model, optimizer, step=step)
+    except ValueError:
+        valid = False
+    require_all_ranks(valid, phase="checkpoint state validation")
     fingerprint = require_model_consensus(model)
     rngs = [None] * dist.get_world_size()
     dist.all_gather_object(rngs, torch.get_rng_state())
@@ -166,6 +213,7 @@ def load_checkpoint(
         if gpt2_model_fingerprint(model) != payload["model_sha256"]:
             raise ValueError("checkpoint model fingerprint does not match")
         optimizer.load_state_dict(payload["optimizer"])
+        validate_optimizer_state(model, optimizer, step=payload["step"])
         torch.set_rng_state(payload["rank_rngs"][dist.get_rank()])
     except (ValueError, RuntimeError, KeyError, TypeError):
         restored = False

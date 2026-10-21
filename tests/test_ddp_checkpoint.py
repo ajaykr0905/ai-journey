@@ -38,11 +38,11 @@ def test_rank_zero_atomically_publishes_complete_replicated_state(tmp_path):
             optimizer=optimizer,
             config=config,
             source=b"public",
-            step=1,
+            step=0,
         )
     payload = torch.load(path, weights_only=True)
     assert payload["model_sha256"] == digest
-    assert payload["step"] == 1
+    assert payload["step"] == 0
     assert len(payload["rank_rngs"]) == 1
     assert list(path.parent.iterdir()) == [path]
 
@@ -66,6 +66,9 @@ def test_publication_failure_is_a_collective_error(tmp_path):
 
 def test_checkpoint_restores_state_and_rejects_another_corpus(tmp_path):
     model, optimizer, config = setup_state()
+    for parameter in model.parameters():
+        parameter.grad = torch.zeros_like(parameter)
+    optimizer.step()
     original = {name: tensor.clone() for name, tensor in model.state_dict().items()}
     path = tmp_path / "state.pt"
     with process_group(Topology(0, 1), rendezvous=(tmp_path / "rdzv").as_uri()):
@@ -108,3 +111,30 @@ def test_compressed_archive_is_rejected_before_torch_load(tmp_path, monkeypatch)
     link.symlink_to(path)
     with pytest.raises(OSError):
         bounded_checkpoint_load(link, 200000)
+
+
+def test_malformed_adamw_moment_shape_rolls_back_loaded_parameters(tmp_path):
+    model, optimizer, config = setup_state()
+    for parameter in model.parameters():
+        parameter.grad = torch.zeros_like(parameter)
+    optimizer.step()
+    path = tmp_path / "state.pt"
+    with process_group(Topology(0, 1), rendezvous=(tmp_path / "rdzv").as_uri()):
+        save_checkpoint(
+            path,
+            model=model,
+            optimizer=optimizer,
+            config=config,
+            source=b"public",
+            step=1,
+        )
+        payload = torch.load(path, weights_only=True)
+        state = next(iter(payload["optimizer"]["state"].values()))
+        state["exp_avg"] = torch.zeros(1)
+        torch.save(payload, path)
+        original = model.wte.weight.detach().clone()
+        with pytest.raises(RuntimeError, match="restoration"):
+            load_checkpoint(
+                path, model=model, optimizer=optimizer, config=config, source=b"public"
+            )
+        assert torch.equal(model.wte.weight, original)
