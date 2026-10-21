@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import math
 import torch
+from .gpt2_training import gpt2_model_fingerprint
 
 
 @dataclass(frozen=True)
@@ -92,3 +93,45 @@ def cached_attention(attention, inputs: torch.Tensor, past=None):
     weights = scores.masked_fill(~mask, torch.finfo(scores.dtype).min).softmax(-1)
     output = (weights @ value).transpose(1, 2).contiguous().view(batch, time, channels)
     return attention.c_proj(output), (key.detach(), value.detach())
+
+
+@torch.inference_mode()
+def cached_forward(model, token_ids: torch.Tensor, cache: KVCache | None = None):
+    """Advance every decoder layer with learned absolute position offsets."""
+    if any(module.training for module in model.modules()):
+        raise ValueError("cached decoder requires every module in evaluation mode")
+    if (
+        token_ids.dtype != torch.long
+        or token_ids.ndim != 2
+        or token_ids.numel() == 0
+        or token_ids.device.type != "cpu"
+    ):
+        raise ValueError("cached decoder requires nonempty CPU integer token batches")
+    if token_ids.min() < 0 or token_ids.max() >= model.config.vocab_size:
+        raise ValueError("cached decoder token id exceeds vocabulary")
+    fingerprint = gpt2_model_fingerprint(model)
+    offset = 0 if cache is None else cache.length
+    if offset + token_ids.shape[1] > model.config.context_length:
+        raise ValueError("cached decoder context capacity exceeded")
+    if cache is not None:
+        if (
+            cache.model_sha256 != fingerprint
+            or len(cache.keys) != len(model.h)
+            or cache.keys[0].shape[:2] != (token_ids.shape[0], model.config.head_count)
+            or cache.keys[0].shape[-1] != model.config.head_dim
+            or cache.keys[0].dtype != model.wte.weight.dtype
+        ):
+            raise ValueError("cache does not belong to this decoder and batch")
+    positions = torch.arange(offset, offset + token_ids.shape[1])
+    hidden = model.wte(token_ids) + model.wpe(positions)
+    keys, values = [], []
+    for index, block in enumerate(model.h):
+        past = None if cache is None else (cache.keys[index], cache.values[index])
+        attended, state = cached_attention(block.attn, block.ln_1(hidden), past)
+        hidden = hidden + attended
+        hidden = hidden + block.mlp(block.ln_2(hidden))
+        keys.append(state[0])
+        values.append(state[1])
+    return model.lm_head(model.ln_f(hidden)), KVCache(
+        fingerprint, tuple(keys), tuple(values)
+    )
