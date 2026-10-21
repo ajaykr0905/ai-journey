@@ -16,6 +16,7 @@ from ai_journey.gpt2_training import (
     learning_rate_at,
     optimizer_group_summary,
     train_optimizer_step,
+    train_optimizer_steps,
 )
 
 
@@ -395,3 +396,48 @@ def test_model_fingerprint_binds_names_shapes_dtypes_and_values():
     with torch.no_grad():
         model.h[0].ln_1.weight[0] += 1
     assert gpt2_model_fingerprint(model) != original
+
+
+def test_training_loop_runs_a_bounded_schedule_segment_and_preserves_mode():
+    config = make_config(
+        optimizer_steps=4,
+        warmup_steps=1,
+        micro_batch_size=2,
+        accumulation_steps=2,
+    )
+    model = make_model().eval()
+    before = gpt2_model_fingerprint(model)
+    cursor = GPT2BatchCursor(GPT2ByteCorpus.from_bytes(bytes(range(100))), config)
+    optimizer = build_gpt2_optimizer(model, config)
+
+    metrics = train_optimizer_steps(
+        model, cursor, optimizer, config, start_step=1, step_count=2
+    )
+
+    assert [metric.step for metric in metrics] == [2, 3]
+    assert [metric.learning_rate for metric in metrics] == pytest.approx(
+        [learning_rate_at(1, config), learning_rate_at(2, config)]
+    )
+    assert all(metric.target_tokens == config.tokens_per_step for metric in metrics)
+    assert cursor.state_dict()["offset"] == 8
+    assert gpt2_model_fingerprint(model) != before
+    assert model.training is False
+
+
+@pytest.mark.parametrize(
+    ("start_step", "step_count"),
+    [(-1, 1), (4, 1), (0, 0), (3, 2), (0, True)],
+)
+def test_training_loop_rejects_invalid_schedule_segments(start_step, step_count):
+    config = make_config(optimizer_steps=4)
+    model = make_model()
+    cursor = GPT2BatchCursor(GPT2ByteCorpus.from_bytes(bytes(range(100))), config)
+    with pytest.raises((GPT2TrainingError, TypeError)):
+        train_optimizer_steps(
+            model,
+            cursor,
+            build_gpt2_optimizer(model, config),
+            config,
+            start_step=start_step,
+            step_count=step_count,
+        )

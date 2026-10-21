@@ -517,3 +517,35 @@ def gpt2_model_fingerprint(model: GPT2LanguageModel) -> str:
         digest.update(str(tuple(value.shape)).encode())
         digest.update(value.view(torch.uint8).numpy().tobytes())
     return digest.hexdigest()
+
+
+def train_optimizer_steps(
+    model: GPT2LanguageModel,
+    cursor: GPT2BatchCursor,
+    optimizer: torch.optim.Optimizer,
+    config: GPT2TrainingConfig,
+    *,
+    start_step: int = 0,
+    step_count: int | None = None,
+) -> tuple[GPT2StepMetric, ...]:
+    """Run a bounded contiguous segment of the configured optimizer schedule."""
+
+    if isinstance(start_step, bool) or not isinstance(start_step, int):
+        raise TypeError("start_step must be an integer")
+    if not 0 <= start_step < config.optimizer_steps:
+        raise GPT2TrainingError("start_step must be inside the optimizer schedule")
+    count = config.optimizer_steps - start_step if step_count is None else step_count
+    if isinstance(count, bool) or not isinstance(count, int):
+        raise TypeError("step_count must be an integer")
+    if count <= 0 or start_step + count > config.optimizer_steps:
+        raise GPT2TrainingError("step_count must fit the remaining optimizer schedule")
+    return tuple(
+        train_optimizer_step(
+            model,
+            cursor,
+            optimizer,
+            config,
+            step=step,
+        )
+        for step in range(start_step, start_step + count)
+    )
