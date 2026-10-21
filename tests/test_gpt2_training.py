@@ -1,4 +1,6 @@
+from dataclasses import asdict
 from hashlib import sha256
+import json
 
 import pytest
 import torch
@@ -10,15 +12,19 @@ from ai_journey.gpt2_training import (
     GPT2BatchCursor,
     GPT2TrainingConfig,
     GPT2TrainingError,
+    GPT2TrainingSource,
+    GPT2TrainingSpec,
     build_gpt2_optimizer,
     gpt2_model_fingerprint,
     language_model_loss,
     learning_rate_at,
+    load_training_spec,
     load_training_checkpoint,
     optimizer_group_summary,
     save_training_checkpoint,
     train_optimizer_step,
     train_optimizer_steps,
+    training_spec_from_mapping,
 )
 
 
@@ -53,6 +59,19 @@ def make_model():
             residual_dropout=0.0,
         )
     )
+
+
+def make_spec(**training_overrides):
+    model = make_model().config
+    training = make_config(**training_overrides)
+    source = GPT2TrainingSource(
+        name="Synthetic public names",
+        url="https://github.com/ajaykr0905/ai-journey",
+        revision="day-19-demo-names-v1",
+        license="CC0-1.0",
+        sha256=sha256(b"public training text\n").hexdigest(),
+    )
+    return GPT2TrainingSpec(model=model, training=training, source=source)
 
 
 def test_training_config_accounts_for_effective_batch_and_tokens():
@@ -584,3 +603,48 @@ def test_checkpoint_rejects_mismatched_corpus_without_mutation(tmp_path):
 
     assert gpt2_model_fingerprint(model) == before
     assert cursor.state_dict() == {"epoch": 0, "offset": 0}
+
+
+def test_training_spec_round_trips_every_declared_control(tmp_path):
+    spec = make_spec()
+    payload = {
+        "schema_version": 1,
+        "model": asdict(spec.model),
+        "training": asdict(spec.training),
+        "source": asdict(spec.source),
+    }
+    path = tmp_path / "training.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = load_training_spec(path)
+
+    assert loaded == spec
+    assert loaded.fingerprint() == spec.fingerprint()
+
+
+def test_training_spec_rejects_unknown_controls():
+    spec = make_spec()
+    payload = {
+        "schema_version": 1,
+        "model": asdict(spec.model),
+        "training": {**asdict(spec.training), "ignored": True},
+        "source": asdict(spec.source),
+    }
+    with pytest.raises(GPT2TrainingError, match="training fields"):
+        training_spec_from_mapping(payload)
+
+
+def test_training_spec_requires_byte_vocabulary_and_deterministic_dropout():
+    spec = make_spec()
+    with pytest.raises(GPT2TrainingError, match="vocab_size 256"):
+        GPT2TrainingSpec(
+            model=GPT2Config(**{**asdict(spec.model), "vocab_size": 255}),
+            training=spec.training,
+            source=spec.source,
+        )
+    with pytest.raises(GPT2TrainingError, match="dropout"):
+        GPT2TrainingSpec(
+            model=GPT2Config(**{**asdict(spec.model), "embedding_dropout": 0.1}),
+            training=spec.training,
+            source=spec.source,
+        )

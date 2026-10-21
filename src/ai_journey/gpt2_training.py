@@ -17,6 +17,7 @@ import torch
 from torch import Tensor
 from torch.nn import functional as F
 
+from .gpt2_config import GPT2Config
 from .gpt2_model import GPT2LanguageModel
 
 
@@ -25,6 +26,7 @@ class GPT2TrainingError(ValueError):
 
 
 GPT2_TRAINING_CHECKPOINT_SCHEMA_VERSION = 1
+GPT2_TRAINING_SPEC_SCHEMA_VERSION = 1
 _GPT2_TRAINING_CHECKPOINT_FIELDS = {
     "schema_version",
     "step",
@@ -67,6 +69,70 @@ class GPT2StepMetric:
     clipped: bool
     micro_batches: int
     target_tokens: int
+
+
+@dataclass(frozen=True)
+class GPT2TrainingSource:
+    """Public source identity required for a reproducible training run."""
+
+    name: str
+    url: str
+    revision: str
+    license: str
+    sha256: str
+
+    def __post_init__(self) -> None:
+        for name in ("name", "url", "revision", "license"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.strip():
+                raise GPT2TrainingError(f"source {name} must be a non-empty string")
+        if len(self.sha256) != 64 or any(
+            character not in "0123456789abcdef" for character in self.sha256
+        ):
+            raise GPT2TrainingError("source sha256 must be a lowercase SHA-256 digest")
+
+
+@dataclass(frozen=True)
+class GPT2TrainingSpec:
+    """Complete model, optimizer, and public-source contract for one run."""
+
+    model: GPT2Config
+    training: GPT2TrainingConfig
+    source: GPT2TrainingSource
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.model, GPT2Config):
+            raise TypeError("model must be GPT2Config")
+        if not isinstance(self.training, GPT2TrainingConfig):
+            raise TypeError("training must be GPT2TrainingConfig")
+        if not isinstance(self.source, GPT2TrainingSource):
+            raise TypeError("source must be GPT2TrainingSource")
+        if self.model.vocab_size != 256:
+            raise GPT2TrainingError("byte-token training requires vocab_size 256")
+        if self.training.sequence_length > self.model.context_length:
+            raise GPT2TrainingError("sequence_length exceeds model context_length")
+        if any(
+            value != 0
+            for value in (
+                self.model.embedding_dropout,
+                self.model.attention_dropout,
+                self.model.residual_dropout,
+            )
+        ):
+            raise GPT2TrainingError(
+                "exact replay requires all model dropout to be zero"
+            )
+
+    def fingerprint(self) -> str:
+        payload = {
+            "schema_version": GPT2_TRAINING_SPEC_SCHEMA_VERSION,
+            "model": asdict(self.model),
+            "training": asdict(self.training),
+            "source": asdict(self.source),
+        }
+        return sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -718,3 +784,49 @@ def load_training_checkpoint(
         torch.set_rng_state(saved_rng)
         raise
     return step
+
+
+def training_spec_from_mapping(payload: Mapping[str, Any]) -> GPT2TrainingSpec:
+    """Parse a complete spec without ignoring unknown or misspelled controls."""
+
+    if not isinstance(payload, Mapping) or set(payload) != {
+        "schema_version",
+        "model",
+        "training",
+        "source",
+    }:
+        raise GPT2TrainingError("training spec fields do not match the schema")
+    if payload["schema_version"] != GPT2_TRAINING_SPEC_SCHEMA_VERSION:
+        raise GPT2TrainingError("training spec schema version is unsupported")
+    components = {
+        "model": (payload["model"], GPT2Config),
+        "training": (payload["training"], GPT2TrainingConfig),
+        "source": (payload["source"], GPT2TrainingSource),
+    }
+    parsed: dict[str, Any] = {}
+    for name, (value, kind) in components.items():
+        expected = set(kind.__dataclass_fields__)
+        if not isinstance(value, Mapping) or set(value) != expected:
+            raise GPT2TrainingError(f"training spec {name} fields are invalid")
+        parsed[name] = kind(**value)
+    return GPT2TrainingSpec(**parsed)
+
+
+def load_training_spec(path: Path, *, max_bytes: int = 1024 * 1024) -> GPT2TrainingSpec:
+    """Load a bounded regular JSON training specification."""
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be pathlib.Path")
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int):
+        raise TypeError("max_bytes must be an integer")
+    if max_bytes <= 0:
+        raise GPT2TrainingError("max_bytes must be positive")
+    if path.is_symlink() or not path.is_file():
+        raise GPT2TrainingError("training spec must be a regular non-symlink file")
+    if path.stat().st_size <= 0 or path.stat().st_size > max_bytes:
+        raise GPT2TrainingError("training spec exceeds its byte budget")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise GPT2TrainingError("training spec must be valid UTF-8 JSON") from exc
+    return training_spec_from_mapping(payload)
