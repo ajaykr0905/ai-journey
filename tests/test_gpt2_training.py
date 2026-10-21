@@ -3,12 +3,16 @@ from hashlib import sha256
 import pytest
 import torch
 
+from ai_journey.gpt2_config import GPT2Config
+from ai_journey.gpt2_model import GPT2LanguageModel
 from ai_journey.gpt2_training import (
     GPT2ByteCorpus,
     GPT2BatchCursor,
     GPT2TrainingConfig,
     GPT2TrainingError,
+    build_gpt2_optimizer,
     learning_rate_at,
+    optimizer_group_summary,
 )
 
 
@@ -27,6 +31,22 @@ def make_config(**overrides):
     }
     values.update(overrides)
     return GPT2TrainingConfig(**values)
+
+
+def make_model():
+    torch.manual_seed(47)
+    return GPT2LanguageModel(
+        GPT2Config(
+            vocab_size=256,
+            context_length=8,
+            embedding_dim=16,
+            head_count=2,
+            layer_count=1,
+            embedding_dropout=0.0,
+            attention_dropout=0.0,
+            residual_dropout=0.0,
+        )
+    )
 
 
 def test_training_config_accounts_for_effective_batch_and_tokens():
@@ -185,3 +205,39 @@ def test_single_decay_step_uses_learning_rate_floor():
 def test_learning_rate_rejects_steps_outside_schedule(step):
     with pytest.raises((GPT2TrainingError, TypeError)):
         learning_rate_at(step, make_config())
+
+
+def test_optimizer_groups_decay_matrices_but_not_biases_or_norms():
+    model = make_model()
+    summary = optimizer_group_summary(model)
+
+    assert "wte.weight" in summary.decay_names
+    assert "lm_head.weight" not in summary.decay_names
+    assert "h.0.attn.c_attn.bias" in summary.no_decay_names
+    assert "h.0.ln_1.weight" in summary.no_decay_names
+    assert summary.total_parameters == model.parameter_count
+    assert set(summary.decay_names) | set(summary.no_decay_names) == {
+        name for name, _ in model.named_parameters()
+    }
+
+
+def test_optimizer_applies_declared_decay_to_exact_groups():
+    config = make_config(weight_decay=0.25)
+    model = make_model()
+    optimizer = build_gpt2_optimizer(model, config)
+    summary = optimizer_group_summary(model)
+
+    assert [group["weight_decay"] for group in optimizer.param_groups] == [0.25, 0.0]
+    assert [group["lr"] for group in optimizer.param_groups] == [
+        config.max_learning_rate,
+        config.max_learning_rate,
+    ]
+    assert len(optimizer.param_groups[0]["params"]) == len(summary.decay_names)
+    assert len(optimizer.param_groups[1]["params"]) == len(summary.no_decay_names)
+    assert len(
+        {
+            id(parameter)
+            for group in optimizer.param_groups
+            for parameter in group["params"]
+        }
+    ) == len(list(model.parameters()))

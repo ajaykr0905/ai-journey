@@ -10,9 +10,25 @@ import math
 import torch
 from torch import Tensor
 
+from .gpt2_model import GPT2LanguageModel
+
 
 class GPT2TrainingError(ValueError):
     """Raised when a GPT-2 training contract or run is invalid."""
+
+
+@dataclass(frozen=True)
+class GPT2OptimizerGroups:
+    """Inspectable AdamW grouping without duplicating tied parameters."""
+
+    decay_names: tuple[str, ...]
+    no_decay_names: tuple[str, ...]
+    decay_parameters: int
+    no_decay_parameters: int
+
+    @property
+    def total_parameters(self) -> int:
+        return self.decay_parameters + self.no_decay_parameters
 
 
 @dataclass(frozen=True)
@@ -279,4 +295,46 @@ def learning_rate_at(step: int, config: GPT2TrainingConfig) -> float:
     coefficient = 0.5 * (1.0 + math.cos(math.pi * progress))
     return config.min_learning_rate + coefficient * (
         config.max_learning_rate - config.min_learning_rate
+    )
+
+
+def optimizer_group_summary(model: GPT2LanguageModel) -> GPT2OptimizerGroups:
+    """Classify matrix parameters for decay and vectors for no decay."""
+
+    if not isinstance(model, GPT2LanguageModel):
+        raise TypeError("model must be GPT2LanguageModel")
+    named = tuple(model.named_parameters())
+    if len({id(parameter) for _, parameter in named}) != len(named):
+        raise RuntimeError("named parameters contain duplicate tensor identities")
+    decay = tuple((name, parameter) for name, parameter in named if parameter.ndim >= 2)
+    no_decay = tuple(
+        (name, parameter) for name, parameter in named if parameter.ndim < 2
+    )
+    if len(decay) + len(no_decay) != len(named):
+        raise RuntimeError("optimizer grouping is incomplete")
+    return GPT2OptimizerGroups(
+        decay_names=tuple(name for name, _ in decay),
+        no_decay_names=tuple(name for name, _ in no_decay),
+        decay_parameters=sum(parameter.numel() for _, parameter in decay),
+        no_decay_parameters=sum(parameter.numel() for _, parameter in no_decay),
+    )
+
+
+def build_gpt2_optimizer(
+    model: GPT2LanguageModel, config: GPT2TrainingConfig
+) -> torch.optim.AdamW:
+    """Build AdamW with weight decay only on matrix-shaped parameters."""
+
+    if not isinstance(config, GPT2TrainingConfig):
+        raise TypeError("config must be GPT2TrainingConfig")
+    summary = optimizer_group_summary(model)
+    parameters = dict(model.named_parameters())
+    decay = [parameters[name] for name in summary.decay_names]
+    no_decay = [parameters[name] for name in summary.no_decay_names]
+    return torch.optim.AdamW(
+        [
+            {"params": decay, "weight_decay": config.weight_decay},
+            {"params": no_decay, "weight_decay": 0.0},
+        ],
+        lr=config.max_learning_rate,
     )
