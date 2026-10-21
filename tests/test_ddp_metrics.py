@@ -2,6 +2,7 @@ import math
 import pytest
 import torch
 from ai_journey.ddp_metrics import ddp_loss_scale, token_nll, weighted_mean
+from ai_journey.ddp_metrics import binary_metrics
 
 
 def test_uneven_rank_gradient_scaling_matches_global_token_mean():
@@ -31,3 +32,12 @@ def test_per_token_cross_entropy_is_stable_for_large_logits():
 def test_invalid_weighted_totals_fail(totals):
     with pytest.raises(ValueError):
         weighted_mean(totals)
+
+
+def test_sensitivity_specificity_keep_distinct_denominators():
+    result = binary_metrics([1, 1, 1, 0, 0], [1, 1, 0, 1, 0])
+    assert result["sensitivity"] == pytest.approx(2 / 3)
+    assert result["specificity"] == 0.5
+    assert result["accuracy"] == 0.6
+    assert binary_metrics([0], [0])["sensitivity"] is None
+    assert binary_metrics([1], [0])["precision"] is None

@@ -45,3 +45,37 @@ def token_nll(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     return torch.nn.functional.cross_entropy(
         logits.reshape(-1, logits.shape[-1]), targets.reshape(-1), reduction="none"
     ).reshape_as(targets)
+
+
+def binary_metrics(labels, predictions) -> dict:
+    """Expose sensitivity and specificity with undefined denominators explicit."""
+    labels, predictions = tuple(labels), tuple(predictions)
+    if (
+        not labels
+        or len(labels) != len(predictions)
+        or any(
+            type(value) is not int or value not in (0, 1)
+            for value in (*labels, *predictions)
+        )
+    ):
+        raise ValueError(
+            "labels and predictions must be matching nonempty binary integers"
+        )
+    tp = sum(label == prediction == 1 for label, prediction in zip(labels, predictions))
+    tn = sum(label == prediction == 0 for label, prediction in zip(labels, predictions))
+    fp = sum(
+        label == 0 and prediction == 1 for label, prediction in zip(labels, predictions)
+    )
+    fn = sum(
+        label == 1 and prediction == 0 for label, prediction in zip(labels, predictions)
+    )
+    return {
+        "true_positive": tp,
+        "true_negative": tn,
+        "false_positive": fp,
+        "false_negative": fn,
+        "accuracy": (tp + tn) / len(labels),
+        "sensitivity": tp / (tp + fn) if tp + fn else None,
+        "specificity": tn / (tn + fp) if tn + fp else None,
+        "precision": tp / (tp + fp) if tp + fp else None,
+    }
