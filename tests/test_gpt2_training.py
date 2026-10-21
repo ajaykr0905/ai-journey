@@ -11,6 +11,7 @@ from ai_journey.gpt2_training import (
     GPT2TrainingConfig,
     GPT2TrainingError,
     build_gpt2_optimizer,
+    language_model_loss,
     learning_rate_at,
     optimizer_group_summary,
 )
@@ -241,3 +242,37 @@ def test_optimizer_applies_declared_decay_to_exact_groups():
             for parameter in group["params"]
         }
     ) == len(list(model.parameters()))
+
+
+def test_language_model_loss_matches_direct_cross_entropy():
+    model = make_model()
+    inputs = torch.tensor([[1, 2, 3], [4, 5, 6]])
+    targets = torch.tensor([[2, 3, 4], [5, 6, 7]])
+
+    loss = language_model_loss(model, inputs, targets)
+    expected = torch.nn.functional.cross_entropy(
+        model(inputs).reshape(-1, 256), targets.reshape(-1)
+    )
+
+    assert float(loss.detach()) == pytest.approx(float(expected.detach()))
+    assert loss.ndim == 0
+
+
+@pytest.mark.parametrize(
+    ("inputs", "targets", "message"),
+    [
+        (torch.tensor([1, 2]), torch.tensor([2, 3]), "rank-two"),
+        (torch.tensor([[1, 2]]), torch.tensor([[2]]), "same non-empty shape"),
+        (
+            torch.empty((0, 2), dtype=torch.long),
+            torch.empty((0, 2), dtype=torch.long),
+            "same non-empty shape",
+        ),
+        (torch.tensor([[1] * 9]), torch.tensor([[2] * 9]), "exceeds model context"),
+        (torch.tensor([[256]]), torch.tensor([[1]]), "inputs contain"),
+        (torch.tensor([[1]]), torch.tensor([[-1]]), "targets contain"),
+    ],
+)
+def test_language_model_loss_rejects_invalid_batches(inputs, targets, message):
+    with pytest.raises((GPT2TrainingError, TypeError), match=message):
+        language_model_loss(make_model(), inputs, targets)

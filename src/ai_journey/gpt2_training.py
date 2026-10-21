@@ -9,6 +9,7 @@ import math
 
 import torch
 from torch import Tensor
+from torch.nn import functional as F
 
 from .gpt2_model import GPT2LanguageModel
 
@@ -338,3 +339,31 @@ def build_gpt2_optimizer(
         ],
         lr=config.max_learning_rate,
     )
+
+
+def language_model_loss(
+    model: GPT2LanguageModel, inputs: Tensor, targets: Tensor
+) -> Tensor:
+    """Calculate finite mean next-token loss for one validated micro-batch."""
+
+    if not isinstance(model, GPT2LanguageModel):
+        raise TypeError("model must be GPT2LanguageModel")
+    for name, tensor in (("inputs", inputs), ("targets", targets)):
+        if not isinstance(tensor, Tensor):
+            raise TypeError(f"{name} must be a torch.Tensor")
+        if tensor.dtype != torch.long or tensor.ndim != 2:
+            raise TypeError(f"{name} must be a rank-two torch.long tensor")
+        if tensor.device != model.wte.weight.device:
+            raise GPT2TrainingError(f"{name} must match the model device")
+    if inputs.shape != targets.shape or inputs.numel() == 0:
+        raise GPT2TrainingError("inputs and targets must have the same non-empty shape")
+    if inputs.shape[1] > model.config.context_length:
+        raise GPT2TrainingError("training sequence exceeds model context length")
+    for name, tensor in (("inputs", inputs), ("targets", targets)):
+        if bool(((tensor < 0) | (tensor >= model.config.vocab_size)).any()):
+            raise GPT2TrainingError(f"{name} contain an out-of-range token id")
+    logits = model(inputs)
+    loss = F.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1))
+    if not bool(torch.isfinite(loss)):
+        raise GPT2TrainingError("training loss must be finite")
+    return loss
