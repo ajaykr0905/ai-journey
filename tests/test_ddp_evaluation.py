@@ -3,6 +3,9 @@ from ai_journey.ddp_evaluation import Document, documents_from_lines
 from ai_journey.ddp_evaluation import split_documents
 from ai_journey.ddp_evaluation import evaluation_batches
 from ai_journey.ddp_evaluation import evaluate_documents
+from ai_journey.ddp_evaluation import evaluate_distributed
+from ai_journey.ddp_contracts import Topology
+from ai_journey.ddp_runtime import process_group
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 import torch
@@ -58,3 +61,13 @@ def test_document_evaluation_matches_uniform_oracle_and_preserves_state():
     assert result["perplexity"] == pytest.approx(256)
     assert model.training and not model.ln_f.training
     assert torch.equal(before, torch.get_rng_state())
+
+
+def test_distributed_evaluation_reduces_every_document_target(tmp_path):
+    model = GPT2LanguageModel(GPT2Config(256, 4, 8, 2, 1)).double()
+    documents = documents_from_lines(b"alice\nbob\ncarol\n")
+    reference = evaluate_documents(model, documents)
+    with process_group(Topology(0, 1), rendezvous=(tmp_path / "rdzv").as_uri()):
+        actual = evaluate_distributed(model, documents, Topology(0, 1))
+    assert actual["tokens"] == reference["tokens"]
+    assert actual["mean_nll"] == reference["mean_nll"]

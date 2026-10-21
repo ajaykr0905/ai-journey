@@ -40,10 +40,15 @@ def process_group(topology: Topology, *, rendezvous: str, timeout_seconds: int =
 
 def reduce_token_totals(loss_sum: float, tokens: int) -> tuple[float, int, float]:
     """Reduce additive statistics; never average rank means."""
-    weighted_mean([(loss_sum, tokens)])
+    if tokens == 0 and loss_sum == 0:
+        pass
+    else:
+        weighted_mean([(loss_sum, tokens)])
     values = torch.tensor([loss_sum, tokens], dtype=torch.float64)
     dist.all_reduce(values, op=dist.ReduceOp.SUM)
     total_loss, total_tokens = values.tolist()
+    if total_tokens == 0:
+        raise ValueError("global evaluation contains no targets")
     return total_loss, int(total_tokens), total_loss / total_tokens
 
 
