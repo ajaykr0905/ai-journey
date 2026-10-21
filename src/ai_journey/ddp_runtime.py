@@ -7,6 +7,7 @@ import torch.distributed as dist
 import torch
 
 from .ddp_metrics import weighted_mean
+from .gpt2_training import gpt2_model_fingerprint
 
 from .ddp_contracts import Topology, integer
 
@@ -56,3 +57,14 @@ def require_all_ranks(success: bool, *, phase: str) -> None:
     dist.all_reduce(status, op=dist.ReduceOp.MIN)
     if status.item() == 0:
         raise RuntimeError(f"at least one rank failed {phase}")
+
+
+def require_model_consensus(model) -> str:
+    """Prove replicated model bytes agree before checkpointing or serving."""
+    fingerprint = gpt2_model_fingerprint(model)
+    encoded = torch.tensor(list(bytes.fromhex(fingerprint)), dtype=torch.uint8)
+    gathered = [torch.empty_like(encoded) for _ in range(dist.get_world_size())]
+    dist.all_gather(gathered, encoded)
+    if any(not torch.equal(encoded, value) for value in gathered):
+        raise RuntimeError("replicated model fingerprints diverged")
+    return fingerprint
