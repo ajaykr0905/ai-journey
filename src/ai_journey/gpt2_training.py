@@ -75,6 +75,104 @@ class GPT2ByteCorpus:
         return digest.hexdigest()
 
 
+class GPT2BatchCursor:
+    """Deterministic full micro-batches with resumable shuffled epochs."""
+
+    def __init__(self, corpus: GPT2ByteCorpus, config: "GPT2TrainingConfig") -> None:
+        if not isinstance(corpus, GPT2ByteCorpus):
+            raise TypeError("corpus must be GPT2ByteCorpus")
+        if not isinstance(config, GPT2TrainingConfig):
+            raise TypeError("config must be GPT2TrainingConfig")
+        sample_count = len(corpus.tokens) - config.sequence_length
+        if sample_count < config.micro_batch_size:
+            raise GPT2TrainingError(
+                "corpus must provide at least one complete micro-batch"
+            )
+        self.tokens = corpus.tokens.clone()
+        self.sequence_length = config.sequence_length
+        self.batch_size = config.micro_batch_size
+        self.seed = config.seed
+        self.sample_count = sample_count
+        self.usable_samples = sample_count - sample_count % self.batch_size
+        self.epoch = 0
+        self.offset = 0
+
+    @property
+    def discarded_samples_per_epoch(self) -> int:
+        """Return tail windows omitted to preserve exact micro-batch weight."""
+
+        return self.sample_count - self.usable_samples
+
+    def _order(self) -> Tensor:
+        generator = torch.Generator(device="cpu").manual_seed(self.seed + self.epoch)
+        return torch.randperm(self.sample_count, generator=generator)
+
+    def next(self) -> tuple[Tensor, Tensor]:
+        """Return the next complete input/target micro-batch."""
+
+        if self.offset >= self.usable_samples:
+            self.epoch += 1
+            self.offset = 0
+        starts = self._order()[self.offset : self.offset + self.batch_size]
+        self.offset += self.batch_size
+        inputs = torch.stack(
+            [
+                self.tokens[start : start + self.sequence_length]
+                for start in starts.tolist()
+            ]
+        )
+        targets = torch.stack(
+            [
+                self.tokens[start + 1 : start + self.sequence_length + 1]
+                for start in starts.tolist()
+            ]
+        )
+        return inputs, targets
+
+    def state_dict(self) -> dict[str, int]:
+        """Return the minimum exact restart position."""
+
+        return {"epoch": self.epoch, "offset": self.offset}
+
+    def load_state_dict(self, state: dict[str, int]) -> None:
+        """Restore a validated micro-batch boundary."""
+
+        if not isinstance(state, dict) or set(state) != {"epoch", "offset"}:
+            raise GPT2TrainingError("batch cursor state has invalid fields")
+        if any(
+            isinstance(value, bool) or not isinstance(value, int)
+            for value in state.values()
+        ):
+            raise TypeError("batch cursor state values must be integers")
+        epoch, offset = state["epoch"], state["offset"]
+        if epoch < 0 or not 0 <= offset <= self.usable_samples:
+            raise GPT2TrainingError("batch cursor state is out of range")
+        if offset % self.batch_size:
+            raise GPT2TrainingError("batch cursor offset is not a batch boundary")
+        if self.seed + epoch >= 2**63:
+            raise GPT2TrainingError("batch cursor epoch exceeds its RNG range")
+        self.epoch = epoch
+        self.offset = offset
+
+    def fingerprint(self) -> str:
+        """Bind restart state compatibility to data and sampler controls."""
+
+        digest = sha256()
+        digest.update(self.tokens.numpy().tobytes())
+        digest.update(
+            json.dumps(
+                {
+                    "sequence_length": self.sequence_length,
+                    "batch_size": self.batch_size,
+                    "seed": self.seed,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        )
+        return digest.hexdigest()
+
+
 @dataclass(frozen=True)
 class GPT2TrainingConfig:
     """Validated optimizer, accumulation, schedule, and reproducibility controls."""

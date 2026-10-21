@@ -5,6 +5,7 @@ import torch
 
 from ai_journey.gpt2_training import (
     GPT2ByteCorpus,
+    GPT2BatchCursor,
     GPT2TrainingConfig,
     GPT2TrainingError,
 )
@@ -89,3 +90,64 @@ def test_byte_corpus_enforces_input_budget():
 def test_byte_corpus_rejects_out_of_range_tokens():
     with pytest.raises(GPT2TrainingError, match=r"in \[0, 255\]"):
         GPT2ByteCorpus(torch.tensor([0, 256]), "0" * 64)
+
+
+def test_batch_cursor_replays_complete_micro_batches_from_saved_state():
+    corpus = GPT2ByteCorpus.from_bytes(bytes(range(25)))
+    config = make_config(micro_batch_size=4, sequence_length=5)
+    cursor = GPT2BatchCursor(corpus, config)
+
+    first = cursor.next()
+    state = cursor.state_dict()
+    expected_second = cursor.next()
+
+    resumed = GPT2BatchCursor(corpus, config)
+    resumed.load_state_dict(state)
+    actual_second = resumed.next()
+
+    assert first[0].shape == (4, 5)
+    assert first[1].shape == (4, 5)
+    assert all(
+        torch.equal(actual, expected)
+        for actual, expected in zip(actual_second, expected_second, strict=True)
+    )
+    assert resumed.fingerprint() == cursor.fingerprint()
+
+
+def test_batch_cursor_discards_only_incomplete_epoch_tail():
+    corpus = GPT2ByteCorpus.from_bytes(bytes(range(24)))
+    config = make_config(micro_batch_size=4, sequence_length=5)
+    cursor = GPT2BatchCursor(corpus, config)
+
+    assert cursor.sample_count == 19
+    assert cursor.usable_samples == 16
+    assert cursor.discarded_samples_per_epoch == 3
+    for _ in range(4):
+        cursor.next()
+    assert cursor.state_dict() == {"epoch": 0, "offset": 16}
+    cursor.next()
+    assert cursor.state_dict() == {"epoch": 1, "offset": 4}
+
+
+def test_batch_cursor_requires_one_complete_micro_batch():
+    corpus = GPT2ByteCorpus.from_bytes(b"abcdef")
+    with pytest.raises(GPT2TrainingError, match="complete micro-batch"):
+        GPT2BatchCursor(corpus, make_config(micro_batch_size=4, sequence_length=4))
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        {"epoch": 0},
+        {"epoch": -1, "offset": 0},
+        {"epoch": 0, "offset": 1},
+        {"epoch": 0, "offset": 10_000},
+    ],
+)
+def test_batch_cursor_rejects_invalid_restart_boundaries(state):
+    cursor = GPT2BatchCursor(
+        GPT2ByteCorpus.from_bytes(bytes(range(25))),
+        make_config(micro_batch_size=4, sequence_length=5),
+    )
+    with pytest.raises((GPT2TrainingError, TypeError)):
+        cursor.load_state_dict(state)
