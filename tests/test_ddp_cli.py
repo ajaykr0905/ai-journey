@@ -41,3 +41,30 @@ def test_cli_invalid_report_exits_with_an_actionable_error(tmp_path):
     with pytest.raises(SystemExit) as result:
         main(["verify", "--report", str(tmp_path / "missing.json")])
     assert result.value.code == 2
+
+
+def test_cli_pipeline_publishes_heldout_and_serving_measurements(tmp_path, capsys):
+    root = Path(__file__).resolve().parents[1]
+    report = tmp_path / "pipeline.json"
+    assert (
+        main(
+            [
+                "pipeline",
+                "--source",
+                str(root / "data/day-19-demo-names.txt"),
+                "--spec",
+                str(root / "config/ddp-lab.json"),
+                "--output",
+                str(report),
+                "--workdir",
+                str(tmp_path / "work"),
+                "--steps",
+                "2",
+            ]
+        )
+        == 0
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert json.loads(report.read_text()) == result
+    assert result["serving_benchmark"]["tokens"] == 12
+    assert result["validation_after"]["tokens"] > 0

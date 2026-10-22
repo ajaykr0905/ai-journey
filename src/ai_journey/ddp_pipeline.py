@@ -13,10 +13,10 @@ from .ddp_evaluation import documents_from_lines, split_documents, evaluate_docu
 from .ddp_evidence import build_evidence
 from .ddp_generation import SamplingConfig
 from .ddp_launch import launch_training
+from .ddp_limits import preflight
 from .ddp_service import GenerationService, GenerationRequest
 from .gpt2_model import GPT2LanguageModel, expected_gpt2_parameter_count
 from .gpt2_training import (
-    load_training_spec,
     training_spec_from_mapping,
     build_gpt2_optimizer,
     gpt2_model_fingerprint,
@@ -53,7 +53,7 @@ def run_pipeline(
     world_size=2,
     steps=2,
 ):
-    original_spec = load_training_spec(spec_path)
+    original_spec = preflight(source, spec_path, world_size=world_size, steps=steps)
     original = source.read_bytes()
     if sha256(original).hexdigest() != original_spec.source.sha256:
         raise ValueError("public fixture does not match source specification")

@@ -8,6 +8,7 @@ from .ddp_acceptance import certify_recovery, certify_batch_equivalence
 from .ddp_evidence import build_evidence, read_evidence, write_evidence
 from .ddp_launch import launch_training
 from .gpt2_training import load_training_spec
+from .ddp_operations import add_commands, run_operation, write_report
 
 
 def main(argv=None):
@@ -24,9 +25,18 @@ def main(argv=None):
             command.add_argument("--resume", action="store_true")
     verify = commands.add_parser("verify")
     verify.add_argument("--report", type=Path, required=True)
+    add_commands(commands)
     arguments = parser.parse_args(argv)
     try:
-        if arguments.command == "verify":
+        if arguments.command in (
+            "matrix",
+            "pipeline",
+            "serve",
+            "benchmark",
+            "verify-comparison",
+        ):
+            result = run_operation(arguments)
+        elif arguments.command == "verify":
             result = read_evidence(arguments.report)
         elif arguments.command == "train":
             spec = load_training_spec(arguments.spec)
@@ -55,10 +65,7 @@ def main(argv=None):
                 world_size=arguments.world_size,
                 **{step_field: arguments.steps},
             )
-            arguments.output.parent.mkdir(parents=True, exist_ok=True)
-            arguments.output.write_text(
-                json.dumps(result, sort_keys=True, allow_nan=False) + "\n"
-            )
+            write_report(arguments.output, result)
     except (OSError, ValueError, RuntimeError, TimeoutError) as error:
         parser.error(str(error))
     print(json.dumps(result, sort_keys=True, allow_nan=False))

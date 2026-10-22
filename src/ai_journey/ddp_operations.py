@@ -1,0 +1,135 @@
+"""Operating commands for comparison, evaluation and loopback serving."""
+
+import json
+import os
+from pathlib import Path
+import tempfile
+import threading
+
+import torch
+
+from .ddp_benchmark import benchmark_service
+from .ddp_comparison import compare_decompositions, write_comparison, verify_comparison
+from .ddp_generation import SamplingConfig
+from .ddp_http import make_server
+from .ddp_limits import preflight
+from .ddp_pipeline import run_pipeline, load_serving_model
+from .ddp_service import GenerationService, GenerationRequest
+
+
+def write_report(path: Path, report):
+    body = (
+        json.dumps(report, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        + "\n"
+    )
+    if path.is_symlink():
+        raise ValueError("report output must not be a symlink")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            mode="w",
+            encoding="utf-8",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def add_commands(commands):
+    for name in ("matrix", "pipeline"):
+        command = commands.add_parser(name)
+        for field in ("source", "spec", "output", "workdir"):
+            command.add_argument(f"--{field}", type=Path, required=True)
+        command.add_argument("--steps", type=int, default=4)
+    verify = commands.add_parser("verify-comparison")
+    verify.add_argument("--report", type=Path, required=True)
+    for name in ("serve", "benchmark"):
+        command = commands.add_parser(name)
+        for field in ("source", "spec", "checkpoint"):
+            command.add_argument(f"--{field}", type=Path, required=True)
+        if name == "serve":
+            command.add_argument("--port", type=int, default=8080)
+            command.add_argument("--max-seconds", type=int, default=60)
+        else:
+            command.add_argument("--output", type=Path, required=True)
+            command.add_argument("--repeats", type=int, default=5)
+
+
+def run_operation(arguments):
+    threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        command = arguments.command
+        if command == "verify-comparison":
+            if (
+                arguments.report.is_symlink()
+                or arguments.report.stat().st_size > 4 * 1024 * 1024
+            ):
+                raise ValueError("comparison report exceeds file constraints")
+            return verify_comparison(json.loads(arguments.report.read_text()))
+        if command == "matrix":
+            report = compare_decompositions(
+                source=arguments.source,
+                spec_path=arguments.spec,
+                directory=arguments.workdir,
+                steps=arguments.steps,
+            )
+            write_comparison(arguments.output, report)
+            return report
+        if command == "pipeline":
+            report = run_pipeline(
+                source=arguments.source,
+                spec_path=arguments.spec,
+                directory=arguments.workdir,
+                steps=arguments.steps,
+            )
+            write_report(arguments.output, report)
+            return report
+        spec = preflight(arguments.source, arguments.spec, world_size=1, steps=1)
+        service = GenerationService(
+            load_serving_model(
+                arguments.checkpoint, spec, arguments.source.read_bytes()
+            )
+        )
+        if command == "benchmark":
+            request = GenerationRequest(
+                "cli-benchmark",
+                tuple(b"a"),
+                SamplingConfig(max_new_tokens=4, temperature=0),
+            )
+            report = benchmark_service(service, request, repeats=arguments.repeats)
+            write_report(arguments.output, report)
+            return report
+        if not 0 <= arguments.port <= 65535 or not 1 <= arguments.max_seconds <= 3600:
+            raise ValueError("server port or lifetime exceeds lab limits")
+        server = make_server(service, port=arguments.port)
+        timer = threading.Timer(arguments.max_seconds, server.shutdown)
+        timer.start()
+        print(
+            json.dumps(
+                {
+                    "listening": f"http://127.0.0.1:{server.server_port}",
+                    **service.health(),
+                }
+            ),
+            flush=True,
+        )
+        try:
+            server.serve_forever(poll_interval=0.05)
+        finally:
+            timer.cancel()
+            timer.join(timeout=2)
+            server.server_close()
+        return service.health()
+    finally:
+        torch.set_num_threads(threads)
