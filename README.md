@@ -21,6 +21,9 @@ then grow these exercises into production-quality training and inference project
 - Deterministic GPT-2-style gradient accumulation, AdamW grouping, warmup and
   cosine scheduling, clipping, rollback, exact checkpoint resume, and fresh-run
   evidence replay in the [training controls guide](docs/gpt2-training-controls.md)
+- Real CPU/Gloo process training, exact checkpoint recovery, controlled global-batch
+  comparisons, held-out evaluation, cached inference, and loopback serving in the
+  [distributed lab runbook](docs/distributed-cpu-lab.md)
 - Grouped preference cross-validation with response-only DPO-style scoring,
   matched full/LoRA arms, negative findings, and exact replay in the
   [preference optimization guide](docs/preference-optimization.md)
@@ -402,6 +405,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 42 | 2026-10-16 | Low-rank adapter primitives, frozen-base audits, dense merge equivalence, paired comparison, and exact replay |
 | 43 | 2026-10-17 | Validated chat/tool conversations, assistant-only SFT, matched full/LoRA trials, uncertainty, and exact replay |
 | 45 | 2026-10-19 | Exact GPT-2 architecture, public checkpoint import, full-logit parity, and tamper-evident evidence |
+| 48 | 2026-10-22 | Real DDP processes, global-batch equivalence, exact recovery, document-held-out evaluation, and bounded serving |
 
 ## License
 

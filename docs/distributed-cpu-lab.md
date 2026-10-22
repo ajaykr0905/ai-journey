@@ -1,0 +1,155 @@
+# Distributed GPT-2 CPU lab
+
+This lab trains the existing 7,536-parameter GPT-2 decoder in real, separate
+CPU/Gloo processes. It supports deterministic global batches, checkpoint recovery,
+document-isolated evaluation, cached inference, and a bounded loopback server.
+The checked protocol is `config/ddp-lab.json`; it uses the public CC0 fixture
+`data/day-19-demo-names.txt`, bound to its SHA-256 and an immutable repository URL.
+
+## Train and resume
+
+Install the package with `python -m pip install -e .`. PyTorch must provide Gloo.
+On Linux, a CPU wheel can be installed first with
+`python -m pip install torch --index-url https://download.pytorch.org/whl/cpu`.
+
+```bash
+ai-journey-ddp train --source data/day-19-demo-names.txt \
+  --spec config/ddp-lab.json --checkpoint /tmp/ddp-demo/state.pt \
+  --output /tmp/ddp-demo/training.json --workdir /tmp/ddp-demo/train --steps 2
+
+ai-journey-ddp train --source data/day-19-demo-names.txt \
+  --spec config/ddp-lab.json --checkpoint /tmp/ddp-demo/state.pt \
+  --output /tmp/ddp-demo/resumed.json --workdir /tmp/ddp-demo/resumed \
+  --steps 2 --resume
+
+ai-journey-ddp verify --report /tmp/ddp-demo/resumed.json
+```
+
+Each rank receives disjoint shuffled samples and the same number of complete
+micro-batches. The effective global batch is
+`world_size × micro_batch_size × accumulation_steps`. The protocol uses
+`2 × 1 × 2 = 4` sequences, four target bytes per sequence, and four optimizer
+updates. Incomplete global batches are discarded explicitly. Epoch and cursor
+positions are reconstructed from the durable global optimizer step.
+
+The worker uses DDP `no_sync()` for intermediate micro-batches. The final backward
+pass synchronizes gradients, then all ranks agree on gradient validity before
+clipping and updating. A rank-local optimizer exception or nonfinite parameter
+update restores model, optimizer, RNG, gradients, and module modes. Rank-zero
+checkpoint publication happens only after replicated model fingerprints agree.
+Publication uses a flushed temporary file, atomic replacement, and directory sync.
+
+The checkpoint contains AdamW moments, the global step, source/config identity,
+and every rank's RNG state. Restore requires the same world size and configuration.
+Archive expansion is bounded before weights-only deserialization. Recovery covers
+completed optimizer boundaries; a failed process can lose work since the last
+published checkpoint.
+
+## Reproduce the acceptance experiments
+
+```bash
+ai-journey-ddp recover --source data/day-19-demo-names.txt \
+  --spec config/ddp-lab.json --output /tmp/ddp-demo/recovery.json \
+  --workdir /tmp/ddp-demo/recovery --steps 2
+
+ai-journey-ddp matrix --source data/day-19-demo-names.txt \
+  --spec config/ddp-lab.json --output /tmp/ddp-demo/comparison.json \
+  --workdir /tmp/ddp-demo/comparison --steps 4
+
+ai-journey-ddp verify-comparison \
+  --report artifacts/ddp-lab-2026-10-22/comparison.json
+
+ai-journey-ddp pipeline --source data/day-19-demo-names.txt \
+  --spec config/ddp-lab.json --output /tmp/ddp-demo/pipeline.json \
+  --workdir /tmp/ddp-demo/pipeline --steps 4
+```
+
+`recover` compares four uninterrupted updates against two updates followed by two
+updates in fresh worker processes. The local acceptance run reproduced model,
+optimizer, per-rank RNG, and progress exactly.
+
+`matrix` predeclares three decompositions of the same global batch. All use the
+same public bytes, model, seed 48, AdamW settings, schedule, FP64 dtype, and 64 total
+target tokens:
+
+| Configuration | Processes | Micro-batch | Accumulation | Max parameter error against serial |
+| --- | ---: | ---: | ---: | ---: |
+| Serial accumulation | 1 | 1 | 4 | 0 |
+| DDP accumulation | 2 | 1 | 2 | 1.6823348270023075e-13 |
+| DDP micro-batch | 2 | 2 | 1 | 3.6849689966089727e-13 |
+
+The acceptance threshold is absolute parameter error `1e-10`. The published report
+records separate worker PIDs, configurations, per-update metrics, runtime identity,
+model fingerprints, and a canonical integrity digest. This digest detects accidental
+changes; it is not a third-party signature. Independent accounting checks also
+reject resealed invalid reports. CI checks the stored evidence and generates new
+reports in its own Linux runtime.
+
+`pipeline` holds out four complete documents before training. Every within-document
+validation target is scored once, including short tails. It reports the initial and
+trained NLL, loads the verified checkpoint into an immutable serving snapshot, and
+benchmarks repeated output parity. The local run's 20 held-out targets changed from
+NLL `12.8548239372311` to `11.911954112734469`. Retain regressions in other runs.
+This one tiny fixture and seed do not establish generalized quality or scaling.
+
+## Serve the verified checkpoint
+
+```bash
+ai-journey-ddp serve --source data/day-19-demo-names.txt \
+  --spec config/ddp-lab.json --checkpoint /tmp/ddp-demo/state.pt \
+  --port 8080 --max-seconds 60
+```
+
+The server prints its loopback URL and model fingerprint, then closes at its
+declared lifetime. `GET /health` returns readiness and request/token counters.
+`POST /generate` returns JSON; `POST /stream` emits ordered `token` events followed
+by one `done` event. Both accept this body:
+
+```json
+{"request_id":"demo-1","prompt":[97],"sampling":{"max_new_tokens":4,"temperature":0,"seed":48}}
+```
+
+The unauthenticated lab server binds only to `127.0.0.1`. Bodies are limited to
+16 KiB, prompts to 512 token IDs, output to 128 tokens, and decode work to a
+10-second monotonic deadline. Admission uses a refillable token budget. A retry
+with the same request ID and input reuses a bounded cached response; a conflicting
+input for a retained ID is rejected. Token callbacks stop generation when a stream
+disconnects. The library also supports explicit cancellation callbacks.
+
+Cached generation uses model-bound keys/values and absolute position offsets. At
+context capacity it rebuilds the sliding window, preserving uncached semantics.
+Tests compare all decoder logits and seeded generated tokens across rollover.
+
+```bash
+ai-journey-ddp benchmark --source data/day-19-demo-names.txt \
+  --spec config/ddp-lab.json --checkpoint /tmp/ddp-demo/state.pt \
+  --output /tmp/ddp-demo/benchmark.json --repeats 5
+```
+
+Warmup requests are excluded, request IDs are fresh to avoid response-cache hits,
+and generated output must match across repeats. Throughput uses the full measured
+window. Latency percentiles use empirical nearest rank; with five observations,
+p95 and p99 are the maximum observation. Reports retain runtime and sample counts.
+These short CPU measurements are functional checks, not production capacity claims.
+
+## Failure diagnosis and limits
+
+Rank logs and JSON reports remain in the supplied work directory. A failing or
+stalled worker stops the supervisor and all processes it owns. Collective timeouts
+are bounded to 30 seconds; the launcher deadline is 60 seconds by default. Tests
+inject rank exit, stall, gradient poisoning, schedule mismatch, malformed optimizer
+state, and forged evidence. To rerun the complete lab suite:
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/test_ddp*.py
+```
+
+Preflight limits are four workers, one million model parameters, context 128,
+1 MiB public source, 8,192 global target tokens per update, and 128 updates per
+invocation. The dedicated CI job reproduces real process recovery, comparisons,
+evaluation, and serving acceptance. NVIDIA multi-GPU training, NCCL, GPU utilization,
+elastic world-size recovery, and production failure recovery remain unverified.
+Automated output does not certify lesson viewing, manual exercises, or reflection.
+
+The synchronization and accumulation behavior follows the
+[PyTorch DDP contract](https://docs.pytorch.org/docs/2.14/generated/torch.nn.parallel.DistributedDataParallel.html).

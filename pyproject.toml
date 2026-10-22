@@ -39,6 +39,7 @@ ai-journey-preference-compare = "ai_journey.preference_cli:main"
 ai-journey-preference-verify = "ai_journey.preference_cli:verify_main"
 ai-journey-gpt2 = "ai_journey.gpt2_cli:main"
 ai-journey-gpt2-train = "ai_journey.gpt2_training_cli:main"
+ai-journey-ddp = "ai_journey.ddp_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
