@@ -1,5 +1,6 @@
 {
   "required_files": [
+    "docs/distributed-cpu-lab.md",
     "src/ai_journey/ddp_acceptance.py",
     "src/ai_journey/ddp_benchmark.py",
     "src/ai_journey/ddp_cache.py",
