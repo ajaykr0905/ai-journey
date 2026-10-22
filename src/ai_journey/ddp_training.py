@@ -81,6 +81,9 @@ def _accumulated_update(
     stepped = True
     try:
         optimizer.step()
+        stepped = all(
+            torch.isfinite(parameter).all().item() for parameter in model.parameters()
+        )
     except (RuntimeError, ValueError):
         stepped = False
     require_all_ranks(stepped, phase="optimizer update")

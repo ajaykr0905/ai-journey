@@ -38,7 +38,12 @@ def launch_training(
         raise ValueError("checkpoint output must not overwrite an input")
     if failure_rank is not None:
         integer(failure_rank, "failure_rank")
-        if failure_rank >= world_size or failure_mode not in ("exit", "stall"):
+        if failure_rank >= world_size or failure_mode not in (
+            "exit",
+            "stall",
+            "nonfinite",
+            "schedule",
+        ):
             raise ValueError(
                 "failure injection requires an existing rank and supported mode"
             )

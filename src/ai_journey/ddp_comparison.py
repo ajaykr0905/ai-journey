@@ -89,6 +89,10 @@ def verify_comparison(report):
         {key: value for key, value in report.items() if key != "evidence_sha256"}
     ) != report.get("evidence_sha256"):
         raise ValueError("comparison schema or digest does not match")
+    if report["absolute_tolerance"] != 1e-10 or report["global_batch_size"] != 4:
+        raise ValueError(
+            "comparison must retain the declared tolerance and global batch"
+        )
     if len(report["arms"]) != len(ARMS) or len(report["max_parameter_errors"]) != len(
         ARMS
     ):

@@ -88,6 +88,7 @@ def verify_evidence(payload: dict) -> dict:
     if (
         not isinstance(payload, dict)
         or set(payload) != fields
+        or type(payload["schema_version"]) is not int
         or payload["schema_version"] != 1
     ):
         raise ValueError("distributed evidence schema does not match")
@@ -114,6 +115,9 @@ def verify_evidence(payload: dict) -> dict:
     ):
         raise ValueError("rank process identities are incomplete")
     for rank in ranks:
+        if not isinstance(rank, dict) or set(rank) != {"rank", "pid", "model_sha256"}:
+            raise ValueError("rank evidence fields are invalid")
+        integer(rank["rank"], "rank")
         integer(rank["pid"], "pid", 1)
         if rank["model_sha256"] != payload["model_sha256"]:
             raise ValueError("rank model fingerprints do not agree")
@@ -126,6 +130,32 @@ def verify_evidence(payload: dict) -> dict:
     ):
         raise ValueError("evidence progress is invalid")
     for expected_step, metric in enumerate(metrics, completed - len(metrics) + 1):
+        expected_fields = {
+            "loss_sum",
+            "tokens",
+            "micro_batches",
+            "gradient_norm",
+            "clipped",
+            "step",
+            "mean_loss",
+            "learning_rate",
+            "model_sha256",
+        }
+        if not isinstance(metric, dict) or set(metric) != expected_fields:
+            raise ValueError("metric fields are invalid")
+        for name in ("step", "tokens", "micro_batches"):
+            integer(metric[name], name, 1)
+        if type(metric["clipped"]) is not bool or metric["clipped"] != (
+            metric["gradient_norm"] > spec.training.gradient_clip
+        ):
+            raise ValueError("gradient clipping evidence does not match")
+        value = metric["model_sha256"]
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+        ):
+            raise ValueError("model fingerprint must be SHA-256")
         if (
             metric["step"] != expected_step
             or metric["tokens"] != spec.training.tokens_per_step * world
@@ -154,6 +184,25 @@ def verify_evidence(payload: dict) -> dict:
         or payload["runtime"]["backend"] != "gloo"
     ):
         raise ValueError("distributed final state or runtime does not match")
+    runtime = payload["runtime"]
+    if (
+        set(runtime)
+        != {
+            "device",
+            "backend",
+            "torch",
+            "python",
+            "machine",
+            "operating_system",
+            "dtype",
+            "torch_threads",
+            "torch_config_sha256",
+        }
+        or runtime["dtype"] != "torch.float64"
+        or type(runtime["torch_threads"]) is not int
+        or runtime["torch_threads"] != 1
+    ):
+        raise ValueError("runtime controls do not match CPU FP64 execution")
     return payload
 
 

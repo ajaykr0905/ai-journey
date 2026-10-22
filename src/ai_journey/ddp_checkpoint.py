@@ -9,6 +9,7 @@ import tempfile
 import stat
 import zipfile
 import pickle
+import math
 
 import torch
 import torch.distributed as dist
@@ -52,6 +53,22 @@ def validate_optimizer_state(model, optimizer, *, step: int):
         raise ValueError("optimizer is not bound to the complete model")
     if any(not torch.isfinite(parameter).all() for parameter in parameters):
         raise ValueError("checkpoint model contains nonfinite values")
+    for group in optimizer.param_groups:
+        for name in ("lr", "weight_decay", "eps"):
+            value = group[name]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+                or (name == "eps" and value == 0)
+            ):
+                raise ValueError("AdamW hyperparameters must be finite and valid")
+        if len(group["betas"]) != 2 or any(
+            isinstance(value, bool) or not math.isfinite(value) or not 0 <= value < 1
+            for value in group["betas"]
+        ):
+            raise ValueError("AdamW beta values are invalid")
     for parameter in parameters:
         state = optimizer.state.get(parameter, {})
         if not state and step == 0:
@@ -173,6 +190,7 @@ def load_checkpoint(
         if (
             not isinstance(payload, dict)
             or set(payload) != expected
+            or type(payload["schema_version"]) is not int
             or payload["schema_version"] != 1
         ):
             raise ValueError("checkpoint schema does not match")

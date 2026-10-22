@@ -25,7 +25,9 @@ def main(argv=None):
     parser.add_argument("--rendezvous", required=True)
     parser.add_argument("--steps", type=int, required=True)
     parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--inject-failure", choices=("exit", "stall"))
+    parser.add_argument(
+        "--inject-failure", choices=("exit", "stall", "nonfinite", "schedule")
+    )
     args = parser.parse_args(argv)
     if args.inject_failure == "exit":
         raise RuntimeError("injected worker exit before process-group initialization")
@@ -48,6 +50,15 @@ def main(argv=None):
     optimizer = build_gpt2_optimizer(model, spec.training)
     with process_group(topology, rendezvous=args.rendezvous):
         wrapped = DistributedDataParallel(model)
+        if args.inject_failure == "nonfinite":
+            model.wte.weight.register_hook(lambda gradient: gradient * float("nan"))
+        training = spec.training
+        if args.inject_failure == "schedule":
+            from dataclasses import replace
+
+            training = replace(
+                training, accumulation_steps=training.accumulation_steps + 1
+            )
         started = (
             load_checkpoint(
                 args.checkpoint,
@@ -63,7 +74,7 @@ def main(argv=None):
             wrapped,
             optimizer,
             source,
-            spec.training,
+            training,
             topology,
             start_step=started,
             steps=args.steps,
