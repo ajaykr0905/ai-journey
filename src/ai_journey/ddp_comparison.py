@@ -1,6 +1,8 @@
 """Predeclared three-arm experiment isolating global-batch decomposition."""
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from .ddp_checkpoint import bounded_checkpoint_load
@@ -121,3 +123,31 @@ def verify_comparison(report):
     if any(spec != specs[0] for spec in specs):
         raise ValueError("comparison changed a fixed experimental condition")
     return report
+
+
+def write_comparison(path: Path, report):
+    verify_comparison(report)
+    if path.is_symlink():
+        raise ValueError("comparison output must not be a symlink")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            mode="w",
+            encoding="utf-8",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            json.dump(
+                report, handle, sort_keys=True, separators=(",", ":"), allow_nan=False
+            )
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)

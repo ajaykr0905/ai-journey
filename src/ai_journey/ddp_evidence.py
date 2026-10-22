@@ -61,6 +61,9 @@ def build_evidence(source: bytes, spec, ranks: list[dict]) -> dict:
             "python": platform.python_version(),
             "machine": platform.machine(),
             "operating_system": platform.system(),
+            "dtype": "torch.float64",
+            "torch_threads": 1,
+            "torch_config_sha256": sha256(torch.__config__.show().encode()).hexdigest(),
         },
         "limitations": LIMITATIONS.copy(),
     }
