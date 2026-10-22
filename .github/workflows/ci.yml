@@ -8,6 +8,46 @@ permissions:
   contents: read
 
 jobs:
+  distributed-cpu-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      PYTHONHASHSEED: "0"
+      GLOO_SOCKET_IFNAME: lo
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU runtime and package
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . ruff==0.6.9 pytest==9.0.2
+      - name: Check distributed lab contracts and real worker regressions
+        run: |
+          ruff check src/ai_journey/ddp*.py tests/test_ddp*.py
+          ruff format --check src/ai_journey/ddp*.py tests/test_ddp*.py
+          python -m compileall -q src tests
+          python -m pytest -q tests/test_ddp*.py
+      - name: Verify published controls and reproduce installed commands
+        run: |
+          ai-journey-ddp verify-comparison --report artifacts/ddp-lab-2026-10-22/comparison.json
+          ai-journey-ddp train --source data/day-19-demo-names.txt --spec config/ddp-lab.json --checkpoint /tmp/ddp-ci/state.pt --output /tmp/ddp-ci/training.json --workdir /tmp/ddp-ci/train --steps 4
+          ai-journey-ddp verify --report /tmp/ddp-ci/training.json
+          ai-journey-ddp recover --source data/day-19-demo-names.txt --spec config/ddp-lab.json --output /tmp/ddp-ci/recovery.json --workdir /tmp/ddp-ci/recovery --steps 2
+          ai-journey-ddp matrix --source data/day-19-demo-names.txt --spec config/ddp-lab.json --output /tmp/ddp-ci/comparison.json --workdir /tmp/ddp-ci/matrix --steps 4
+          ai-journey-ddp pipeline --source data/day-19-demo-names.txt --spec config/ddp-lab.json --output /tmp/ddp-ci/pipeline.json --workdir /tmp/ddp-ci/pipeline --steps 4
+      - name: Retain measured CPU acceptance reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: distributed-cpu-evidence
+          path: /tmp/ddp-ci/*.json
+          if-no-files-found: error
   test:
     runs-on: ubuntu-latest
     steps:
