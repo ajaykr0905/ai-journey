@@ -221,3 +221,48 @@ def records_from_dataset_server(source: bytes) -> tuple[HellaSwagRecord, ...]:
     ):
         raise HellaSwagError("dataset response contains duplicate examples")
     return tuple(records)
+
+
+def select_records(
+    records, *, start: int = 0, count: int = 100
+) -> tuple[HellaSwagRecord, ...]:
+    """Select an exact contiguous validation slice independent of response order."""
+    for name, value, minimum, maximum in (
+        ("start", start, 0, 10041),
+        ("count", count, 1, 1000),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not minimum <= value <= maximum
+        ):
+            raise HellaSwagError(f"{name} is outside the evaluation budget")
+    records = tuple(records)
+    if not records or any(
+        not isinstance(record, HellaSwagRecord) for record in records
+    ):
+        raise HellaSwagError("selection requires validated HellaSwag records")
+    selected = tuple(
+        sorted(
+            (record for record in records if start <= record.row_index < start + count),
+            key=lambda record: record.row_index,
+        )
+    )
+    if [record.row_index for record in selected] != list(range(start, start + count)):
+        raise HellaSwagError("dataset response does not cover the requested slice")
+    return selected
+
+
+def records_digest(records) -> str:
+    records = tuple(records)
+    if not records or any(
+        not isinstance(record, HellaSwagRecord) for record in records
+    ):
+        raise HellaSwagError("digest requires validated HellaSwag records")
+    payload = [
+        {"row_index": record.row_index, "example_sha256": record.example.digest}
+        for record in records
+    ]
+    return sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()

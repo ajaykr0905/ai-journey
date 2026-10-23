@@ -5,6 +5,7 @@ import pytest
 
 from ai_journey.hellaswag import HellaSwagError, HellaSwagExample, HellaSwagSource
 from ai_journey.hellaswag import records_from_dataset_server
+from ai_journey.hellaswag import records_digest, select_records
 
 
 def example_payload(index=24, label="3"):
@@ -137,3 +138,23 @@ def test_dataset_server_loader_rejects_duplicate_rows():
     row = example_payload()
     with pytest.raises(HellaSwagError, match="duplicate"):
         records_from_dataset_server(json.dumps(server_payload(row, row)).encode())
+
+
+def test_record_selection_requires_complete_contiguous_coverage():
+    rows = [example_payload(index=100 + offset) for offset in range(4)]
+    records = records_from_dataset_server(json.dumps(server_payload(*rows)).encode())
+    selected = select_records(reversed(records), start=1, count=2)
+    assert [record.row_index for record in selected] == [1, 2]
+    assert records_digest(selected) == records_digest(tuple(selected))
+    assert len(records_digest(selected)) == 64
+    with pytest.raises(HellaSwagError, match="cover"):
+        select_records(records, start=2, count=3)
+
+
+@pytest.mark.parametrize(("start", "count"), [(True, 1), (-1, 1), (0, 0), (0, 1001)])
+def test_record_selection_enforces_evaluation_budgets(start, count):
+    records = records_from_dataset_server(
+        json.dumps(server_payload(example_payload())).encode()
+    )
+    with pytest.raises(HellaSwagError, match="budget"):
+        select_records(records, start=start, count=count)
