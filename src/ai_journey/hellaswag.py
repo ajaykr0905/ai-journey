@@ -81,6 +81,14 @@ class HellaSwagExample:
             raise HellaSwagError("example label must select one of four endings")
         if parsed_label not in range(4):
             raise HellaSwagError("example label must select one of four endings")
+        canonical_context = f"{strings['ctx_a'].rstrip()} {strings['ctx_b'].lstrip()}"
+        if strings["ctx"].strip() != canonical_context:
+            raise HellaSwagError("example context does not match ctx_a and ctx_b")
+        if strings["split"] != "val" or strings["split_type"] not in {
+            "indomain",
+            "zeroshot",
+        }:
+            raise HellaSwagError("example must come from a known validation split")
         return cls(
             index=index,
             activity_label=strings["activity_label"],
@@ -93,6 +101,10 @@ class HellaSwagExample:
             split=strings["split"],
             split_type=strings["split_type"],
         )
+
+    @property
+    def canonical_context(self) -> str:
+        return f"{self.context_a.rstrip()} {self.context_b.lstrip()}"
 
     @property
     def digest(self) -> str:

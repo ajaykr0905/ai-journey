@@ -30,6 +30,7 @@ def test_example_schema_normalizes_label_and_has_stable_digest():
     second = HellaSwagExample.from_mapping(example_payload(label=3))
     assert first == second
     assert first.label == 3
+    assert first.canonical_context == "A man is sitting on a roof. he"
     assert len(first.digest) == 64
 
 
@@ -41,6 +42,9 @@ def test_example_schema_normalizes_label_and_has_stable_digest():
         ("endings", ["one", "two", "three"]),
         ("endings", ["same"] * 4),
         ("label", "4"),
+        ("ctx", "A different context"),
+        ("split", "train"),
+        ("split_type", "unknown"),
     ],
 )
 def test_example_schema_rejects_malformed_records(field, value):
