@@ -168,3 +168,48 @@ class HellaSwagSource:
         if payload["license"] != "MIT":
             raise HellaSwagError("HellaSwag source license must remain MIT")
         return cls(**payload)
+
+
+def examples_from_dataset_server(source: bytes) -> tuple[HellaSwagExample, ...]:
+    """Parse a bounded Hugging Face dataset-server first-rows response."""
+    if not isinstance(source, bytes):
+        raise TypeError("dataset response must be bytes")
+    if not 0 < len(source) <= 2 * 1024 * 1024:
+        raise HellaSwagError("dataset response exceeds the input budget")
+    try:
+        payload = json.loads(source)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise HellaSwagError("dataset response must be valid UTF-8 JSON") from error
+    required = {"dataset", "config", "split", "features", "rows", "truncated"}
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != required
+        or payload["dataset"] != "Rowan/hellaswag"
+        or payload["config"] != "default"
+        or payload["split"] != "validation"
+        or type(payload["truncated"]) is not bool
+        or not isinstance(payload["features"], list)
+        or not isinstance(payload["rows"], list)
+        or not 1 <= len(payload["rows"]) <= 1000
+    ):
+        raise HellaSwagError("dataset response metadata does not match HellaSwag")
+    examples = []
+    for entry in payload["rows"]:
+        if (
+            not isinstance(entry, dict)
+            or set(entry) != {"row_idx", "row", "truncated_cells"}
+            or isinstance(entry["row_idx"], bool)
+            or not isinstance(entry["row_idx"], int)
+            or entry["row_idx"] < 0
+            or entry["truncated_cells"] != []
+        ):
+            raise HellaSwagError("dataset row envelope is incomplete or truncated")
+        example = HellaSwagExample.from_mapping(entry["row"])
+        if entry["row_idx"] != example.index:
+            raise HellaSwagError("dataset row index does not match example index")
+        examples.append(example)
+    if len({example.index for example in examples}) != len(examples) or len(
+        {example.digest for example in examples}
+    ) != len(examples):
+        raise HellaSwagError("dataset response contains duplicate examples")
+    return tuple(examples)

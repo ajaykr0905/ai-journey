@@ -1,8 +1,10 @@
 import copy
+import json
 
 import pytest
 
 from ai_journey.hellaswag import HellaSwagError, HellaSwagExample, HellaSwagSource
+from ai_journey.hellaswag import examples_from_dataset_server
 
 
 def example_payload(index=24, label="3"):
@@ -94,3 +96,42 @@ def test_source_contract_rejects_unpinned_or_invalid_metadata(field, value):
     payload[field] = value
     with pytest.raises(HellaSwagError):
         HellaSwagSource.from_mapping(payload)
+
+
+def server_payload(*rows):
+    return {
+        "dataset": "Rowan/hellaswag",
+        "config": "default",
+        "split": "validation",
+        "features": [],
+        "rows": [
+            {"row_idx": row["ind"], "row": row, "truncated_cells": []} for row in rows
+        ],
+        "truncated": True,
+    }
+
+
+def test_dataset_server_loader_preserves_validated_row_identities():
+    payload = server_payload(example_payload())
+    examples = examples_from_dataset_server(json.dumps(payload).encode())
+    assert [example.index for example in examples] == [24]
+    assert examples[0].label == 3
+
+
+@pytest.mark.parametrize("mutation", ["dataset", "row-index", "truncated-cell"])
+def test_dataset_server_loader_rejects_mismatched_envelopes(mutation):
+    payload = server_payload(example_payload())
+    if mutation == "dataset":
+        payload["dataset"] = "other/dataset"
+    elif mutation == "row-index":
+        payload["rows"][0]["row_idx"] = 99
+    else:
+        payload["rows"][0]["truncated_cells"] = ["ctx"]
+    with pytest.raises(HellaSwagError):
+        examples_from_dataset_server(json.dumps(payload).encode())
+
+
+def test_dataset_server_loader_rejects_duplicate_rows():
+    row = example_payload()
+    with pytest.raises(HellaSwagError, match="duplicate"):
+        examples_from_dataset_server(json.dumps(server_payload(row, row)).encode())
