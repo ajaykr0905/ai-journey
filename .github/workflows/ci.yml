@@ -93,6 +93,19 @@ jobs:
           ai-journey-gpt2-train verify --report artifacts/gpt2-training-2026-10-21/training-evidence.json
           ai-journey-gpt2-train train --source data/day-19-demo-names.txt --spec config/gpt2-training.json --checkpoint /tmp/gpt2-training.pt --report /tmp/gpt2-training.json
           ai-journey-gpt2-train replay --source data/day-19-demo-names.txt --report /tmp/gpt2-training.json
+      - name: Check bounded HellaSwag evaluation contracts
+        run: |
+          ruff check src/ai_journey/hellaswag*.py tests/test_hellaswag*.py
+          ruff format --check src/ai_journey/hellaswag*.py tests/test_hellaswag*.py
+          python -m pytest -q tests/test_hellaswag*.py
+      - name: Reproduce the pinned HellaSwag validation slice
+        env:
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+        run: |
+          curl --fail --location --retry 2 --max-time 60 'https://datasets-server.huggingface.co/first-rows?dataset=Rowan%2Fhellaswag&config=default&split=validation' --output /tmp/hellaswag-first-rows.json
+          ai-journey-hellaswag evaluate --dataset-response /tmp/hellaswag-first-rows.json --protocol config/hellaswag-validation.json --source data/day-19-demo-names.txt --spec config/ddp-lab.json --output /tmp/hellaswag-evidence.json
+          ai-journey-hellaswag verify --report /tmp/hellaswag-evidence.json
       - name: Check low-rank adapter source and numerical oracles
         run: |
           ruff check src/ai_journey/lora*.py tests/test_lora*.py
