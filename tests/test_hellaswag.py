@@ -84,6 +84,9 @@ def source_payload():
         "validation_sha256": "899813071e1e95efafec90f856e1987d2150fa4d020fc005df6962c259f660cd",
         "validation_bytes": 6315951,
         "validation_rows": 10042,
+        "sample_url": "https://datasets-server.huggingface.co/first-rows",
+        "sample_sha256": "c0e8c949d0945d9c6894378eedd1c3d3ef0342ae6f03fd5276d18995c7ac9f4a",
+        "sample_bytes": 72739,
         "license": "MIT",
     }
 
@@ -101,6 +104,8 @@ def test_source_contract_pins_public_validation_bytes():
         ("validation_sha256", "not-a-digest"),
         ("validation_bytes", True),
         ("validation_rows", 0),
+        ("sample_sha256", "latest"),
+        ("sample_bytes", 0),
         ("license", "unknown"),
     ],
 )
@@ -109,6 +114,12 @@ def test_source_contract_rejects_unpinned_or_invalid_metadata(field, value):
     payload[field] = value
     with pytest.raises(HellaSwagError):
         HellaSwagSource.from_mapping(payload)
+
+
+def test_source_contract_rejects_changed_sample_delivery_bytes():
+    source = HellaSwagSource.from_mapping(source_payload())
+    with pytest.raises(HellaSwagError, match="snapshot"):
+        source.verify_sample(b"different response")
 
 
 def server_payload(*rows):

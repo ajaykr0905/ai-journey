@@ -137,6 +137,9 @@ class HellaSwagSource:
     validation_sha256: str
     validation_bytes: int
     validation_rows: int
+    sample_url: str
+    sample_sha256: str
+    sample_bytes: int
     license: str
 
     @classmethod
@@ -148,28 +151,43 @@ class HellaSwagSource:
             "validation_sha256",
             "validation_bytes",
             "validation_rows",
+            "sample_url",
+            "sample_sha256",
+            "sample_bytes",
             "license",
         }
         if not isinstance(payload, dict) or set(payload) != fields:
             raise HellaSwagError("HellaSwag source fields do not match")
-        for field in ("repository", "validation_url", "license"):
+        for field in ("repository", "validation_url", "sample_url", "license"):
             if not isinstance(payload[field], str) or not payload[field].strip():
                 raise HellaSwagError(f"source {field} must be a nonempty string")
-        for field in ("revision", "validation_sha256"):
+        for field in ("revision", "validation_sha256", "sample_sha256"):
             value = payload[field]
+            expected_length = 40 if field == "revision" else 64
             if (
                 not isinstance(value, str)
-                or len(value) != 40 + 24 * (field == "validation_sha256")
+                or len(value) != expected_length
                 or any(character not in "0123456789abcdef" for character in value)
             ):
                 raise HellaSwagError(f"source {field} must be a lowercase digest")
-        for field in ("validation_bytes", "validation_rows"):
+        for field in ("validation_bytes", "validation_rows", "sample_bytes"):
             value = payload[field]
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise HellaSwagError(f"source {field} must be a positive integer")
         if payload["license"] != "MIT":
             raise HellaSwagError("HellaSwag source license must remain MIT")
         return cls(**payload)
+
+    def verify_sample(self, source: bytes) -> None:
+        if not isinstance(source, bytes):
+            raise TypeError("sample response must be bytes")
+        if (
+            len(source) != self.sample_bytes
+            or sha256(source).hexdigest() != self.sample_sha256
+        ):
+            raise HellaSwagError(
+                "sample response does not match the pinned public snapshot"
+            )
 
 
 @dataclass(frozen=True)
