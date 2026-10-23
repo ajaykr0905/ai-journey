@@ -6,11 +6,20 @@ from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 import math
+import platform
 import random
 
 
 class HellaSwagError(ValueError):
     """Raised when benchmark data or evidence violates its contract."""
+
+
+HELLASWAG_LIMITATIONS = [
+    "A pinned 100-row validation slice is not the official 10,042-example score.",
+    "The byte-level CPU lab model is not the pretrained GPT-2 124M checkpoint.",
+    "Accuracy uncertainty is descriptive for this bounded slice only.",
+    "Automated execution does not prove lecture viewing or learner understanding.",
+]
 
 
 _EXAMPLE_FIELDS = {
@@ -250,17 +259,24 @@ class HellaSwagProtocol:
 
     @property
     def fingerprint(self) -> str:
-        payload = {
-            "source": self.source.__dict__,
-            "start": self.start,
-            "count": self.count,
-            "world_size": self.world_size,
-            "bootstrap_samples": self.bootstrap_samples,
-            "bootstrap_seed": self.bootstrap_seed,
-        }
+        payload = protocol_mapping(self)
         return sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
+
+
+def protocol_mapping(protocol: HellaSwagProtocol) -> dict:
+    if not isinstance(protocol, HellaSwagProtocol):
+        raise TypeError("protocol must be HellaSwagProtocol")
+    return {
+        "schema_version": 1,
+        "source": protocol.source.__dict__,
+        "start": protocol.start,
+        "count": protocol.count,
+        "world_size": protocol.world_size,
+        "bootstrap_samples": protocol.bootstrap_samples,
+        "bootstrap_seed": protocol.bootstrap_seed,
+    }
 
 
 @dataclass(frozen=True)
@@ -685,3 +701,88 @@ def run_evaluation(model, response: bytes, protocol: HellaSwagProtocol) -> dict:
         "world_size": protocol.world_size,
         "evaluation": evaluation,
     }
+
+
+def _payload_digest(payload: dict) -> str:
+    return sha256(
+        json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+    ).hexdigest()
+
+
+def seal_evidence(report: dict, protocol: HellaSwagProtocol) -> dict:
+    """Seal measured benchmark output with protocol, runtime and scope limitations."""
+    import torch
+
+    if (
+        not isinstance(report, dict)
+        or report.get("protocol_sha256") != protocol.fingerprint
+    ):
+        raise HellaSwagError("benchmark report does not match the protocol")
+    payload = {
+        "schema_version": 1,
+        "benchmark": "hellaswag_validation",
+        "protocol": protocol_mapping(protocol),
+        "run": report,
+        "runtime": {
+            "device": "cpu",
+            "torch": torch.__version__,
+            "python": platform.python_version(),
+            "operating_system": platform.system(),
+            "machine": platform.machine(),
+        },
+        "limitations": HELLASWAG_LIMITATIONS.copy(),
+    }
+    payload["evidence_sha256"] = _payload_digest(payload)
+    return verify_evidence(payload)
+
+
+def verify_evidence(payload: dict) -> dict:
+    """Reject modified HellaSwag evidence or metrics inconsistent with its rows."""
+    fields = {
+        "schema_version",
+        "benchmark",
+        "protocol",
+        "run",
+        "runtime",
+        "limitations",
+        "evidence_sha256",
+    }
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != fields
+        or type(payload["schema_version"]) is not int
+        or payload["schema_version"] != 1
+        or payload["benchmark"] != "hellaswag_validation"
+    ):
+        raise HellaSwagError("HellaSwag evidence schema does not match")
+    unsigned = {
+        key: value for key, value in payload.items() if key != "evidence_sha256"
+    }
+    if _payload_digest(unsigned) != payload["evidence_sha256"]:
+        raise HellaSwagError("HellaSwag evidence digest does not match")
+    protocol = HellaSwagProtocol.from_mapping(payload["protocol"])
+    run = payload["run"]
+    if (
+        not isinstance(run, dict)
+        or run.get("protocol_sha256") != protocol.fingerprint
+        or run.get("sample_sha256") != protocol.source.sample_sha256
+        or run.get("world_size") != protocol.world_size
+        or payload["limitations"] != HELLASWAG_LIMITATIONS
+        or payload["runtime"].get("device") != "cpu"
+    ):
+        raise HellaSwagError("HellaSwag evidence provenance does not match")
+    evaluation = run.get("evaluation")
+    records = evaluation.get("records") if isinstance(evaluation, dict) else None
+    if not isinstance(records, (list, tuple)) or len(records) != protocol.count:
+        raise HellaSwagError("HellaSwag evidence row count does not match")
+    expected = summarize_scores(
+        records,
+        bootstrap_samples=protocol.bootstrap_samples,
+        bootstrap_seed=protocol.bootstrap_seed,
+    )
+    expected["records"] = records
+    if evaluation != expected:
+        raise HellaSwagError("HellaSwag aggregate metrics do not match scored rows")
+    return payload

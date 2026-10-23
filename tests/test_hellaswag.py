@@ -19,6 +19,7 @@ from ai_journey.hellaswag import shard_records
 from ai_journey.hellaswag import merge_evaluations
 from ai_journey.hellaswag import compare_evaluations
 from ai_journey.hellaswag import run_evaluation
+from ai_journey.hellaswag import seal_evidence, verify_evidence
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 
@@ -432,3 +433,25 @@ def test_protocol_run_verifies_sample_and_merges_disjoint_shards():
     assert report["evaluation"]["examples"] == 2
     assert report["evaluation"]["accuracy"] == 0.5
     assert len(report["records_sha256"]) == len(report["model_sha256"]) == 64
+
+
+def test_benchmark_evidence_binds_runtime_protocol_and_measured_rows():
+    rows = [example_payload(index=100), example_payload(index=101, label="0")]
+    rows[1]["source_id"] = "activitynet~second"
+    response = json.dumps(server_payload(*rows), separators=(",", ":")).encode()
+    payload = protocol_payload()
+    payload.update(count=2, world_size=1, bootstrap_samples=100)
+    payload["source"]["sample_sha256"] = sha256(response).hexdigest()
+    payload["source"]["sample_bytes"] = len(response)
+    protocol = HellaSwagProtocol.from_mapping(payload)
+    model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double()
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.zero_()
+    evidence = seal_evidence(run_evaluation(model, response, protocol), protocol)
+    assert verify_evidence(evidence) == evidence
+    assert evidence["runtime"]["device"] == "cpu"
+    changed = copy.deepcopy(evidence)
+    changed["run"]["evaluation"]["accuracy"] = 1.0
+    with pytest.raises(HellaSwagError, match="digest"):
+        verify_evidence(changed)
