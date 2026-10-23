@@ -720,11 +720,12 @@ def seal_evidence(report: dict, protocol: HellaSwagProtocol) -> dict:
         or report.get("protocol_sha256") != protocol.fingerprint
     ):
         raise HellaSwagError("benchmark report does not match the protocol")
+    canonical_report = json.loads(json.dumps(report, allow_nan=False))
     payload = {
         "schema_version": 1,
         "benchmark": "hellaswag_validation",
         "protocol": protocol_mapping(protocol),
-        "run": report,
+        "run": canonical_report,
         "runtime": {
             "device": "cpu",
             "torch": torch.__version__,
