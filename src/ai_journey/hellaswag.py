@@ -371,5 +371,32 @@ def evaluate_records(model, records) -> dict:
             [result["probabilities"] for result in results],
             [result["label"] for result in results],
         ),
+        "split_types": split_type_metrics(results),
         "records": results,
     }
+
+
+def split_type_metrics(results) -> dict:
+    """Report in-domain and zero-shot strata without hiding absent groups."""
+    results = tuple(results)
+    if not results:
+        raise HellaSwagError("split metrics require scored records")
+    output = {}
+    for split_type in ("indomain", "zeroshot"):
+        group = [result for result in results if result.get("split_type") == split_type]
+        if not group:
+            output[split_type] = None
+            continue
+        correct = sum(result["correct"] for result in group)
+        output[split_type] = {
+            "examples": len(group),
+            "correct": correct,
+            "accuracy": correct / len(group),
+            "mean_correct_nll": math.fsum(
+                result["scores"][result["label"]]["mean_nll"] for result in group
+            )
+            / len(group),
+        }
+    if sum(value is not None for value in output.values()) == 0:
+        raise HellaSwagError("scored records contain no known split types")
+    return output

@@ -11,6 +11,7 @@ from ai_journey.hellaswag import encode_example
 from ai_journey.hellaswag import score_record
 from ai_journey.hellaswag import probabilities_from_scores
 from ai_journey.hellaswag import evaluate_records
+from ai_journey.hellaswag import split_type_metrics
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 
@@ -235,6 +236,8 @@ def test_evaluation_aggregates_accuracy_nll_and_calibration_once_per_row():
     assert result["accuracy"] == 0.5
     assert result["mean_correct_nll"] == pytest.approx(torch.log(torch.tensor(256.0)))
     assert result["calibration"]["brier_score"] == pytest.approx(0.75)
+    assert result["split_types"]["indomain"]["examples"] == 2
+    assert result["split_types"]["zeroshot"] is None
     assert [row["row_index"] for row in result["records"]] == [0, 1]
 
 
@@ -246,3 +249,26 @@ def test_evaluation_rejects_empty_or_duplicate_rows():
     )[0]
     with pytest.raises(HellaSwagError, match="unique"):
         evaluate_records(object(), [record, record])
+
+
+def test_split_metrics_keep_indomain_and_zeroshot_results_separate():
+    results = [
+        {
+            "split_type": split_type,
+            "correct": correct,
+            "label": 0,
+            "scores": [{"mean_nll": loss}] * 4,
+        }
+        for split_type, correct, loss in (
+            ("indomain", True, 1.0),
+            ("zeroshot", False, 3.0),
+        )
+    ]
+    metrics = split_type_metrics(results)
+    assert metrics["indomain"] == {
+        "examples": 1,
+        "correct": 1,
+        "accuracy": 1.0,
+        "mean_correct_nll": 1.0,
+    }
+    assert metrics["zeroshot"]["accuracy"] == 0
