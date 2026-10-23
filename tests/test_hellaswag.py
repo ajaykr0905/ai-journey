@@ -2,7 +2,7 @@ import copy
 
 import pytest
 
-from ai_journey.hellaswag import HellaSwagError, HellaSwagExample
+from ai_journey.hellaswag import HellaSwagError, HellaSwagExample, HellaSwagSource
 
 
 def example_payload(index=24, label="3"):
@@ -55,3 +55,38 @@ def test_example_schema_rejects_unknown_fields():
     payload["unexpected"] = "field"
     with pytest.raises(HellaSwagError, match="fields"):
         HellaSwagExample.from_mapping(payload)
+
+
+def source_payload():
+    return {
+        "repository": "Rowan/hellaswag",
+        "revision": "218ec52e09a7e7462a5400043bb9a69a41d06b76",
+        "validation_url": "https://huggingface.co/example.parquet",
+        "validation_sha256": "899813071e1e95efafec90f856e1987d2150fa4d020fc005df6962c259f660cd",
+        "validation_bytes": 6315951,
+        "validation_rows": 10042,
+        "license": "MIT",
+    }
+
+
+def test_source_contract_pins_public_validation_bytes():
+    source = HellaSwagSource.from_mapping(source_payload())
+    assert source.validation_rows == 10042
+    assert source.license == "MIT"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("revision", "main"),
+        ("validation_sha256", "not-a-digest"),
+        ("validation_bytes", True),
+        ("validation_rows", 0),
+        ("license", "unknown"),
+    ],
+)
+def test_source_contract_rejects_unpinned_or_invalid_metadata(field, value):
+    payload = source_payload()
+    payload[field] = value
+    with pytest.raises(HellaSwagError):
+        HellaSwagSource.from_mapping(payload)

@@ -111,3 +111,48 @@ class HellaSwagExample:
         return sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
+
+
+@dataclass(frozen=True)
+class HellaSwagSource:
+    """Pinned public validation-set identity without a runtime data dependency."""
+
+    repository: str
+    revision: str
+    validation_url: str
+    validation_sha256: str
+    validation_bytes: int
+    validation_rows: int
+    license: str
+
+    @classmethod
+    def from_mapping(cls, payload: dict) -> "HellaSwagSource":
+        fields = {
+            "repository",
+            "revision",
+            "validation_url",
+            "validation_sha256",
+            "validation_bytes",
+            "validation_rows",
+            "license",
+        }
+        if not isinstance(payload, dict) or set(payload) != fields:
+            raise HellaSwagError("HellaSwag source fields do not match")
+        for field in ("repository", "validation_url", "license"):
+            if not isinstance(payload[field], str) or not payload[field].strip():
+                raise HellaSwagError(f"source {field} must be a nonempty string")
+        for field in ("revision", "validation_sha256"):
+            value = payload[field]
+            if (
+                not isinstance(value, str)
+                or len(value) != 40 + 24 * (field == "validation_sha256")
+                or any(character not in "0123456789abcdef" for character in value)
+            ):
+                raise HellaSwagError(f"source {field} must be a lowercase digest")
+        for field in ("validation_bytes", "validation_rows"):
+            value = payload[field]
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise HellaSwagError(f"source {field} must be a positive integer")
+        if payload["license"] != "MIT":
+            raise HellaSwagError("HellaSwag source license must remain MIT")
+        return cls(**payload)
