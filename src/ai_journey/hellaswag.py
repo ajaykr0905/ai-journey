@@ -349,8 +349,6 @@ def probabilities_from_scores(scores) -> list[float]:
 
 def evaluate_records(model, records) -> dict:
     """Evaluate every selected row once with accuracy, NLL and calibration."""
-    from .ddp_metrics import calibration_metrics
-
     records = tuple(records)
     if not records or any(
         not isinstance(record, HellaSwagRecord) for record in records
@@ -359,6 +357,18 @@ def evaluate_records(model, records) -> dict:
     if len({record.row_index for record in records}) != len(records):
         raise HellaSwagError("evaluation rows must be unique")
     results = [score_record(model, record) for record in records]
+    return summarize_scores(results)
+
+
+def summarize_scores(results) -> dict:
+    """Reduce validated per-row scores into one benchmark summary."""
+    from .ddp_metrics import calibration_metrics
+
+    results = tuple(results)
+    if not results or len({result.get("row_index") for result in results}) != len(
+        results
+    ):
+        raise HellaSwagError("summary requires unique scored rows")
     correct = sum(result["correct"] for result in results)
     mean_correct_nll = math.fsum(
         result["scores"][result["label"]]["mean_nll"] for result in results
@@ -458,3 +468,26 @@ def shard_records(
         raise HellaSwagError("shard topology is invalid")
     ordered = sorted(records, key=lambda record: record.row_index)
     return tuple(ordered[rank::world_size])
+
+
+def merge_evaluations(shards, expected_records) -> dict:
+    """Merge complete disjoint shard results against selected dataset identities."""
+    expected_records = tuple(expected_records)
+    expected = {record.row_index: record.example.digest for record in expected_records}
+    if not expected or len(expected) != len(expected_records):
+        raise HellaSwagError("expected evaluation rows must be unique")
+    shards = tuple(shards)
+    if not shards or any(not isinstance(shard, dict) for shard in shards):
+        raise HellaSwagError("at least one shard evaluation is required")
+    rows = []
+    for shard in shards:
+        shard_rows = shard.get("records")
+        if not isinstance(shard_rows, (list, tuple)) or not shard_rows:
+            raise HellaSwagError("shard evaluation has no scored rows")
+        rows.extend(shard_rows)
+    observed = [row.get("row_index") for row in rows]
+    if len(set(observed)) != len(observed) or set(observed) != set(expected):
+        raise HellaSwagError("shard evaluations do not cover the selected rows exactly")
+    if any(row.get("example_sha256") != expected[row["row_index"]] for row in rows):
+        raise HellaSwagError("shard example identity does not match the selected data")
+    return summarize_scores(sorted(rows, key=lambda row: row["row_index"]))

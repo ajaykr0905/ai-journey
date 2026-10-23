@@ -14,6 +14,7 @@ from ai_journey.hellaswag import evaluate_records
 from ai_journey.hellaswag import split_type_metrics
 from ai_journey.hellaswag import bootstrap_accuracy
 from ai_journey.hellaswag import shard_records
+from ai_journey.hellaswag import merge_evaluations
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 
@@ -309,3 +310,22 @@ def test_stable_shards_cover_each_validation_row_exactly_once():
     )
     with pytest.raises(HellaSwagError, match="topology"):
         shard_records(records, rank=3, world_size=3)
+
+
+def test_shard_merge_requires_disjoint_complete_dataset_coverage():
+    rows = [example_payload(index=100), example_payload(index=101, label="0")]
+    rows[1]["source_id"] = "activitynet~second"
+    records = records_from_dataset_server(json.dumps(server_payload(*rows)).encode())
+    model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double()
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.zero_()
+    shards = [
+        evaluate_records(model, shard_records(records, rank=rank, world_size=2))
+        for rank in range(2)
+    ]
+    merged = merge_evaluations(reversed(shards), records)
+    assert merged["examples"] == 2
+    assert [row["row_index"] for row in merged["records"]] == [0, 1]
+    with pytest.raises(HellaSwagError, match="cover"):
+        merge_evaluations([shards[0], shards[0]], records)
