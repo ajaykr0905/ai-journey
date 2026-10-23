@@ -191,6 +191,79 @@ class HellaSwagSource:
 
 
 @dataclass(frozen=True)
+class HellaSwagProtocol:
+    """Complete bounded controls for one reproducible validation run."""
+
+    source: HellaSwagSource
+    start: int
+    count: int
+    world_size: int
+    bootstrap_samples: int
+    bootstrap_seed: int
+
+    @classmethod
+    def from_mapping(cls, payload: dict) -> "HellaSwagProtocol":
+        fields = {
+            "schema_version",
+            "source",
+            "start",
+            "count",
+            "world_size",
+            "bootstrap_samples",
+            "bootstrap_seed",
+        }
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != fields
+            or type(payload["schema_version"]) is not int
+            or payload["schema_version"] != 1
+        ):
+            raise HellaSwagError("HellaSwag protocol schema does not match")
+        source = HellaSwagSource.from_mapping(payload["source"])
+        controls = {
+            field: payload[field]
+            for field in (
+                "start",
+                "count",
+                "world_size",
+                "bootstrap_samples",
+                "bootstrap_seed",
+            )
+        }
+        for name, (minimum, maximum) in {
+            "start": (0, source.validation_rows - 1),
+            "count": (1, 1000),
+            "world_size": (1, 16),
+            "bootstrap_samples": (100, 10000),
+            "bootstrap_seed": (0, 2**32 - 1),
+        }.items():
+            value = controls[name]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not minimum <= value <= maximum
+            ):
+                raise HellaSwagError(f"protocol {name} is outside its budget")
+        if controls["start"] + controls["count"] > source.validation_rows:
+            raise HellaSwagError("protocol slice exceeds the validation set")
+        return cls(source=source, **controls)
+
+    @property
+    def fingerprint(self) -> str:
+        payload = {
+            "source": self.source.__dict__,
+            "start": self.start,
+            "count": self.count,
+            "world_size": self.world_size,
+            "bootstrap_samples": self.bootstrap_samples,
+            "bootstrap_seed": self.bootstrap_seed,
+        }
+        return sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
+
+@dataclass(frozen=True)
 class HellaSwagRecord:
     """Dataset row ordinal paired with the benchmark's independent example ID."""
 

@@ -5,6 +5,7 @@ import pytest
 import torch
 
 from ai_journey.hellaswag import HellaSwagError, HellaSwagExample, HellaSwagSource
+from ai_journey.hellaswag import HellaSwagProtocol
 from ai_journey.hellaswag import records_from_dataset_server
 from ai_journey.hellaswag import records_digest, select_records
 from ai_journey.hellaswag import encode_example
@@ -120,6 +121,42 @@ def test_source_contract_rejects_changed_sample_delivery_bytes():
     source = HellaSwagSource.from_mapping(source_payload())
     with pytest.raises(HellaSwagError, match="snapshot"):
         source.verify_sample(b"different response")
+
+
+def protocol_payload():
+    return {
+        "schema_version": 1,
+        "source": source_payload(),
+        "start": 0,
+        "count": 100,
+        "world_size": 4,
+        "bootstrap_samples": 2000,
+        "bootstrap_seed": 49,
+    }
+
+
+def test_protocol_binds_source_slice_shards_and_uncertainty_controls():
+    protocol = HellaSwagProtocol.from_mapping(protocol_payload())
+    assert protocol.count == 100
+    assert protocol.world_size == 4
+    assert len(protocol.fingerprint) == 64
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("start", -1),
+        ("count", 1001),
+        ("world_size", 0),
+        ("bootstrap_samples", 99),
+        ("bootstrap_seed", True),
+    ],
+)
+def test_protocol_rejects_unbounded_controls(field, value):
+    payload = protocol_payload()
+    payload[field] = value
+    with pytest.raises(HellaSwagError, match="budget"):
+        HellaSwagProtocol.from_mapping(payload)
 
 
 def server_payload(*rows):
