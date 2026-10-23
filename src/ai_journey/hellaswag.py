@@ -294,3 +294,25 @@ def encode_example(
     if any(not ending.strip() or len(ending) > max_ending_bytes for ending in endings):
         raise HellaSwagError("encoded ending exceeds the text budget")
     return prompt, endings
+
+
+def score_record(model, record: HellaSwagRecord) -> dict:
+    """Score one HellaSwag row by completion-only mean negative log likelihood."""
+    from .ddp_evaluation import score_choices
+
+    if not isinstance(record, HellaSwagRecord):
+        raise TypeError("record must be HellaSwagRecord")
+    prompt, endings = encode_example(record.example)
+    scoring = score_choices(model, prompt, endings)
+    prediction = scoring["prediction"]
+    return {
+        "row_index": record.row_index,
+        "example_index": record.example.index,
+        "example_sha256": record.example.digest,
+        "label": record.example.label,
+        "prediction": prediction,
+        "correct": prediction == record.example.label,
+        "scores": scoring["scores"],
+        "normalization": scoring["normalization"],
+        "split_type": record.example.split_type,
+    }

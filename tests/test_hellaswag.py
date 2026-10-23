@@ -2,11 +2,15 @@ import copy
 import json
 
 import pytest
+import torch
 
 from ai_journey.hellaswag import HellaSwagError, HellaSwagExample, HellaSwagSource
 from ai_journey.hellaswag import records_from_dataset_server
 from ai_journey.hellaswag import records_digest, select_records
 from ai_journey.hellaswag import encode_example
+from ai_journey.hellaswag import score_record
+from ai_journey.gpt2_config import GPT2Config
+from ai_journey.gpt2_model import GPT2LanguageModel
 
 
 def example_payload(index=24, label="3"):
@@ -177,3 +181,22 @@ def test_example_encoding_uses_utf8_and_one_continuation_boundary_space():
 def test_example_encoding_enforces_byte_budgets(limits):
     with pytest.raises(HellaSwagError, match="budget"):
         encode_example(HellaSwagExample.from_mapping(example_payload()), **limits)
+
+
+def test_record_scoring_excludes_prompt_and_reports_stable_tie_break():
+    record = records_from_dataset_server(
+        json.dumps(server_payload(example_payload())).encode()
+    )[0]
+    model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double().train()
+    model.ln_f.eval()
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.zero_()
+    result = score_record(model, record)
+    assert result["prediction"] == 0
+    assert not result["correct"]
+    assert result["label"] == 3
+    assert [score["tokens"] for score in result["scores"]] == [
+        len(ending) for ending in encode_example(record.example)[1]
+    ]
+    assert model.training and not model.ln_f.training
