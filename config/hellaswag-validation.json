@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "source": {
+    "repository": "Rowan/hellaswag",
+    "revision": "218ec52e09a7e7462a5400043bb9a69a41d06b76",
+    "validation_url": "https://huggingface.co/datasets/Rowan/hellaswag/resolve/218ec52e09a7e7462a5400043bb9a69a41d06b76/data/validation-00000-of-00001.parquet",
+    "validation_sha256": "899813071e1e95efafec90f856e1987d2150fa4d020fc005df6962c259f660cd",
+    "validation_bytes": 6315951,
+    "validation_rows": 10042,
+    "sample_url": "https://datasets-server.huggingface.co/first-rows?dataset=Rowan%2Fhellaswag&config=default&split=validation",
+    "sample_sha256": "c0e8c949d0945d9c6894378eedd1c3d3ef0342ae6f03fd5276d18995c7ac9f4a",
+    "sample_bytes": 72739,
+    "license": "MIT"
+  },
+  "start": 0,
+  "count": 100,
+  "world_size": 4,
+  "bootstrap_samples": 2000,
+  "bootstrap_seed": 49
+}

@@ -1,6 +1,7 @@
 import copy
 from hashlib import sha256
 import json
+from pathlib import Path
 
 import pytest
 import torch
@@ -160,6 +161,18 @@ def test_protocol_rejects_unbounded_controls(field, value):
     payload[field] = value
     with pytest.raises(HellaSwagError, match="budget"):
         HellaSwagProtocol.from_mapping(payload)
+
+
+def test_checked_in_protocol_pins_the_public_validation_snapshot():
+    root = Path(__file__).resolve().parents[1]
+    protocol = HellaSwagProtocol.from_mapping(
+        json.loads((root / "config/hellaswag-validation.json").read_text())
+    )
+    assert protocol.count == 100
+    assert protocol.source.validation_rows == 10042
+    assert protocol.source.validation_sha256 == (
+        "899813071e1e95efafec90f856e1987d2150fa4d020fc005df6962c259f660cd"
+    )
 
 
 def server_payload(*rows):
