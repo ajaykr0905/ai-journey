@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 import json
 import math
+import random
 
 
 class HellaSwagError(ValueError):
@@ -366,6 +367,7 @@ def evaluate_records(model, records) -> dict:
         "examples": len(results),
         "correct": correct,
         "accuracy": correct / len(results),
+        "accuracy_interval": bootstrap_accuracy(results),
         "mean_correct_nll": mean_correct_nll,
         "calibration": calibration_metrics(
             [result["probabilities"] for result in results],
@@ -400,3 +402,37 @@ def split_type_metrics(results) -> dict:
     if sum(value is not None for value in output.values()) == 0:
         raise HellaSwagError("scored records contain no known split types")
     return output
+
+
+def bootstrap_accuracy(results, *, samples: int = 2000, seed: int = 49) -> dict:
+    """Compute a deterministic 95% nonparametric interval for accuracy."""
+    results = tuple(results)
+    if not results or any(
+        type(result.get("correct")) is not bool for result in results
+    ):
+        raise HellaSwagError("bootstrap requires scored boolean outcomes")
+    if (
+        isinstance(samples, bool)
+        or not isinstance(samples, int)
+        or not 100 <= samples <= 10000
+        or isinstance(seed, bool)
+        or not isinstance(seed, int)
+        or not 0 <= seed < 2**32
+    ):
+        raise HellaSwagError("bootstrap controls exceed the evaluation budget")
+    generator = random.Random(seed)
+    outcomes = [int(result["correct"]) for result in results]
+    estimates = sorted(
+        math.fsum(generator.choice(outcomes) for _ in outcomes) / len(outcomes)
+        for _ in range(samples)
+    )
+    lower = estimates[math.floor(0.025 * (samples - 1))]
+    upper = estimates[math.ceil(0.975 * (samples - 1))]
+    return {
+        "method": "nonparametric_percentile",
+        "confidence": 0.95,
+        "samples": samples,
+        "seed": seed,
+        "lower": lower,
+        "upper": upper,
+    }

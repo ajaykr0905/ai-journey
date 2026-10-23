@@ -12,6 +12,7 @@ from ai_journey.hellaswag import score_record
 from ai_journey.hellaswag import probabilities_from_scores
 from ai_journey.hellaswag import evaluate_records
 from ai_journey.hellaswag import split_type_metrics
+from ai_journey.hellaswag import bootstrap_accuracy
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 
@@ -234,6 +235,8 @@ def test_evaluation_aggregates_accuracy_nll_and_calibration_once_per_row():
     assert result["examples"] == 2
     assert result["correct"] == 1
     assert result["accuracy"] == 0.5
+    assert result["accuracy_interval"]["lower"] == 0
+    assert result["accuracy_interval"]["upper"] == 1
     assert result["mean_correct_nll"] == pytest.approx(torch.log(torch.tensor(256.0)))
     assert result["calibration"]["brier_score"] == pytest.approx(0.75)
     assert result["split_types"]["indomain"]["examples"] == 2
@@ -272,3 +275,14 @@ def test_split_metrics_keep_indomain_and_zeroshot_results_separate():
         "mean_correct_nll": 1.0,
     }
     assert metrics["zeroshot"]["accuracy"] == 0
+
+
+def test_accuracy_bootstrap_is_deterministic_and_bounded():
+    mixed = [{"correct": value} for value in (True, False, True, False)]
+    first = bootstrap_accuracy(mixed, samples=200, seed=7)
+    assert first == bootstrap_accuracy(mixed, samples=200, seed=7)
+    assert 0 <= first["lower"] <= first["upper"] <= 1
+    perfect = bootstrap_accuracy([{"correct": True}] * 3, samples=100)
+    assert perfect["lower"] == perfect["upper"] == 1
+    with pytest.raises(HellaSwagError, match="budget"):
+        bootstrap_accuracy(mixed, samples=99)
