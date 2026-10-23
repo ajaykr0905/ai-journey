@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import math
 
 
 class HellaSwagError(ValueError):
@@ -305,6 +306,7 @@ def score_record(model, record: HellaSwagRecord) -> dict:
     prompt, endings = encode_example(record.example)
     scoring = score_choices(model, prompt, endings)
     prediction = scoring["prediction"]
+    probabilities = probabilities_from_scores(scoring["scores"])
     return {
         "row_index": record.row_index,
         "example_index": record.example.index,
@@ -313,6 +315,32 @@ def score_record(model, record: HellaSwagRecord) -> dict:
         "prediction": prediction,
         "correct": prediction == record.example.label,
         "scores": scoring["scores"],
+        "probabilities": probabilities,
+        "confidence": probabilities[prediction],
         "normalization": scoring["normalization"],
         "split_type": record.example.split_type,
     }
+
+
+def probabilities_from_scores(scores) -> list[float]:
+    """Convert normalized candidate losses to a stable four-way distribution."""
+    scores = tuple(scores)
+    if (
+        len(scores) != 4
+        or any(
+            not isinstance(score, dict) or "mean_nll" not in score for score in scores
+        )
+        or any(
+            isinstance(score["mean_nll"], bool)
+            or not isinstance(score["mean_nll"], (int, float))
+            or not math.isfinite(score["mean_nll"])
+            or score["mean_nll"] < 0
+            for score in scores
+        )
+    ):
+        raise HellaSwagError("four finite nonnegative candidate losses are required")
+    logits = [-float(score["mean_nll"]) for score in scores]
+    maximum = max(logits)
+    weights = [math.exp(value - maximum) for value in logits]
+    total = math.fsum(weights)
+    return [weight / total for weight in weights]

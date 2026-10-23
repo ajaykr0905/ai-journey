@@ -9,6 +9,7 @@ from ai_journey.hellaswag import records_from_dataset_server
 from ai_journey.hellaswag import records_digest, select_records
 from ai_journey.hellaswag import encode_example
 from ai_journey.hellaswag import score_record
+from ai_journey.hellaswag import probabilities_from_scores
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 
@@ -196,7 +197,19 @@ def test_record_scoring_excludes_prompt_and_reports_stable_tie_break():
     assert result["prediction"] == 0
     assert not result["correct"]
     assert result["label"] == 3
+    assert result["probabilities"] == pytest.approx([0.25] * 4)
+    assert result["confidence"] == pytest.approx(0.25)
     assert [score["tokens"] for score in result["scores"]] == [
         len(ending) for ending in encode_example(record.example)[1]
     ]
     assert model.training and not model.ln_f.training
+
+
+def test_score_probabilities_are_stable_for_large_candidate_losses():
+    probabilities = probabilities_from_scores(
+        [{"mean_nll": value} for value in (10000.0, 10001.0, 10002.0, 10003.0)]
+    )
+    assert sum(probabilities) == pytest.approx(1)
+    assert probabilities[0] > probabilities[1] > probabilities[2] > probabilities[3]
+    with pytest.raises(HellaSwagError):
+        probabilities_from_scores([{"mean_nll": float("nan")}] * 4)
