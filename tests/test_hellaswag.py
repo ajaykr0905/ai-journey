@@ -1,4 +1,5 @@
 import copy
+from hashlib import sha256
 import json
 
 import pytest
@@ -17,6 +18,7 @@ from ai_journey.hellaswag import bootstrap_accuracy
 from ai_journey.hellaswag import shard_records
 from ai_journey.hellaswag import merge_evaluations
 from ai_journey.hellaswag import compare_evaluations
+from ai_journey.hellaswag import run_evaluation
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 
@@ -408,3 +410,25 @@ def test_paired_comparison_reports_direction_and_exact_mcnemar_test():
     candidate["records"][0]["example_sha256"] = "f" * 64
     with pytest.raises(HellaSwagError, match="identities"):
         compare_evaluations(baseline, candidate)
+
+
+def test_protocol_run_verifies_sample_and_merges_disjoint_shards():
+    rows = [example_payload(index=100), example_payload(index=101, label="0")]
+    rows[1]["source_id"] = "activitynet~second"
+    response = json.dumps(server_payload(*rows), separators=(",", ":")).encode()
+    payload = protocol_payload()
+    payload["count"] = 2
+    payload["world_size"] = 2
+    payload["bootstrap_samples"] = 100
+    payload["source"]["sample_sha256"] = sha256(response).hexdigest()
+    payload["source"]["sample_bytes"] = len(response)
+    protocol = HellaSwagProtocol.from_mapping(payload)
+    model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double()
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.zero_()
+    report = run_evaluation(model, response, protocol)
+    assert report["world_size"] == 2
+    assert report["evaluation"]["examples"] == 2
+    assert report["evaluation"]["accuracy"] == 0.5
+    assert len(report["records_sha256"]) == len(report["model_sha256"]) == 64

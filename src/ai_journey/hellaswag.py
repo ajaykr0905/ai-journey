@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 import math
@@ -438,7 +438,9 @@ def probabilities_from_scores(scores) -> list[float]:
     return [weight / total for weight in weights]
 
 
-def evaluate_records(model, records) -> dict:
+def evaluate_records(
+    model, records, *, bootstrap_samples: int = 2000, bootstrap_seed: int = 49
+) -> dict:
     """Evaluate every selected row once with accuracy, NLL and calibration."""
     records = tuple(records)
     if not records or any(
@@ -448,10 +450,14 @@ def evaluate_records(model, records) -> dict:
     if len({record.row_index for record in records}) != len(records):
         raise HellaSwagError("evaluation rows must be unique")
     results = [score_record(model, record) for record in records]
-    return summarize_scores(results)
+    return summarize_scores(
+        results, bootstrap_samples=bootstrap_samples, bootstrap_seed=bootstrap_seed
+    )
 
 
-def summarize_scores(results) -> dict:
+def summarize_scores(
+    results, *, bootstrap_samples: int = 2000, bootstrap_seed: int = 49
+) -> dict:
     """Reduce validated per-row scores into one benchmark summary."""
     from .ddp_metrics import calibration_metrics
 
@@ -468,7 +474,9 @@ def summarize_scores(results) -> dict:
         "examples": len(results),
         "correct": correct,
         "accuracy": correct / len(results),
-        "accuracy_interval": bootstrap_accuracy(results),
+        "accuracy_interval": bootstrap_accuracy(
+            results, samples=bootstrap_samples, seed=bootstrap_seed
+        ),
         "mean_correct_nll": mean_correct_nll,
         "calibration": calibration_metrics(
             [result["probabilities"] for result in results],
@@ -633,4 +641,47 @@ def compare_evaluations(baseline: dict, candidate: dict) -> dict:
         "mean_correct_nll_delta": candidate["mean_correct_nll"]
         - baseline["mean_correct_nll"],
         "mcnemar_exact_p_value": p_value,
+    }
+
+
+def run_evaluation(model, response: bytes, protocol: HellaSwagProtocol) -> dict:
+    """Run a pinned validation slice through disjoint local evaluation shards."""
+    from .gpt2_model import GPT2LanguageModel
+    from .gpt2_training import gpt2_model_fingerprint
+
+    if not isinstance(model, GPT2LanguageModel):
+        raise TypeError("model must be GPT2LanguageModel")
+    if not isinstance(protocol, HellaSwagProtocol):
+        raise TypeError("protocol must be HellaSwagProtocol")
+    protocol.source.verify_sample(response)
+    records = select_records(
+        records_from_dataset_server(response),
+        start=protocol.start,
+        count=protocol.count,
+    )
+    shards = [
+        evaluate_records(
+            model,
+            shard_records(records, rank=rank, world_size=protocol.world_size),
+            bootstrap_samples=protocol.bootstrap_samples,
+            bootstrap_seed=(protocol.bootstrap_seed + rank) % 2**32,
+        )
+        for rank in range(protocol.world_size)
+        if shard_records(records, rank=rank, world_size=protocol.world_size)
+    ]
+    evaluation = merge_evaluations(shards, records)
+    evaluation["accuracy_interval"] = bootstrap_accuracy(
+        evaluation["records"],
+        samples=protocol.bootstrap_samples,
+        seed=protocol.bootstrap_seed,
+    )
+    return {
+        "schema_version": 1,
+        "protocol_sha256": protocol.fingerprint,
+        "sample_sha256": sha256(response).hexdigest(),
+        "records_sha256": records_digest(records),
+        "model_config": asdict(model.config),
+        "model_sha256": gpt2_model_fingerprint(model),
+        "world_size": protocol.world_size,
+        "evaluation": evaluation,
     }
