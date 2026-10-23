@@ -1,6 +1,7 @@
 from hashlib import sha256
 import json
 from pathlib import Path
+import tomllib
 
 import pytest
 
@@ -52,3 +53,12 @@ def test_cli_rejects_missing_or_invalid_reports(tmp_path):
     with pytest.raises(SystemExit) as result:
         main(["verify", "--report", str(tmp_path / "missing.json")])
     assert result.value.code == 2
+
+
+def test_package_installs_hellaswag_command():
+    root = Path(__file__).resolve().parents[1]
+    project = tomllib.loads((root / "pyproject.toml").read_text())
+    assert (
+        project["project"]["scripts"]["ai-journey-hellaswag"]
+        == "ai_journey.hellaswag_cli:main"
+    )
