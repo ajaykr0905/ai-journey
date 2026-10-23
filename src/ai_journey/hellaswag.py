@@ -266,3 +266,31 @@ def records_digest(records) -> str:
     return sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def encode_example(
+    example: HellaSwagExample,
+    *,
+    max_context_bytes: int = 4096,
+    max_ending_bytes: int = 1024,
+) -> tuple[bytes, tuple[bytes, bytes, bytes, bytes]]:
+    """Encode the canonical prompt and space-prefixed candidate continuations."""
+    if not isinstance(example, HellaSwagExample):
+        raise TypeError("example must be HellaSwagExample")
+    for name, value, limit in (
+        ("max_context_bytes", max_context_bytes, 16384),
+        ("max_ending_bytes", max_ending_bytes, 4096),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not 1 <= value <= limit
+        ):
+            raise HellaSwagError(f"{name} is outside the text budget")
+    prompt = example.canonical_context.rstrip().encode("utf-8")
+    endings = tuple(f" {ending.lstrip()}".encode("utf-8") for ending in example.endings)
+    if not prompt or len(prompt) > max_context_bytes:
+        raise HellaSwagError("encoded context exceeds the text budget")
+    if any(not ending.strip() or len(ending) > max_ending_bytes for ending in endings):
+        raise HellaSwagError("encoded ending exceeds the text budget")
+    return prompt, endings

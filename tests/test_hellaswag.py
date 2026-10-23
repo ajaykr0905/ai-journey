@@ -6,6 +6,7 @@ import pytest
 from ai_journey.hellaswag import HellaSwagError, HellaSwagExample, HellaSwagSource
 from ai_journey.hellaswag import records_from_dataset_server
 from ai_journey.hellaswag import records_digest, select_records
+from ai_journey.hellaswag import encode_example
 
 
 def example_payload(index=24, label="3"):
@@ -158,3 +159,21 @@ def test_record_selection_enforces_evaluation_budgets(start, count):
     )
     with pytest.raises(HellaSwagError, match="budget"):
         select_records(records, start=start, count=count)
+
+
+def test_example_encoding_uses_utf8_and_one_continuation_boundary_space():
+    payload = example_payload()
+    payload["endings"][3] = "  starts removing shingles."
+    example = HellaSwagExample.from_mapping(payload)
+    prompt, endings = encode_example(example)
+    assert prompt.decode() == example.context
+    assert endings[3] == b" starts removing shingles."
+    assert all(
+        ending.startswith(b" ") and not ending.startswith(b"  ") for ending in endings
+    )
+
+
+@pytest.mark.parametrize("limits", [{"max_context_bytes": 1}, {"max_ending_bytes": 1}])
+def test_example_encoding_enforces_byte_budgets(limits):
+    with pytest.raises(HellaSwagError, match="budget"):
+        encode_example(HellaSwagExample.from_mapping(example_payload()), **limits)
