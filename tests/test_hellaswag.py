@@ -13,6 +13,7 @@ from ai_journey.hellaswag import probabilities_from_scores
 from ai_journey.hellaswag import evaluate_records
 from ai_journey.hellaswag import split_type_metrics
 from ai_journey.hellaswag import bootstrap_accuracy
+from ai_journey.hellaswag import shard_records
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 
@@ -286,3 +287,25 @@ def test_accuracy_bootstrap_is_deterministic_and_bounded():
     assert perfect["lower"] == perfect["upper"] == 1
     with pytest.raises(HellaSwagError, match="budget"):
         bootstrap_accuracy(mixed, samples=99)
+
+
+def test_stable_shards_cover_each_validation_row_exactly_once():
+    rows = []
+    for offset in range(7):
+        row = example_payload(index=100 + offset, label=str(offset % 4))
+        row["source_id"] = f"activitynet~{offset}"
+        rows.append(row)
+    records = records_from_dataset_server(json.dumps(server_payload(*rows)).encode())
+    shards = [
+        shard_records(reversed(records), rank=rank, world_size=3) for rank in range(3)
+    ]
+    assert [[record.row_index for record in shard] for shard in shards] == [
+        [0, 3, 6],
+        [1, 4],
+        [2, 5],
+    ]
+    assert sorted(record.row_index for shard in shards for record in shard) == list(
+        range(7)
+    )
+    with pytest.raises(HellaSwagError, match="topology"):
+        shard_records(records, rank=3, world_size=3)

@@ -436,3 +436,25 @@ def bootstrap_accuracy(results, *, samples: int = 2000, seed: int = 49) -> dict:
         "lower": lower,
         "upper": upper,
     }
+
+
+def shard_records(
+    records, *, rank: int, world_size: int
+) -> tuple[HellaSwagRecord, ...]:
+    """Partition validation rows without duplication or padding."""
+    records = tuple(records)
+    if not records or any(
+        not isinstance(record, HellaSwagRecord) for record in records
+    ):
+        raise HellaSwagError("sharding requires validated HellaSwag records")
+    if (
+        isinstance(world_size, bool)
+        or not isinstance(world_size, int)
+        or not 1 <= world_size <= 16
+        or isinstance(rank, bool)
+        or not isinstance(rank, int)
+        or not 0 <= rank < world_size
+    ):
+        raise HellaSwagError("shard topology is invalid")
+    ordered = sorted(records, key=lambda record: record.row_index)
+    return tuple(ordered[rank::world_size])
