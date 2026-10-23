@@ -1,7 +1,7 @@
 # AI Journey: Reproducible Transformer Training and Serving Lab
 
 This repository is a public-safe, executable record of an added setup day plus the
-selected verified code through Day 47 of a 90-day AI engineering learning plan. It combines
+selected verified code through Day 49 of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -24,6 +24,9 @@ then grow these exercises into production-quality training and inference project
 - Real CPU/Gloo process training, exact checkpoint recovery, controlled global-batch
   comparisons, held-out evaluation, cached inference, and loopback serving in the
   [distributed lab runbook](docs/distributed-cpu-lab.md)
+- Checksum-pinned HellaSwag ingestion, completion-only likelihood scoring,
+  calibration, uncertainty, exact sharding, and sealed paired comparisons in the
+  [bounded evaluation runbook](docs/hellaswag-evaluation.md)
 - Grouped preference cross-validation with response-only DPO-style scoring,
   matched full/LoRA arms, negative findings, and exact replay in the
   [preference optimization guide](docs/preference-optimization.md)
@@ -406,6 +409,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 43 | 2026-10-17 | Validated chat/tool conversations, assistant-only SFT, matched full/LoRA trials, uncertainty, and exact replay |
 | 45 | 2026-10-19 | Exact GPT-2 architecture, public checkpoint import, full-logit parity, and tamper-evident evidence |
 | 48 | 2026-10-22 | Real DDP processes, global-batch equivalence, exact recovery, document-held-out evaluation, and bounded serving |
+| 49 | 2026-10-23 | Pinned HellaSwag ingestion, completion-only scoring, calibration, uncertainty, sharding, and evidence replay |
 
 ## License
 
