@@ -170,7 +170,15 @@ class HellaSwagSource:
         return cls(**payload)
 
 
-def examples_from_dataset_server(source: bytes) -> tuple[HellaSwagExample, ...]:
+@dataclass(frozen=True)
+class HellaSwagRecord:
+    """Dataset row ordinal paired with the benchmark's independent example ID."""
+
+    row_index: int
+    example: HellaSwagExample
+
+
+def records_from_dataset_server(source: bytes) -> tuple[HellaSwagRecord, ...]:
     """Parse a bounded Hugging Face dataset-server first-rows response."""
     if not isinstance(source, bytes):
         raise TypeError("dataset response must be bytes")
@@ -193,7 +201,7 @@ def examples_from_dataset_server(source: bytes) -> tuple[HellaSwagExample, ...]:
         or not 1 <= len(payload["rows"]) <= 1000
     ):
         raise HellaSwagError("dataset response metadata does not match HellaSwag")
-    examples = []
+    records = []
     for entry in payload["rows"]:
         if (
             not isinstance(entry, dict)
@@ -205,11 +213,11 @@ def examples_from_dataset_server(source: bytes) -> tuple[HellaSwagExample, ...]:
         ):
             raise HellaSwagError("dataset row envelope is incomplete or truncated")
         example = HellaSwagExample.from_mapping(entry["row"])
-        if entry["row_idx"] != example.index:
-            raise HellaSwagError("dataset row index does not match example index")
-        examples.append(example)
-    if len({example.index for example in examples}) != len(examples) or len(
-        {example.digest for example in examples}
-    ) != len(examples):
+        records.append(HellaSwagRecord(entry["row_idx"], example))
+    if (
+        len({record.row_index for record in records}) != len(records)
+        or len({record.example.index for record in records}) != len(records)
+        or len({record.example.digest for record in records}) != len(records)
+    ):
         raise HellaSwagError("dataset response contains duplicate examples")
-    return tuple(examples)
+    return tuple(records)
