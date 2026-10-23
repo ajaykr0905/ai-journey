@@ -344,3 +344,32 @@ def probabilities_from_scores(scores) -> list[float]:
     weights = [math.exp(value - maximum) for value in logits]
     total = math.fsum(weights)
     return [weight / total for weight in weights]
+
+
+def evaluate_records(model, records) -> dict:
+    """Evaluate every selected row once with accuracy, NLL and calibration."""
+    from .ddp_metrics import calibration_metrics
+
+    records = tuple(records)
+    if not records or any(
+        not isinstance(record, HellaSwagRecord) for record in records
+    ):
+        raise HellaSwagError("evaluation requires validated HellaSwag records")
+    if len({record.row_index for record in records}) != len(records):
+        raise HellaSwagError("evaluation rows must be unique")
+    results = [score_record(model, record) for record in records]
+    correct = sum(result["correct"] for result in results)
+    mean_correct_nll = math.fsum(
+        result["scores"][result["label"]]["mean_nll"] for result in results
+    ) / len(results)
+    return {
+        "examples": len(results),
+        "correct": correct,
+        "accuracy": correct / len(results),
+        "mean_correct_nll": mean_correct_nll,
+        "calibration": calibration_metrics(
+            [result["probabilities"] for result in results],
+            [result["label"] for result in results],
+        ),
+        "records": results,
+    }

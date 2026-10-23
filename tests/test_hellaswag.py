@@ -10,6 +10,7 @@ from ai_journey.hellaswag import records_digest, select_records
 from ai_journey.hellaswag import encode_example
 from ai_journey.hellaswag import score_record
 from ai_journey.hellaswag import probabilities_from_scores
+from ai_journey.hellaswag import evaluate_records
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 
@@ -213,3 +214,35 @@ def test_score_probabilities_are_stable_for_large_candidate_losses():
     assert probabilities[0] > probabilities[1] > probabilities[2] > probabilities[3]
     with pytest.raises(HellaSwagError):
         probabilities_from_scores([{"mean_nll": float("nan")}] * 4)
+
+
+def test_evaluation_aggregates_accuracy_nll_and_calibration_once_per_row():
+    payloads = [
+        example_payload(index=24, label="0"),
+        example_payload(index=25, label="3"),
+    ]
+    payloads[1]["source_id"] = "activitynet~second"
+    records = records_from_dataset_server(
+        json.dumps(server_payload(*payloads)).encode()
+    )
+    model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double()
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.zero_()
+    result = evaluate_records(model, records)
+    assert result["examples"] == 2
+    assert result["correct"] == 1
+    assert result["accuracy"] == 0.5
+    assert result["mean_correct_nll"] == pytest.approx(torch.log(torch.tensor(256.0)))
+    assert result["calibration"]["brier_score"] == pytest.approx(0.75)
+    assert [row["row_index"] for row in result["records"]] == [0, 1]
+
+
+def test_evaluation_rejects_empty_or_duplicate_rows():
+    with pytest.raises(HellaSwagError):
+        evaluate_records(object(), [])
+    record = records_from_dataset_server(
+        json.dumps(server_payload(example_payload())).encode()
+    )[0]
+    with pytest.raises(HellaSwagError, match="unique"):
+        evaluate_records(object(), [record, record])
