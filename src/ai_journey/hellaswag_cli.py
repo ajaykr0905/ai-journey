@@ -10,7 +10,8 @@ import torch
 from .ddp_pipeline import load_serving_model
 from .gpt2_model import GPT2LanguageModel, expected_gpt2_parameter_count
 from .gpt2_training import load_training_spec
-from .hellaswag import HellaSwagError, HellaSwagProtocol, run_evaluation, seal_evidence
+from .hellaswag import HellaSwagError, HellaSwagProtocol, compare_evaluations
+from .hellaswag import run_evaluation, seal_evidence
 from .hellaswag_evidence import read_evidence, write_evidence
 
 
@@ -56,8 +57,33 @@ def main(argv=None) -> int:
     evaluate.add_argument("--output", type=Path, required=True)
     verify = commands.add_parser("verify")
     verify.add_argument("--report", type=Path, required=True)
+    compare = commands.add_parser("compare")
+    compare.add_argument("--baseline", type=Path, required=True)
+    compare.add_argument("--candidate", type=Path, required=True)
     arguments = parser.parse_args(argv)
     try:
+        if arguments.command == "compare":
+            baseline = read_evidence(arguments.baseline)
+            candidate = read_evidence(arguments.candidate)
+            left, right = baseline["run"], candidate["run"]
+            if any(
+                left[field] != right[field]
+                for field in ("protocol_sha256", "sample_sha256", "records_sha256")
+            ):
+                raise HellaSwagError(
+                    "comparison evidence does not cover the same protocol rows"
+                )
+            comparison = {
+                "baseline_evidence_sha256": baseline["evidence_sha256"],
+                "candidate_evidence_sha256": candidate["evidence_sha256"],
+                "baseline_model_sha256": left["model_sha256"],
+                "candidate_model_sha256": right["model_sha256"],
+                "protocol_sha256": left["protocol_sha256"],
+                "records_sha256": left["records_sha256"],
+                "metrics": compare_evaluations(left["evaluation"], right["evaluation"]),
+            }
+            print(json.dumps(comparison, sort_keys=True, allow_nan=False))
+            return 0
         if arguments.command == "verify":
             evidence = read_evidence(arguments.report)
         else:

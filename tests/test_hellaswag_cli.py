@@ -7,7 +7,9 @@ import pytest
 
 from ai_journey.hellaswag_cli import main
 from ai_journey.hellaswag_evidence import read_evidence
+from ai_journey.hellaswag_evidence import write_evidence
 from test_hellaswag import example_payload, protocol_payload, server_payload
+from test_hellaswag_evidence import evidence_fixture
 
 
 def test_cli_evaluates_fresh_model_and_verifies_saved_evidence(tmp_path, capsys):
@@ -62,3 +64,26 @@ def test_package_installs_hellaswag_command():
         project["project"]["scripts"]["ai-journey-hellaswag"]
         == "ai_journey.hellaswag_cli:main"
     )
+
+
+def test_cli_compares_verified_reports_on_identical_rows(tmp_path, capsys):
+    evidence = evidence_fixture()
+    baseline = tmp_path / "baseline.json"
+    candidate = tmp_path / "candidate.json"
+    write_evidence(baseline, evidence)
+    write_evidence(candidate, evidence)
+    assert (
+        main(
+            [
+                "compare",
+                "--baseline",
+                str(baseline),
+                "--candidate",
+                str(candidate),
+            ]
+        )
+        == 0
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert result["metrics"]["accuracy_delta"] == 0
+    assert result["metrics"]["mcnemar_exact_p_value"] == 1
