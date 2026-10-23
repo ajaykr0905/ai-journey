@@ -491,3 +491,55 @@ def merge_evaluations(shards, expected_records) -> dict:
     if any(row.get("example_sha256") != expected[row["row_index"]] for row in rows):
         raise HellaSwagError("shard example identity does not match the selected data")
     return summarize_scores(sorted(rows, key=lambda row: row["row_index"]))
+
+
+def compare_evaluations(baseline: dict, candidate: dict) -> dict:
+    """Compare paired benchmark outcomes with an exact two-sided McNemar test."""
+    if not isinstance(baseline, dict) or not isinstance(candidate, dict):
+        raise TypeError("evaluations must be dictionaries")
+    before = baseline.get("records")
+    after = candidate.get("records")
+    if not isinstance(before, (list, tuple)) or not isinstance(after, (list, tuple)):
+        raise HellaSwagError("paired evaluations require scored rows")
+    before_by_row = {row.get("row_index"): row for row in before}
+    after_by_row = {row.get("row_index"): row for row in after}
+    if (
+        len(before_by_row) != len(before)
+        or len(after_by_row) != len(after)
+        or set(before_by_row) != set(after_by_row)
+        or not before_by_row
+    ):
+        raise HellaSwagError("paired evaluations do not cover identical rows")
+    pairs = []
+    for row_index in sorted(before_by_row):
+        left, right = before_by_row[row_index], after_by_row[row_index]
+        if any(
+            left.get(field) != right.get(field) for field in ("example_sha256", "label")
+        ):
+            raise HellaSwagError("paired evaluation identities do not match")
+        pairs.append((bool(left["correct"]), bool(right["correct"])))
+    baseline_only = sum(left and not right for left, right in pairs)
+    candidate_only = sum(right and not left for left, right in pairs)
+    discordant = baseline_only + candidate_only
+    if discordant:
+        tail = (
+            sum(
+                math.comb(discordant, value)
+                for value in range(0, min(baseline_only, candidate_only) + 1)
+            )
+            / 2**discordant
+        )
+        p_value = min(1.0, 2 * tail)
+    else:
+        p_value = 1.0
+    return {
+        "examples": len(pairs),
+        "both_correct": sum(left and right for left, right in pairs),
+        "baseline_only": baseline_only,
+        "candidate_only": candidate_only,
+        "both_wrong": sum(not left and not right for left, right in pairs),
+        "accuracy_delta": candidate["accuracy"] - baseline["accuracy"],
+        "mean_correct_nll_delta": candidate["mean_correct_nll"]
+        - baseline["mean_correct_nll"],
+        "mcnemar_exact_p_value": p_value,
+    }

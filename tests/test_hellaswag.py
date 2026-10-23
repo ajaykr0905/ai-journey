@@ -15,6 +15,7 @@ from ai_journey.hellaswag import split_type_metrics
 from ai_journey.hellaswag import bootstrap_accuracy
 from ai_journey.hellaswag import shard_records
 from ai_journey.hellaswag import merge_evaluations
+from ai_journey.hellaswag import compare_evaluations
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 
@@ -329,3 +330,33 @@ def test_shard_merge_requires_disjoint_complete_dataset_coverage():
     assert [row["row_index"] for row in merged["records"]] == [0, 1]
     with pytest.raises(HellaSwagError, match="cover"):
         merge_evaluations([shards[0], shards[0]], records)
+
+
+def test_paired_comparison_reports_direction_and_exact_mcnemar_test():
+    def evaluation(outcomes, nll):
+        rows = [
+            {
+                "row_index": index,
+                "example_sha256": f"{index:064x}",
+                "label": 0,
+                "correct": outcome,
+            }
+            for index, outcome in enumerate(outcomes)
+        ]
+        return {
+            "records": rows,
+            "accuracy": sum(outcomes) / len(outcomes),
+            "mean_correct_nll": nll,
+        }
+
+    baseline = evaluation([True, False, False, False], 4.0)
+    candidate = evaluation([True, True, True, False], 3.0)
+    comparison = compare_evaluations(baseline, candidate)
+    assert comparison["candidate_only"] == 2
+    assert comparison["baseline_only"] == 0
+    assert comparison["accuracy_delta"] == 0.5
+    assert comparison["mean_correct_nll_delta"] == -1
+    assert comparison["mcnemar_exact_p_value"] == 0.5
+    candidate["records"][0]["example_sha256"] = "f" * 64
+    with pytest.raises(HellaSwagError, match="identities"):
+        compare_evaluations(baseline, candidate)
