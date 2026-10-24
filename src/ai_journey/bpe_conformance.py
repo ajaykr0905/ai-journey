@@ -150,6 +150,14 @@ def build_training_audit(
     if final_tokens != expected_tokens:
         raise TokenizerError("merge replay and encoder token counts disagree")
     token_counts = Counter(token for sequence in encoded for token in sequence)
+    token_byte_lengths = Counter()
+    for token_id, count in token_counts.items():
+        token_byte_lengths[len(tokenizer.token_bytes(token_id))] += count
+    if (
+        sum(length * count for length, count in token_byte_lengths.items())
+        != utf8_bytes
+    ):
+        raise TokenizerError("token byte-length histogram does not cover the corpus")
     unused_learned = [
         token_id
         for token_id in range(256, tokenizer.vocab_size)
@@ -185,6 +193,11 @@ def build_training_audit(
             {"token_id": token_id, "count": count}
             for token_id, count in sorted(token_counts.items())
         ],
+        "token_byte_length_histogram": [
+            {"bytes": length, "count": count}
+            for length, count in sorted(token_byte_lengths.items())
+        ],
+        "max_token_bytes": max(token_byte_lengths),
         "min_frequency": min_frequency,
         "pattern": tokenizer.pattern if isinstance(tokenizer, RegexTokenizer) else None,
         "stop_reason": stop_reason,

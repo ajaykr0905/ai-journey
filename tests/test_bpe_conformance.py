@@ -120,6 +120,19 @@ class MergeReplayTests(unittest.TestCase):
         self.assertEqual(fallback["used_vocabulary"], 3)
         self.assertEqual(fallback["byte_fallback_tokens"], 3)
 
+    def test_reconciles_encoded_token_lengths_to_every_source_byte(self):
+        documents = ("hello hello", "नमस्ते🙂")
+        tokenizer = train_documents(documents, vocab_size=270)
+        report = build_training_audit(documents, tokenizer)
+        accounted = sum(
+            row["bytes"] * row["count"] for row in report["token_byte_length_histogram"]
+        )
+        self.assertEqual(accounted, report["utf8_bytes"])
+        self.assertEqual(
+            report["max_token_bytes"],
+            max(row["bytes"] for row in report["token_byte_length_histogram"]),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
