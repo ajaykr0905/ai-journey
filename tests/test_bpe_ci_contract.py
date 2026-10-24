@@ -48,3 +48,10 @@ class BPEOperatingGateTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 2)
             self.assertFalse((output / "certification.json").exists())
+
+    def test_operations_guide_includes_source_backed_training_audit(self):
+        guide = (ROOT / "docs/bpe-training-serving.md").read_text()
+        self.assertIn("ai-journey-tokenizer audit-training", guide)
+        self.assertIn("ai-journey-tokenizer verify-training-audit", guide)
+        self.assertIn("document boundaries", guide)
+        self.assertIn("Unicode normalization collisions", guide)

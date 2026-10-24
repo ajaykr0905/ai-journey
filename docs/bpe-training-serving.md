@@ -85,6 +85,28 @@ canonical merge prefix. It reconstructs that prefix; loading is not a constant-t
 operation. Repeated pieces retain their multiplicities during weighted training.
 The encoder benchmark uses an ordinary byte/regex codec, not the EOS wrapper.
 
+## Audit tokenizer training
+
+```bash
+ai-journey-tokenizer audit-training \
+  --tokenizer artifacts/bpe/base-codec.json \
+  --corpus artifacts/bpe/train.txt \
+  --output artifacts/bpe/training-audit.json
+ai-journey-tokenizer verify-training-audit \
+  --tokenizer artifacts/bpe/base-codec.json \
+  --corpus artifacts/bpe/train.txt \
+  --audit artifacts/bpe/training-audit.json
+```
+
+The audit reconstructs each merge from the exact document boundaries. It records
+overlapping pair frequency separately from nonoverlapping applications, token
+ancestry, byte coverage, vocabulary utilization, the next eligible pair, and
+why training stopped. Verification checks the report digest and then rebuilds
+the report from the corpus and tokenizer instead of trusting the stored fields.
+Unicode normalization collisions are reported by document index; source text is
+never normalized or rewritten. For binary inputs, `DocumentEncodingStream`
+buffers chunks until an explicit document boundary so merges never cross records.
+
 The tokenizer is independently written, not GPT/tiktoken-compatible. Regex
 segmentation uses Python's Unicode rules and must be trusted configuration.
 Strict UTF-8 masks alter the sampling distribution; EOS stops without rendering
