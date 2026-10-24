@@ -193,6 +193,8 @@ class RegexTokenizer(ByteTokenizer):
 
     @classmethod
     def train(cls, text, *, vocab_size=320, min_frequency=2, pattern=DEFAULT_PATTERN):
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
         # Reuse basic training validation before applying boundary-aware counts.
         ByteTokenizer.train("", vocab_size=vocab_size, min_frequency=min_frequency)
         splitter = cls(pattern=pattern)

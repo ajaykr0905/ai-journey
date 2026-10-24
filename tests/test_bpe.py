@@ -62,6 +62,8 @@ class RegexTokenizerTests(unittest.TestCase):
         for pattern in (r"a*", r"(?=a)", r"a", "["):
             with self.assertRaises(TokenizerError):
                 RegexTokenizer.train("abc", pattern=pattern)
+        with self.assertRaisesRegex(TypeError, "text must be a string"):
+            RegexTokenizer.train(123)
 
 
 class SpecialTokenizerTests(unittest.TestCase):
