@@ -87,6 +87,34 @@ class TokenizerCliTests(unittest.TestCase):
             report = load_training_audit(audit)
             self.assertEqual(report["document_count"], 2)
             self.assertEqual(len(report["merges"]), 1)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                main(
+                    [
+                        "verify-training-audit",
+                        "--tokenizer",
+                        str(tokenizer),
+                        "--corpus",
+                        str(corpus),
+                        "--audit",
+                        str(audit),
+                    ]
+                )
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["verified_merges"], 1)
+            corpus.write_text("ababab\nchanged\n", encoding="utf-8")
+            with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                main(
+                    [
+                        "verify-training-audit",
+                        "--tokenizer",
+                        str(tokenizer),
+                        "--corpus",
+                        str(corpus),
+                        "--audit",
+                        str(audit),
+                    ]
+                )
 
     def test_training_cannot_overwrite_source(self):
         with tempfile.TemporaryDirectory() as directory:
