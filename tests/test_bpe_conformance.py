@@ -37,6 +37,16 @@ class MergeReplayTests(unittest.TestCase):
         self.assertEqual(observation.tokens_before, 15)
         self.assertEqual(observation.tokens_after, 9)
 
+    def test_records_exact_token_expansion_and_dependency_depth(self):
+        tokenizer = ByteTokenizer(((97, 98), (256, 99), (257, 257)))
+        observations = replay_merge_prefix(("abcabcabcabc",), tokenizer)
+        self.assertEqual(
+            [row.token_hex for row in observations],
+            [b"ab".hex(), b"abc".hex(), b"abcabc".hex()],
+        )
+        self.assertEqual([row.byte_length for row in observations], [2, 3, 6])
+        self.assertEqual([row.dependency_depth for row in observations], [1, 2, 3])
+
 
 if __name__ == "__main__":
     unittest.main()
