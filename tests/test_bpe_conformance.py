@@ -1,7 +1,11 @@
 import unittest
 
 from ai_journey.bpe import ByteTokenizer, RegexTokenizer, TokenizerError
-from ai_journey.bpe_conformance import build_training_audit, replay_merge_prefix
+from ai_journey.bpe_conformance import (
+    audit_fingerprint,
+    build_training_audit,
+    replay_merge_prefix,
+)
 from ai_journey.tokenizer_io import tokenizer_fingerprint
 from ai_journey.tokenizer_training import train_documents
 
@@ -60,6 +64,9 @@ class MergeReplayTests(unittest.TestCase):
             report["compression_ratio"], report["final_tokens"] / report["utf8_bytes"]
         )
         self.assertEqual(report["tokenizer_sha256"], tokenizer_fingerprint(tokenizer))
+        self.assertEqual(report["audit_sha256"], audit_fingerprint(report))
+        tampered = {**report, "final_tokens": report["final_tokens"] + 1}
+        self.assertNotEqual(tampered["audit_sha256"], audit_fingerprint(tampered))
         changed = build_training_audit(documents[::-1], tokenizer)
         self.assertNotEqual(report["corpus_sha256"], changed["corpus_sha256"])
         self.assertEqual(report["tokenizer_sha256"], changed["tokenizer_sha256"])

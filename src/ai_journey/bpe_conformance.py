@@ -102,6 +102,21 @@ def corpus_fingerprint(documents: tuple[str, ...]) -> str:
     ).hexdigest()
 
 
+def audit_fingerprint(report: dict) -> str:
+    if not isinstance(report, dict):
+        raise TypeError("audit report must be an object")
+    semantic = {key: value for key, value in report.items() if key != "audit_sha256"}
+    return sha256(
+        json.dumps(
+            semantic,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def build_training_audit(
     documents: tuple[str, ...],
     tokenizer: ByteTokenizer,
@@ -122,7 +137,7 @@ def build_training_audit(
     expected_tokens = observations[-1].tokens_after if observations else utf8_bytes
     if final_tokens != expected_tokens:
         raise TokenizerError("merge replay and encoder token counts disagree")
-    return {
+    report = {
         "schema_version": 1,
         "corpus_sha256": corpus_fingerprint(documents),
         "tokenizer_sha256": tokenizer_fingerprint(tokenizer),
@@ -135,3 +150,5 @@ def build_training_audit(
         "pattern": tokenizer.pattern if isinstance(tokenizer, RegexTokenizer) else None,
         "merges": [asdict(observation) for observation in observations],
     }
+    report["audit_sha256"] = audit_fingerprint(report)
+    return report
