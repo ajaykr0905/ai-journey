@@ -149,6 +149,12 @@ def build_training_audit(
     expected_tokens = observations[-1].tokens_after if observations else utf8_bytes
     if final_tokens != expected_tokens:
         raise TokenizerError("merge replay and encoder token counts disagree")
+    token_counts = Counter(token for sequence in encoded for token in sequence)
+    unused_learned = [
+        token_id
+        for token_id in range(256, tokenizer.vocab_size)
+        if token_id not in token_counts
+    ]
     remaining = _weighted_pair_counts(final_streams)
     next_pair = (
         min(remaining, key=lambda pair: (-remaining[pair], pair)) if remaining else None
@@ -170,6 +176,15 @@ def build_training_audit(
         "initial_tokens": utf8_bytes,
         "final_tokens": final_tokens,
         "compression_ratio": final_tokens / utf8_bytes,
+        "used_vocabulary": len(token_counts),
+        "byte_fallback_tokens": sum(
+            count for token_id, count in token_counts.items() if token_id < 256
+        ),
+        "unused_learned_token_ids": unused_learned,
+        "token_frequencies": [
+            {"token_id": token_id, "count": count}
+            for token_id, count in sorted(token_counts.items())
+        ],
         "min_frequency": min_frequency,
         "pattern": tokenizer.pattern if isinstance(tokenizer, RegexTokenizer) else None,
         "stop_reason": stop_reason,

@@ -106,6 +106,20 @@ class MergeReplayTests(unittest.TestCase):
         self.assertEqual(converged["next_frequency"], 0)
         self.assertIsNone(converged["next_pair"])
 
+    def test_reports_dead_intermediate_tokens_and_byte_fallback_usage(self):
+        documents = ("abababababababab",)
+        tokenizer = train_documents(documents, vocab_size=259)
+        report = build_training_audit(documents, tokenizer)
+        self.assertEqual(tokenizer.merges, ((97, 98), (256, 256), (257, 257)))
+        self.assertEqual(report["unused_learned_token_ids"], [256, 257])
+        self.assertEqual(report["used_vocabulary"], 1)
+        self.assertEqual(report["byte_fallback_tokens"], 0)
+        self.assertEqual(report["token_frequencies"], [{"token_id": 258, "count": 2}])
+
+        fallback = build_training_audit(("xyz",), ByteTokenizer())
+        self.assertEqual(fallback["used_vocabulary"], 3)
+        self.assertEqual(fallback["byte_fallback_tokens"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()
