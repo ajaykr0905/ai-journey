@@ -30,6 +30,28 @@ class DocumentEncodingStreamTests(unittest.TestCase):
         with self.assertRaisesRegex(TokenizerError, "document budget"):
             stream.feed(b"abc")
 
+    def test_resumes_partial_binary_documents_with_exact_token_ids(self):
+        tokenizer = ByteTokenizer(((0, 255), (256, 128)))
+        stream = DocumentEncodingStream(tokenizer, max_document_bytes=32)
+        self.assertEqual(stream.feed(b"\x00\xff"), ())
+        resumed = DocumentEncodingStream(tokenizer, max_document_bytes=32)
+        resumed.restore(stream.snapshot())
+        actual = resumed.feed(b"\x80\xfe", final=True)
+        self.assertEqual(actual, tokenizer.encode_bytes(b"\x00\xff\x80\xfe"))
+
+    def test_restore_rejects_changed_tokenizers_and_malformed_buffers(self):
+        stream = DocumentEncodingStream(ByteTokenizer(), max_document_bytes=8)
+        stream.feed(b"abc")
+        state = stream.snapshot()
+        changed = DocumentEncodingStream(
+            ByteTokenizer(((97, 98),)), max_document_bytes=8
+        )
+        with self.assertRaisesRegex(TokenizerError, "policy"):
+            changed.restore(state)
+        with self.assertRaisesRegex(TokenizerError, "buffer"):
+            stream.restore({**state, "buffer": "***"})
+        self.assertEqual(stream.snapshot(), state)
+
 
 if __name__ == "__main__":
     unittest.main()
