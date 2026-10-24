@@ -13,8 +13,12 @@ ROOT = Path(__file__).resolve().parents[1]
 class BPEOperatingGateTests(unittest.TestCase):
     def test_pipeline_has_ci_lint_and_readiness_gates(self):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        certification = (ROOT / "scripts/verify_bpe_lab.py").read_text()
         self.assertIn("python scripts/verify_bpe_lab.py", workflow)
         self.assertIn("ruff check src/ai_journey/bpe*.py", workflow)
+        self.assertIn('"audit-training"', certification)
+        self.assertIn('"verify-training-audit"', certification)
+        self.assertIn('"tokenizer_audit_sha256"', certification)
         required = json.loads((ROOT / "config/deployment_readiness.json").read_text())[
             "required_files"
         ]

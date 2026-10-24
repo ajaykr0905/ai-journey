@@ -12,6 +12,7 @@ from ai_journey.bpe_train_cli import main as train
 from ai_journey.parallel_export import main as export
 from ai_journey.serving_benchmark import _publish
 from ai_journey.tokenizer_restart_cli import main as train_tokenizer
+from ai_journey.tokenizer_cli import main as operate_tokenizer
 
 
 def main(argv=None):
@@ -127,16 +128,27 @@ def main(argv=None):
             str(root / "encoder-benchmark.json"),
         ]
     )
+    audit = root / "training-audit.json"
+    audit_inputs = [
+        "--tokenizer",
+        str(base_codec),
+        "--corpus",
+        str(train_text),
+    ]
+    operate_tokenizer(["audit-training", *audit_inputs, "--output", str(audit)])
+    operate_tokenizer(["verify-training-audit", *audit_inputs, "--audit", str(audit)])
+    audit_sha256 = json.loads(audit.read_text())["audit_sha256"]
     _publish(
         root / "certification.json",
         {
             "schema_version": 1,
             "model_sha256": fingerprint,
+            "tokenizer_audit_sha256": audit_sha256,
             "sample_sha256": sha256(
                 json.dumps(samples[0], sort_keys=True).encode()
             ).hexdigest(),
             "dataset": json.loads(manifest.read_text()),
-            "scope": "Pinned public-data CPU smoke; exact model restart, durable tokenizer resume, paired UTF-8 serving and encoder parity passed.",
+            "scope": "Pinned public-data CPU smoke; exact model restart, source-backed tokenizer audit, durable tokenizer resume, paired UTF-8 serving and encoder parity passed.",
         },
     )
     print("BPE operating workflow certification passed")
