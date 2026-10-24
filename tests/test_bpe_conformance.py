@@ -151,6 +151,18 @@ class MergeReplayTests(unittest.TestCase):
         with self.assertRaisesRegex(TokenizerError, "normalization form"):
             normalization_collisions(documents, form="NFD")
 
+    def test_reports_pretokenization_segment_cardinality(self):
+        documents = ("hello, world!", "hello, दुनिया!")
+        plain = build_training_audit(documents, ByteTokenizer())
+        regex = build_training_audit(
+            documents,
+            RegexTokenizer(pattern=r"\w+|[^\w\s]+|\s+"),
+        )
+        self.assertEqual(plain["segment_count"], len(documents))
+        self.assertGreater(regex["segment_count"], plain["segment_count"])
+        self.assertLessEqual(regex["unique_segments"], regex["segment_count"])
+        self.assertLess(regex["max_segment_bytes"], plain["max_segment_bytes"])
+
 
 if __name__ == "__main__":
     unittest.main()

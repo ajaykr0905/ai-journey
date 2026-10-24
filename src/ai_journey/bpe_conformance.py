@@ -157,6 +157,8 @@ def build_training_audit(
     observations, final_streams = _replay_merge_prefix(
         documents, tokenizer, min_frequency=min_frequency
     )
+    pattern = tokenizer.pattern if isinstance(tokenizer, RegexTokenizer) else None
+    segments = training_segments(documents, pattern=pattern)
     utf8_bytes = sum(len(document.encode("utf-8")) for document in documents)
     encoded = tuple(tokenizer.encode(document) for document in documents)
     if any(
@@ -219,7 +221,10 @@ def build_training_audit(
         "nfc_collision_groups": normalization_collisions(documents, form="NFC"),
         "nfkc_collision_groups": normalization_collisions(documents, form="NFKC"),
         "min_frequency": min_frequency,
-        "pattern": tokenizer.pattern if isinstance(tokenizer, RegexTokenizer) else None,
+        "pattern": pattern,
+        "segment_count": len(segments),
+        "unique_segments": len(set(segments)),
+        "max_segment_bytes": max(len(segment.encode("utf-8")) for segment in segments),
         "stop_reason": stop_reason,
         "next_pair": next_pair,
         "next_frequency": next_frequency,
