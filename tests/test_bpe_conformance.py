@@ -88,6 +88,24 @@ class MergeReplayTests(unittest.TestCase):
         with self.assertRaisesRegex(TokenizerError, "source replay"):
             verify_training_audit(report, documents[::-1], tokenizer)
 
+    def test_explains_why_training_stopped(self):
+        limited = build_training_audit(
+            ("ababab", "abab"),
+            train_documents(("ababab", "abab"), vocab_size=257),
+        )
+        self.assertEqual(limited["stop_reason"], "vocabulary_limit")
+        self.assertGreaterEqual(limited["next_frequency"], 2)
+        self.assertIsNotNone(limited["next_pair"])
+
+        infrequent = build_training_audit(("ab",), ByteTokenizer())
+        self.assertEqual(infrequent["stop_reason"], "min_frequency")
+        self.assertEqual(infrequent["next_frequency"], 1)
+
+        converged = build_training_audit(("a", "b"), ByteTokenizer())
+        self.assertEqual(converged["stop_reason"], "no_pairs")
+        self.assertEqual(converged["next_frequency"], 0)
+        self.assertIsNone(converged["next_pair"])
+
 
 if __name__ == "__main__":
     unittest.main()

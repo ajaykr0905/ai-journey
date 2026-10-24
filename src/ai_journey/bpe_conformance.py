@@ -35,13 +35,12 @@ def _weighted_token_count(streams: Counter) -> int:
     return sum(len(stream) * weight for stream, weight in streams.items())
 
 
-def replay_merge_prefix(
+def _replay_merge_prefix(
     documents: tuple[str, ...],
     tokenizer: ByteTokenizer,
     *,
     min_frequency: int = 2,
-) -> tuple[MergeObservation, ...]:
-    """Prove that every stored merge is the canonical next corpus merge."""
+):
     if not isinstance(tokenizer, ByteTokenizer):
         raise TypeError("merge replay requires a byte tokenizer")
     ByteTokenizer.train("", min_frequency=min_frequency)
@@ -86,7 +85,20 @@ def replay_merge_prefix(
             )
         )
         streams = merged
-    return tuple(observations)
+    return tuple(observations), streams
+
+
+def replay_merge_prefix(
+    documents: tuple[str, ...],
+    tokenizer: ByteTokenizer,
+    *,
+    min_frequency: int = 2,
+) -> tuple[MergeObservation, ...]:
+    """Prove that every stored merge is the canonical next corpus merge."""
+    observations, _ = _replay_merge_prefix(
+        documents, tokenizer, min_frequency=min_frequency
+    )
+    return observations
 
 
 def corpus_fingerprint(documents: tuple[str, ...]) -> str:
@@ -124,7 +136,7 @@ def build_training_audit(
     min_frequency: int = 2,
 ) -> dict:
     """Build a JSON-safe audit of corpus identity and every learned merge."""
-    observations = replay_merge_prefix(
+    observations, final_streams = _replay_merge_prefix(
         documents, tokenizer, min_frequency=min_frequency
     )
     utf8_bytes = sum(len(document.encode("utf-8")) for document in documents)
@@ -137,6 +149,18 @@ def build_training_audit(
     expected_tokens = observations[-1].tokens_after if observations else utf8_bytes
     if final_tokens != expected_tokens:
         raise TokenizerError("merge replay and encoder token counts disagree")
+    remaining = _weighted_pair_counts(final_streams)
+    next_pair = (
+        min(remaining, key=lambda pair: (-remaining[pair], pair)) if remaining else None
+    )
+    next_frequency = remaining[next_pair] if next_pair is not None else 0
+    stop_reason = (
+        "no_pairs"
+        if next_pair is None
+        else "min_frequency"
+        if next_frequency < min_frequency
+        else "vocabulary_limit"
+    )
     report = {
         "schema_version": 1,
         "corpus_sha256": corpus_fingerprint(documents),
@@ -148,6 +172,9 @@ def build_training_audit(
         "compression_ratio": final_tokens / utf8_bytes,
         "min_frequency": min_frequency,
         "pattern": tokenizer.pattern if isinstance(tokenizer, RegexTokenizer) else None,
+        "stop_reason": stop_reason,
+        "next_pair": next_pair,
+        "next_frequency": next_frequency,
         "merges": [asdict(observation) for observation in observations],
     }
     report["audit_sha256"] = audit_fingerprint(report)
