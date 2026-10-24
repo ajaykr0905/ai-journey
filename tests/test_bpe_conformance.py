@@ -5,6 +5,7 @@ from ai_journey.bpe_conformance import (
     audit_fingerprint,
     build_training_audit,
     replay_merge_prefix,
+    verify_training_audit,
 )
 from ai_journey.tokenizer_io import tokenizer_fingerprint
 from ai_journey.tokenizer_training import train_documents
@@ -70,6 +71,22 @@ class MergeReplayTests(unittest.TestCase):
         changed = build_training_audit(documents[::-1], tokenizer)
         self.assertNotEqual(report["corpus_sha256"], changed["corpus_sha256"])
         self.assertEqual(report["tokenizer_sha256"], changed["tokenizer_sha256"])
+
+    def test_verifier_replays_sources_instead_of_trusting_a_recomputed_seal(self):
+        documents = ("ababab", "abab")
+        tokenizer = train_documents(documents, vocab_size=257)
+        report = build_training_audit(documents, tokenizer)
+        result = verify_training_audit(report, documents, tokenizer)
+        self.assertEqual(result["verified_merges"], 1)
+
+        damaged = {**report, "final_tokens": report["final_tokens"] + 1}
+        with self.assertRaisesRegex(TokenizerError, "fingerprint"):
+            verify_training_audit(damaged, documents, tokenizer)
+        damaged["audit_sha256"] = audit_fingerprint(damaged)
+        with self.assertRaisesRegex(TokenizerError, "source replay"):
+            verify_training_audit(damaged, documents, tokenizer)
+        with self.assertRaisesRegex(TokenizerError, "source replay"):
+            verify_training_audit(report, documents[::-1], tokenizer)
 
 
 if __name__ == "__main__":

@@ -152,3 +152,34 @@ def build_training_audit(
     }
     report["audit_sha256"] = audit_fingerprint(report)
     return report
+
+
+def verify_training_audit(
+    report: dict,
+    documents: tuple[str, ...],
+    tokenizer: ByteTokenizer,
+) -> dict:
+    """Verify both the report seal and a fresh source-backed replay."""
+    if not isinstance(report, dict) or type(report.get("audit_sha256")) is not str:
+        raise TokenizerError("training audit fields are invalid")
+    if audit_fingerprint(report) != report["audit_sha256"]:
+        raise TokenizerError("training audit fingerprint mismatch")
+    try:
+        expected = build_training_audit(
+            documents, tokenizer, min_frequency=report["min_frequency"]
+        )
+        observed_json = json.dumps(
+            report, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        expected_json = json.dumps(
+            expected, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+    except (KeyError, TypeError, ValueError, RecursionError) as exc:
+        raise TokenizerError("training audit fields are invalid") from exc
+    if observed_json != expected_json:
+        raise TokenizerError("training audit does not match exact source replay")
+    return {
+        "audit_sha256": report["audit_sha256"],
+        "verified_merges": len(report["merges"]),
+        "final_tokens": report["final_tokens"],
+    }
