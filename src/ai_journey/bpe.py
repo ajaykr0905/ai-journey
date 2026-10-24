@@ -127,10 +127,8 @@ class ByteTokenizer:
             merges.append(pair)
         return cls(tuple(merges))
 
-    def encode(self, text: str) -> tuple[int, ...]:
-        if not isinstance(text, str):
-            raise TypeError("text must be a string")
-        values = tuple(text.encode("utf-8"))
+    def _encode_bytes(self, payload: bytes) -> tuple[int, ...]:
+        values = tuple(payload)
         while len(values) > 1:
             available = set(pair_counts(values)) & self._ranks.keys()
             if not available:
@@ -138,6 +136,17 @@ class ByteTokenizer:
             pair = min(available, key=self._ranks.__getitem__)
             values = merge_pair(values, pair, 256 + self._ranks[pair])
         return values
+
+    def encode_bytes(self, payload: bytes) -> tuple[int, ...]:
+        """Encode arbitrary bytes without requiring them to be valid UTF-8."""
+        if not isinstance(payload, bytes):
+            raise TypeError("payload must be bytes")
+        return self._encode_bytes(payload)
+
+    def encode(self, text: str) -> tuple[int, ...]:
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        return self._encode_bytes(text.encode("utf-8"))
 
     def decode_bytes(self, values) -> bytes:
         values = token_ids(values)
@@ -211,6 +220,9 @@ class RegexTokenizer(ByteTokenizer):
             for piece in self.pieces(text)
             for token in super(RegexTokenizer, self).encode(piece)
         )
+
+    def encode_bytes(self, payload):
+        raise TokenizerError("regex tokenization requires decoded text boundaries")
 
 
 class SpecialTokenizer:
