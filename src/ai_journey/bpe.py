@@ -226,14 +226,16 @@ class SpecialTokenizer:
             )
         ):
             raise TokenizerError("special names must be unique bounded strings")
-        for name in names:
-            name.encode("utf-8")
+        try:
+            encoded_names = tuple(name.encode("utf-8") for name in names)
+        except UnicodeEncodeError as exc:
+            raise TokenizerError("special names must be valid UTF-8 text") from exc
         self._tokenizer = tokenizer
         self._names = names
         self._special_ids = {
             name: tokenizer.vocab_size + index for index, name in enumerate(names)
         }
-        self._special_bytes = tuple(name.encode("utf-8") for name in names)
+        self._special_bytes = encoded_names
         self._pattern = (
             re.compile(
                 "|".join(

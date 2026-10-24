@@ -85,3 +85,7 @@ class SpecialTokenizerTests(unittest.TestCase):
         )
         with self.assertRaises(TokenizerError):
             tokenizer.encode("text", allowed=frozenset({"typo"}))
+
+    def test_special_names_must_be_valid_utf8_text(self):
+        with self.assertRaisesRegex(TokenizerError, "valid UTF-8"):
+            SpecialTokenizer(ByteTokenizer(), ("<bad\ud800>",))
