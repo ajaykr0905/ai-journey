@@ -1,7 +1,9 @@
 """Source-backed conformance checks for learned byte-pair merge tables."""
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from hashlib import sha256
+import json
 
 from .bpe import (
     ByteTokenizer,
@@ -11,6 +13,7 @@ from .bpe import (
     _weighted_pair_counts,
 )
 from .tokenizer_training import training_segments
+from .tokenizer_io import tokenizer_fingerprint
 
 
 @dataclass(frozen=True)
@@ -84,3 +87,51 @@ def replay_merge_prefix(
         )
         streams = merged
     return tuple(observations)
+
+
+def corpus_fingerprint(documents: tuple[str, ...]) -> str:
+    """Bind document order and boundaries without normalizing source text."""
+    training_segments(documents)
+    return sha256(
+        json.dumps(
+            documents,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def build_training_audit(
+    documents: tuple[str, ...],
+    tokenizer: ByteTokenizer,
+    *,
+    min_frequency: int = 2,
+) -> dict:
+    """Build a JSON-safe audit of corpus identity and every learned merge."""
+    observations = replay_merge_prefix(
+        documents, tokenizer, min_frequency=min_frequency
+    )
+    utf8_bytes = sum(len(document.encode("utf-8")) for document in documents)
+    encoded = tuple(tokenizer.encode(document) for document in documents)
+    if any(
+        tokenizer.decode(ids) != document for ids, document in zip(encoded, documents)
+    ):
+        raise TokenizerError("tokenizer failed corpus round-trip during audit")
+    final_tokens = sum(map(len, encoded))
+    expected_tokens = observations[-1].tokens_after if observations else utf8_bytes
+    if final_tokens != expected_tokens:
+        raise TokenizerError("merge replay and encoder token counts disagree")
+    return {
+        "schema_version": 1,
+        "corpus_sha256": corpus_fingerprint(documents),
+        "tokenizer_sha256": tokenizer_fingerprint(tokenizer),
+        "document_count": len(documents),
+        "utf8_bytes": utf8_bytes,
+        "initial_tokens": utf8_bytes,
+        "final_tokens": final_tokens,
+        "compression_ratio": final_tokens / utf8_bytes,
+        "min_frequency": min_frequency,
+        "pattern": tokenizer.pattern if isinstance(tokenizer, RegexTokenizer) else None,
+        "merges": [asdict(observation) for observation in observations],
+    }

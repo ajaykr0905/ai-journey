@@ -1,7 +1,8 @@
 import unittest
 
 from ai_journey.bpe import ByteTokenizer, RegexTokenizer, TokenizerError
-from ai_journey.bpe_conformance import replay_merge_prefix
+from ai_journey.bpe_conformance import build_training_audit, replay_merge_prefix
+from ai_journey.tokenizer_io import tokenizer_fingerprint
 from ai_journey.tokenizer_training import train_documents
 
 
@@ -46,6 +47,22 @@ class MergeReplayTests(unittest.TestCase):
         )
         self.assertEqual([row.byte_length for row in observations], [2, 3, 6])
         self.assertEqual([row.dependency_depth for row in observations], [1, 2, 3])
+
+    def test_binds_audit_to_exact_corpus_and_tokenizer_identities(self):
+        documents = ("banana banana", "नमस्ते नमस्ते")
+        tokenizer = train_documents(documents, vocab_size=270)
+        report = build_training_audit(documents, tokenizer)
+        self.assertEqual(report["schema_version"], 1)
+        self.assertEqual(report["document_count"], 2)
+        self.assertEqual(report["initial_tokens"], report["utf8_bytes"])
+        self.assertLess(report["final_tokens"], report["initial_tokens"])
+        self.assertEqual(
+            report["compression_ratio"], report["final_tokens"] / report["utf8_bytes"]
+        )
+        self.assertEqual(report["tokenizer_sha256"], tokenizer_fingerprint(tokenizer))
+        changed = build_training_audit(documents[::-1], tokenizer)
+        self.assertNotEqual(report["corpus_sha256"], changed["corpus_sha256"])
+        self.assertEqual(report["tokenizer_sha256"], changed["tokenizer_sha256"])
 
 
 if __name__ == "__main__":
