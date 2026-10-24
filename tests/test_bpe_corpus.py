@@ -43,3 +43,10 @@ class BPECorpusTests(unittest.TestCase):
             build_bpe_corpus(train, train)
         with self.assertRaises(TokenizerError):
             build_bpe_corpus((EOS_MARKER,), ("held out",))
+
+    def test_unicode_equivalent_documents_cannot_cross_the_split(self):
+        with self.assertRaisesRegex(TokenizerError, "Unicode-equivalent"):
+            build_bpe_corpus(
+                ("caf\N{LATIN SMALL LETTER E WITH ACUTE}",),
+                ("cafe\N{COMBINING ACUTE ACCENT}",),
+            )

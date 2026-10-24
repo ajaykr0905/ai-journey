@@ -2,6 +2,7 @@
 
 from hashlib import sha256
 import json
+import unicodedata
 
 import torch
 
@@ -32,8 +33,12 @@ def build_bpe_corpus(
             dtype=torch.long,
         )
 
-    if set(train) & set(validation):
-        raise TokenizerError("exact training documents must not leak into validation")
+    train_normalized = {unicodedata.normalize("NFC", text) for text in train}
+    validation_normalized = {unicodedata.normalize("NFC", text) for text in validation}
+    if train_normalized & validation_normalized:
+        raise TokenizerError(
+            "Unicode-equivalent training documents must not leak into validation"
+        )
     source = sha256(
         json.dumps(
             {"train": train, "validation": validation},
