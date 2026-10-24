@@ -4,6 +4,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
+import unicodedata
 
 from .bpe import (
     ByteTokenizer,
@@ -114,6 +115,23 @@ def corpus_fingerprint(documents: tuple[str, ...]) -> str:
     ).hexdigest()
 
 
+def normalization_collisions(
+    documents: tuple[str, ...], *, form: str = "NFC"
+) -> tuple[tuple[int, ...], ...]:
+    """Locate distinct source strings that collapse under a Unicode policy."""
+    training_segments(documents)
+    if form not in {"NFC", "NFKC"}:
+        raise TokenizerError("normalization form must be NFC or NFKC")
+    groups = {}
+    for index, document in enumerate(documents):
+        groups.setdefault(unicodedata.normalize(form, document), []).append(index)
+    return tuple(
+        tuple(indices)
+        for indices in groups.values()
+        if len({documents[index] for index in indices}) > 1
+    )
+
+
 def audit_fingerprint(report: dict) -> str:
     if not isinstance(report, dict):
         raise TypeError("audit report must be an object")
@@ -198,6 +216,8 @@ def build_training_audit(
             for length, count in sorted(token_byte_lengths.items())
         ],
         "max_token_bytes": max(token_byte_lengths),
+        "nfc_collision_groups": normalization_collisions(documents, form="NFC"),
+        "nfkc_collision_groups": normalization_collisions(documents, form="NFKC"),
         "min_frequency": min_frequency,
         "pattern": tokenizer.pattern if isinstance(tokenizer, RegexTokenizer) else None,
         "stop_reason": stop_reason,

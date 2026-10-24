@@ -4,6 +4,7 @@ from ai_journey.bpe import ByteTokenizer, RegexTokenizer, TokenizerError
 from ai_journey.bpe_conformance import (
     audit_fingerprint,
     build_training_audit,
+    normalization_collisions,
     replay_merge_prefix,
     verify_training_audit,
 )
@@ -132,6 +133,23 @@ class MergeReplayTests(unittest.TestCase):
             report["max_token_bytes"],
             max(row["bytes"] for row in report["token_byte_length_histogram"]),
         )
+
+    def test_surfaces_normalization_collisions_without_changing_source_bytes(self):
+        documents = (
+            "caf\N{LATIN SMALL LETTER E WITH ACUTE}",
+            "cafe\N{COMBINING ACUTE ACCENT}",
+            "\N{LATIN SMALL LIGATURE FI}",
+            "fi",
+        )
+        self.assertEqual(normalization_collisions(documents), ((0, 1),))
+        self.assertEqual(
+            normalization_collisions(documents, form="NFKC"), ((0, 1), (2, 3))
+        )
+        report = build_training_audit(documents, ByteTokenizer())
+        self.assertEqual(report["nfc_collision_groups"], ((0, 1),))
+        self.assertEqual(report["nfkc_collision_groups"], ((0, 1), (2, 3)))
+        with self.assertRaisesRegex(TokenizerError, "normalization form"):
+            normalization_collisions(documents, form="NFD")
 
 
 if __name__ == "__main__":
