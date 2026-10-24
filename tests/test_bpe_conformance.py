@@ -29,6 +29,14 @@ class MergeReplayTests(unittest.TestCase):
                 min_frequency=100,
             )
 
+    def test_distinguishes_overlapping_frequency_from_applied_merges(self):
+        tokenizer = train_documents(("aaaaa",) * 3, vocab_size=257)
+        (observation,) = replay_merge_prefix(("aaaaa",) * 3, tokenizer)
+        self.assertEqual(observation.frequency, 12)
+        self.assertEqual(observation.applied_count, 6)
+        self.assertEqual(observation.tokens_before, 15)
+        self.assertEqual(observation.tokens_after, 9)
+
 
 if __name__ == "__main__":
     unittest.main()

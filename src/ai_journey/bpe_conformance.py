@@ -20,6 +20,13 @@ class MergeObservation:
     rank: int
     pair: tuple[int, int]
     frequency: int
+    applied_count: int
+    tokens_before: int
+    tokens_after: int
+
+
+def _weighted_token_count(streams: Counter) -> int:
+    return sum(len(stream) * weight for stream, weight in streams.items())
 
 
 def replay_merge_prefix(
@@ -48,6 +55,21 @@ def replay_merge_prefix(
             raise TokenizerError("stored merge falls below the frequency policy")
         if stored_pair != selected:
             raise TokenizerError("stored merge is not the canonical corpus pair")
-        observations.append(MergeObservation(rank, selected, frequency))
-        streams = _merge_weighted_streams(streams, selected, 256 + rank)
+        tokens_before = _weighted_token_count(streams)
+        merged = _merge_weighted_streams(streams, selected, 256 + rank)
+        tokens_after = _weighted_token_count(merged)
+        applied_count = tokens_before - tokens_after
+        if not 0 < applied_count <= frequency:
+            raise TokenizerError("merge application count contradicts pair frequency")
+        observations.append(
+            MergeObservation(
+                rank,
+                selected,
+                frequency,
+                applied_count,
+                tokens_before,
+                tokens_after,
+            )
+        )
+        streams = merged
     return tuple(observations)
