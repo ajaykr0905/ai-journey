@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 
 from .bpe import DEFAULT_PATTERN, TokenizerError
+from .bpe_conformance import build_training_audit, verify_training_audit
+from .bpe_conformance_io import load_training_audit, save_training_audit
 from .serving_benchmark import _publish
 from .tokenizer_io import load_tokenizer, save_tokenizer, tokenizer_fingerprint
 from .tokenizer_metrics import compression_metrics
@@ -41,6 +43,15 @@ def build_parser():
     audit.add_argument("--tokenizer", type=Path, required=True)
     audit.add_argument("--corpus", type=Path, required=True)
     audit.add_argument("--output", type=Path, required=True)
+    training_audit = commands.add_parser("audit-training")
+    training_audit.add_argument("--tokenizer", type=Path, required=True)
+    training_audit.add_argument("--corpus", type=Path, required=True)
+    training_audit.add_argument("--output", type=Path, required=True)
+    training_audit.add_argument("--min-frequency", type=int, default=2)
+    verify_audit = commands.add_parser("verify-training-audit")
+    verify_audit.add_argument("--tokenizer", type=Path, required=True)
+    verify_audit.add_argument("--corpus", type=Path, required=True)
+    verify_audit.add_argument("--audit", type=Path, required=True)
     return parser
 
 
@@ -72,7 +83,7 @@ def main(argv=None):
                 print(json.dumps(tokenizer.encode(args.text)))
             elif args.command == "decode":
                 print(tokenizer.decode(json.loads(args.ids)))
-            else:
+            elif args.command == "audit":
                 if args.output.resolve() in (
                     args.corpus.resolve(),
                     args.tokenizer.resolve(),
@@ -87,6 +98,35 @@ def main(argv=None):
                         "metrics": metrics.as_dict(),
                     },
                 )
+            elif args.command == "audit-training":
+                if args.output.resolve() in (
+                    args.corpus.resolve(),
+                    args.tokenizer.resolve(),
+                ):
+                    raise TokenizerError(
+                        "training audit output must preserve input artifacts"
+                    )
+                report = build_training_audit(
+                    read_documents(args.corpus),
+                    tokenizer,
+                    min_frequency=args.min_frequency,
+                )
+                save_training_audit(args.output, report)
+                print(
+                    json.dumps(
+                        {
+                            "audit_sha256": report["audit_sha256"],
+                            "verified_merges": len(report["merges"]),
+                        }
+                    )
+                )
+            else:
+                result = verify_training_audit(
+                    load_training_audit(args.audit),
+                    read_documents(args.corpus),
+                    tokenizer,
+                )
+                print(json.dumps(result, sort_keys=True))
     except (OSError, ValueError, TypeError) as exc:
         parser.error(str(exc))
     return 0

@@ -45,3 +45,10 @@ class TokenBatchTests(unittest.TestCase):
             ),
             ("ab",),
         )
+
+    def test_decode_rejects_a_validity_mask_that_disagrees_with_lengths(self):
+        tokenizer = ByteTokenizer()
+        batch = encode_batch(tokenizer, ("a", "bc"))
+        corrupted = type(batch)(batch.token_ids, batch.lengths, ~batch.valid)
+        with self.assertRaisesRegex(TokenizerError, "validity mask"):
+            decode_batch(tokenizer, corrupted)

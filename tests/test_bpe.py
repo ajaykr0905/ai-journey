@@ -45,6 +45,17 @@ class ByteTokenizerTests(unittest.TestCase):
         with self.assertRaises(TokenizerError):
             ByteTokenizer().decode_bytes([256])
 
+    def test_raw_byte_encoding_round_trips_non_utf8_payloads(self):
+        tokenizer = ByteTokenizer(((0, 255), (256, 128)))
+        payload = b"\x00\xff\x80\xfe"
+        ids = tokenizer.encode_bytes(payload)
+        self.assertEqual(ids, (257, 254))
+        self.assertEqual(tokenizer.decode_bytes(ids), payload)
+        text = "नमस्ते🙂"
+        self.assertEqual(
+            tokenizer.encode_bytes(text.encode("utf-8")), tokenizer.encode(text)
+        )
+
 
 class RegexTokenizerTests(unittest.TestCase):
     def test_training_respects_piece_boundaries(self):
@@ -62,6 +73,10 @@ class RegexTokenizerTests(unittest.TestCase):
         for pattern in (r"a*", r"(?=a)", r"a", "["):
             with self.assertRaises(TokenizerError):
                 RegexTokenizer.train("abc", pattern=pattern)
+        with self.assertRaisesRegex(TypeError, "text must be a string"):
+            RegexTokenizer.train(123)
+        with self.assertRaisesRegex(TokenizerError, "decoded text"):
+            tokenizer.encode_bytes(b"hello")
 
 
 class SpecialTokenizerTests(unittest.TestCase):
@@ -85,3 +100,7 @@ class SpecialTokenizerTests(unittest.TestCase):
         )
         with self.assertRaises(TokenizerError):
             tokenizer.encode("text", allowed=frozenset({"typo"}))
+
+    def test_special_names_must_be_valid_utf8_text(self):
+        with self.assertRaisesRegex(TokenizerError, "valid UTF-8"):
+            SpecialTokenizer(ByteTokenizer(), ("<bad\ud800>",))

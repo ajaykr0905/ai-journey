@@ -1,10 +1,21 @@
 import unittest
 
 from ai_journey.bpe import ByteTokenizer, SpecialTokenizer
-from ai_journey.token_spans import encode_with_spans
+from ai_journey.token_spans import encode_bytes_with_spans, encode_with_spans
 
 
 class TokenSpanTests(unittest.TestCase):
+    def test_arbitrary_byte_spans_cover_the_original_payload_exactly(self):
+        tokenizer = ByteTokenizer(((0, 255), (256, 128)))
+        payload = b"\x00\xff\x80\xfe"
+        spans = encode_bytes_with_spans(tokenizer, payload)
+        self.assertEqual(
+            [(span.token_id, span.byte_start, span.byte_end) for span in spans],
+            [(257, 0, 3), (254, 3, 4)],
+        )
+        rebuilt = b"".join(payload[span.byte_start : span.byte_end] for span in spans)
+        self.assertEqual(rebuilt, payload)
+
     def test_partial_unicode_tokens_cover_one_character_without_losing_bytes(self):
         tokenizer = ByteTokenizer()
         text = "न😀x"

@@ -60,16 +60,25 @@ def encode_batch(
 def decode_batch(tokenizer, batch: EncodedBatch) -> tuple[str, ...]:
     if not isinstance(batch, EncodedBatch):
         raise TypeError("batch must be EncodedBatch")
-    values, lengths = batch.token_ids, batch.lengths
+    values, lengths, valid = batch.token_ids, batch.lengths, batch.valid
     if (
         values.ndim != 2
         or values.dtype != torch.long
         or lengths.ndim != 1
         or lengths.dtype != torch.long
+        or valid.ndim != 2
+        or valid.dtype != torch.bool
+        or valid.shape != values.shape
         or len(lengths) != len(values)
+        or not (values.device == lengths.device == valid.device)
         or bool(((lengths <= 0) | (lengths > values.shape[1])).any())
     ):
         raise TokenizerError("token batch shapes or lengths are invalid")
+    expected_valid = (
+        torch.arange(values.shape[1], device=values.device)[None, :] < lengths[:, None]
+    )
+    if not torch.equal(valid, expected_valid):
+        raise TokenizerError("token batch validity mask does not match lengths")
     return tuple(
         tokenizer.decode(values[index, : int(length)].tolist())
         for index, length in enumerate(lengths)

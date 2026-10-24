@@ -127,10 +127,8 @@ class ByteTokenizer:
             merges.append(pair)
         return cls(tuple(merges))
 
-    def encode(self, text: str) -> tuple[int, ...]:
-        if not isinstance(text, str):
-            raise TypeError("text must be a string")
-        values = tuple(text.encode("utf-8"))
+    def _encode_bytes(self, payload: bytes) -> tuple[int, ...]:
+        values = tuple(payload)
         while len(values) > 1:
             available = set(pair_counts(values)) & self._ranks.keys()
             if not available:
@@ -138,6 +136,17 @@ class ByteTokenizer:
             pair = min(available, key=self._ranks.__getitem__)
             values = merge_pair(values, pair, 256 + self._ranks[pair])
         return values
+
+    def encode_bytes(self, payload: bytes) -> tuple[int, ...]:
+        """Encode arbitrary bytes without requiring them to be valid UTF-8."""
+        if not isinstance(payload, bytes):
+            raise TypeError("payload must be bytes")
+        return self._encode_bytes(payload)
+
+    def encode(self, text: str) -> tuple[int, ...]:
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        return self._encode_bytes(text.encode("utf-8"))
 
     def decode_bytes(self, values) -> bytes:
         values = token_ids(values)
@@ -193,6 +202,8 @@ class RegexTokenizer(ByteTokenizer):
 
     @classmethod
     def train(cls, text, *, vocab_size=320, min_frequency=2, pattern=DEFAULT_PATTERN):
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
         # Reuse basic training validation before applying boundary-aware counts.
         ByteTokenizer.train("", vocab_size=vocab_size, min_frequency=min_frequency)
         splitter = cls(pattern=pattern)
@@ -210,6 +221,9 @@ class RegexTokenizer(ByteTokenizer):
             for token in super(RegexTokenizer, self).encode(piece)
         )
 
+    def encode_bytes(self, payload):
+        raise TokenizerError("regex tokenization requires decoded text boundaries")
+
 
 class SpecialTokenizer:
     """Reserve named markers while rejecting them in untrusted ordinary input."""
@@ -226,14 +240,16 @@ class SpecialTokenizer:
             )
         ):
             raise TokenizerError("special names must be unique bounded strings")
-        for name in names:
-            name.encode("utf-8")
+        try:
+            encoded_names = tuple(name.encode("utf-8") for name in names)
+        except UnicodeEncodeError as exc:
+            raise TokenizerError("special names must be valid UTF-8 text") from exc
         self._tokenizer = tokenizer
         self._names = names
         self._special_ids = {
             name: tokenizer.vocab_size + index for index, name in enumerate(names)
         }
-        self._special_bytes = tuple(name.encode("utf-8") for name in names)
+        self._special_bytes = encoded_names
         self._pattern = (
             re.compile(
                 "|".join(

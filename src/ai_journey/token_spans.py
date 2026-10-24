@@ -3,7 +3,7 @@
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 
-from .bpe import SpecialTokenizer, TokenizerError
+from .bpe import ByteTokenizer, SpecialTokenizer, TokenizerError
 
 
 @dataclass(frozen=True)
@@ -13,6 +13,34 @@ class TokenSpan:
     byte_end: int
     character_start: int
     character_end: int
+
+
+@dataclass(frozen=True)
+class ByteTokenSpan:
+    token_id: int
+    byte_start: int
+    byte_end: int
+
+
+def encode_bytes_with_spans(
+    tokenizer: ByteTokenizer, payload: bytes
+) -> tuple[ByteTokenSpan, ...]:
+    if type(tokenizer) is not ByteTokenizer:
+        raise TypeError("byte spans require a plain byte tokenizer")
+    if not isinstance(payload, bytes):
+        raise TypeError("payload must be bytes")
+    offset = 0
+    spans = []
+    for token_id in tokenizer.encode_bytes(payload):
+        token_bytes = tokenizer.token_bytes(token_id)
+        end = offset + len(token_bytes)
+        if payload[offset:end] != token_bytes:
+            raise TokenizerError("token bytes do not align with the input payload")
+        spans.append(ByteTokenSpan(token_id, offset, end))
+        offset = end
+    if offset != len(payload):
+        raise TokenizerError("token spans do not cover the complete payload")
+    return tuple(spans)
 
 
 def encode_with_spans(
