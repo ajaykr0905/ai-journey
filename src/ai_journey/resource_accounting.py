@@ -157,3 +157,23 @@ def forward_linear_flops(
         ),
         "output_projection": 2 * tokens * hidden * model.vocab_size,
     }
+
+
+def attention_matmul_flops(
+    model: DecoderSpec, *, batch_size: int, sequence_length: int
+) -> dict[str, int]:
+    """Count dense QKᵀ and probability-value matmuls.
+
+    Causal masking does not reduce this analytical count because standard dense
+    kernels still materialize the full square matmul work.
+    """
+
+    _positive_integer(batch_size, "batch_size")
+    _positive_integer(sequence_length, "sequence_length")
+    one_matmul = (
+        2 * batch_size * model.layer_count * sequence_length**2 * model.hidden_size
+    )
+    return {
+        "query_key_scores": one_matmul,
+        "attention_value_mix": one_matmul,
+    }

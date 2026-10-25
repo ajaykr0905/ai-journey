@@ -4,6 +4,7 @@ from ai_journey.resource_accounting import (
     DecoderSpec,
     ResourceAccountingError,
     TrainingWorkload,
+    attention_matmul_flops,
     forward_linear_flops,
 )
 
@@ -75,3 +76,13 @@ def test_forward_linear_flops_decompose_projection_work():
         "output_projection": 48_000,
     }
     assert sum(flops.values()) == 186_240
+
+
+def test_attention_flops_scale_quadratically_with_sequence_length():
+    short = attention_matmul_flops(small_spec(), batch_size=3, sequence_length=5)
+    long = attention_matmul_flops(small_spec(), batch_size=3, sequence_length=10)
+    assert short == {
+        "query_key_scores": 4_800,
+        "attention_value_mix": 4_800,
+    }
+    assert sum(long.values()) == 4 * sum(short.values())
