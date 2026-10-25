@@ -13,7 +13,11 @@ from .resource_accounting import (
     TrainingWorkload,
 )
 from .resource_report import ResourcePlan, build_resource_report, seal_resource_report
-from .resource_report_io import MAX_RESOURCE_REPORT_BYTES, save_resource_report
+from .resource_report_io import (
+    MAX_RESOURCE_REPORT_BYTES,
+    load_resource_report,
+    save_resource_report,
+)
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -68,6 +72,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"{report['integrity']['digest']} "
         f"parameters={report['parameters']['count']} "
         f"fits={str(report['memory']['capacity']['fits']).lower()} "
+        "measured=false"
+    )
+    return 0
+
+
+def build_verify_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Verify and recompute analytical transformer resource evidence."
+    )
+    parser.add_argument("--report", type=Path, required=True)
+    return parser
+
+
+def verify_main(argv: Sequence[str] | None = None) -> int:
+    args = build_verify_parser().parse_args(argv)
+    report = load_resource_report(args.report)
+    print(
+        "verified_resource_plan="
+        f"{report['integrity']['digest']} "
+        f"parameters={report['parameters']['count']} "
         "measured=false"
     )
     return 0
