@@ -8,6 +8,7 @@ import json
 
 from .resource_accounting import (
     DecoderSpec,
+    ResourceAccountingError,
     TrainingWorkload,
     attention_workspace_memory,
     checkpointed_activation_memory,
@@ -162,3 +163,36 @@ def seal_resource_report(report: dict[str, object]) -> dict[str, object]:
         "digest": hashlib.sha256(_canonical_report_bytes(sealed)).hexdigest(),
     }
     return sealed
+
+
+def verify_resource_report(report: dict[str, object]) -> dict[str, object]:
+    """Recompute every derived field and reject any report drift."""
+
+    if not isinstance(report, dict):
+        raise TypeError("report must be a dictionary")
+    if report.get("schema_version") != 1:
+        raise ResourceAccountingError("unsupported resource report schema")
+    if report.get("kind") != "analytical_planning_estimate":
+        raise ResourceAccountingError("unexpected resource report kind")
+    if report.get("measured") is not False:
+        raise ResourceAccountingError("resource report must remain unmeasured")
+    try:
+        model_payload = report["model"]
+        workload_payload = report["workload"]
+        assumptions = report["assumptions"]
+        if not all(
+            isinstance(value, dict)
+            for value in (model_payload, workload_payload, assumptions)
+        ):
+            raise TypeError("report plan sections must be dictionaries")
+        plan = ResourcePlan(
+            model=DecoderSpec(**model_payload),
+            workload=TrainingWorkload(**workload_payload),
+            **assumptions,
+        )
+    except (KeyError, TypeError, ResourceAccountingError) as error:
+        raise ResourceAccountingError("invalid resource report plan") from error
+    expected = seal_resource_report(build_resource_report(plan))
+    if report != expected:
+        raise ResourceAccountingError("resource report does not match recomputation")
+    return report

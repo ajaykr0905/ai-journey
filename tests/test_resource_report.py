@@ -1,8 +1,17 @@
-from ai_journey.resource_accounting import DecoderSpec, TrainingWorkload
+from copy import deepcopy
+
+import pytest
+
+from ai_journey.resource_accounting import (
+    DecoderSpec,
+    ResourceAccountingError,
+    TrainingWorkload,
+)
 from ai_journey.resource_report import (
     ResourcePlan,
     build_resource_report,
     seal_resource_report,
+    verify_resource_report,
 )
 
 
@@ -55,3 +64,18 @@ def test_resource_report_seal_is_stable_and_does_not_mutate_input():
         seal_resource_report(changed)["integrity"]["digest"]
         != first["integrity"]["digest"]
     )
+
+
+def test_resource_report_verification_recomputes_every_derived_field():
+    sealed = seal_resource_report(build_resource_report(make_plan()))
+    assert verify_resource_report(sealed) is sealed
+
+    tampered = deepcopy(sealed)
+    tampered["memory"]["per_device"]["total"] += 1
+    with pytest.raises(ResourceAccountingError, match="recomputation"):
+        verify_resource_report(tampered)
+
+    mislabeled = deepcopy(sealed)
+    mislabeled["measured"] = True
+    with pytest.raises(ResourceAccountingError, match="unmeasured"):
+        verify_resource_report(mislabeled)
