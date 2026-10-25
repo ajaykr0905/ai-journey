@@ -105,6 +105,104 @@ def test_rotary_attention_has_no_learned_position_table_or_persistent_mask() -> 
     assert attention.resid_dropout.p == _config().residual_dropout
 
 
+def test_cached_prefill_matches_full_sequence_forward_exactly() -> None:
+    torch.manual_seed(52)
+    attention = RotarySelfAttention(_config()).double().eval()
+    inputs = torch.randn(2, 5, 8, dtype=torch.float64)
+
+    output, key, value = attention.forward_with_cache(inputs)
+
+    assert torch.equal(output, attention(inputs))
+    assert key.shape == (2, 2, 5, 4)
+    assert value.shape == (2, 2, 5, 4)
+
+
+def test_cached_chunks_match_full_sequence_and_preserve_prior_cache() -> None:
+    torch.manual_seed(52)
+    attention = RotarySelfAttention(_config()).double().eval()
+    inputs = torch.randn(2, 5, 8, dtype=torch.float64)
+    full_output = attention(inputs)
+
+    first, past_key, past_value = attention.forward_with_cache(inputs[:, :2])
+    key_before, value_before = past_key.clone(), past_value.clone()
+    middle, extended_key, extended_value = attention.forward_with_cache(
+        inputs[:, 2:3], past_key=past_key, past_value=past_value
+    )
+    last, final_key, final_value = attention.forward_with_cache(
+        inputs[:, 3:], past_key=extended_key, past_value=extended_value
+    )
+    chunked = torch.cat((first, middle, last), dim=1)
+
+    torch.testing.assert_close(chunked, full_output, rtol=0, atol=1e-14)
+    assert final_key.shape == (2, 2, 5, 4)
+    assert final_value.shape == (2, 2, 5, 4)
+    assert torch.equal(past_key, key_before)
+    assert torch.equal(past_value, value_before)
+    assert torch.equal(final_key[:, :, :2], past_key)
+    assert torch.equal(final_value[:, :, :2], past_value)
+    assert final_key.data_ptr() != past_key.data_ptr()
+    assert final_value.data_ptr() != past_value.data_ptr()
+
+
+def test_cached_decode_rejects_total_length_above_context() -> None:
+    attention = RotarySelfAttention(_config()).eval()
+    _, past_key, past_value = attention.forward_with_cache(torch.randn(1, 4, 8))
+
+    with pytest.raises(GPT2ConfigError, match="context_length"):
+        attention.forward_with_cache(
+            torch.randn(1, 2, 8), past_key=past_key, past_value=past_value
+        )
+
+
+@pytest.mark.parametrize(
+    ("inputs", "error", "message"),
+    [
+        ([], TypeError, "torch.Tensor"),
+        (torch.ones(2, 8), GPT2ConfigError, "non-empty"),
+        (torch.empty(1, 0, 8), GPT2ConfigError, "non-empty"),
+        (torch.ones(1, 2, 7), GPT2ConfigError, "embedding_dim"),
+        (torch.ones(1, 2, 8, dtype=torch.float64), GPT2ConfigError, "parameter dtype"),
+        (torch.empty(1, 2, 8, device="meta"), GPT2ConfigError, "parameter device"),
+    ],
+)
+def test_cached_decode_rejects_invalid_input_contracts(
+    inputs: object, error: type[Exception], message: str
+) -> None:
+    with pytest.raises(error, match=message):
+        RotarySelfAttention(_config()).forward_with_cache(inputs)  # type: ignore[arg-type]
+
+
+def test_cached_decode_rejects_unpaired_and_malformed_caches() -> None:
+    attention = RotarySelfAttention(_config()).eval()
+    inputs = torch.randn(2, 1, 8)
+    valid = torch.randn(2, 2, 2, 4)
+
+    with pytest.raises(GPT2ConfigError, match="supplied together"):
+        attention.forward_with_cache(inputs, past_key=valid)
+    with pytest.raises(TypeError, match="past_key must be a torch.Tensor"):
+        attention.forward_with_cache(inputs, past_key=[], past_value=valid)  # type: ignore[arg-type]
+    with pytest.raises(GPT2ConfigError, match="past_key.*shape"):
+        attention.forward_with_cache(
+            inputs, past_key=torch.randn(2, 3, 2, 4), past_value=valid
+        )
+    with pytest.raises(GPT2ConfigError, match="past_value.*shape"):
+        attention.forward_with_cache(
+            inputs, past_key=valid, past_value=torch.randn(2, 2, 2, 3)
+        )
+    with pytest.raises(GPT2ConfigError, match="share past_time"):
+        attention.forward_with_cache(
+            inputs, past_key=valid, past_value=torch.randn(2, 2, 3, 4)
+        )
+    with pytest.raises(GPT2ConfigError, match="past_key.*dtype and device"):
+        attention.forward_with_cache(inputs, past_key=valid.double(), past_value=valid)
+    with pytest.raises(GPT2ConfigError, match="past_value.*dtype and device"):
+        attention.forward_with_cache(
+            inputs,
+            past_key=valid,
+            past_value=torch.empty(2, 2, 2, 4, device="meta"),
+        )
+
+
 @pytest.mark.parametrize(
     ("inputs", "error", "message"),
     [
