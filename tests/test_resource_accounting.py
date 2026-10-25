@@ -4,6 +4,7 @@ from ai_journey.resource_accounting import (
     DecoderSpec,
     ResourceAccountingError,
     TrainingWorkload,
+    activation_memory,
     attention_matmul_flops,
     bytes_per_element,
     forward_linear_flops,
@@ -152,3 +153,15 @@ def test_training_state_memory_accounts_for_adam_and_master_weights():
         master_weights=False,
     )
     assert without_master["total"] == 7_888 * 16
+
+
+def test_activation_memory_exposes_saved_tensor_families():
+    memory = activation_memory(
+        small_spec(), batch_size=3, sequence_length=5, dtype="bfloat16"
+    )
+    assert memory == {
+        "residual_streams": 1_920,
+        "attention_projections": 2_880,
+        "feed_forward_intermediates": 3_840,
+        "total": 8_640,
+    }

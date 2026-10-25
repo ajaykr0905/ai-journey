@@ -287,3 +287,25 @@ def training_state_memory(
     }
     groups["total"] = sum(groups.values())
     return groups
+
+
+def activation_memory(
+    model: DecoderSpec, *, batch_size: int, sequence_length: int, dtype: str
+) -> dict[str, int]:
+    """Estimate saved dense layer activations from named tensor families."""
+
+    _positive_integer(batch_size, "batch_size")
+    _positive_integer(sequence_length, "sequence_length")
+    width = bytes_per_element(dtype)
+    tokens = batch_size * sequence_length
+    layers = model.layer_count
+    elements = {
+        "residual_streams": tokens * layers * model.hidden_size * 2,
+        "attention_projections": (
+            tokens * layers * (model.hidden_size * 2 + model.kv_size * 2)
+        ),
+        "feed_forward_intermediates": (tokens * layers * model.feed_forward_size * 2),
+    }
+    groups = {name: count * width for name, count in elements.items()}
+    groups["total"] = sum(groups.values())
+    return groups
