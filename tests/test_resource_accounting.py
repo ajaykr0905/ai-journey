@@ -5,6 +5,7 @@ from ai_journey.resource_accounting import (
     ResourceAccountingError,
     TrainingWorkload,
     activation_memory,
+    attention_workspace_memory,
     attention_matmul_flops,
     bytes_per_element,
     checkpointed_activation_memory,
@@ -190,3 +191,22 @@ def test_checkpointing_retains_boundaries_and_one_recompute_window():
             dtype="bfloat16",
             checkpoint_segments=3,
         )
+
+
+def test_attention_workspace_exposes_quadratic_score_storage():
+    saved = attention_workspace_memory(
+        small_spec(),
+        batch_size=3,
+        sequence_length=5,
+        dtype="bfloat16",
+        save_probabilities=True,
+    )
+    assert saved == {"scores": 600, "probabilities": 600, "total": 1_200}
+    recomputed = attention_workspace_memory(
+        small_spec(),
+        batch_size=3,
+        sequence_length=5,
+        dtype="bfloat16",
+        save_probabilities=False,
+    )
+    assert recomputed["total"] == 600

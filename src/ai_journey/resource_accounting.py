@@ -351,3 +351,26 @@ def checkpointed_activation_memory(
         "peak": peak,
         "saved_vs_uncheckpointed": full - peak,
     }
+
+
+def attention_workspace_memory(
+    model: DecoderSpec,
+    *,
+    batch_size: int,
+    sequence_length: int,
+    dtype: str,
+    save_probabilities: bool,
+) -> dict[str, int]:
+    """Account for dense attention score and probability tensors."""
+
+    if not isinstance(save_probabilities, bool):
+        raise TypeError("save_probabilities must be a boolean")
+    batch = _positive_integer(batch_size, "batch_size")
+    sequence = _positive_integer(sequence_length, "sequence_length")
+    score_bytes = batch * model.attention_heads * sequence**2 * bytes_per_element(dtype)
+    groups = {
+        "scores": score_bytes,
+        "probabilities": score_bytes if save_probabilities else 0,
+    }
+    groups["total"] = sum(groups.values())
+    return groups
