@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
+import json
 
 from .resource_accounting import (
     DecoderSpec,
@@ -138,3 +140,25 @@ def build_resource_report(plan: ResourcePlan) -> dict[str, object]:
             "Runtime and cost depend on the declared MFU and price assumptions.",
         ],
     }
+
+
+def _canonical_report_bytes(report: dict[str, object]) -> bytes:
+    unsigned = {key: value for key, value in report.items() if key != "integrity"}
+    return json.dumps(
+        unsigned,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def seal_resource_report(report: dict[str, object]) -> dict[str, object]:
+    """Attach a deterministic SHA-256 digest without mutating the input."""
+
+    sealed = {key: value for key, value in report.items() if key != "integrity"}
+    sealed["integrity"] = {
+        "algorithm": "sha256",
+        "digest": hashlib.sha256(_canonical_report_bytes(sealed)).hexdigest(),
+    }
+    return sealed

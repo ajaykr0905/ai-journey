@@ -1,5 +1,9 @@
 from ai_journey.resource_accounting import DecoderSpec, TrainingWorkload
-from ai_journey.resource_report import ResourcePlan, build_resource_report
+from ai_journey.resource_report import (
+    ResourcePlan,
+    build_resource_report,
+    seal_resource_report,
+)
 
 
 def make_plan() -> ResourcePlan:
@@ -35,3 +39,19 @@ def test_resource_report_reconciles_compute_memory_runtime_and_cost():
     assert first["runtime"]["seconds"] > 0
     assert first["cost"]["estimated_cost"] > 0
     assert len(first["limitations"]) == 3
+
+
+def test_resource_report_seal_is_stable_and_does_not_mutate_input():
+    report = build_resource_report(make_plan())
+    first = seal_resource_report(report)
+    second = seal_resource_report(report)
+    assert first == second
+    assert "integrity" not in report
+    assert first["integrity"]["algorithm"] == "sha256"
+    assert len(first["integrity"]["digest"]) == 64
+    changed = build_resource_report(make_plan())
+    changed["assumptions"]["reserve_fraction"] = 0.2
+    assert (
+        seal_resource_report(changed)["integrity"]["digest"]
+        != first["integrity"]["digest"]
+    )
