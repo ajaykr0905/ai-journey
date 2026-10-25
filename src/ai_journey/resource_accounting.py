@@ -447,3 +447,32 @@ def distributed_training_memory(
     groups["activations"] = activations
     groups["total"] = sum(groups.values())
     return groups
+
+
+def memory_capacity(
+    required_bytes: int,
+    *,
+    device_capacity_bytes: int,
+    reserve_fraction: float = 0.1,
+) -> dict[str, int | bool]:
+    """Compare an estimate with device capacity after an explicit reserve."""
+
+    required = _nonnegative_integer(required_bytes, "required_bytes")
+    capacity = _positive_integer(device_capacity_bytes, "device_capacity_bytes")
+    if (
+        isinstance(reserve_fraction, bool)
+        or not isinstance(reserve_fraction, (int, float))
+        or not math.isfinite(reserve_fraction)
+        or not 0 <= reserve_fraction < 1
+    ):
+        raise ResourceAccountingError("reserve_fraction must be finite and in [0, 1)")
+    reserved = math.ceil(capacity * reserve_fraction)
+    usable = capacity - reserved
+    return {
+        "capacity": capacity,
+        "reserved": reserved,
+        "usable": usable,
+        "required": required,
+        "headroom": usable - required,
+        "fits": required <= usable,
+    }

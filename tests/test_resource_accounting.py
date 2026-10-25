@@ -12,6 +12,7 @@ from ai_journey.resource_accounting import (
     distributed_training_memory,
     forward_linear_flops,
     kv_cache_memory,
+    memory_capacity,
     optimizer_update_flops,
     parameter_memory,
     training_state_memory,
@@ -241,3 +242,20 @@ def test_distributed_memory_distinguishes_replication_and_sharding_stages():
     assert distributed_training_memory(**common, strategy="zero3")["total"] == 32_552
     with pytest.raises(ResourceAccountingError, match="strategy must be"):
         distributed_training_memory(**common, strategy="unknown")
+
+
+def test_capacity_gate_reserves_memory_before_deciding_fit():
+    fits = memory_capacity(80, device_capacity_bytes=100, reserve_fraction=0.1)
+    assert fits == {
+        "capacity": 100,
+        "reserved": 10,
+        "usable": 90,
+        "required": 80,
+        "headroom": 10,
+        "fits": True,
+    }
+    assert not memory_capacity(91, device_capacity_bytes=100, reserve_fraction=0.1)[
+        "fits"
+    ]
+    with pytest.raises(ResourceAccountingError, match=r"\[0, 1\)"):
+        memory_capacity(80, device_capacity_bytes=100, reserve_fraction=1.0)
