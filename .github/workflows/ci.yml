@@ -85,6 +85,29 @@ jobs:
           ruff format --check src/ai_journey/gpt2*.py tests/test_gpt2*.py
           python -m pytest -q tests/test_gpt2*.py
           ai-journey-gpt2 --help
+      - name: Check opt-in decoder architecture and CPU comparison CLI
+        env:
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+        run: |
+          sources=(
+            src/ai_journey/decoder_variant*.py
+            src/ai_journey/modern_architecture.py
+            src/ai_journey/swiglu.py
+            src/ai_journey/rope.py
+            src/ai_journey/rotary_attention.py
+          )
+          tests=(
+            tests/test_decoder_variant*.py
+            tests/test_modern_architecture.py
+            tests/test_swiglu.py
+            tests/test_rope.py
+            tests/test_rotary_attention.py
+          )
+          ruff check "${sources[@]}" "${tests[@]}"
+          ruff format --check "${sources[@]}" "${tests[@]}"
+          python -m pytest -q "${tests[@]}"
+          ai-journey-decoder-compare --help
       - name: Replay verified GPT-2 training controls
         env:
           OMP_NUM_THREADS: "1"
