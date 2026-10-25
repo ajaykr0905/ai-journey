@@ -226,3 +226,12 @@ def training_step_flops(
     )
     backward = int(forward * backward_to_forward_ratio)
     return {"forward": forward, "backward": backward, "total": forward + backward}
+
+
+def optimizer_update_flops(
+    model: DecoderSpec, *, operations_per_parameter: int = 10
+) -> int:
+    """Estimate one dense optimizer update from an explicit operation budget."""
+
+    _positive_integer(operations_per_parameter, "operations_per_parameter")
+    return model.parameter_count * operations_per_parameter

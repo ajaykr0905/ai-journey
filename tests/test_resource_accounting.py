@@ -6,6 +6,7 @@ from ai_journey.resource_accounting import (
     TrainingWorkload,
     attention_matmul_flops,
     forward_linear_flops,
+    optimizer_update_flops,
     training_step_flops,
 )
 
@@ -102,3 +103,10 @@ def test_training_step_flops_include_accumulation_and_data_parallel_work():
         training_step_flops(
             small_spec(), workload, backward_to_forward_ratio=float("nan")
         )
+
+
+def test_optimizer_update_uses_an_explicit_per_parameter_budget():
+    assert optimizer_update_flops(small_spec()) == 78_880
+    assert optimizer_update_flops(small_spec(), operations_per_parameter=6) == 47_328
+    with pytest.raises(ResourceAccountingError, match="operations_per_parameter"):
+        optimizer_update_flops(small_spec(), operations_per_parameter=0)
