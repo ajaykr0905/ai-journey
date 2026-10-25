@@ -374,3 +374,19 @@ def attention_workspace_memory(
     }
     groups["total"] = sum(groups.values())
     return groups
+
+
+def kv_cache_memory(
+    model: DecoderSpec, *, batch_size: int, sequence_length: int, dtype: str
+) -> dict[str, int]:
+    """Return byte-exact autoregressive key/value cache storage."""
+
+    batch = _positive_integer(batch_size, "batch_size")
+    sequence = _positive_integer(sequence_length, "sequence_length")
+    width = bytes_per_element(dtype)
+    per_layer = batch * sequence * model.kv_size * 2 * width
+    return {
+        "per_layer": per_layer,
+        "per_sequence": per_layer * model.layer_count // batch,
+        "total": per_layer * model.layer_count,
+    }

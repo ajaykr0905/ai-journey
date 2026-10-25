@@ -10,6 +10,7 @@ from ai_journey.resource_accounting import (
     bytes_per_element,
     checkpointed_activation_memory,
     forward_linear_flops,
+    kv_cache_memory,
     optimizer_update_flops,
     parameter_memory,
     training_state_memory,
@@ -210,3 +211,14 @@ def test_attention_workspace_exposes_quadratic_score_storage():
         save_probabilities=False,
     )
     assert recomputed["total"] == 600
+
+
+def test_kv_cache_accounts_for_layers_batch_and_grouped_heads():
+    cache = kv_cache_memory(
+        small_spec(), batch_size=3, sequence_length=5, dtype="bfloat16"
+    )
+    assert cache == {"per_layer": 480, "per_sequence": 320, "total": 960}
+    full_heads = kv_cache_memory(
+        small_spec(kv_heads=4), batch_size=3, sequence_length=5, dtype="bfloat16"
+    )
+    assert full_heads["total"] == 2 * cache["total"]
