@@ -9,6 +9,9 @@ from hashlib import sha256
 from pathlib import Path
 
 import pytest
+import torch
+
+from ai_journey.gpt2_config import GPT2Config
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -62,8 +65,15 @@ def test_cli_writes_cpu_comparison_report_for_explicit_byte_files(
 
     assert completed.returncode == 0, completed.stderr
     report = json.loads(report_path.read_text())
-    assert report["schema_version"] == 1
+    assert report["schema_version"] == 2
     assert report["device"] == "cpu"
+    assert set(report["baseline_config"]) == set(GPT2Config.__dataclass_fields__)
+    assert report["baseline_config"]["vocab_size"] == 256
+    assert report["baseline_config"]["embedding_dim"] == 8
+    assert report["baseline_config"]["embedding_dropout"] == 0.0
+    assert report["learning_rate"] == 0.001
+    assert report["evaluation_windows"] == 4
+    assert report["torch_version"] == str(torch.__version__)
     assert report["train_sha256"] == sha256(train).hexdigest()
     assert report["heldout_sha256"] == sha256(heldout).hexdigest()
     assert report["steps"] == 1
@@ -131,6 +141,8 @@ def test_cli_replays_custom_bounded_cpu_settings_byte_for_byte(tmp_path: Path) -
         6,
     )
     assert report["heldout_windows"] == 2
+    assert report["learning_rate"] == 0.002
+    assert report["evaluation_windows"] == 2
 
 
 def test_cli_never_overwrites_an_existing_report(tmp_path: Path) -> None:

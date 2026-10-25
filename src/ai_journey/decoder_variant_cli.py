@@ -5,17 +5,20 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from collections.abc import Sequence
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Sequence
+
+import torch
 
 from .decoder_variant_config import DecoderVariantConfig
 from .decoder_variant_experiment import run_variant_comparison
 from .gpt2_config import GPT2Config
 
-
 MAX_INPUT_BYTES = 1024 * 1024
 MAX_WORK_UNITS = 200_000
+REPORT_SCHEMA_VERSION = 2
+REPORT_SCOPE = "matched-byte experiment; held-out NLL is not a generalization claim"
 
 
 def _bounded_integer(name: str, *, minimum: int, maximum: int):
@@ -109,6 +112,22 @@ def _read_bytes(path: Path) -> bytes:
     return payload
 
 
+def _standard_variants(
+    baseline: DecoderVariantConfig,
+) -> dict[str, DecoderVariantConfig]:
+    """Return the five fixed comparison arms in report order."""
+
+    return {
+        "baseline": baseline,
+        "rmsnorm": replace(baseline, norm_kind="rmsnorm"),
+        "swiglu": replace(baseline, mlp_kind="swiglu"),
+        "rope": replace(baseline, position_kind="rope"),
+        "combined": replace(
+            baseline, norm_kind="rmsnorm", mlp_kind="swiglu", position_kind="rope"
+        ),
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Compare five decoder arms and create a stable, non-overwriting report."""
 
@@ -138,15 +157,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 residual_dropout=0.0,
             )
         )
-        variants = {
-            "baseline": baseline,
-            "rmsnorm": replace(baseline, norm_kind="rmsnorm"),
-            "swiglu": replace(baseline, mlp_kind="swiglu"),
-            "rope": replace(baseline, position_kind="rope"),
-            "combined": replace(
-                baseline, norm_kind="rmsnorm", mlp_kind="swiglu", position_kind="rope"
-            ),
-        }
+        variants = _standard_variants(baseline)
         result = run_variant_comparison(
             train_bytes=_read_bytes(args.train),
             heldout_bytes=_read_bytes(args.heldout),
@@ -159,9 +170,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         report = asdict(result)
         report.update(
-            schema_version=1,
+            schema_version=REPORT_SCHEMA_VERSION,
             device="cpu",
-            scope="matched-byte experiment; held-out NLL is not a generalization claim",
+            scope=REPORT_SCOPE,
+            baseline_config=asdict(baseline.gpt2),
+            learning_rate=args.learning_rate,
+            evaluation_windows=args.evaluation_windows,
+            torch_version=str(torch.__version__),
         )
         with args.output.open("x", encoding="utf-8") as stream:
             stream.write(
