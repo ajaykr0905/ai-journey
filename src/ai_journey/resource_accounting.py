@@ -1,0 +1,99 @@
+"""Deterministic resource accounting for dense decoder-only transformers.
+
+The formulas in this module are planning estimates.  They do not claim measured
+GPU allocation, throughput, or kernel behavior.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+class ResourceAccountingError(ValueError):
+    """Raised when a resource-accounting contract is invalid."""
+
+
+def _positive_integer(value: int, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer")
+    if value <= 0:
+        raise ResourceAccountingError(f"{name} must be positive")
+    return value
+
+
+@dataclass(frozen=True)
+class DecoderSpec:
+    """Architecture inputs for a dense SwiGLU decoder-only transformer."""
+
+    vocab_size: int
+    layer_count: int
+    hidden_size: int
+    attention_heads: int
+    kv_heads: int
+    feed_forward_size: int
+    tie_embeddings: bool = False
+    use_bias: bool = False
+
+    def __post_init__(self) -> None:
+        for name in (
+            "vocab_size",
+            "layer_count",
+            "hidden_size",
+            "attention_heads",
+            "kv_heads",
+            "feed_forward_size",
+        ):
+            _positive_integer(getattr(self, name), name)
+        if self.hidden_size % self.attention_heads:
+            raise ResourceAccountingError(
+                "hidden_size must be divisible by attention_heads"
+            )
+        if self.attention_heads % self.kv_heads:
+            raise ResourceAccountingError(
+                "attention_heads must be divisible by kv_heads"
+            )
+        if not isinstance(self.tie_embeddings, bool):
+            raise TypeError("tie_embeddings must be a boolean")
+        if not isinstance(self.use_bias, bool):
+            raise TypeError("use_bias must be a boolean")
+
+    @property
+    def head_size(self) -> int:
+        """Return the width of one attention head."""
+
+        return self.hidden_size // self.attention_heads
+
+    @property
+    def kv_size(self) -> int:
+        """Return the combined key/value projection width."""
+
+        return self.kv_heads * self.head_size
+
+    def parameter_groups(self) -> dict[str, int]:
+        """Return an exact, non-overlapping parameter inventory."""
+
+        hidden = self.hidden_size
+        kv_size = self.kv_size
+        attention = hidden * hidden * 2 + hidden * kv_size * 2
+        feed_forward = hidden * self.feed_forward_size * 3
+        norms = hidden * 2
+        if self.use_bias:
+            attention += hidden * 2 + kv_size * 2
+            feed_forward += self.feed_forward_size * 2 + hidden
+        groups = {
+            "token_embedding": self.vocab_size * hidden,
+            "attention": self.layer_count * attention,
+            "feed_forward": self.layer_count * feed_forward,
+            "block_norms": self.layer_count * norms,
+            "final_norm": hidden,
+            "output_projection": (
+                0 if self.tie_embeddings else self.vocab_size * hidden
+            ),
+        }
+        return groups
+
+    @property
+    def parameter_count(self) -> int:
+        """Return the exact parameter count for the declared architecture."""
+
+        return sum(self.parameter_groups().values())
