@@ -12,6 +12,9 @@ from .modern_architecture import RMSNorm
 from .rotary_attention import RotarySelfAttention
 from .swiglu import SwiGLU
 
+LayerKeyValue = tuple[Tensor, Tensor]
+PastKeyValues = tuple[LayerKeyValue, ...]
+
 
 class DecoderVariantBlock(nn.Module):
     """A pre-normalized residual block selected by a validated variant contract."""
@@ -101,6 +104,98 @@ class DecoderVariantModel(nn.Module):
         for block in self.h:
             hidden = block(hidden)
         return self.lm_head(self.ln_f(hidden))
+
+    def forward_with_cache(
+        self,
+        token_ids: Tensor,
+        *,
+        past_key_values: PastKeyValues | None = None,
+    ) -> tuple[Tensor, PastKeyValues]:
+        """Return new-token logits and per-layer key/value caches for RoPE.
+
+        Each cache pair contains already-rotated keys and unrotated values in
+        ``(batch, heads, past_time, head_dim)`` order. Pass the returned tuple
+        unchanged on the next call; no past cache tensor is modified in place.
+        Learned-position variants retain their ordinary full-sequence forward
+        path and do not expose cache semantics here.
+        """
+
+        if self.config.position_kind != "rope":
+            raise GPT2ConfigError("cached forward requires a RoPE position variant")
+        if not isinstance(token_ids, Tensor):
+            raise TypeError("token_ids must be a torch.Tensor")
+        if token_ids.dtype != torch.long or token_ids.ndim != 2:
+            raise TypeError("token_ids must be a rank-two torch.long tensor")
+        batch, time = token_ids.shape
+        base = self.config.gpt2
+        if batch == 0 or time == 0:
+            raise GPT2ConfigError("token batch and time dimensions must be non-empty")
+        if token_ids.device != self.wte.weight.device:
+            raise GPT2ConfigError("token_ids must match the model device")
+
+        past_time = 0
+        if past_key_values is not None:
+            if not isinstance(past_key_values, tuple) or len(past_key_values) != len(
+                self.h
+            ):
+                raise GPT2ConfigError("past_key_values must have one pair per layer")
+            expected_shape = (batch, base.head_count, base.head_dim)
+            for layer_index, pair in enumerate(past_key_values):
+                if not isinstance(pair, tuple) or len(pair) != 2:
+                    raise GPT2ConfigError(
+                        f"past_key_values[{layer_index}] must be a key/value pair"
+                    )
+                key, value = pair
+                for name, cache in (("key", key), ("value", value)):
+                    if not isinstance(cache, Tensor):
+                        raise TypeError(
+                            f"past_key_values[{layer_index}] {name} must be a torch.Tensor"
+                        )
+                    if (
+                        cache.ndim != 4
+                        or (cache.shape[0], cache.shape[1], cache.shape[3])
+                        != expected_shape
+                    ):
+                        raise GPT2ConfigError(
+                            f"past_key_values[{layer_index}] {name} has invalid cache shape"
+                        )
+                    if (
+                        cache.dtype != self.wte.weight.dtype
+                        or cache.device != token_ids.device
+                    ):
+                        raise GPT2ConfigError(
+                            f"past_key_values[{layer_index}] {name} must match model dtype and device"
+                        )
+                if key.shape[2] != value.shape[2]:
+                    raise GPT2ConfigError(
+                        f"past_key_values[{layer_index}] key/value lengths differ"
+                    )
+                if layer_index == 0:
+                    past_time = key.shape[2]
+                elif key.shape[2] != past_time:
+                    raise GPT2ConfigError("past_key_values must share past length")
+        if past_time + time > base.context_length:
+            raise GPT2ConfigError("token sequence exceeds context_length")
+        if int(token_ids.min()) < 0 or int(token_ids.max()) >= base.vocab_size:
+            raise GPT2ConfigError("token_ids contain an out-of-range id")
+
+        hidden = self.drop(self.wte(token_ids))
+        next_key_values: list[LayerKeyValue] = []
+        for layer_index, block in enumerate(self.h):
+            if not isinstance(block.attn, RotarySelfAttention):
+                raise GPT2ConfigError("cached forward requires rotary attention")
+            past_key, past_value = (
+                (None, None)
+                if past_key_values is None
+                else past_key_values[layer_index]
+            )
+            attended, key, value = block.attn.forward_with_cache(
+                block.ln_1(hidden), past_key=past_key, past_value=past_value
+            )
+            after_attention = hidden + attended
+            hidden = after_attention + block.mlp(block.ln_2(after_attention))
+            next_key_values.append((key, value))
+        return self.lm_head(self.ln_f(hidden)), tuple(next_key_values)
 
     @property
     def parameter_count(self) -> int:
