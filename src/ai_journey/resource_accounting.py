@@ -476,3 +476,33 @@ def memory_capacity(
         "headroom": usable - required,
         "fits": required <= usable,
     }
+
+
+def compute_runtime(
+    total_flops: int,
+    *,
+    accelerator_peak_flops: int,
+    accelerator_count: int,
+    model_flops_utilization: float,
+) -> dict[str, float | int]:
+    """Translate analytical FLOPs into runtime under an explicit MFU assumption."""
+
+    work = _positive_integer(total_flops, "total_flops")
+    peak = _positive_integer(accelerator_peak_flops, "accelerator_peak_flops")
+    count = _positive_integer(accelerator_count, "accelerator_count")
+    if (
+        isinstance(model_flops_utilization, bool)
+        or not isinstance(model_flops_utilization, (int, float))
+        or not math.isfinite(model_flops_utilization)
+        or not 0 < model_flops_utilization <= 1
+    ):
+        raise ResourceAccountingError(
+            "model_flops_utilization must be finite and in (0, 1]"
+        )
+    effective_flops_per_second = peak * count * model_flops_utilization
+    return {
+        "total_flops": work,
+        "aggregate_peak_flops_per_second": peak * count,
+        "effective_flops_per_second": effective_flops_per_second,
+        "seconds": work / effective_flops_per_second,
+    }

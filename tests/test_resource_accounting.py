@@ -9,6 +9,7 @@ from ai_journey.resource_accounting import (
     attention_matmul_flops,
     bytes_per_element,
     checkpointed_activation_memory,
+    compute_runtime,
     distributed_training_memory,
     forward_linear_flops,
     kv_cache_memory,
@@ -259,3 +260,25 @@ def test_capacity_gate_reserves_memory_before_deciding_fit():
     ]
     with pytest.raises(ResourceAccountingError, match=r"\[0, 1\)"):
         memory_capacity(80, device_capacity_bytes=100, reserve_fraction=1.0)
+
+
+def test_compute_runtime_exposes_peak_and_mfu_assumptions():
+    runtime = compute_runtime(
+        1_000_000_000_000,
+        accelerator_peak_flops=1_000_000_000_000,
+        accelerator_count=2,
+        model_flops_utilization=0.5,
+    )
+    assert runtime == {
+        "total_flops": 1_000_000_000_000,
+        "aggregate_peak_flops_per_second": 2_000_000_000_000,
+        "effective_flops_per_second": 1_000_000_000_000.0,
+        "seconds": 1.0,
+    }
+    with pytest.raises(ResourceAccountingError, match=r"\(0, 1\]"):
+        compute_runtime(
+            1,
+            accelerator_peak_flops=1,
+            accelerator_count=1,
+            model_flops_utilization=0,
+        )
