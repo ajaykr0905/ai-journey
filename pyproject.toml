@@ -41,6 +41,8 @@ ai-journey-gpt2 = "ai_journey.gpt2_cli:main"
 ai-journey-gpt2-train = "ai_journey.gpt2_training_cli:main"
 ai-journey-ddp = "ai_journey.ddp_cli:main"
 ai-journey-hellaswag = "ai_journey.hellaswag_cli:main"
+ai-journey-resource-plan = "ai_journey.resource_cli:main"
+ai-journey-resource-verify = "ai_journey.resource_cli:verify_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

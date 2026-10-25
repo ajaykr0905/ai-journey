@@ -1,0 +1,32 @@
+{
+  "activation_dtype": "bfloat16",
+  "accelerator_peak_flops": 312000000000000,
+  "checkpoint_segments": 32,
+  "device_capacity_bytes": 85899345920,
+  "gradient_dtype": "bfloat16",
+  "hourly_cost_per_accelerator": 3.0,
+  "master_weights": true,
+  "model": {
+    "attention_heads": 32,
+    "feed_forward_size": 11008,
+    "hidden_size": 4096,
+    "kv_heads": 32,
+    "layer_count": 32,
+    "tie_embeddings": false,
+    "use_bias": false,
+    "vocab_size": 32000
+  },
+  "model_flops_utilization": 0.35,
+  "optimizer_state_dtype": "float32",
+  "parameter_dtype": "bfloat16",
+  "reserve_fraction": 0.1,
+  "save_attention_probabilities": false,
+  "sharding_strategy": "zero3",
+  "workload": {
+    "data_parallel_size": 8,
+    "gradient_accumulation_steps": 1,
+    "micro_batch_size": 1,
+    "optimizer_steps": 1000,
+    "sequence_length": 2048
+  }
+}

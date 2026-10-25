@@ -140,6 +140,15 @@ jobs:
         run: |
           ai-journey-preference-compare --config config/preference-comparison.json --output /tmp/ai-journey-artifacts/preference-comparison.json
           ai-journey-preference-verify --report /tmp/ai-journey-artifacts/preference-comparison.json
+      - name: Check analytical resource accounting contracts
+        run: |
+          ruff check src/ai_journey/resource*.py tests/test_resource*.py
+          ruff format --check src/ai_journey/resource*.py tests/test_resource*.py
+          python -m pytest -q tests/test_resource*.py
+      - name: Recompute and verify the pinned 7B resource plan
+        run: |
+          ai-journey-resource-plan --config config/day-51-resource-plan.json --output /tmp/ai-journey-artifacts/day-51-resource-plan.json
+          ai-journey-resource-verify --report /tmp/ai-journey-artifacts/day-51-resource-plan.json
       - name: Check BPE source tests and pipeline formatting
         run: |
           ruff check src/ai_journey/bpe*.py src/ai_journey/token*.py src/ai_journey/parallel*.py src/ai_journey/export_verification.py src/ai_journey/day40_cli.py tests/test_bpe*.py tests/test_tokenizer*.py tests/test_parallel*.py tests/test_export_verification.py tests/test_run_day_40.py scripts/verify_bpe_lab.py
