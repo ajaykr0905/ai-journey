@@ -7,6 +7,7 @@ GPU allocation, throughput, or kernel behavior.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 
 class ResourceAccountingError(ValueError):
@@ -177,3 +178,51 @@ def attention_matmul_flops(
         "query_key_scores": one_matmul,
         "attention_value_mix": one_matmul,
     }
+
+
+def forward_flops(
+    model: DecoderSpec, *, batch_size: int, sequence_length: int
+) -> dict[str, int]:
+    """Return the complete modeled forward-pass FLOP decomposition."""
+
+    return {
+        **forward_linear_flops(
+            model, batch_size=batch_size, sequence_length=sequence_length
+        ),
+        **attention_matmul_flops(
+            model, batch_size=batch_size, sequence_length=sequence_length
+        ),
+    }
+
+
+def training_step_flops(
+    model: DecoderSpec,
+    workload: TrainingWorkload,
+    *,
+    backward_to_forward_ratio: float = 2.0,
+) -> dict[str, int]:
+    """Estimate aggregate forward/backward FLOPs for one optimizer step."""
+
+    if (
+        isinstance(backward_to_forward_ratio, bool)
+        or not isinstance(backward_to_forward_ratio, (int, float))
+        or not math.isfinite(backward_to_forward_ratio)
+        or backward_to_forward_ratio <= 0
+    ):
+        raise ResourceAccountingError(
+            "backward_to_forward_ratio must be positive and finite"
+        )
+    per_micro_batch = sum(
+        forward_flops(
+            model,
+            batch_size=workload.micro_batch_size,
+            sequence_length=workload.sequence_length,
+        ).values()
+    )
+    forward = (
+        per_micro_batch
+        * workload.gradient_accumulation_steps
+        * workload.data_parallel_size
+    )
+    backward = int(forward * backward_to_forward_ratio)
+    return {"forward": forward, "backward": backward, "total": forward + backward}

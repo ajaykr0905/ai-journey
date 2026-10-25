@@ -6,6 +6,7 @@ from ai_journey.resource_accounting import (
     TrainingWorkload,
     attention_matmul_flops,
     forward_linear_flops,
+    training_step_flops,
 )
 
 
@@ -86,3 +87,18 @@ def test_attention_flops_scale_quadratically_with_sequence_length():
         "attention_value_mix": 4_800,
     }
     assert sum(long.values()) == 4 * sum(short.values())
+
+
+def test_training_step_flops_include_accumulation_and_data_parallel_work():
+    workload = TrainingWorkload(5, 3, 2, 4, 10)
+    estimate = training_step_flops(small_spec(), workload)
+    per_micro_batch = 186_240 + 9_600
+    assert estimate == {
+        "forward": per_micro_batch * 8,
+        "backward": per_micro_batch * 16,
+        "total": per_micro_batch * 24,
+    }
+    with pytest.raises(ResourceAccountingError, match="positive and finite"):
+        training_step_flops(
+            small_spec(), workload, backward_to_forward_ratio=float("nan")
+        )
