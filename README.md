@@ -410,6 +410,8 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 45 | 2026-10-19 | Exact GPT-2 architecture, public checkpoint import, full-logit parity, and tamper-evident evidence |
 | 48 | 2026-10-22 | Real DDP processes, global-batch equivalence, exact recovery, document-held-out evaluation, and bounded serving |
 | 49 | 2026-10-23 | Pinned HellaSwag ingestion, completion-only scoring, calibration, uncertainty, sharding, and evidence replay |
+| 50 | 2026-10-24 | Source-backed BPE merge replay, bounded audits, Unicode controls, and document-safe streaming |
+| 51 | 2026-10-25 | Exact transformer parameter, FLOP, memory, sharding, runtime, and cost planning |
 
 ## License
 
