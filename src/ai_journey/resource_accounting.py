@@ -97,3 +97,40 @@ class DecoderSpec:
         """Return the exact parameter count for the declared architecture."""
 
         return sum(self.parameter_groups().values())
+
+
+@dataclass(frozen=True)
+class TrainingWorkload:
+    """The token geometry of one data-parallel training run."""
+
+    sequence_length: int
+    micro_batch_size: int
+    gradient_accumulation_steps: int
+    data_parallel_size: int
+    optimizer_steps: int
+
+    def __post_init__(self) -> None:
+        for name in (
+            "sequence_length",
+            "micro_batch_size",
+            "gradient_accumulation_steps",
+            "data_parallel_size",
+            "optimizer_steps",
+        ):
+            _positive_integer(getattr(self, name), name)
+
+    @property
+    def tokens_per_micro_batch(self) -> int:
+        return self.sequence_length * self.micro_batch_size
+
+    @property
+    def tokens_per_optimizer_step(self) -> int:
+        return (
+            self.tokens_per_micro_batch
+            * self.gradient_accumulation_steps
+            * self.data_parallel_size
+        )
+
+    @property
+    def total_training_tokens(self) -> int:
+        return self.tokens_per_optimizer_step * self.optimizer_steps

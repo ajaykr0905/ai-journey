@@ -1,6 +1,10 @@
 import pytest
 
-from ai_journey.resource_accounting import DecoderSpec, ResourceAccountingError
+from ai_journey.resource_accounting import (
+    DecoderSpec,
+    ResourceAccountingError,
+    TrainingWorkload,
+)
 
 
 def small_spec(**changes) -> DecoderSpec:
@@ -45,3 +49,18 @@ def test_tied_output_and_bias_parameters_are_explicit():
     biased = small_spec(use_bias=True)
     assert tied.parameter_count == small_spec().parameter_count - 1_600
     assert biased.parameter_count == small_spec().parameter_count + 256
+
+
+def test_training_workload_accounts_for_every_parallelism_axis():
+    workload = TrainingWorkload(
+        sequence_length=2_048,
+        micro_batch_size=2,
+        gradient_accumulation_steps=4,
+        data_parallel_size=8,
+        optimizer_steps=10,
+    )
+    assert workload.tokens_per_micro_batch == 4_096
+    assert workload.tokens_per_optimizer_step == 131_072
+    assert workload.total_training_tokens == 1_310_720
+    with pytest.raises(ResourceAccountingError, match="optimizer_steps"):
+        TrainingWorkload(2_048, 2, 4, 8, 0)
