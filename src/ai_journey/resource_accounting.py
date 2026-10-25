@@ -309,3 +309,45 @@ def activation_memory(
     groups = {name: count * width for name, count in elements.items()}
     groups["total"] = sum(groups.values())
     return groups
+
+
+def checkpointed_activation_memory(
+    model: DecoderSpec,
+    *,
+    batch_size: int,
+    sequence_length: int,
+    dtype: str,
+    checkpoint_segments: int,
+) -> dict[str, int]:
+    """Estimate peak saved activations with uniform layer checkpointing.
+
+    The estimate retains every segment boundary plus one segment's recomputed
+    working set.  It intentionally excludes allocator and kernel workspaces.
+    """
+
+    _positive_integer(checkpoint_segments, "checkpoint_segments")
+    if checkpoint_segments > model.layer_count:
+        raise ResourceAccountingError("checkpoint_segments cannot exceed layer_count")
+    if model.layer_count % checkpoint_segments:
+        raise ResourceAccountingError(
+            "layer_count must be divisible by checkpoint_segments"
+        )
+    width = bytes_per_element(dtype)
+    tokens = _positive_integer(batch_size, "batch_size") * _positive_integer(
+        sequence_length, "sequence_length"
+    )
+    full = activation_memory(
+        model, batch_size=batch_size, sequence_length=sequence_length, dtype=dtype
+    )["total"]
+    layers_per_segment = model.layer_count // checkpoint_segments
+    checkpoint_boundaries = (
+        tokens * (checkpoint_segments + 1) * model.hidden_size * width
+    )
+    recompute_window = full * layers_per_segment // model.layer_count
+    peak = checkpoint_boundaries + recompute_window
+    return {
+        "checkpoint_boundaries": checkpoint_boundaries,
+        "recompute_window": recompute_window,
+        "peak": peak,
+        "saved_vs_uncheckpointed": full - peak,
+    }

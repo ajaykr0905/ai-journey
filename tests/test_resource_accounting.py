@@ -7,6 +7,7 @@ from ai_journey.resource_accounting import (
     activation_memory,
     attention_matmul_flops,
     bytes_per_element,
+    checkpointed_activation_memory,
     forward_linear_flops,
     optimizer_update_flops,
     parameter_memory,
@@ -165,3 +166,27 @@ def test_activation_memory_exposes_saved_tensor_families():
         "feed_forward_intermediates": 3_840,
         "total": 8_640,
     }
+
+
+def test_checkpointing_retains_boundaries_and_one_recompute_window():
+    memory = checkpointed_activation_memory(
+        small_spec(),
+        batch_size=3,
+        sequence_length=5,
+        dtype="bfloat16",
+        checkpoint_segments=2,
+    )
+    assert memory == {
+        "checkpoint_boundaries": 1_440,
+        "recompute_window": 4_320,
+        "peak": 5_760,
+        "saved_vs_uncheckpointed": 2_880,
+    }
+    with pytest.raises(ResourceAccountingError, match="cannot exceed"):
+        checkpointed_activation_memory(
+            small_spec(),
+            batch_size=3,
+            sequence_length=5,
+            dtype="bfloat16",
+            checkpoint_segments=3,
+        )
