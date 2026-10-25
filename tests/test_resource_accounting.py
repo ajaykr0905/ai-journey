@@ -3,6 +3,9 @@ import pytest
 from ai_journey.resource_accounting import (
     DecoderSpec,
     ResourceAccountingError,
+    SEVEN_B_BATCH_SIZE,
+    SEVEN_B_DECODER,
+    SEVEN_B_SEQUENCE_LENGTH,
     TrainingWorkload,
     activation_memory,
     attention_workspace_memory,
@@ -64,6 +67,12 @@ def test_tied_output_and_bias_parameters_are_explicit():
     biased = small_spec(use_bias=True)
     assert tied.parameter_count == small_spec().parameter_count - 1_600
     assert biased.parameter_count == small_spec().parameter_count + 256
+
+
+def test_seven_b_reference_scenario_is_explicit_and_stable():
+    assert SEVEN_B_DECODER.parameter_count == 6_738_415_616
+    assert SEVEN_B_BATCH_SIZE == 8
+    assert SEVEN_B_SEQUENCE_LENGTH == 2_048
 
 
 def test_training_workload_accounts_for_every_parallelism_axis():

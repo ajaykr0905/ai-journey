@@ -117,6 +117,20 @@ class DecoderSpec:
         return sum(self.parameter_groups().values())
 
 
+SEVEN_B_DECODER = DecoderSpec(
+    vocab_size=32_000,
+    layer_count=32,
+    hidden_size=4_096,
+    attention_heads=32,
+    kv_heads=32,
+    feed_forward_size=11_008,
+    tie_embeddings=False,
+    use_bias=False,
+)
+SEVEN_B_BATCH_SIZE = 8
+SEVEN_B_SEQUENCE_LENGTH = 2_048
+
+
 @dataclass(frozen=True)
 class TrainingWorkload:
     """The token geometry of one data-parallel training run."""
