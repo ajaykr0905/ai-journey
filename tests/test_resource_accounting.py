@@ -9,6 +9,7 @@ from ai_journey.resource_accounting import (
     forward_linear_flops,
     optimizer_update_flops,
     parameter_memory,
+    training_state_memory,
     training_step_flops,
 )
 
@@ -126,3 +127,28 @@ def test_parameter_memory_preserves_group_accounting_across_dtypes():
     assert bytes_per_element("int8") == 1
     with pytest.raises(ResourceAccountingError, match="unsupported dtype"):
         bytes_per_element("float24")
+
+
+def test_training_state_memory_accounts_for_adam_and_master_weights():
+    mixed = training_state_memory(
+        small_spec(),
+        parameter_dtype="bfloat16",
+        gradient_dtype="bfloat16",
+        optimizer_state_dtype="float32",
+        master_weights=True,
+    )
+    assert mixed == {
+        "parameters": 7_888 * 2,
+        "gradients": 7_888 * 2,
+        "optimizer_moments": 7_888 * 8,
+        "master_parameters": 7_888 * 4,
+        "total": 7_888 * 16,
+    }
+    without_master = training_state_memory(
+        small_spec(),
+        parameter_dtype="float32",
+        gradient_dtype="float32",
+        optimizer_state_dtype="float32",
+        master_weights=False,
+    )
+    assert without_master["total"] == 7_888 * 16

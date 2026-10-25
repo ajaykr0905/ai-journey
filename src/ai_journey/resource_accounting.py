@@ -264,3 +264,26 @@ def parameter_memory(model: DecoderSpec, *, dtype: str) -> dict[str, int]:
     groups = {name: count * width for name, count in model.parameter_groups().items()}
     groups["total"] = sum(groups.values())
     return groups
+
+
+def training_state_memory(
+    model: DecoderSpec,
+    *,
+    parameter_dtype: str,
+    gradient_dtype: str,
+    optimizer_state_dtype: str,
+    master_weights: bool,
+) -> dict[str, int]:
+    """Account for weights, gradients, Adam moments, and optional FP32 masters."""
+
+    if not isinstance(master_weights, bool):
+        raise TypeError("master_weights must be a boolean")
+    count = model.parameter_count
+    groups = {
+        "parameters": count * bytes_per_element(parameter_dtype),
+        "gradients": count * bytes_per_element(gradient_dtype),
+        "optimizer_moments": count * bytes_per_element(optimizer_state_dtype) * 2,
+        "master_parameters": count * 4 if master_weights else 0,
+    }
+    groups["total"] = sum(groups.values())
+    return groups
