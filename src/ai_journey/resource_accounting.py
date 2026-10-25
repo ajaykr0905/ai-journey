@@ -31,6 +31,14 @@ def _positive_integer(value: int, name: str) -> int:
     return value
 
 
+def _nonnegative_integer(value: int, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer")
+    if value < 0:
+        raise ResourceAccountingError(f"{name} must be nonnegative")
+    return value
+
+
 @dataclass(frozen=True)
 class DecoderSpec:
     """Architecture inputs for a dense SwiGLU decoder-only transformer."""
@@ -390,3 +398,52 @@ def kv_cache_memory(
         "per_sequence": per_layer * model.layer_count // batch,
         "total": per_layer * model.layer_count,
     }
+
+
+def distributed_training_memory(
+    model: DecoderSpec,
+    *,
+    parameter_dtype: str,
+    gradient_dtype: str,
+    optimizer_state_dtype: str,
+    master_weights: bool,
+    activation_bytes: int,
+    data_parallel_size: int,
+    strategy: str,
+) -> dict[str, int]:
+    """Estimate per-device training memory under common sharding stages."""
+
+    stages = {
+        "ddp": frozenset(),
+        "zero1": frozenset({"optimizer_moments", "master_parameters"}),
+        "zero2": frozenset({"gradients", "optimizer_moments", "master_parameters"}),
+        "zero3": frozenset(
+            {"parameters", "gradients", "optimizer_moments", "master_parameters"}
+        ),
+    }
+    if strategy not in stages:
+        raise ResourceAccountingError(
+            f"strategy must be one of {', '.join(sorted(stages))}"
+        )
+    world = _positive_integer(data_parallel_size, "data_parallel_size")
+    activations = _nonnegative_integer(activation_bytes, "activation_bytes")
+    state = training_state_memory(
+        model,
+        parameter_dtype=parameter_dtype,
+        gradient_dtype=gradient_dtype,
+        optimizer_state_dtype=optimizer_state_dtype,
+        master_weights=master_weights,
+    )
+    groups = {}
+    for name in (
+        "parameters",
+        "gradients",
+        "optimizer_moments",
+        "master_parameters",
+    ):
+        groups[name] = (
+            math.ceil(state[name] / world) if name in stages[strategy] else state[name]
+        )
+    groups["activations"] = activations
+    groups["total"] = sum(groups.values())
+    return groups

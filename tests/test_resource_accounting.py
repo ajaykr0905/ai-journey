@@ -9,6 +9,7 @@ from ai_journey.resource_accounting import (
     attention_matmul_flops,
     bytes_per_element,
     checkpointed_activation_memory,
+    distributed_training_memory,
     forward_linear_flops,
     kv_cache_memory,
     optimizer_update_flops,
@@ -222,3 +223,21 @@ def test_kv_cache_accounts_for_layers_batch_and_grouped_heads():
         small_spec(kv_heads=4), batch_size=3, sequence_length=5, dtype="bfloat16"
     )
     assert full_heads["total"] == 2 * cache["total"]
+
+
+def test_distributed_memory_distinguishes_replication_and_sharding_stages():
+    common = {
+        "model": small_spec(),
+        "parameter_dtype": "bfloat16",
+        "gradient_dtype": "bfloat16",
+        "optimizer_state_dtype": "float32",
+        "master_weights": True,
+        "activation_bytes": 1_000,
+        "data_parallel_size": 4,
+    }
+    assert distributed_training_memory(**common, strategy="ddp")["total"] == 127_208
+    assert distributed_training_memory(**common, strategy="zero1")["total"] == 56_216
+    assert distributed_training_memory(**common, strategy="zero2")["total"] == 44_384
+    assert distributed_training_memory(**common, strategy="zero3")["total"] == 32_552
+    with pytest.raises(ResourceAccountingError, match="strategy must be"):
+        distributed_training_memory(**common, strategy="unknown")
