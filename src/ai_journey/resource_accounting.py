@@ -134,3 +134,26 @@ class TrainingWorkload:
     @property
     def total_training_tokens(self) -> int:
         return self.tokens_per_optimizer_step * self.optimizer_steps
+
+
+def forward_linear_flops(
+    model: DecoderSpec, *, batch_size: int, sequence_length: int
+) -> dict[str, int]:
+    """Count multiply-adds as two FLOPs for all dense forward projections."""
+
+    _positive_integer(batch_size, "batch_size")
+    _positive_integer(sequence_length, "sequence_length")
+    tokens = batch_size * sequence_length
+    hidden = model.hidden_size
+    kv_size = model.kv_size
+    per_layer_attention_weights = hidden * hidden * 2 + hidden * kv_size * 2
+    per_layer_feed_forward_weights = hidden * model.feed_forward_size * 3
+    return {
+        "attention_projections": (
+            2 * tokens * model.layer_count * per_layer_attention_weights
+        ),
+        "feed_forward_projections": (
+            2 * tokens * model.layer_count * per_layer_feed_forward_weights
+        ),
+        "output_projection": 2 * tokens * hidden * model.vocab_size,
+    }

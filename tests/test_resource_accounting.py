@@ -4,6 +4,7 @@ from ai_journey.resource_accounting import (
     DecoderSpec,
     ResourceAccountingError,
     TrainingWorkload,
+    forward_linear_flops,
 )
 
 
@@ -64,3 +65,13 @@ def test_training_workload_accounts_for_every_parallelism_axis():
     assert workload.total_training_tokens == 1_310_720
     with pytest.raises(ResourceAccountingError, match="optimizer_steps"):
         TrainingWorkload(2_048, 2, 4, 8, 0)
+
+
+def test_forward_linear_flops_decompose_projection_work():
+    flops = forward_linear_flops(small_spec(), batch_size=3, sequence_length=5)
+    assert flops == {
+        "attention_projections": 46_080,
+        "feed_forward_projections": 92_160,
+        "output_projection": 48_000,
+    }
+    assert sum(flops.values()) == 186_240
