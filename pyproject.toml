@@ -43,6 +43,7 @@ ai-journey-ddp = "ai_journey.ddp_cli:main"
 ai-journey-hellaswag = "ai_journey.hellaswag_cli:main"
 ai-journey-resource-plan = "ai_journey.resource_cli:main"
 ai-journey-resource-verify = "ai_journey.resource_cli:verify_main"
+ai-journey-decoder-compare = "ai_journey.decoder_variant_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
