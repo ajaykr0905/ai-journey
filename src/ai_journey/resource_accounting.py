@@ -14,6 +14,15 @@ class ResourceAccountingError(ValueError):
     """Raised when a resource-accounting contract is invalid."""
 
 
+DTYPE_BYTES = {
+    "float64": 8,
+    "float32": 4,
+    "bfloat16": 2,
+    "float16": 2,
+    "int8": 1,
+}
+
+
 def _positive_integer(value: int, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{name} must be an integer")
@@ -235,3 +244,23 @@ def optimizer_update_flops(
 
     _positive_integer(operations_per_parameter, "operations_per_parameter")
     return model.parameter_count * operations_per_parameter
+
+
+def bytes_per_element(dtype: str) -> int:
+    """Resolve the storage width of one supported tensor dtype."""
+
+    if not isinstance(dtype, str):
+        raise TypeError("dtype must be a string")
+    try:
+        return DTYPE_BYTES[dtype]
+    except KeyError as error:
+        raise ResourceAccountingError(f"unsupported dtype: {dtype!r}") from error
+
+
+def parameter_memory(model: DecoderSpec, *, dtype: str) -> dict[str, int]:
+    """Return byte-exact storage for each declared parameter group."""
+
+    width = bytes_per_element(dtype)
+    groups = {name: count * width for name, count in model.parameter_groups().items()}
+    groups["total"] = sum(groups.values())
+    return groups

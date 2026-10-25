@@ -5,8 +5,10 @@ from ai_journey.resource_accounting import (
     ResourceAccountingError,
     TrainingWorkload,
     attention_matmul_flops,
+    bytes_per_element,
     forward_linear_flops,
     optimizer_update_flops,
+    parameter_memory,
     training_step_flops,
 )
 
@@ -110,3 +112,17 @@ def test_optimizer_update_uses_an_explicit_per_parameter_budget():
     assert optimizer_update_flops(small_spec(), operations_per_parameter=6) == 47_328
     with pytest.raises(ResourceAccountingError, match="operations_per_parameter"):
         optimizer_update_flops(small_spec(), operations_per_parameter=0)
+
+
+def test_parameter_memory_preserves_group_accounting_across_dtypes():
+    float32 = parameter_memory(small_spec(), dtype="float32")
+    bfloat16 = parameter_memory(small_spec(), dtype="bfloat16")
+    assert float32["total"] == 7_888 * 4
+    assert bfloat16["total"] == float32["total"] // 2
+    assert (
+        sum(value for key, value in float32.items() if key != "total")
+        == float32["total"]
+    )
+    assert bytes_per_element("int8") == 1
+    with pytest.raises(ResourceAccountingError, match="unsupported dtype"):
+        bytes_per_element("float24")
