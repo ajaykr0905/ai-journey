@@ -506,3 +506,38 @@ def compute_runtime(
         "effective_flops_per_second": effective_flops_per_second,
         "seconds": work / effective_flops_per_second,
     }
+
+
+def compute_cost(
+    runtime_seconds: float,
+    *,
+    accelerator_count: int,
+    hourly_cost_per_accelerator: float,
+) -> dict[str, float | int]:
+    """Price an analytical runtime without implying a purchased run."""
+
+    if (
+        isinstance(runtime_seconds, bool)
+        or not isinstance(runtime_seconds, (int, float))
+        or not math.isfinite(runtime_seconds)
+        or runtime_seconds <= 0
+    ):
+        raise ResourceAccountingError("runtime_seconds must be positive and finite")
+    count = _positive_integer(accelerator_count, "accelerator_count")
+    if (
+        isinstance(hourly_cost_per_accelerator, bool)
+        or not isinstance(hourly_cost_per_accelerator, (int, float))
+        or not math.isfinite(hourly_cost_per_accelerator)
+        or hourly_cost_per_accelerator < 0
+    ):
+        raise ResourceAccountingError(
+            "hourly_cost_per_accelerator must be nonnegative and finite"
+        )
+    accelerator_hours = runtime_seconds * count / 3_600
+    return {
+        "accelerator_count": count,
+        "runtime_seconds": runtime_seconds,
+        "accelerator_hours": accelerator_hours,
+        "hourly_cost_per_accelerator": hourly_cost_per_accelerator,
+        "estimated_cost": accelerator_hours * hourly_cost_per_accelerator,
+    }

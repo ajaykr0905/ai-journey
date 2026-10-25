@@ -10,6 +10,7 @@ from ai_journey.resource_accounting import (
     bytes_per_element,
     checkpointed_activation_memory,
     compute_runtime,
+    compute_cost,
     distributed_training_memory,
     forward_linear_flops,
     kv_cache_memory,
@@ -282,3 +283,16 @@ def test_compute_runtime_exposes_peak_and_mfu_assumptions():
             accelerator_count=1,
             model_flops_utilization=0,
         )
+
+
+def test_compute_cost_prices_accelerator_hours_without_rounding():
+    cost = compute_cost(3_600, accelerator_count=2, hourly_cost_per_accelerator=3.0)
+    assert cost == {
+        "accelerator_count": 2,
+        "runtime_seconds": 3_600,
+        "accelerator_hours": 2.0,
+        "hourly_cost_per_accelerator": 3.0,
+        "estimated_cost": 6.0,
+    }
+    with pytest.raises(ResourceAccountingError, match="nonnegative"):
+        compute_cost(1, accelerator_count=1, hourly_cost_per_accelerator=-0.01)
