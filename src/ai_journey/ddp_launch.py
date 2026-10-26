@@ -21,8 +21,10 @@ def launch_training(
     steps: int = 2,
     resume: bool = False,
     timeout_seconds: int = 60,
+    checkpoint_interval: int | None = None,
     failure_rank: int | None = None,
     failure_mode: str = "exit",
+    failure_after_step: int | None = None,
 ) -> list[dict]:
     import json
 
@@ -31,7 +33,19 @@ def launch_training(
     integer(timeout_seconds, "timeout_seconds", 1)
     if world_size > 4:
         raise ValueError("CPU lab permits at most four workers")
-    preflight(source, spec, world_size=world_size, steps=steps)
+    training_spec = preflight(source, spec, world_size=world_size, steps=steps)
+    if checkpoint_interval is not None:
+        integer(checkpoint_interval, "checkpoint_interval", 1)
+    if failure_after_step is not None:
+        integer(failure_after_step, "failure_after_step", 1)
+        if (
+            failure_rank is None
+            or failure_mode != "exit"
+            or failure_after_step > training_spec.training.optimizer_steps
+        ):
+            raise ValueError(
+                "late failure requires a rank, exit mode and scheduled step"
+            )
     if not isinstance(resume, bool):
         raise TypeError("resume must be boolean")
     if checkpoint.resolve() in (source.resolve(), spec.resolve()):
@@ -79,8 +93,14 @@ def launch_training(
                 ]
                 if resume:
                     command.append("--resume")
+                if checkpoint_interval is not None:
+                    command.extend(["--checkpoint-interval", str(checkpoint_interval)])
                 if rank == failure_rank:
                     command.extend(["--inject-failure", failure_mode])
+                    if failure_after_step is not None:
+                        command.extend(
+                            ["--failure-after-step", str(failure_after_step)]
+                        )
                 environment = dict(os.environ, OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
                 processes.append(
                     subprocess.Popen(
