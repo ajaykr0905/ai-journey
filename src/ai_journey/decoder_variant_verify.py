@@ -222,10 +222,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Recompute every measurement and compare it with an unchanged report."""
 
     values = list(sys.argv[1:] if argv is None else argv)
-    if values and values[0] == "documents":
+    if values and values[0] in {"documents", "public"}:
         from .decoder_variant_document_cli import main as documents_main
 
-        return documents_main(["verify", *values[1:]])
+        command = "verify-public" if values[0] == "public" else "verify"
+        return documents_main([command, *values[1:]])
     parser = _parser()
     args = parser.parse_args(values)
     try:

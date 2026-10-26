@@ -133,12 +133,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Compare five decoder arms and create a stable, non-overwriting report."""
 
     values = list(sys.argv[1:] if argv is None else argv)
-    if values and values[0] in {"plan", "documents"}:
+    if values and values[0] in {"plan", "documents", "public"}:
         from .decoder_variant_document_cli import main as documents_main
 
-        return documents_main(
-            ["run" if values[0] == "documents" else "plan", *values[1:]]
-        )
+        command = {"documents": "run", "public": "run-public", "plan": "plan"}[
+            values[0]
+        ]
+        return documents_main([command, *values[1:]])
     parser = _parser()
     args = parser.parse_args(values)
     work_units = (

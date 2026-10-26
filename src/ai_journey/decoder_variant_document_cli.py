@@ -14,6 +14,11 @@ from .decoder_variant_comparison import (
 )
 from .decoder_variant_config import DecoderVariantConfig
 from .decoder_variant_plan import DecoderExperimentPlan, decoder_plan_from_mapping
+from .decoder_variant_public import (
+    PUBLIC_SOURCES,
+    run_public_decoder_comparison,
+    verify_public_decoder_report,
+)
 from .decoder_variant_report_io import write_new_report
 from .decoder_variant_verify import _read_report
 from .gpt2_config import GPT2Config
@@ -54,6 +59,21 @@ def _parser():
     for command in (run, verify):
         command.add_argument("--train", type=Path, required=True)
         command.add_argument("--heldout", type=Path, required=True)
+    public_run = commands.add_parser(
+        "run-public", help="compare a verified pinned public snapshot offline"
+    )
+    public_run.add_argument("--plan", type=Path)
+    public_run.add_argument("--output", type=Path, required=True)
+    public_run.add_argument("--train-documents", type=int, default=16)
+    public_run.add_argument("--heldout-documents", type=int, default=4)
+    public_run.add_argument("--split-seed", type=int, default=52)
+    public_verify = commands.add_parser(
+        "verify-public", help="replay a pinned public-corpus report"
+    )
+    public_verify.add_argument("--report", type=Path, required=True)
+    for command in (public_run, public_verify):
+        command.add_argument("--snapshot", type=Path, required=True)
+        command.add_argument("--source", choices=sorted(PUBLIC_SOURCES), required=True)
     return parser
 
 
@@ -99,7 +119,7 @@ def main(argv=None):
         if args.command == "plan":
             write_new_report(args.output, _default_plan().to_mapping())
             print(f"plan={args.output} device=cpu")
-        elif args.command == "run":
+        elif args.command in {"run", "run-public"}:
             if args.output.exists() or args.output.is_symlink():
                 raise ValueError("output already exists; choose a new path")
             plan = (
@@ -107,20 +127,42 @@ def main(argv=None):
                 if args.plan
                 else _default_plan()
             )
-            report = run_decoder_document_comparison(
-                plan, _read_bytes(args.train), _read_bytes(args.heldout)
-            )
+            if args.command == "run-public":
+                report = run_public_decoder_comparison(
+                    plan,
+                    args.snapshot,
+                    PUBLIC_SOURCES[args.source],
+                    train_documents=args.train_documents,
+                    heldout_documents=args.heldout_documents,
+                    split_seed=args.split_seed,
+                )
+            else:
+                report = run_decoder_document_comparison(
+                    plan, _read_bytes(args.train), _read_bytes(args.heldout)
+                )
             write_new_report(args.output, report)
             print(
                 f"report={args.output} device=cpu seeds={len(plan.seeds)} variants={len(plan.variants)}"
             )
         else:
             report = _read_report(args.report, max_bytes=2 * 1024 * 1024)
-            verify_decoder_document_report(
-                report, _read_bytes(args.train), _read_bytes(args.heldout)
-            )
+            if args.command == "verify-public":
+                verify_public_decoder_report(
+                    report, args.snapshot, PUBLIC_SOURCES[args.source]
+                )
+            else:
+                verify_decoder_document_report(
+                    report, _read_bytes(args.train), _read_bytes(args.heldout)
+                )
             print(f"verified={args.report} device=cpu documents=complete")
-    except (OSError, TypeError, ValueError, RuntimeError, FloatingPointError) as exc:
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        RuntimeError,
+        FloatingPointError,
+        KeyError,
+    ) as exc:
         parser.error(str(exc))
     return 0
 

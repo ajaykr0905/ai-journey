@@ -35,3 +35,25 @@ coverage count, metric and descriptive summary. It does not change artifacts.
 Seed spread is descriptive; equal target exposure does not equal compute cost,
 and this bounded experiment establishes no GPU, distributed-scale or population
 generalization claim.
+
+## Pinned public snapshots
+
+The public mode reuses this repository's immutable English/Hindi Universal
+Dependencies PUD pins and CC-BY-SA-3.0 license metadata. Supply the exact offline
+CoNLL-U snapshot already described by `tokenizer_sources`; size and SHA-256 are
+verified before parsing or training. Whole sentences are assigned by content
+hash and split seed, independently of annotation order. Reports retain the
+revision, source/license URLs, split controls and selected document hashes.
+
+```bash
+ai-journey-decoder-compare public --source en-pud \
+  --snapshot public/en_pud-ud-test.conllu \
+  --plan artifacts/decoder-plan.json --output artifacts/decoder-public.json
+ai-journey-decoder-verify public --source en-pud \
+  --snapshot public/en_pud-ud-test.conllu --report artifacts/decoder-public.json
+```
+
+The defaults select 16 training and four held-out documents; explicit counts
+are capped at 128 and 32. Selection is a bounded protocol, not a claim that the
+selected subset represents the source corpus or that a UD test partition is a
+training benchmark. No network request is made by either command.
