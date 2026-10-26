@@ -9,8 +9,8 @@ from ai_journey.ddp_http import make_server
 
 
 @contextmanager
-def serving(service):
-    server = make_server(service)
+def serving(service, **options):
+    server = make_server(service, **options)
     thread = threading.Thread(
         target=server.serve_forever, kwargs={"poll_interval": 0.01}
     )
@@ -102,3 +102,86 @@ def test_duplicate_json_fields_are_rejected_before_service_execution(payload):
         assert json.loads(response.read()) == {"error": "invalid generation request"}
         assert service.calls == 0
         client.close()
+
+
+class BlockingService(RecordingService):
+    def __init__(self):
+        super().__init__()
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def generate(self, request, **kwargs):
+        self.entered.set()
+        if not self.release.wait(timeout=5):
+            raise RuntimeError("test request was not released")
+        return super().generate(request, **kwargs)
+
+
+def _post_request(server, outcomes):
+    client = http.client.HTTPConnection(*server.server_address, timeout=5)
+    try:
+        client.request(
+            "POST",
+            "/generate",
+            body=json.dumps({"request_id": "wait", "prompt": [1], "sampling": {}}),
+        )
+        response = client.getresponse()
+        outcomes.append(response.status)
+        response.read()
+    except Exception as error:
+        outcomes.append(error)
+    finally:
+        client.close()
+
+
+def test_bounded_http_workers_keep_health_responsive_during_generation():
+    service = BlockingService()
+    outcomes = []
+    with serving(service, max_connections=2) as server:
+        worker = threading.Thread(target=_post_request, args=(server, outcomes))
+        worker.start()
+        try:
+            assert service.entered.wait(timeout=2)
+            client = http.client.HTTPConnection(*server.server_address, timeout=1)
+            client.request("GET", "/health")
+            response = client.getresponse()
+            assert response.status == 200
+            assert json.loads(response.read())["ready"]
+            client.close()
+        finally:
+            service.release.set()
+            worker.join(timeout=5)
+    assert outcomes == [200]
+
+
+def test_http_connection_limit_rejects_overload_and_recovers_capacity():
+    service = BlockingService()
+    outcomes = []
+    with serving(service, max_connections=1) as server:
+        worker = threading.Thread(target=_post_request, args=(server, outcomes))
+        worker.start()
+        try:
+            assert service.entered.wait(timeout=2)
+            client = http.client.HTTPConnection(*server.server_address, timeout=1)
+            client.request("GET", "/health")
+            response = client.getresponse()
+            assert response.status == 503
+            assert response.getheader("Retry-After") == "1"
+            assert json.loads(response.read()) == {"error": "connection limit reached"}
+            client.close()
+        finally:
+            service.release.set()
+            worker.join(timeout=5)
+        client = http.client.HTTPConnection(*server.server_address, timeout=1)
+        client.request("GET", "/health")
+        response = client.getresponse()
+        assert response.status == 200
+        response.read()
+        client.close()
+    assert outcomes == [200]
+
+
+@pytest.mark.parametrize("limit", [True, 0, 65])
+def test_http_worker_limit_is_validated_before_socket_allocation(limit):
+    with pytest.raises(ValueError, match="connections"):
+        make_server(RecordingService(), max_connections=limit)

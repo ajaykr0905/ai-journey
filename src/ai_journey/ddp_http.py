@@ -1,10 +1,12 @@
 """Loopback-only HTTP transport for the bounded CPU inference lab."""
 
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import math
+import threading
 import time
 
+from .ddp_contracts import integer
 from .ddp_service import AdmissionRejected, GenerationRequest, event_frame
 
 
@@ -21,9 +23,50 @@ def _reject_constant(value):
     raise ValueError("nonfinite JSON constant")
 
 
-def make_server(service, *, host="127.0.0.1", port=0):
+class BoundedHTTPServer(ThreadingHTTPServer):
+    """Bound accepted connections before creating per-connection worker threads."""
+
+    def __init__(self, address, handler, *, max_connections):
+        self._slots = threading.BoundedSemaphore(max_connections)
+        super().__init__(address, handler)
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            body = b'{"error":"connection limit reached"}'
+            response = (
+                b"HTTP/1.0 503 Service Unavailable\r\n"
+                b"Content-Type: application/json\r\n"
+                b"Retry-After: 1\r\nConnection: close\r\n"
+                + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+                + body
+            )
+            try:
+                request.settimeout(1)
+                request.sendall(response)
+            except OSError:
+                pass
+            finally:
+                self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+
+def make_server(service, *, host="127.0.0.1", port=0, max_connections=8):
     if host != "127.0.0.1":
         raise ValueError("the unauthenticated lab server binds only to loopback")
+    integer(max_connections, "max_connections", 1)
+    if max_connections > 64:
+        raise ValueError("max_connections exceeds the lab limit of 64")
 
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
@@ -121,4 +164,4 @@ def make_server(service, *, host="127.0.0.1", port=0):
             except (BrokenPipeError, ConnectionResetError, TimeoutError):
                 pass
 
-    return HTTPServer((host, port), Handler)
+    return BoundedHTTPServer((host, port), Handler, max_connections=max_connections)
