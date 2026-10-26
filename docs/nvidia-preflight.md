@@ -26,3 +26,12 @@ accounting; it does not multiply per-microbatch activation memory. Native bfloat
 requires compute capability 8 or later. An analytical fit alone remains blocked
 until actual host observations support the request. Sharding estimates remain
 assumptions; this admission check does not implement those training strategies.
+
+The implemented `ai_journey.gpu_preflight_worker` module reads the torchrun rank
+environment, probes this host, and writes a verified record to
+`OUTPUT_DIR/RUN_ID/rank-RANK.json`. A blocked observation is still written, and
+the worker exits with status 2. No process group, CUDA tensor, kernel, or training
+loop is started. Records bind the canonical run UUID, actual process ID, rank
+mapping, resource report, and host observations. Verification recomputes memory
+admission rather than trusting a stored success flag. Digests detect drift;
+they are not hardware attestation or third-party signatures.
