@@ -84,7 +84,7 @@ def _accumulated_update(
                 ):
                     loss = None
             except (ValueError, RuntimeError, TypeError):
-                pass
+                loss = None
             require_all_ranks(loss is not None, phase="forward loss validation")
             loss.backward()
             total_loss += batch_total

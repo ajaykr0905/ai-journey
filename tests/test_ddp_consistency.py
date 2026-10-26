@@ -155,6 +155,13 @@ def _diverged_update(rank, directory, divergence="model"):
             lambda module, inputs, output: output * float("nan")
         )
 
+    if divergence == "loss-accounting" and rank == 1:
+
+        def failing_double(tensor, *args, **kwargs):
+            raise RuntimeError("injected loss-accounting allocation failure")
+
+        torch.Tensor.double = failing_double
+
     class DivergingAdamW(torch.optim.AdamW):
         def step(self, closure=None):
             result = super().step(closure)
@@ -200,6 +207,7 @@ def _diverged_update(rank, directory, divergence="model"):
             "moment": "optimizer fingerprints diverged",
             "nonfinite": "optimizer state fingerprinting",
             "forward": "forward loss validation",
+            "loss-accounting": "forward loss validation",
         }[divergence]
         with pytest.raises(RuntimeError, match=expected):
             train_segment(
@@ -229,6 +237,12 @@ def test_bad_optimizer_moments_roll_back_the_completed_update(tmp_path, divergen
 
 def test_rank_local_forward_failure_restores_both_ranks_before_backward(tmp_path):
     mp.spawn(_diverged_update, args=(str(tmp_path), "forward"), nprocs=2, join=True)
+
+
+def test_rank_local_loss_accounting_failure_cannot_commit_an_update(tmp_path):
+    mp.spawn(
+        _diverged_update, args=(str(tmp_path), "loss-accounting"), nprocs=2, join=True
+    )
 
 
 def _invalid_totals(rank, directory):
