@@ -1,4 +1,5 @@
 import copy
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -121,6 +122,75 @@ def test_cli_verifies_actual_crash_certificate_and_artifacts(crash_evidence, cap
         == 0
     )
     assert json.loads(capsys.readouterr().out) == report
+
+
+def test_artifact_verification_rejects_resealed_spec_digest(crash_evidence):
+    original, _, workdir = crash_evidence
+    report = copy.deepcopy(original)
+    report["spec_sha256"] = "a" * 64
+    report["report_sha256"] = crash_recovery_digest(report)
+    # A standalone seal provides consistency, not authentication of input bytes.
+    assert verify_crash_recovery(report) == report
+    with pytest.raises(ValueError, match="artifacts"):
+        verify_crash_recovery(report, directory=workdir)
+
+
+@pytest.mark.parametrize(
+    "change", ["missing", "whitespace", "source", "model", "training"]
+)
+def test_artifact_verification_binds_retained_specification(
+    crash_evidence, tmp_path, change
+):
+    report, _, original = crash_evidence
+    copied = tmp_path / "copy"
+    shutil.copytree(original, copied)
+    path = copied / "training-spec.json"
+    assert path.read_bytes() == (ROOT / "config/ddp-lab.json").read_bytes()
+    if change == "missing":
+        path.unlink()
+    elif change == "whitespace":
+        path.write_bytes(path.read_bytes() + b"\n")
+    else:
+        report = copy.deepcopy(report)
+        payload = json.loads(path.read_bytes())
+        if change == "source":
+            payload["source"]["sha256"] = "a" * 64
+        elif change == "model":
+            payload["model"]["layer_norm_epsilon"] *= 2
+        else:
+            payload["training"]["max_learning_rate"] *= 2
+        path.write_text(json.dumps(payload))
+        report["spec_sha256"] = sha256(path.read_bytes()).hexdigest()
+        report["report_sha256"] = crash_recovery_digest(report)
+    with pytest.raises(ValueError, match="artifacts"):
+        verify_crash_recovery(report, directory=copied)
+
+
+@pytest.mark.parametrize(
+    "filename", ["last-durable.pt", "continuous.pt", "recovered.pt"]
+)
+@pytest.mark.parametrize(
+    "field", ["model_config", "training_config", "source_sha256", "world_size"]
+)
+def test_artifact_verification_binds_every_checkpoint_to_the_spec(
+    crash_evidence, tmp_path, filename, field
+):
+    report, _, original = crash_evidence
+    copied = tmp_path / "copy"
+    shutil.copytree(original, copied)
+    path = copied / filename
+    payload = torch.load(path, weights_only=True)
+    if field == "model_config":
+        payload[field]["layer_norm_epsilon"] *= 2
+    elif field == "training_config":
+        payload[field]["max_learning_rate"] *= 2
+    elif field == "source_sha256":
+        payload[field] = "a" * 64
+    else:
+        payload[field] = True
+    torch.save(payload, path)
+    with pytest.raises(ValueError, match="artifacts"):
+        verify_crash_recovery(report, directory=copied)
 
 
 def test_recovery_report_fifo_cannot_block_waiting_for_a_writer(tmp_path):

@@ -115,7 +115,13 @@ progress, source/specification digests, monotonic chronology and exact final
 model/AdamW/RNG/step parity against the control. Offline verification recomputes
 loss and timing bounds and rejects resealed type drift. With `--workdir`, it also
 recomputes state digests from `continuous.pt`/`recovered.pt`, checks preserved
-`last-durable.pt`, and compares crash/restoration witnesses. Without `--workdir`,
+`last-durable.pt`, and compares crash/restoration witnesses. New crash experiments
+retain the exact bounded input bytes as `training-spec.json`, and every worker
+loads that witness. Artifact verification hashes those bytes and binds all three
+checkpoints' model/training configuration, source digest and world size to the
+retained specification/report. An older directory without this witness cannot
+prove specification binding and fails artifact verification; the v1 report
+fields themselves are unchanged. Without `--workdir`,
 verification proves internal report consistency only. A digest cannot authenticate
 that timings were collected honestly. Keep the owned artifact directory; no GPU,
 elastic-world-size, machine power-loss or production failover claim follows.
