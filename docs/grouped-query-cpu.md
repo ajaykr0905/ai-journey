@@ -33,6 +33,34 @@ match. Frozen loading validates optimizer/restart state, preserves caller RNG,
 and enables model-bound cache generation. Old GPT-2 weight import does not imply
 GQA compatibility and is rejected for this explicit architecture.
 
+## Operate the dense grouped-query control
+
+`config/gqa-cpu-lab.json` declares a new version-three training specification:
+two query heads, one K/V head, RMSNorm/SwiGLU/RoPE and four tiny CPU updates on
+the existing SHA-pinned, CC0 synthetic public fixture. Version-one GPT-2 and
+version-two decoder specifications are unchanged. This generic training route
+accepts dense GQA only; expert wrappers require their explicit auxiliary-loss
+training interface and are rejected before allocation.
+
+```bash
+ai-journey-gpt2-train train --source data/day-19-demo-names.txt \
+  --spec config/gqa-cpu-lab.json --checkpoint /tmp/gqa-training.pt \
+  --report /tmp/gqa-training.json
+ai-journey-gpt2-train verify --report /tmp/gqa-training.json
+ai-journey-gpt2-train replay --source data/day-19-demo-names.txt \
+  --report /tmp/gqa-training.json
+ai-journey-ddp recover-crash --source data/day-19-demo-names.txt \
+  --spec config/gqa-cpu-lab.json --output /tmp/gqa-recovery.json \
+  --workdir /tmp/gqa-recovery-owned
+ai-journey-ddp verify-crash-recovery --report /tmp/gqa-recovery.json \
+  --workdir /tmp/gqa-recovery-owned
+```
+
+The dedicated CI job builds an isolated wheel and runs these installed commands,
+including real two-rank Gloo loss/restart and artifact verification. The crash
+control observes step three, restores step two, and verifies exact final state;
+it is neither GPU nor expert-parallel execution.
+
 Numerical/gradient/cache/storage/restart checks establish CPU reference behavior.
 They establish no GPU execution, inference-speed improvement, distributed MoE
 scaling, public benchmark improvement, production readiness or learner activity.

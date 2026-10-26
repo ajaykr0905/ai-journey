@@ -1,0 +1,51 @@
+{
+  "schema_version": 3,
+  "model": {
+    "kind": "grouped_query",
+    "config": {
+      "schema_version": 1,
+      "decoder": {
+        "kind": "decoder_variant",
+        "config": {
+          "gpt2": {
+            "vocab_size": 256,
+            "context_length": 8,
+            "embedding_dim": 8,
+            "head_count": 2,
+            "layer_count": 1,
+            "layer_norm_epsilon": 0.00001,
+            "embedding_dropout": 0.0,
+            "attention_dropout": 0.0,
+            "residual_dropout": 0.0,
+            "activation_function": "gelu_new"
+          },
+          "norm_kind": "rmsnorm",
+          "mlp_kind": "swiglu",
+          "position_kind": "rope",
+          "rope_base": 10000.0,
+          "swiglu_hidden_dim": null
+        }
+      },
+      "kv_heads": 1
+    }
+  },
+  "training": {
+    "optimizer_steps": 4,
+    "micro_batch_size": 1,
+    "accumulation_steps": 2,
+    "sequence_length": 4,
+    "max_learning_rate": 0.003,
+    "min_learning_rate": 0.0003,
+    "warmup_steps": 1,
+    "weight_decay": 0.1,
+    "gradient_clip": 1.0,
+    "seed": 53
+  },
+  "source": {
+    "name": "Synthetic public name-like tokens",
+    "url": "https://github.com/ajaykr0905/ai-journey/blob/10c33105bf0ae8c4a205ecf098fdeea43ea070c0/data/day-19-demo-names.txt",
+    "revision": "sha256:f3670d269756a7b8800389c29599c25b2eccc63ca16e7b4f84b532d21f973411",
+    "license": "CC0-1.0",
+    "sha256": "f3670d269756a7b8800389c29599c25b2eccc63ca16e7b4f84b532d21f973411"
+  }
+}
