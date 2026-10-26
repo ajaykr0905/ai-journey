@@ -9,6 +9,7 @@ from .moe_experiment import run_moe_document_trial
 from .moe_route_audit import validate_moe_routing
 
 MOE_REPORT_SCHEMA = "ai-journey-moe-documents-v1"
+MOE_REPORT_SCOPE = "internal consistency of recorded CPU observations; hashes cannot authenticate a measurement; exact source replay is a separate check"
 UNCERTAINTY_POLICY = (
     "Paired seed deltas are descriptive, not population confidence or evidence "
     "of generalization, compute equivalence, GPU speed or architecture superiority."
@@ -116,6 +117,7 @@ def assemble_moe_comparison(plan, trials):
         },
         "trials": trials,
         "summary": summarize_moe_trials(plan, trials),
+        "verification_scope": MOE_REPORT_SCOPE,
     }
     report["report_sha256"] = decoder_comparison_digest(report)
     return report
