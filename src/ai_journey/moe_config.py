@@ -34,8 +34,8 @@ class MoEConfig(DecoderVariantConfig):
             raise ValueError("the reference MoE contract requires top_k=2")
         if (
             type(self.capacity_factor) not in (int, float)
-            or not math.isfinite(self.capacity_factor)
             or not 0 < self.capacity_factor <= 16
+            or not math.isfinite(self.capacity_factor)
         ):
             raise ValueError("capacity_factor must be finite and in (0, 16]")
         object.__setattr__(self, "capacity_factor", float(self.capacity_factor))
