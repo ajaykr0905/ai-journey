@@ -61,3 +61,21 @@ def test_plan_rejects_unexpected_interventions_and_unknown_fields():
 def test_plan_rejects_invalid_or_unbounded_controls(controls):
     with pytest.raises(ValueError, match="plan"):
         plan(**controls)
+
+
+def test_plan_rejects_inactive_controls_that_masquerade_as_architecture_changes():
+    controls = plan()
+    baseline = controls.variants[0]
+    fake_arm = ("inactive-rope", replace(baseline[1], rope_base=20000.0))
+    with pytest.raises(ValueError, match="inactive RoPE"):
+        replace(
+            controls, variants=(baseline, fake_arm), declared_changes=("rope_base",)
+        )
+    # A real RoPE arm can declare and vary its active frequency base.
+    active = ("rope", replace(baseline[1], position_kind="rope", rope_base=20000.0))
+    declared = replace(
+        controls,
+        variants=(baseline, active),
+        declared_changes=("position_kind", "rope_base"),
+    )
+    assert decoder_plan_from_mapping(declared.to_mapping()) == declared

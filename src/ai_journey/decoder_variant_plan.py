@@ -71,6 +71,13 @@ class DecoderExperimentPlan:
         for _, variant in self.variants[1:]:
             if variant.gpt2 != baseline.gpt2:
                 raise ValueError("plan arms must share the GPT-2 base controls")
+            if (
+                variant.position_kind != "rope"
+                and variant.rope_base != baseline.rope_base
+            ):
+                raise ValueError(
+                    "plan cannot vary inactive RoPE controls on a learned-position arm"
+                )
             changes = {
                 name
                 for name in _ARCHITECTURE_FIELDS

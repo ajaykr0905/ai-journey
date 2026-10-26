@@ -24,7 +24,8 @@ partitions at 2048 documents, held-out scoring at 8192 targets, and plans at eig
 arms, four seeds, 64 steps, 32 examples per training batch and 32 examples per
 evaluation batch. Additional work and attention budgets reject expensive plans
 before model allocation. Explicit SwiGLU width cannot exceed four times model
-width. Short training documents remain in source evidence but are not sampled
+width. A learned-position arm cannot vary an inactive RoPE frequency base and
+claim it as an architecture intervention. Short training documents remain in source evidence but are not sampled
 when they contain no complete context window.
 
 Reports contain hashes and measurements, not source text or local source paths.
