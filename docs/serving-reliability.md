@@ -24,6 +24,12 @@ returns 503 with `Retry-After`. The generation token bucket separately returns
 429. Invalid requests return 400, internal generation failures return a generic
 500, and a failure after streaming begins emits one terminal `error` SSE event.
 Requests have a ten-second generation deadline and a five-second socket timeout.
+The service separately bounds running-plus-waiting generation calls to eight by
+default (`GenerationService(max_inflight_requests=...)`, maximum 64); a full
+inference queue returns 503 with `Retry-After` without charging the token bucket.
+Queued cancellation and deadline expiry release their admitted slot without
+waiting for the active decode lock or charging generation work. This does not
+preempt a running model kernel.
 
 ```bash
 curl --fail http://127.0.0.1:8080/health

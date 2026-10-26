@@ -13,6 +13,7 @@ from .ddp_service import (
     AdmissionRejected,
     GenerationRequest,
     ServiceDraining,
+    ServiceOverloaded,
     event_frame,
 )
 
@@ -179,6 +180,8 @@ def make_server(service, *, host="127.0.0.1", port=0, max_connections=8):
                 self.reply(429, {"error": str(error)}, retry_after=error.retry_after)
             except ServiceDraining:
                 self.reply(503, {"error": "service is draining"}, retry_after=1)
+            except ServiceOverloaded:
+                self.reply(503, {"error": "inference queue is full"}, retry_after=1)
             except (ValueError, TypeError, UnicodeError):
                 if streaming:
                     self.wfile.write(
