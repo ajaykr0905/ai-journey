@@ -9,3 +9,10 @@ Worker validation requires `RANK`, `LOCAL_RANK`, `WORLD_SIZE`, and
 `LOCAL_WORLD_SIZE` from a complete single-node torchrun environment. Multi-node
 execution is outside this contract. These validations prepare a hardware check;
 they do not implement CUDA training or establish that NCCL communication works.
+
+`probe_gpu_host()` reads the actual operating system, PyTorch/CUDA build, NCCL
+availability, visible CUDA device properties and free/total memory. Darwin and
+CPU-only builds return an explicit unavailable reason. Device-query failures
+cannot produce partial success. The visibility-mask identity is hashed; raw
+hardware serials, hostnames, and unrelated environment variables are not recorded.
+Property discovery does not measure GPU kernels, training, or communication.
