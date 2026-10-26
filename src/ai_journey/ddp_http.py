@@ -7,7 +7,12 @@ import threading
 import time
 
 from .ddp_contracts import integer
-from .ddp_service import AdmissionRejected, GenerationRequest, event_frame
+from .ddp_service import (
+    AdmissionRejected,
+    GenerationRequest,
+    ServiceDraining,
+    event_frame,
+)
 
 
 def _unique_fields(pairs):
@@ -147,6 +152,8 @@ def make_server(service, *, host="127.0.0.1", port=0, max_connections=8):
                     self.reply(200, output)
             except AdmissionRejected as error:
                 self.reply(429, {"error": str(error)}, retry_after=error.retry_after)
+            except ServiceDraining:
+                self.reply(503, {"error": "service is draining"}, retry_after=1)
             except (ValueError, TypeError, UnicodeError):
                 if streaming:
                     self.wfile.write(

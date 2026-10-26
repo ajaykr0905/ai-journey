@@ -7,6 +7,7 @@ import re
 import copy
 import threading
 from collections import OrderedDict
+from contextlib import contextmanager
 import time
 import math
 
@@ -19,6 +20,10 @@ class AdmissionRejected(RuntimeError):
     def __init__(self, retry_after: float):
         super().__init__("generation token budget exhausted")
         self.retry_after = retry_after
+
+
+class ServiceDraining(RuntimeError):
+    """New requests cannot enter a service that is draining admitted work."""
 
 
 class TokenBucket:
@@ -131,11 +136,42 @@ class GenerationService:
         self.model_sha256 = gpt2_model_fingerprint(self._model)
         self._lock = threading.RLock()
         self._stats_lock = threading.Lock()
+        self._lifecycle = threading.Condition(self._stats_lock)
+        self._active_requests = 0
+        self._draining = False
         self.completed_requests = 0
         self.generated_tokens = 0
         self._responses = OrderedDict()
         self._cache_capacity = cache_capacity
         self._admission = admission if admission is not None else TokenBucket()
+
+    @contextmanager
+    def _admitted_request(self):
+        with self._lifecycle:
+            if self._draining:
+                raise ServiceDraining("service is draining")
+            self._active_requests += 1
+        try:
+            yield
+        finally:
+            with self._lifecycle:
+                self._active_requests -= 1
+                self._lifecycle.notify_all()
+
+    def drain(self, *, timeout_seconds=10):
+        """Stop accepting work and wait at most the declared time for admission to empty."""
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not math.isfinite(timeout_seconds)
+            or not 0 <= timeout_seconds <= 60
+        ):
+            raise ValueError("drain timeout must be finite and in [0, 60]")
+        with self._lifecycle:
+            self._draining = True
+            return self._lifecycle.wait_for(
+                lambda: self._active_requests == 0, timeout=timeout_seconds
+            )
 
     def generate(
         self,
@@ -159,7 +195,7 @@ class GenerationService:
             raise ValueError("deadline must be a finite monotonic timestamp")
         if any(token >= self._model.config.vocab_size for token in request.prompt):
             raise ValueError("prompt token exceeds vocabulary")
-        with self._lock:
+        with self._admitted_request(), self._lock:
             fingerprint = request.fingerprint()
             if request.request_id in self._responses:
                 previous_fingerprint, previous_output = self._responses[
@@ -213,7 +249,8 @@ class GenerationService:
     def health(self) -> dict:
         with self._stats_lock:
             return {
-                "ready": True,
+                "ready": not self._draining,
+                "active_requests": self._active_requests,
                 "device": "cpu",
                 "model_sha256": self.model_sha256,
                 "completed_requests": self.completed_requests,
