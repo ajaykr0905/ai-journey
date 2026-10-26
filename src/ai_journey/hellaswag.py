@@ -786,13 +786,17 @@ def verify_evidence(payload: dict) -> dict:
         raise HellaSwagError("HellaSwag evidence digest does not match")
     protocol = HellaSwagProtocol.from_mapping(payload["protocol"])
     run = payload["run"]
+    runtime = payload["runtime"]
     if (
         not isinstance(run, dict)
         or run.get("protocol_sha256") != protocol.fingerprint
         or run.get("sample_sha256") != protocol.source.sample_sha256
         or run.get("world_size") != protocol.world_size
         or payload["limitations"] != HELLASWAG_LIMITATIONS
-        or payload["runtime"].get("device") != "cpu"
+        or not isinstance(runtime, dict)
+        or set(runtime) != {"device", "torch", "python", "operating_system", "machine"}
+        or any(not isinstance(value, str) or not value for value in runtime.values())
+        or runtime.get("device") != "cpu"
     ):
         raise HellaSwagError("HellaSwag evidence provenance does not match")
     from .training_models import (
@@ -806,6 +810,24 @@ def verify_evidence(payload: dict) -> dict:
         2,
     ):
         raise HellaSwagError("HellaSwag run schema does not match")
+    run_fields = {
+        "schema_version",
+        "protocol_sha256",
+        "sample_sha256",
+        "records_sha256",
+        "model_config",
+        "model_sha256",
+        "world_size",
+        "evaluation",
+    }
+    if run["schema_version"] == 2:
+        run_fields |= {"parameter_count", "model_dtype", "torch_threads"}
+    if set(run) != run_fields:
+        raise HellaSwagError("HellaSwag run fields do not match")
+    from .hellaswag_scored_contract import require_scoring_digest, validate_scored_rows
+
+    for name in ("protocol_sha256", "sample_sha256", "records_sha256", "model_sha256"):
+        require_scoring_digest(run[name], name)
     config = model_config_from_mapping(run.get("model_config"))
     if (
         base_model_config(config).vocab_size != 256
@@ -828,6 +850,10 @@ def verify_evidence(payload: dict) -> dict:
     records = evaluation.get("records") if isinstance(evaluation, dict) else None
     if not isinstance(records, (list, tuple)) or len(records) != protocol.count:
         raise HellaSwagError("HellaSwag evidence row count does not match")
+    if validate_scored_rows(records, protocol) != run["records_sha256"]:
+        raise HellaSwagError(
+            "HellaSwag selected-record digest does not match scored rows"
+        )
     expected = summarize_scores(
         records,
         bootstrap_samples=protocol.bootstrap_samples,
