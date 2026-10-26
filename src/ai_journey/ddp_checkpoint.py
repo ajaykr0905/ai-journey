@@ -15,8 +15,13 @@ import torch
 import torch.distributed as dist
 
 from .ddp_contracts import integer
-from .ddp_runtime import require_all_ranks, require_model_consensus
+from .ddp_runtime import (
+    require_all_ranks,
+    require_model_consensus,
+    require_optimizer_consensus,
+)
 from .gpt2_training import gpt2_model_fingerprint
+from .training_models import model_config_mapping
 
 
 def bounded_checkpoint_load(path: Path, max_bytes: int):
@@ -109,6 +114,7 @@ def save_checkpoint(
         valid = False
     require_all_ranks(valid, phase="checkpoint state validation")
     fingerprint = require_model_consensus(model)
+    require_optimizer_consensus(optimizer)
     rngs = [None] * dist.get_world_size()
     dist.all_gather_object(rngs, torch.get_rng_state())
     success = True
@@ -127,7 +133,7 @@ def save_checkpoint(
                         "schema_version": 1,
                         "world_size": dist.get_world_size(),
                         "step": step,
-                        "model_config": asdict(model.config),
+                        "model_config": model_config_mapping(model.config),
                         "training_config": asdict(config),
                         "source_sha256": sha256(source).hexdigest(),
                         "model_sha256": fingerprint,
@@ -198,7 +204,7 @@ def load_checkpoint(
         if (
             payload["step"] > config.optimizer_steps
             or payload["world_size"] != dist.get_world_size()
-            or payload["model_config"] != asdict(model.config)
+            or payload["model_config"] != model_config_mapping(model.config)
             or payload["training_config"] != asdict(config)
             or payload["source_sha256"] != sha256(source).hexdigest()
         ):
@@ -238,6 +244,7 @@ def load_checkpoint(
     try:
         require_all_ranks(restored, phase="checkpoint restoration")
         require_model_consensus(model)
+        require_optimizer_consensus(optimizer)
     except Exception:
         model.load_state_dict(saved[0])
         optimizer.load_state_dict(saved[1])

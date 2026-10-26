@@ -23,6 +23,7 @@ def main(argv=None):
         if name == "train":
             command.add_argument("--checkpoint", type=Path, required=True)
             command.add_argument("--resume", action="store_true")
+            command.add_argument("--checkpoint-interval", type=int)
     verify = commands.add_parser("verify")
     verify.add_argument("--report", type=Path, required=True)
     add_commands(commands)
@@ -48,6 +49,7 @@ def main(argv=None):
                 world_size=arguments.world_size,
                 steps=arguments.steps,
                 resume=arguments.resume,
+                checkpoint_interval=arguments.checkpoint_interval,
             )
             result = build_evidence(arguments.source.read_bytes(), spec, ranks)
             write_evidence(arguments.output, result)

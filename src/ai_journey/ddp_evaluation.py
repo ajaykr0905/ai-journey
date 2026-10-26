@@ -7,6 +7,7 @@ import math
 
 from .ddp_contracts import integer
 from .ddp_metrics import token_nll
+from .training_models import base_model_config
 
 
 @dataclass(frozen=True)
@@ -95,7 +96,7 @@ def evaluate_documents(model, documents, *, batch_size: int = 4) -> dict:
         with torch.inference_mode():
             for inputs, targets, mask in evaluation_batches(
                 documents,
-                context_length=model.config.context_length,
+                context_length=base_model_config(model).context_length,
                 batch_size=batch_size,
             ):
                 losses = token_nll(model(inputs), targets)
@@ -159,7 +160,8 @@ def score_choices(model, prompt: bytes, choices) -> dict:
                 losses = []
                 for target in choice:
                     inputs = torch.tensor(
-                        [context[-model.config.context_length :]], dtype=torch.long
+                        [context[-base_model_config(model).context_length :]],
+                        dtype=torch.long,
                     )
                     logits = model(inputs)[:, -1:, :]
                     losses.append(token_nll(logits, torch.tensor([[target]])).item())

@@ -28,6 +28,8 @@ def test_cli_trains_verifies_and_prints_measured_rank_evidence(tmp_path, capsys)
                 str(tmp_path / "state.pt"),
                 "--workdir",
                 str(tmp_path / "ranks"),
+                "--checkpoint-interval",
+                "1",
             ]
         )
         == 0
