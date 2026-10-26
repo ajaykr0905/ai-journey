@@ -15,7 +15,11 @@ import torch
 import torch.distributed as dist
 
 from .ddp_contracts import integer
-from .ddp_runtime import require_all_ranks, require_model_consensus
+from .ddp_runtime import (
+    require_all_ranks,
+    require_model_consensus,
+    require_optimizer_consensus,
+)
 from .gpt2_training import gpt2_model_fingerprint
 
 
@@ -109,6 +113,7 @@ def save_checkpoint(
         valid = False
     require_all_ranks(valid, phase="checkpoint state validation")
     fingerprint = require_model_consensus(model)
+    require_optimizer_consensus(optimizer)
     rngs = [None] * dist.get_world_size()
     dist.all_gather_object(rngs, torch.get_rng_state())
     success = True

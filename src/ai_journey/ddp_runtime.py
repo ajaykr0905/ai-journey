@@ -2,6 +2,8 @@
 
 from contextlib import contextmanager
 from datetime import timedelta
+from hashlib import sha256
+import json
 
 import torch.distributed as dist
 import torch
@@ -72,4 +74,51 @@ def require_model_consensus(model) -> str:
     dist.all_gather(gathered, encoded)
     if any(not torch.equal(encoded, value) for value in gathered):
         raise RuntimeError("replicated model fingerprints diverged")
+    return fingerprint
+
+
+def require_optimizer_consensus(optimizer) -> str:
+    """Compare tensor bytes and all optimizer settings across replicas."""
+
+    def encode(value):
+        if isinstance(value, torch.Tensor):
+            tensor = value.detach().cpu().contiguous()
+            return [
+                "tensor",
+                str(tensor.dtype),
+                list(tensor.shape),
+                sha256(
+                    tensor.reshape(-1).view(torch.uint8).numpy().tobytes()
+                ).hexdigest(),
+            ]
+        if isinstance(value, dict):
+            return [
+                "dict",
+                [
+                    [encode(key), encode(item)]
+                    for key, item in sorted(
+                        value.items(),
+                        key=lambda pair: (type(pair[0]).__name__, repr(pair[0])),
+                    )
+                ],
+            ]
+        if isinstance(value, (tuple, list)):
+            return [type(value).__name__, [encode(item) for item in value]]
+        if value is None or type(value) in (bool, int, float, str):
+            return [type(value).__name__, value]
+        raise ValueError("unsupported optimizer state value")
+
+    fingerprint = None
+    try:
+        fingerprint = sha256(
+            json.dumps(encode(optimizer.state_dict()), allow_nan=False).encode()
+        ).hexdigest()
+    except (TypeError, ValueError, RuntimeError):
+        pass
+    require_all_ranks(fingerprint is not None, phase="optimizer state fingerprinting")
+    encoded = torch.tensor(list(bytes.fromhex(fingerprint)), dtype=torch.uint8)
+    gathered = [torch.empty_like(encoded) for _ in range(dist.get_world_size())]
+    dist.all_gather(gathered, encoded)
+    if any(not torch.equal(encoded, value) for value in gathered):
+        raise RuntimeError("replicated optimizer fingerprints diverged")
     return fingerprint
