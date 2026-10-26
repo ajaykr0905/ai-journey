@@ -35,7 +35,10 @@ from .training_models import (
     model_config_mapping,
     training_model_fingerprint,
 )
-from .training_optimizer_state import validate_adamw_state
+from .training_optimizer_state import (
+    validate_adamw_state,
+    validate_serialized_adamw_state,
+)
 from .checkpoint_archive import load_checkpoint_archive
 
 
@@ -884,6 +887,9 @@ def load_training_checkpoint(
     saved_cursor = cursor.state_dict()
     saved_rng = torch.get_rng_state().clone()
     try:
+        validate_serialized_adamw_state(
+            model, optimizer, payload["optimizer_state"], step=step
+        )
         model.load_state_dict(payload["model_state"], strict=True)
         optimizer.load_state_dict(payload["optimizer_state"])
         cursor.load_state_dict(payload["cursor_state"])

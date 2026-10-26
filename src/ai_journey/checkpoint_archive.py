@@ -8,6 +8,39 @@ import zipfile
 import torch
 
 MAX_CHECKPOINT_RECORDS = 16_384
+MAX_CHECKPOINT_LOGICAL_BYTES = 128 * 1024 * 1024
+MAX_CHECKPOINT_HASH_ITEMS = 100_000
+MAX_CHECKPOINT_HASH_DEPTH = 64
+
+
+def validate_checkpoint_tensor_work(value) -> None:
+    """Bound logical tensors and container traversal before any materialization.
+
+    Archive storage size does not bound expanded tensor views. Repeated aliases
+    are charged independently because callers can process every occurrence.
+    """
+    items, logical_bytes = 0, 0
+
+    def visit(item, depth):
+        nonlocal items, logical_bytes
+        items += 1
+        if depth > MAX_CHECKPOINT_HASH_DEPTH:
+            raise ValueError("checkpoint nesting exceeds its hash-work budget")
+        if items > MAX_CHECKPOINT_HASH_ITEMS:
+            raise ValueError("checkpoint items exceed their hash-work budget")
+        if isinstance(item, torch.Tensor):
+            logical_bytes += item.numel() * item.element_size()
+            if logical_bytes > MAX_CHECKPOINT_LOGICAL_BYTES:
+                raise ValueError("checkpoint logical tensor work exceeds its budget")
+        elif isinstance(item, dict):
+            for key, part in item.items():
+                visit(key, depth + 1)
+                visit(part, depth + 1)
+        elif isinstance(item, (tuple, list)):
+            for part in item:
+                visit(part, depth + 1)
+
+    visit(value, 0)
 
 
 def load_checkpoint_archive(path: Path, *, max_bytes: int, max_records: int = 1024):
@@ -38,4 +71,6 @@ def load_checkpoint_archive(path: Path, *, max_bytes: int, max_records: int = 10
             ):
                 raise ValueError("checkpoint exceeds its expanded storage budget")
         stream.seek(0)
-        return torch.load(stream, map_location="cpu", weights_only=True)
+        payload = torch.load(stream, map_location="cpu", weights_only=True)
+        validate_checkpoint_tensor_work(payload)
+        return payload

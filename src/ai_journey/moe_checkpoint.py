@@ -10,10 +10,18 @@ import tempfile
 
 import torch
 
-from .checkpoint_archive import MAX_CHECKPOINT_RECORDS, load_checkpoint_archive
+from .checkpoint_archive import (
+    MAX_CHECKPOINT_RECORDS,
+    MAX_CHECKPOINT_LOGICAL_BYTES as MAX_CHECKPOINT_LOGICAL_BYTES,
+    MAX_CHECKPOINT_HASH_ITEMS as MAX_CHECKPOINT_HASH_ITEMS,
+    MAX_CHECKPOINT_HASH_DEPTH as MAX_CHECKPOINT_HASH_DEPTH,
+    load_checkpoint_archive,
+    validate_checkpoint_tensor_work as _admit_digest_work,
+)
 from .moe_model import MoEDecoderModel
 from .moe_resources import expected_checkpoint_records
 from .moe_training import validate_moe_optimizer
+from .training_optimizer_state import validate_serialized_adamw_state
 from .training_models import training_model_fingerprint
 
 _FIELDS = {
@@ -30,9 +38,6 @@ _FIELDS = {
     "torch_rng_state",
     "checkpoint_sha256",
 }
-MAX_CHECKPOINT_LOGICAL_BYTES = 128 * 1024 * 1024
-MAX_CHECKPOINT_HASH_ITEMS = 100_000
-MAX_CHECKPOINT_HASH_DEPTH = 64
 
 
 def _contract(value) -> dict:
@@ -51,37 +56,6 @@ def _contract(value) -> dict:
     if len(encoded.encode()) > 65536:
         raise ValueError("training_contract exceeds its byte budget")
     return json.loads(encoded)
-
-
-def _admit_digest_work(value) -> None:
-    """Bound logical tensor work, including repeated aliases, before copying it.
-
-    ZIP storage limits are insufficient: a four-byte storage can describe a
-    billion-element expanded tensor. Charge each submitted tensor occurrence
-    because canonical sealing processes each occurrence independently.
-    """
-    items, logical_bytes = 0, 0
-
-    def visit(item, depth):
-        nonlocal items, logical_bytes
-        items += 1
-        if depth > MAX_CHECKPOINT_HASH_DEPTH:
-            raise ValueError("checkpoint nesting exceeds its hash-work budget")
-        if items > MAX_CHECKPOINT_HASH_ITEMS:
-            raise ValueError("checkpoint items exceed their hash-work budget")
-        if isinstance(item, torch.Tensor):
-            logical_bytes += item.numel() * item.element_size()
-            if logical_bytes > MAX_CHECKPOINT_LOGICAL_BYTES:
-                raise ValueError("checkpoint logical tensor work exceeds its budget")
-        elif isinstance(item, dict):
-            for key, part in item.items():
-                visit(key, depth + 1)
-                visit(part, depth + 1)
-        elif isinstance(item, (tuple, list)):
-            for part in item:
-                visit(part, depth + 1)
-
-    visit(value, 0)
 
 
 def _digest(value) -> str:
@@ -301,6 +275,9 @@ def restore_moe_payload(
         torch.get_rng_state().clone(),
     )
     try:
+        validate_serialized_adamw_state(
+            model, optimizer, payload["optimizer_state"], step=payload["step"]
+        )
         model.load_state_dict(state, strict=True)
         optimizer.load_state_dict(payload["optimizer_state"])
         torch.set_rng_state(payload["torch_rng_state"])

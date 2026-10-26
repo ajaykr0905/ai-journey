@@ -34,8 +34,10 @@ def test_small_archive_cannot_trigger_billion_element_tensor_hashing(
         return original(tensor, *args, **kwargs)
 
     monkeypatch.setattr(torch, "isfinite", bounded_finite)
-    with pytest.raises(ValueError, match="logical.*budget"):
+    with pytest.raises(ValueError, match="bounded weights-only") as error:
         read_moe_checkpoint(path)
+    assert isinstance(error.value.__cause__, ValueError)
+    assert "logical tensor work exceeds its budget" in str(error.value.__cause__)
 
 
 def test_tensor_aliases_are_charged_each_time_the_digest_would_materialize_them():

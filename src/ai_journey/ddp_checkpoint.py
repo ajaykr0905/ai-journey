@@ -22,7 +22,10 @@ from .ddp_runtime import (
 )
 from .gpt2_training import gpt2_model_fingerprint
 from .training_models import model_config_mapping
-from .training_optimizer_state import validate_adamw_state
+from .training_optimizer_state import (
+    validate_adamw_state,
+    validate_serialized_adamw_state,
+)
 
 
 def bounded_checkpoint_load(path: Path, max_bytes: int):
@@ -198,6 +201,9 @@ def load_checkpoint(
     )
     restored = True
     try:
+        validate_serialized_adamw_state(
+            model, optimizer, payload["optimizer"], step=payload["step"]
+        )
         model.load_state_dict(payload["model"], strict=True)
         if gpt2_model_fingerprint(model) != payload["model_sha256"]:
             raise ValueError("checkpoint model fingerprint does not match")
