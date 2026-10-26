@@ -3,6 +3,10 @@
 This lab trains the existing 7,536-parameter GPT-2 decoder in real, separate
 CPU/Gloo processes. It supports deterministic global batches, checkpoint recovery,
 document-isolated evaluation, cached inference, and a bounded loopback server.
+Distributed evaluation agrees on local scoring success before reducing totals,
+including ranks with no documents. Local forward/likelihood failures reject on
+every rank and leave an intact process group available for a corrected evaluation;
+this does not recover a failed transport or interrupted training reducer.
 The checked protocol is `config/ddp-lab.json`; it uses the public CC0 fixture
 `data/day-19-demo-names.txt`, bound to its SHA-256 and an immutable repository URL.
 

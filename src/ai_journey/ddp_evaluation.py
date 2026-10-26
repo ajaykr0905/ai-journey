@@ -128,15 +128,26 @@ def evaluate_documents(model, documents, *, batch_size: int = 4) -> dict:
 
 def evaluate_distributed(model, documents, topology, *, batch_size: int = 4) -> dict:
     """Partition whole documents without padding or duplicating validation targets."""
-    from .ddp_runtime import reduce_token_totals, require_model_consensus
+    from .ddp_runtime import (
+        reduce_token_totals,
+        require_model_consensus,
+        require_all_ranks,
+    )
 
     require_model_consensus(model)
-    local = tuple(documents)[topology.rank :: topology.world_size]
-    result = (
-        evaluate_documents(model, local, batch_size=batch_size)
-        if local
-        else {"loss_sum": 0.0, "tokens": 0}
-    )
+    result, valid = None, True
+    try:
+        local = tuple(documents)[topology.rank :: topology.world_size]
+        result = (
+            evaluate_documents(model, local, batch_size=batch_size)
+            if local
+            else {"loss_sum": 0.0, "tokens": 0}
+        )
+    except (ValueError, TypeError, RuntimeError, OverflowError, FloatingPointError):
+        valid = False
+    # This phase precedes *every* token reduction, including ranks with no local
+    # documents. A local forward/metric error is not a broken process group.
+    require_all_ranks(valid, phase="document evaluation")
     loss_sum, tokens, mean = reduce_token_totals(result["loss_sum"], result["tokens"])
     return {
         "loss_sum": loss_sum,
