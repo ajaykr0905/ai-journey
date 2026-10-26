@@ -6,7 +6,6 @@ from hashlib import sha256
 import os
 from pathlib import Path
 import tempfile
-import stat
 import zipfile
 import pickle
 import math
@@ -15,6 +14,7 @@ import torch
 import torch.distributed as dist
 
 from .ddp_contracts import integer
+from .checkpoint_archive import load_checkpoint_archive
 from .ddp_runtime import (
     require_all_ranks,
     require_model_consensus,
@@ -27,21 +27,7 @@ from .training_models import model_config_mapping
 def bounded_checkpoint_load(path: Path, max_bytes: int):
     """Bound both archive bytes and expanded tensor storage before deserialization."""
     integer(max_bytes, "max_bytes", 1)
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    with os.fdopen(descriptor, "rb") as stream:
-        info = os.fstat(stream.fileno())
-        if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= max_bytes:
-            raise ValueError("checkpoint exceeds file budget")
-        with zipfile.ZipFile(stream) as archive:
-            records = archive.infolist()
-            if (
-                len(records) > 1024
-                or sum(record.file_size for record in records) > max_bytes
-                or any(record.compress_type != zipfile.ZIP_STORED for record in records)
-            ):
-                raise ValueError("checkpoint exceeds expanded storage budget")
-        stream.seek(0)
-        return torch.load(stream, map_location="cpu", weights_only=True)
+    return load_checkpoint_archive(path, max_bytes=max_bytes)
 
 
 def validate_optimizer_state(model, optimizer, *, step: int):

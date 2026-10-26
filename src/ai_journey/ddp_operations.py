@@ -60,6 +60,8 @@ def add_commands(commands):
         if name == "serve":
             command.add_argument("--port", type=int, default=8080)
             command.add_argument("--max-seconds", type=int, default=60)
+            command.add_argument("--max-connections", type=int, default=8)
+            command.add_argument("--drain-seconds", type=int, default=10)
         else:
             command.add_argument("--output", type=Path, required=True)
             command.add_argument("--repeats", type=int, default=5)
@@ -112,8 +114,17 @@ def run_operation(arguments):
             return report
         if not 0 <= arguments.port <= 65535 or not 1 <= arguments.max_seconds <= 3600:
             raise ValueError("server port or lifetime exceeds lab limits")
-        server = make_server(service, port=arguments.port)
-        timer = threading.Timer(arguments.max_seconds, server.shutdown)
+        if not 0 <= arguments.drain_seconds <= 60:
+            raise ValueError("drain timeout exceeds lab limits")
+        server = make_server(
+            service, port=arguments.port, max_connections=arguments.max_connections
+        )
+
+        def stop():
+            service.drain(timeout_seconds=arguments.drain_seconds)
+            server.shutdown()
+
+        timer = threading.Timer(arguments.max_seconds, stop)
         timer.start()
         print(
             json.dumps(
@@ -128,7 +139,8 @@ def run_operation(arguments):
             server.serve_forever(poll_interval=0.05)
         finally:
             timer.cancel()
-            timer.join(timeout=2)
+            service.drain(timeout_seconds=arguments.drain_seconds)
+            timer.join(timeout=arguments.drain_seconds + 2)
             server.server_close()
         return service.health()
     finally:

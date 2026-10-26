@@ -51,6 +51,7 @@ def filter_logits(logits: torch.Tensor, config: SamplingConfig) -> torch.Tensor:
         raise ValueError("each logit row requires at least one finite value")
     values = logits.double().clone()
     if config.temperature > 0:
+        values -= values.amax(dim=-1, keepdim=True)
         values /= config.temperature
     order = torch.argsort(values, dim=-1, descending=True, stable=True)
     ranked = values.gather(1, order)

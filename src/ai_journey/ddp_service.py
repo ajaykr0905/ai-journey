@@ -15,6 +15,7 @@ from .ddp_contracts import integer
 from .ddp_generation import SamplingConfig, generate_tokens
 from .gpt2_training import gpt2_model_fingerprint
 from .training_models import base_model_config
+from .serving_metrics import ServingMetrics
 
 
 class AdmissionRejected(RuntimeError):
@@ -145,6 +146,7 @@ class GenerationService:
         self._responses = OrderedDict()
         self._cache_capacity = cache_capacity
         self._admission = admission if admission is not None else TokenBucket()
+        self.metrics = ServingMetrics()
 
     @contextmanager
     def _admitted_request(self):
@@ -182,6 +184,50 @@ class GenerationService:
         deadline=None,
         on_token=None,
     ) -> dict:
+        started = time.perf_counter()
+        observation = {"tokens": 0, "cached": False}
+        outcome = "error"
+
+        def observe(index, token):
+            observation["tokens"] += 1
+            if on_token is not None:
+                on_token(index, token)
+
+        try:
+            if on_token is not None and not callable(on_token):
+                raise TypeError("on_token must be callable")
+            output = self._generate(
+                request,
+                cancelled=cancelled,
+                deadline=deadline,
+                on_token=observe,
+                observation=observation,
+            )
+            outcome = {
+                "cancelled": "cancelled",
+                "deadline": "deadline",
+            }.get(output["finish_reason"], "success")
+            return output
+        except (AdmissionRejected, ServiceDraining, ValueError, TypeError):
+            outcome = "rejected"
+            raise
+        finally:
+            self.metrics.record(
+                outcome=outcome,
+                duration_seconds=time.perf_counter() - started,
+                generated_tokens=observation["tokens"],
+                cached=observation["cached"],
+            )
+
+    def _generate(
+        self,
+        request: GenerationRequest,
+        *,
+        cancelled=None,
+        deadline=None,
+        on_token=None,
+        observation=None,
+    ) -> dict:
         if not isinstance(request, GenerationRequest):
             raise TypeError("request must be GenerationRequest")
         if cancelled is not None and not callable(cancelled):
@@ -208,6 +254,7 @@ class GenerationService:
                 if previous_fingerprint != fingerprint:
                     raise ValueError("request_id was already used with different input")
                 self._responses.move_to_end(request.request_id)
+                observation["cached"] = True
                 response = copy.deepcopy(previous_output)
                 response["tokens"] = []
                 for index, token in enumerate(previous_output["tokens"]):
