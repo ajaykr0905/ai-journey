@@ -20,6 +20,8 @@ from ai_journey.gpt2_training_evidence import (
     build_training_evidence,
     verify_training_replay,
 )
+from ai_journey.training_artifact import load_training_model_checkpoint
+from ai_journey.training_models import training_model_fingerprint
 
 
 def modern_spec(norm="rmsnorm", mlp="swiglu", position="rope"):
@@ -91,3 +93,49 @@ def test_checkpoint_rejects_different_rotary_contract_with_identical_shapes(tmp_
     with pytest.raises(ValueError, match="model configuration"):
         run_training_experiment(source, changed, checkpoint_path=path, resume=True)
     assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("modern", [False, True])
+def test_verified_checkpoint_becomes_frozen_inference_model_without_rng_effects(
+    tmp_path, modern
+):
+    source, spec = modern_spec()
+    if not modern:
+        spec = replace(spec, model=spec.model.gpt2)
+    path = tmp_path / "state.pt"
+    run = run_training_experiment(source, spec, checkpoint_path=path)
+    rng = torch.get_rng_state().clone()
+    model = load_training_model_checkpoint(path, spec=spec, source=source)
+    assert torch.equal(torch.get_rng_state(), rng)
+    assert training_model_fingerprint(model) == run.final_model_fingerprint
+    assert not any(module.training for module in model.modules())
+    assert not any(parameter.requires_grad for parameter in model.parameters())
+    assert model.lm_head.weight is model.wte.weight
+    with torch.inference_mode():
+        assert torch.isfinite(model(torch.tensor([[1, 2, 3]]))).all()
+
+
+def test_inference_loader_rejects_wrong_source_before_allocation(tmp_path, monkeypatch):
+    source, spec = modern_spec()
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("allocation must not occur")
+
+    monkeypatch.setattr("ai_journey.training_artifact.build_training_model", unexpected)
+    with pytest.raises(ValueError, match="source bytes"):
+        load_training_model_checkpoint(
+            tmp_path / "absent.pt", spec=spec, source=source + b"changed"
+        )
+
+
+def test_inference_loader_checks_optimizer_integrity_and_restores_caller_rng(tmp_path):
+    source, spec = modern_spec()
+    path = tmp_path / "state.pt"
+    run_training_experiment(source, spec, checkpoint_path=path)
+    payload = torch.load(path, weights_only=True)
+    next(iter(payload["optimizer_state"]["state"].values()))["step"].zero_()
+    torch.save(payload, path)
+    rng = torch.get_rng_state().clone()
+    with pytest.raises(ValueError, match="AdamW"):
+        load_training_model_checkpoint(path, spec=spec, source=source)
+    assert torch.equal(torch.get_rng_state(), rng)
