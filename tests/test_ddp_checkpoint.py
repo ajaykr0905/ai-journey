@@ -1,5 +1,8 @@
+import copy
+
 import pytest
 import torch
+from ai_journey.ddp_acceptance import exact_state
 from ai_journey.ddp_checkpoint import save_checkpoint
 from ai_journey.ddp_checkpoint import load_checkpoint
 from ai_journey.ddp_checkpoint import bounded_checkpoint_load
@@ -172,3 +175,137 @@ def test_distributed_checkpoint_duplicate_archive_members_reject_before_loading(
     monkeypatch.setattr(torch, "load", unexpected)
     with pytest.raises(ValueError, match="expanded storage"):
         bounded_checkpoint_load(path, 1024)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("capturable", True),
+        ("capturable", 0),
+        ("capturable", None),
+        ("differentiable", True),
+        ("differentiable", 0),
+        ("differentiable", None),
+        ("foreach", True),
+        ("foreach", False),
+        ("foreach", 0),
+        ("fused", True),
+        ("fused", False),
+        ("fused", 0),
+        ("amsgrad", 1),
+        ("betas", ("0.9", 0.999)),
+        ("betas", (True, 0.999)),
+    ],
+)
+def test_unsupported_cpu_optimizer_controls_reject_and_restore_caller_state(
+    tmp_path, name, value
+):
+    model, optimizer, config = setup_state()
+    for parameter in model.parameters():
+        parameter.grad = torch.ones_like(parameter)
+    optimizer.step()
+    path = tmp_path / "state.pt"
+    with process_group(Topology(0, 1), rendezvous=(tmp_path / "rdzv").as_uri()):
+        save_checkpoint(
+            path,
+            model=model,
+            optimizer=optimizer,
+            config=config,
+            source=b"public",
+            step=1,
+        )
+        payload = torch.load(path, weights_only=True)
+        payload["optimizer"]["param_groups"][0][name] = value
+        torch.save(payload, path)
+        checkpoint_bytes = path.read_bytes()
+        with torch.no_grad():
+            model.wte.weight.add_(1)
+        optimizer.param_groups[0]["lr"] = 0.003
+        optimizer.state[model.wte.weight]["exp_avg"].add_(0.25)
+        torch.rand(7)
+        before_model = copy.deepcopy(model.state_dict())
+        before_optimizer = copy.deepcopy(optimizer.state_dict())
+        before_rng = torch.get_rng_state().clone()
+
+        with pytest.raises(RuntimeError, match="checkpoint restoration"):
+            load_checkpoint(
+                path, model=model, optimizer=optimizer, config=config, source=b"public"
+            )
+
+        assert exact_state(model.state_dict(), before_model)
+        assert exact_state(optimizer.state_dict(), before_optimizer)
+        assert torch.equal(torch.get_rng_state(), before_rng)
+        assert path.read_bytes() == checkpoint_bytes
+
+
+def test_admitted_cpu_optimizer_checkpoint_resumes_a_real_update(tmp_path):
+    model, optimizer, config = setup_state()
+    for parameter in model.parameters():
+        parameter.grad = torch.ones_like(parameter)
+    optimizer.step()
+    original_model = copy.deepcopy(model.state_dict())
+    original_optimizer = copy.deepcopy(optimizer.state_dict())
+    original_rng = torch.get_rng_state().clone()
+    path = tmp_path / "state.pt"
+    with process_group(Topology(0, 1), rendezvous=(tmp_path / "rdzv").as_uri()):
+        save_checkpoint(
+            path,
+            model=model,
+            optimizer=optimizer,
+            config=config,
+            source=b"public",
+            step=1,
+        )
+        with torch.no_grad():
+            model.wte.weight.add_(1)
+        optimizer.param_groups[0]["lr"] = 0.003
+        torch.rand(7)
+        assert (
+            load_checkpoint(
+                path, model=model, optimizer=optimizer, config=config, source=b"public"
+            )
+            == 1
+        )
+        assert exact_state(model.state_dict(), original_model)
+        assert exact_state(optimizer.state_dict(), original_optimizer)
+        assert torch.equal(torch.get_rng_state(), original_rng)
+        for parameter in model.parameters():
+            parameter.grad = torch.ones_like(parameter)
+        optimizer.step()
+        assert all(state["step"].item() == 2 for state in optimizer.state.values())
+        assert not exact_state(model.state_dict(), original_model)
+        save_checkpoint(
+            path,
+            model=model,
+            optimizer=optimizer,
+            config=config,
+            source=b"public",
+            step=2,
+        )
+
+
+def test_nonfinite_model_cannot_replace_an_admitted_checkpoint(tmp_path):
+    model, optimizer, config = setup_state()
+    path = tmp_path / "state.pt"
+    with process_group(Topology(0, 1), rendezvous=(tmp_path / "rdzv").as_uri()):
+        save_checkpoint(
+            path,
+            model=model,
+            optimizer=optimizer,
+            config=config,
+            source=b"public",
+            step=0,
+        )
+        previous = path.read_bytes()
+        with torch.no_grad():
+            model.wte.weight.fill_(float("nan"))
+        with pytest.raises(RuntimeError, match="checkpoint state validation"):
+            save_checkpoint(
+                path,
+                model=model,
+                optimizer=optimizer,
+                config=config,
+                source=b"public",
+                step=0,
+            )
+        assert path.read_bytes() == previous
