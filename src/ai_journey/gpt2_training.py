@@ -565,6 +565,29 @@ def _validate_optimizer_contract(
             raise GPT2TrainingError("AdamW controls do not match the training contract")
 
 
+def _validate_cursor_progress(
+    cursor: GPT2BatchCursor, config: GPT2TrainingConfig, *, step: int
+) -> None:
+    """Require the durable sampler boundary implied by completed optimizer steps."""
+    if (
+        cursor.sequence_length != config.sequence_length
+        or cursor.batch_size != config.micro_batch_size
+        or cursor.seed != config.seed
+    ):
+        raise GPT2TrainingError("checkpoint cursor controls do not match training")
+    consumed = step * config.accumulation_steps
+    batches_per_epoch = cursor.usable_samples // cursor.batch_size
+    if consumed:
+        epoch, batch_offset = divmod(consumed - 1, batches_per_epoch)
+        expected = {"epoch": epoch, "offset": (batch_offset + 1) * cursor.batch_size}
+    else:
+        expected = {"epoch": 0, "offset": 0}
+    if cursor.state_dict() != expected:
+        raise GPT2TrainingError(
+            "checkpoint cursor progress does not match its optimizer step"
+        )
+
+
 def _gradient_norm(parameters: tuple[Tensor, ...]) -> float:
     total = math.fsum(
         float(parameter.grad.detach().double().pow(2).sum()) for parameter in parameters
@@ -731,6 +754,7 @@ def save_training_checkpoint(
         raise GPT2TrainingError("corpus_fingerprint must be a SHA-256 digest")
     _validate_optimizer_binding(model, optimizer)
     _validate_optimizer_contract(model, optimizer, config, step=step)
+    _validate_cursor_progress(cursor, config, step=step)
     payload = {
         "schema_version": GPT2_TRAINING_CHECKPOINT_SCHEMA_VERSION,
         "step": step,
@@ -849,6 +873,7 @@ def load_training_checkpoint(
         model.load_state_dict(payload["model_state"], strict=True)
         optimizer.load_state_dict(payload["optimizer_state"])
         cursor.load_state_dict(payload["cursor_state"])
+        _validate_cursor_progress(cursor, config, step=step)
         torch.set_rng_state(rng_state)
         _validate_optimizer_binding(model, optimizer)
         _validate_optimizer_contract(model, optimizer, config, step=step)

@@ -153,3 +153,64 @@ def test_live_optimizer_control_drift_cannot_publish(restart_state):
     with pytest.raises(ValueError, match="AdamW controls"):
         save_training_checkpoint(path, step=1, **kwargs)
     assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "state",
+    [{"epoch": 0, "offset": 0}, {"epoch": 0, "offset": 2}, {"epoch": 1, "offset": 1}],
+)
+def test_valid_but_inconsistent_cursor_boundary_is_rejected(restart_state, state):
+    path, kwargs = restart_state
+    payload = torch.load(path, weights_only=True)
+    payload["cursor_state"] = state
+    torch.save(payload, path)
+    original = kwargs["cursor"].state_dict()
+    with pytest.raises(ValueError, match="cursor progress"):
+        load_training_checkpoint(path, **kwargs)
+    assert kwargs["cursor"].state_dict() == original
+
+
+def test_live_cursor_drift_cannot_replace_recoverable_checkpoint(restart_state):
+    path, kwargs = restart_state
+    original = path.read_bytes()
+    kwargs["cursor"].next()
+    with pytest.raises(ValueError, match="cursor progress"):
+        save_training_checkpoint(path, step=1, **kwargs)
+    assert path.read_bytes() == original
+
+
+def test_restart_reproduces_sampler_across_multiple_epoch_boundaries(tmp_path):
+    from ai_journey.gpt2_training import train_optimizer_steps
+
+    model = GPT2LanguageModel(
+        GPT2Config(
+            256,
+            4,
+            8,
+            2,
+            1,
+            embedding_dropout=0,
+            attention_dropout=0,
+            residual_dropout=0,
+        )
+    )
+    config = GPT2TrainingConfig(4, 2, 3, 4, 0.01, 0.001, 0, 0.1, 1.0, 52)
+    corpus = GPT2ByteCorpus.from_bytes(b"abcdefghijkl")
+    cursor = GPT2BatchCursor(corpus, config)
+    optimizer = build_gpt2_optimizer(model, config)
+    train_optimizer_steps(model, cursor, optimizer, config, step_count=3)
+    path = tmp_path / "epochs.pt"
+    kwargs = dict(
+        model=model,
+        optimizer=optimizer,
+        cursor=cursor,
+        config=config,
+        corpus_fingerprint=corpus.fingerprint(),
+    )
+    save_training_checkpoint(path, step=3, **kwargs)
+    expected = cursor.next()
+    assert load_training_checkpoint(path, **kwargs) == 3
+    actual = cursor.next()
+    assert all(
+        torch.equal(left, right) for left, right in zip(expected, actual, strict=True)
+    )
