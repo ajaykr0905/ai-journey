@@ -293,10 +293,9 @@ def records_from_dataset_server(source: bytes) -> tuple[HellaSwagRecord, ...]:
         raise TypeError("dataset response must be bytes")
     if not 0 < len(source) <= 2 * 1024 * 1024:
         raise HellaSwagError("dataset response exceeds the input budget")
-    try:
-        payload = json.loads(source)
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise HellaSwagError("dataset response must be valid UTF-8 JSON") from error
+    from .hellaswag_io import parse_evaluation_json
+
+    payload = parse_evaluation_json(source, name="dataset response")
     required = {"dataset", "config", "split", "features", "rows", "truncated"}
     if (
         not isinstance(payload, dict)

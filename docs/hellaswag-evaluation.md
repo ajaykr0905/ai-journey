@@ -54,6 +54,13 @@ contract, unique parameter count, actual CPU parameter dtype and PyTorch thread
 count. Initial models retain FP64 evaluation; local checkpoints retain their
 verified FP32 weights. Existing schema-1 evaluation evidence remains readable.
 
+File inputs use bounded regular-file descriptors: dataset responses are limited
+to 2 MiB, protocols to 128 KiB, source bytes to 16 MiB, and saved evidence to
+16 MiB. Symlinks, FIFOs, duplicate JSON keys, nonfinite JSON values, and outputs
+aliasing an input are rejected. Evidence verification also checks completion-only
+token totals, predicted endings, correctness, probabilities, confidence, selected
+row identities and model accounting after its digest is checked.
+
 Compare two sealed reports only when they cover the same protocol rows:
 
 ```bash

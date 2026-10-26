@@ -12,24 +12,19 @@ from .gpt2_training import load_training_spec
 from .hellaswag import HellaSwagError, HellaSwagProtocol, compare_evaluations
 from .hellaswag import run_evaluation, seal_evidence
 from .hellaswag_evidence import read_evidence, write_evidence
+from .hellaswag_io import (
+    read_evaluation_bytes,
+    parse_evaluation_json,
+    validate_evaluation_output,
+)
 from .training_artifact import load_training_model_checkpoint
 from .training_models import build_training_model, expected_training_parameters
 
 
 def _read_json(path: Path, *, maximum: int) -> dict:
-    if (
-        path.is_symlink()
-        or not path.is_file()
-        or not 0 < path.stat().st_size <= maximum
-    ):
-        raise HellaSwagError(f"{path.name} exceeds the file constraints")
-    try:
-        payload = json.loads(path.read_bytes())
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise HellaSwagError(f"{path.name} must be valid UTF-8 JSON") from error
-    if not isinstance(payload, dict):
-        raise HellaSwagError(f"{path.name} must contain a JSON object")
-    return payload
+    return parse_evaluation_json(
+        read_evaluation_bytes(path, maximum=maximum, name=path.name), name=path.name
+    )
 
 
 def _load_model(
@@ -40,7 +35,9 @@ def _load_model(
     checkpoint_format: str = "distributed",
 ):
     spec = load_training_spec(spec_path)
-    source_bytes = source.read_bytes()
+    source_bytes = read_evaluation_bytes(
+        source, maximum=16 * 1024 * 1024, name="training source"
+    )
     if sha256(source_bytes).hexdigest() != spec.source.sha256:
         raise HellaSwagError("model source does not match the training specification")
     if expected_training_parameters(spec.model) > 1_000_000:
@@ -105,10 +102,23 @@ def main(argv=None) -> int:
         if arguments.command == "verify":
             evidence = read_evidence(arguments.report)
         else:
+            inputs = (
+                arguments.dataset_response,
+                arguments.protocol,
+                arguments.source,
+                arguments.spec,
+            )
+            if arguments.checkpoint is not None:
+                inputs += (arguments.checkpoint,)
+            validate_evaluation_output(arguments.output, inputs)
             protocol = HellaSwagProtocol.from_mapping(
                 _read_json(arguments.protocol, maximum=128 * 1024)
             )
-            response = arguments.dataset_response.read_bytes()
+            response = read_evaluation_bytes(
+                arguments.dataset_response,
+                maximum=2 * 1024 * 1024,
+                name="dataset response",
+            )
             model = _load_model(
                 arguments.source,
                 arguments.spec,
