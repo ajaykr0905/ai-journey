@@ -42,9 +42,12 @@ def token_nll(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         raise ValueError("logits must be finite floating point values")
     if targets.numel() == 0 or targets.min() < 0 or targets.max() >= logits.shape[-1]:
         raise ValueError("targets must be nonempty valid vocabulary ids")
-    return torch.nn.functional.cross_entropy(
+    losses = torch.nn.functional.cross_entropy(
         logits.reshape(-1, logits.shape[-1]), targets.reshape(-1), reduction="none"
     ).reshape_as(targets)
+    if not bool(torch.isfinite(losses).all()):
+        raise ValueError("token losses must be finite after cross entropy")
+    return losses
 
 
 def binary_metrics(labels, predictions) -> dict:
