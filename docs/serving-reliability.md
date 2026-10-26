@@ -24,6 +24,12 @@ returns 503 with `Retry-After`. The generation token bucket separately returns
 429. Invalid requests return 400, internal generation failures return a generic
 500, and a failure after streaming begins emits one terminal `error` SSE event.
 Requests have a ten-second generation deadline and a five-second socket timeout.
+An absolute five-second input budget also covers request headers and body;
+trickling bytes cannot renew it. The owned socket's receive side is interrupted
+at expiry, incomplete input cannot enter generation, and a body receive timeout
+returns 408 when response framing is available. `make_server` accepts an explicit
+`receive_timeout_seconds` in `(0, 30]` for bounded local operating checks. This
+timer ends after input receipt and does not shorten an admitted decode deadline.
 The service separately bounds running-plus-waiting generation calls to eight by
 default (`GenerationService(max_inflight_requests=...)`, maximum 64); a full
 inference queue returns 503 with `Retry-After` without charging the token bucket.
