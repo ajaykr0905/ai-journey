@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
 from collections.abc import Sequence
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -131,8 +132,15 @@ def _standard_variants(
 def main(argv: Sequence[str] | None = None) -> int:
     """Compare five decoder arms and create a stable, non-overwriting report."""
 
+    values = list(sys.argv[1:] if argv is None else argv)
+    if values and values[0] in {"plan", "documents"}:
+        from .decoder_variant_document_cli import main as documents_main
+
+        return documents_main(
+            ["run" if values[0] == "documents" else "plan", *values[1:]]
+        )
     parser = _parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(values)
     work_units = (
         args.steps
         * args.batch_size
