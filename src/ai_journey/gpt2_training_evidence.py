@@ -14,6 +14,9 @@ from typing import Any, Mapping
 
 import torch
 
+from .decoder_variant_config import DecoderVariantConfig
+from .gpt2_config import GPT2Config
+from .gqa_config import GQAConfig
 from .training_models import expected_training_parameters
 from .gpt2_training import (
     GPT2StepMetric,
@@ -75,7 +78,7 @@ def _runtime_payload(*, torch_threads: int) -> dict[str, Any]:
 
 
 def build_training_evidence(run: GPT2TrainingRun) -> dict[str, Any]:
-    """Build a complete self-authenticating report from one measured run."""
+    """Build an internally consistent report from one measured run, not an attestation."""
 
     if not isinstance(run, GPT2TrainingRun):
         raise TypeError("run must be GPT2TrainingRun")
@@ -114,6 +117,89 @@ def build_training_evidence(run: GPT2TrainingRun) -> dict[str, Any]:
 def _require_digest(value: Any, name: str) -> None:
     if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
         raise GPT2TrainingError(f"{name} must be a SHA-256 digest")
+
+
+def _dense_parameter_shapes(config, *, name_count: int) -> dict[str, tuple[int, ...]]:
+    """Enumerate unique dense parameters without tensor or model construction.
+
+    Work is bounded by the submitted name count before iterating decoder layers.
+    The tied head is not a second parameter and RoPE buffers are not weights.
+    """
+    prefix = ""
+    kv_heads = None
+    if type(config) is GQAConfig:
+        prefix, kv_heads = "decoder.", config.kv_heads
+        config = config.decoder
+    if type(config) is GPT2Config:
+        base, norm, mlp, position = config, "layernorm", "gelu", "learned"
+        variant = False
+        hidden = 4 * base.embedding_dim
+    elif type(config) is DecoderVariantConfig:
+        variant = True
+        base, norm, mlp, position = (
+            config.gpt2,
+            config.norm_kind,
+            config.mlp_kind,
+            config.position_kind,
+        )
+        hidden = (
+            config.resolved_swiglu_hidden_dim
+            if mlp == "swiglu"
+            else 4 * base.embedding_dim
+        )
+    else:
+        raise GPT2TrainingError(
+            "optimizer evidence requires an explicit dense architecture"
+        )
+    norm_tensors = 2 if norm == "layernorm" else 1
+    tensor_count = (
+        1
+        + (position == "learned")
+        + norm_tensors
+        + base.layer_count * (2 * norm_tensors + 4 + (3 if mlp == "swiglu" else 4))
+    )
+    if tensor_count != name_count:
+        raise GPT2TrainingError(
+            "training evidence optimizer names differ from architecture"
+        )
+    width = base.embedding_dim
+    qkv_width = 3 * width if kv_heads is None else width + 2 * kv_heads * base.head_dim
+    shapes = {}
+
+    def add(name, shape):
+        shapes[f"{prefix}{name}"] = shape
+
+    def add_norm(name):
+        add(f"{name}.weight", (width,))
+        if norm == "layernorm":
+            add(f"{name}.bias", (width,))
+
+    def linear(name, output, inputs, *, bias=True):
+        add(f"{name}.weight", (output, inputs))
+        if bias:
+            add(f"{name}.bias", (output,))
+
+    add("wte.weight", (base.vocab_size, width))
+    if position == "learned":
+        add("wpe.weight", (base.context_length, width))
+    for index in range(base.layer_count):
+        block = f"h.{index}"
+        add_norm(f"{block}.ln_1")
+        if variant:
+            add_norm(f"{block}.ln_2")
+        linear(f"{block}.attn.c_attn", qkv_width, width)
+        linear(f"{block}.attn.c_proj", width, width)
+        if not variant:
+            add_norm(f"{block}.ln_2")
+        if mlp == "swiglu":
+            linear(f"{block}.mlp.0.gate_proj", hidden, width, bias=False)
+            linear(f"{block}.mlp.0.up_proj", hidden, width, bias=False)
+            linear(f"{block}.mlp.0.down_proj", width, hidden, bias=False)
+        else:
+            linear(f"{block}.mlp.c_fc", hidden, width)
+            linear(f"{block}.mlp.c_proj", width, hidden)
+    add_norm("ln_f")
+    return shapes
 
 
 def verify_training_evidence(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -159,6 +245,10 @@ def verify_training_evidence(payload: Mapping[str, Any]) -> dict[str, Any]:
         "no_decay_parameters",
     }:
         raise GPT2TrainingError("training evidence optimizer groups are invalid")
+    if any(
+        type(groups[name]) is not list for name in ("decay_names", "no_decay_names")
+    ):
+        raise GPT2TrainingError("training evidence optimizer names must be lists")
     names = [*groups["decay_names"], *groups["no_decay_names"]]
     if (
         any(not isinstance(name, str) or not name for name in names)
@@ -171,6 +261,21 @@ def verify_training_evidence(payload: Mapping[str, Any]) -> dict[str, Any]:
         )
     ):
         raise GPT2TrainingError("training evidence optimizer accounting is invalid")
+    shapes = _dense_parameter_shapes(spec.model, name_count=len(names))
+    for group, matrix in (("decay", True), ("no_decay", False)):
+        expected = [
+            name for name, shape in shapes.items() if (len(shape) >= 2) == matrix
+        ]
+        if groups[f"{group}_names"] != expected:
+            raise GPT2TrainingError(
+                "training evidence optimizer names differ from architecture"
+            )
+        if groups[f"{group}_parameters"] != sum(
+            math.prod(shapes[name]) for name in expected
+        ):
+            raise GPT2TrainingError(
+                "training evidence optimizer parameter count differs from architecture"
+            )
     parameter_count = payload["parameter_count"]
     if (
         isinstance(parameter_count, bool)
