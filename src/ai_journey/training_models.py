@@ -11,9 +11,11 @@ from .decoder_variant_model import DecoderVariantModel
 from .decoder_variant_resources import expected_decoder_variant_parameter_count
 from .gpt2_config import GPT2Config
 from .gpt2_model import GPT2LanguageModel, expected_gpt2_parameter_count
+from .moe_config import MoEConfig, expected_moe_parameter_count, moe_config_from_mapping
+from .moe_model import MoEDecoderModel
 
-TrainingModelConfig = GPT2Config | DecoderVariantConfig
-TrainingModel = GPT2LanguageModel | DecoderVariantModel
+TrainingModelConfig = GPT2Config | DecoderVariantConfig | MoEConfig
+TrainingModel = GPT2LanguageModel | DecoderVariantModel | MoEDecoderModel
 
 # Parameter counts do not bound nonpersistent T-by-T causal masks or the number
 # of Python decoder blocks. Keep these construction costs bounded independently.
@@ -33,6 +35,8 @@ def base_model_config(value: TrainingModelConfig | TrainingModel) -> GPT2Config:
 
 
 def expected_training_parameters(config: TrainingModelConfig) -> int:
+    if isinstance(config, MoEConfig):
+        return expected_moe_parameter_count(config)
     if isinstance(config, DecoderVariantConfig):
         return expected_decoder_variant_parameter_count(config)
     return expected_gpt2_parameter_count(config)
@@ -59,6 +63,8 @@ def build_training_model(
         raise ValueError(
             f"CPU attention-mask construction requires {peak_attention_bytes} bytes, exceeding the {MAX_CPU_ATTENTION_MASK_BYTES}-byte budget"
         )
+    if isinstance(config, MoEConfig):
+        return MoEDecoderModel(config)
     return (
         DecoderVariantModel(config)
         if isinstance(config, DecoderVariantConfig)
@@ -69,6 +75,8 @@ def build_training_model(
 def model_config_mapping(config: TrainingModelConfig) -> dict:
     """Retain legacy GPT-2 mappings and explicitly tag modern architecture choices."""
     base_model_config(config)
+    if isinstance(config, MoEConfig):
+        return {"kind": "moe_decoder", "config": config.to_mapping()}
     if isinstance(config, DecoderVariantConfig):
         return {"kind": "decoder_variant", "config": asdict(config)}
     return asdict(config)
@@ -88,6 +96,8 @@ def model_config_from_mapping(payload: Mapping) -> TrainingModelConfig:
         raise ValueError("model configuration must be a mapping")
     if "kind" not in payload:
         return _base_from_mapping(payload)
+    if set(payload) == {"kind", "config"} and payload["kind"] == "moe_decoder":
+        return moe_config_from_mapping(payload["config"])
     if set(payload) != {"kind", "config"} or payload["kind"] != "decoder_variant":
         raise ValueError("unsupported model architecture contract")
     values = payload["config"]
@@ -105,7 +115,10 @@ def training_model_fingerprint(model: TrainingModel) -> str:
     if not isinstance(model, (GPT2LanguageModel, DecoderVariantModel)):
         raise TypeError("model must be GPT2LanguageModel or DecoderVariantModel")
     digest = sha256()
-    if isinstance(model, DecoderVariantModel):
+    if isinstance(model, MoEDecoderModel):
+        digest.update(b"moe-decoder-v1\0")
+        digest.update(model.config.fingerprint().encode())
+    elif isinstance(model, DecoderVariantModel):
         digest.update(b"decoder-variant-v1\0")
         digest.update(model.config.fingerprint().encode())
     for name, tensor in sorted(model.state_dict().items()):

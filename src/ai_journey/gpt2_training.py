@@ -22,6 +22,8 @@ from torch.nn import functional as F
 from .gpt2_config import GPT2Config
 from .gpt2_model import GPT2LanguageModel
 from .decoder_variant_config import DecoderVariantConfig
+from .moe_config import MoEConfig
+from .moe_model import MoEDecoderModel
 from .decoder_variant_model import DecoderVariantModel
 from .training_models import (
     TrainingModel,
@@ -120,6 +122,10 @@ class GPT2TrainingSpec:
     def __post_init__(self) -> None:
         if not isinstance(self.model, (GPT2Config, DecoderVariantConfig)):
             raise TypeError("model must be GPT2Config or DecoderVariantConfig")
+        if isinstance(self.model, MoEConfig):
+            raise GPT2TrainingError(
+                "MoE training requires its explicit auxiliary objective"
+            )
         if not isinstance(self.training, GPT2TrainingConfig):
             raise TypeError("training must be GPT2TrainingConfig")
         if not isinstance(self.source, GPT2TrainingSource):
@@ -496,6 +502,10 @@ def language_model_loss(
 ) -> Tensor:
     """Calculate finite mean next-token loss for one validated micro-batch."""
 
+    if isinstance(model, MoEDecoderModel):
+        raise GPT2TrainingError(
+            "MoE training requires its explicit auxiliary objective"
+        )
     if not isinstance(model, (GPT2LanguageModel, DecoderVariantModel)):
         raise TypeError("model must be GPT2LanguageModel or DecoderVariantModel")
     base = base_model_config(model)
