@@ -3,6 +3,7 @@
 from dataclasses import asdict
 import copy
 from hashlib import sha256
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -35,6 +36,30 @@ def validate_optimizer_state(model, optimizer, *, step: int):
     if any(not torch.isfinite(parameter).all() for parameter in model.parameters()):
         raise ValueError("checkpoint model contains nonfinite values")
     validate_adamw_state(model, optimizer, step=step)
+
+
+def _exact_contract(actual, expected) -> bool:
+    """Do not let Python's bool/int/float aliases change a restart contract."""
+    return json.dumps(actual, sort_keys=True, allow_nan=False) == json.dumps(
+        expected, sort_keys=True, allow_nan=False
+    )
+
+
+def _validate_model_schema(state, model) -> None:
+    expected = model.state_dict()
+    if not isinstance(state, dict) or set(state) != set(expected):
+        raise ValueError("checkpoint model fields do not match")
+    for name, value in state.items():
+        target = expected[name]
+        if (
+            not isinstance(value, torch.Tensor)
+            or value.layout != torch.strided
+            or value.shape != target.shape
+            or value.dtype != target.dtype
+            or value.device != target.device
+            or not bool(torch.isfinite(value).all())
+        ):
+            raise ValueError("checkpoint model tensor schema does not match")
 
 
 def save_checkpoint(
@@ -137,11 +162,14 @@ def load_checkpoint(
         ):
             raise ValueError("checkpoint schema does not match")
         integer(payload["step"], "step")
+        integer(payload["world_size"], "world_size", 1)
         if (
             payload["step"] > config.optimizer_steps
             or payload["world_size"] != dist.get_world_size()
-            or payload["model_config"] != model_config_mapping(model.config)
-            or payload["training_config"] != asdict(config)
+            or not _exact_contract(
+                payload["model_config"], model_config_mapping(model.config)
+            )
+            or not _exact_contract(payload["training_config"], asdict(config))
             or payload["source_sha256"] != sha256(source).hexdigest()
         ):
             raise ValueError("checkpoint run contract does not match")
@@ -150,6 +178,7 @@ def load_checkpoint(
             or len(payload["rank_rngs"]) != dist.get_world_size()
         ):
             raise ValueError("rank RNG states do not match world size")
+        _validate_model_schema(payload["model"], model)
     except (
         OSError,
         ValueError,
