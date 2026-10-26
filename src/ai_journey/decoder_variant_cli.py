@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import json
 import math
+import sys
 from collections.abc import Sequence
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -12,11 +12,12 @@ from pathlib import Path
 import torch
 
 from .decoder_variant_config import DecoderVariantConfig
+from .decoder_variant_budget import MAX_WORK_UNITS, require_comparison_budget
 from .decoder_variant_experiment import run_variant_comparison
+from .decoder_variant_report_io import write_new_report
 from .gpt2_config import GPT2Config
 
 MAX_INPUT_BYTES = 1024 * 1024
-MAX_WORK_UNITS = 200_000
 REPORT_SCHEMA_VERSION = 2
 REPORT_SCOPE = "matched-byte experiment; held-out NLL is not a generalization claim"
 
@@ -131,8 +132,16 @@ def _standard_variants(
 def main(argv: Sequence[str] | None = None) -> int:
     """Compare five decoder arms and create a stable, non-overwriting report."""
 
+    values = list(sys.argv[1:] if argv is None else argv)
+    if values and values[0] in {"plan", "documents", "public"}:
+        from .decoder_variant_document_cli import main as documents_main
+
+        command = {"documents": "run", "public": "run-public", "plan": "plan"}[
+            values[0]
+        ]
+        return documents_main([command, *values[1:]])
     parser = _parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(values)
     work_units = (
         args.steps
         * args.batch_size
@@ -158,6 +167,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
         variants = _standard_variants(baseline)
+        require_comparison_budget(
+            baseline.gpt2,
+            steps=args.steps,
+            batch_size=args.batch_size,
+            evaluation_windows=args.evaluation_windows,
+        )
         result = run_variant_comparison(
             train_bytes=_read_bytes(args.train),
             heldout_bytes=_read_bytes(args.heldout),
@@ -178,10 +193,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             evaluation_windows=args.evaluation_windows,
             torch_version=str(torch.__version__),
         )
-        with args.output.open("x", encoding="utf-8") as stream:
-            stream.write(
-                json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n"
-            )
+        write_new_report(args.output, report)
     except (OSError, TypeError, ValueError, FloatingPointError) as exc:
         parser.error(str(exc))
     print(f"report={args.output} device=cpu variants={len(result.variants)}")

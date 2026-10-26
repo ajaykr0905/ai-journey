@@ -14,6 +14,7 @@ from torch.nn import functional as F
 
 from .decoder_variant_config import DecoderVariantConfig
 from .decoder_variant_model import DecoderVariantModel
+from .decoder_variant_runtime import isolated_decoder_runtime
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ class ComparisonResult:
     variants: tuple[VariantResult, ...]
 
 
+@isolated_decoder_runtime()
 def _build_matched_model(
     config: DecoderVariantConfig, seed: int
 ) -> DecoderVariantModel:
@@ -56,7 +58,7 @@ def _build_matched_model(
     """
 
     with torch.random.fork_rng(devices=[]):
-        torch.manual_seed(seed)
+        torch.random.default_generator.manual_seed(seed)
         model = DecoderVariantModel(config).cpu()
         for name, module in model.named_modules():
             if name == "lm_head" or not isinstance(
@@ -64,11 +66,14 @@ def _build_matched_model(
             ):
                 continue
             digest = sha256(seed.to_bytes(8, "big") + b"\0" + name.encode()).digest()
-            torch.manual_seed(int.from_bytes(digest[:8], "big") % (2**63))
+            torch.random.default_generator.manual_seed(
+                int.from_bytes(digest[:8], "big") % (2**63)
+            )
             module.reset_parameters()
     return model
 
 
+@isolated_decoder_runtime()
 def run_variant_comparison(
     *,
     train_bytes: bytes,

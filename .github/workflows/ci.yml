@@ -8,6 +8,49 @@ permissions:
   contents: read
 
 jobs:
+  nvidia-preflight-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU contract and build tools
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check NVIDIA preflight contracts without GPU execution
+        run: |
+          ruff check src/ai_journey/gpu*.py tests/test_gpu*.py
+          ruff format --check src/ai_journey/gpu*.py tests/test_gpu*.py
+          python -m compileall -q src/ai_journey/gpu*.py tests/test_gpu*.py
+          python -m pytest -q tests/test_gpu*.py
+      - name: Build and install isolated wheel
+        run: |
+          python -m build --outdir "$RUNNER_TEMP/nvidia-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/nvidia-installed" "$RUNNER_TEMP"/nvidia-dist/*.whl
+      - name: Run installed probe plan collect and verify integrity smoke
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/nvidia-installed
+        run: |
+          python -m ai_journey.gpu_preflight_readiness --installed-root "$RUNNER_TEMP/nvidia-installed" --resource-config "$GITHUB_WORKSPACE/config/day-51-resource-plan.json" --output-dir "$RUNNER_TEMP/nvidia-evidence" --expect-blocked
+      - name: Retain blocked host and installed-package evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvidia-preflight-cpu-integrity
+          path: |
+            ${{ runner.temp }}/nvidia-evidence/
+            ${{ runner.temp }}/nvidia-dist/
+          if-no-files-found: error
   distributed-cpu-lab:
     runs-on: ubuntu-latest
     timeout-minutes: 15
