@@ -90,6 +90,13 @@ def make_server(service, *, host="127.0.0.1", port=0):
                     )
                 else:
                     self.reply(400, {"error": "invalid generation request"})
+            except (RuntimeError, FloatingPointError):
+                if streaming:
+                    self.wfile.write(
+                        event_frame("error", {"error": "generation failed"})
+                    )
+                else:
+                    self.reply(500, {"error": "generation failed"})
             except (BrokenPipeError, ConnectionResetError, TimeoutError):
                 pass
 
