@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .decoder_variant_cli import _read_bytes
 from .decoder_variant_config import DecoderVariantConfig
-from .decoder_variant_public import PUBLIC_SOURCES
+from .decoder_variant_public import PUBLIC_SOURCES, public_decoder_partitions
 from .decoder_variant_report_io import write_new_report
 from .decoder_variant_verify import _read_report
 from .gpt2_config import GPT2Config
@@ -21,6 +21,12 @@ from .gqa_experiment_public import (
     verify_public_gqa_report,
     replay_public_gqa_report,
 )
+from .gqa_cache_evidence import (
+    run_gqa_cache_evidence,
+    verify_gqa_cache_evidence,
+    replay_gqa_cache_evidence,
+)
+from .moe_report import canonical_moe_json
 
 
 def default_gqa_plan():
@@ -66,13 +72,77 @@ def _parser():
     replay.add_argument("--snapshot", type=Path)
     replay.add_argument("--train", type=Path)
     replay.add_argument("--heldout", type=Path)
+    cache = commands.add_parser(
+        "cache", help="replay training and inspect actual native KV growth"
+    )
+    cache.add_argument("--output", type=Path, required=True)
+    cache.add_argument("--prefix-count", type=int, default=4)
+    cache_replay = commands.add_parser(
+        "cache-replay", help="rerun every cache measurement"
+    )
+    for command in (cache, cache_replay):
+        command.add_argument("--report", type=Path, required=True)
+        command.add_argument("--snapshot", type=Path)
+        command.add_argument("--train", type=Path)
+        command.add_argument("--heldout", type=Path)
+    cache_verify = commands.add_parser(
+        "cache-verify", help="recompute storage and raw logit residuals offline"
+    )
+    cache_verify.add_argument("--report", type=Path, required=True)
     return parser
+
+
+def _cache_inputs(source_report, args):
+    if source_report.get("schema") == PUBLIC_GQA_SCHEMA:
+        verify_public_gqa_report(source_report)
+        if args.snapshot is None or args.train is not None or args.heldout is not None:
+            raise ValueError("public cache evidence requires only --snapshot")
+        evidence = source_report["public_corpus"]
+        train, heldout, actual = public_decoder_partitions(
+            args.snapshot,
+            PUBLIC_SOURCES[source_report["public_source"]],
+            train_documents=evidence["train_documents"],
+            heldout_documents=evidence["heldout_documents"],
+            split_seed=evidence["split_seed"],
+        )
+        if canonical_moe_json(actual) != canonical_moe_json(evidence):
+            raise ValueError(
+                "cache source partitions differ from pinned public snapshot"
+            )
+        return train, heldout
+    if args.snapshot is not None or args.train is None or args.heldout is None:
+        raise ValueError("document cache evidence requires --train and --heldout")
+    return _read_bytes(args.train), _read_bytes(args.heldout)
 
 
 def main(argv=None):
     parser = _parser()
     args = parser.parse_args(argv)
     try:
+        if args.command in {"cache", "cache-verify", "cache-replay"}:
+            if args.command == "cache" and (
+                args.output.exists() or args.output.is_symlink()
+            ):
+                raise ValueError("output already exists; choose a new path")
+            report = _read_report(args.report, max_bytes=16 * 1024 * 1024)
+            if args.command == "cache-verify":
+                verify_gqa_cache_evidence(report)
+                print(f"cache_internally_verified={args.report}")
+            else:
+                source = report if args.command == "cache" else report["source_report"]
+                train, heldout = _cache_inputs(source, args)
+                if args.command == "cache":
+                    measured = run_gqa_cache_evidence(
+                        source, train, heldout, prefix_count=args.prefix_count
+                    )
+                    write_new_report(args.output, measured)
+                    print(
+                        f"cache_report={args.output} observations={len(measured['observations'])}"
+                    )
+                else:
+                    replay_gqa_cache_evidence(report, train, heldout)
+                    print(f"cache_replayed={args.report}")
+            return 0
         if args.command in {"plan", "run", "public"}:
             if args.output.exists() or args.output.is_symlink():
                 raise ValueError("output already exists; choose a new path")

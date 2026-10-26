@@ -43,3 +43,32 @@ Hashes cannot authenticate a measurement or prove the initialization mapping;
 full source replay reruns the actual models and requires exact recorded CPU
 runtime and observations. Seed deltas are descriptive, not population confidence
 or architecture-superiority evidence. Existing MoE/decoder reports are unchanged.
+
+## Inspect actual native KV storage and numerical cache parity
+
+```sh
+ai-journey-gqa-experiment cache --report gqa-public.json --snapshot english.conllu \
+  --prefix-count 4 --output gqa-cache.json
+ai-journey-gqa-experiment cache-verify --report gqa-cache.json
+ai-journey-gqa-experiment cache-replay --report gqa-cache.json --snapshot english.conllu
+```
+
+For document-file reports, use both original `--train` and `--heldout` instead
+of `--snapshot`. The operation fully replays the declared training comparison
+before accepting its final models. It inspects up to four held-out document
+prefixes (bounded by context length and available documents), advancing one
+token at a time from an empty native KV cache without context overflow.
+Whole-job admission includes this complete replay and extra full/incremental
+prefix forwards and model-state hashing before any model allocation.
+
+Each step retains all 256 raw float32 full/cached logits, their recomputed error
+and fixed absolute/relative tolerance, native KV shapes, actual compact backing
+store bytes, and declared per-layer query-score dimensions. Storage is inspected
+through the core cache auditor, not inferred from a logically expanded view.
+The report's denominators count actual prefixes, growth steps and compared
+logits; summaries recompute from those raw observations. Smaller native caches
+do not imply fewer query-head score elements, better NLL, faster inference or
+lower total peak process memory. No timing or GPU measurement is performed.
+`cache-verify` checks internal arithmetic without a model; `cache-replay` repeats
+both training and every cache observation against original source/runtime. A
+fully fabricated but self-consistent record still requires actual replay.
