@@ -194,7 +194,7 @@ def measure_http_generation(
                 received = time.perf_counter_ns()
                 if not chunk:
                     break
-                for event, payload in decoder.feed(chunk):
+                for event, payload in decoder.iter_events(chunk):
                     if event == "token":
                         result["tokens"].append(payload["token"])
                         result["token_received_ns"].append(received)

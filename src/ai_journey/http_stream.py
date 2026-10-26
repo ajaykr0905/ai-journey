@@ -92,13 +92,13 @@ class GenerationEventDecoder:
         self._event_bytes = 0
         self._total_bytes = 0
         self._closed = False
+        self._feeding = False
         self.tokens = []
         self.output = None
         self.error = None
 
     def _consume(self, text):
         self._text += text
-        events = []
         while "\n" in self._text:
             line, self._text = self._text.split("\n", 1)
             line = line.removesuffix("\r")
@@ -139,16 +139,17 @@ class GenerationEventDecoder:
                         )
                     self.tokens.append(data["token"])
                 elif event == "done":
-                    self.output = validate_generation_output(
+                    output = validate_generation_output(
                         data,
                         request_id=self.request_id,
                         prompt_tokens=self.prompt_tokens,
                         max_tokens=self.max_tokens,
                     )
-                    if self.output["tokens"] != self.tokens:
+                    if output["tokens"] != self.tokens:
                         raise StreamProtocolError(
                             "terminal tokens differ from streamed tokens"
                         )
+                    self.output = output
                 elif event == "error":
                     if (
                         type(data) is not dict
@@ -160,25 +161,56 @@ class GenerationEventDecoder:
                     self.error = data["error"]
                 else:
                     raise StreamProtocolError("unsupported generation SSE event")
-                events.append((event, data))
+                yield event, data
         if self._event_bytes + len(self._text.encode()) > self.max_event_bytes:
             raise StreamProtocolError("SSE event exceeds its byte budget")
-        return events
 
-    def feed(self, payload: bytes):
-        if self._closed or not isinstance(payload, bytes):
+    def iter_events(self, payload: bytes):
+        """Yield each accepted event before inspecting subsequent received bytes.
+
+        Consume or close this iterator before supplying more input. A consumer
+        may stop at a cancellation boundary without validating a later frame,
+        even when both frames arrived in the same socket read.
+        """
+
+        if self._closed or self._feeding or not isinstance(payload, bytes):
             raise StreamProtocolError("stream decoder requires bytes before EOF")
-        self._total_bytes += len(payload)
-        if self._total_bytes > self.max_bytes:
-            raise StreamProtocolError("SSE stream exceeds its byte budget")
+        self._feeding = True
         try:
-            return self._consume(self._decoder.decode(payload))
+            offset = 0
+            while offset < len(payload):
+                newline = payload.find(b"\n", offset)
+                stop = len(payload) if newline < 0 else newline + 1
+                piece = payload[offset:stop]
+                self._total_bytes += len(piece)
+                if self._total_bytes > self.max_bytes:
+                    raise StreamProtocolError("SSE stream exceeds its byte budget")
+                pending_utf8 = len(self._decoder.getstate()[0])
+                if (
+                    self._event_bytes
+                    + len(self._text.encode())
+                    + pending_utf8
+                    + len(piece)
+                    > self.max_event_bytes
+                ):
+                    raise StreamProtocolError("SSE event exceeds its byte budget")
+                yield from self._consume(self._decoder.decode(piece))
+                offset = stop
         except UnicodeError as exc:
             raise StreamProtocolError("stream contains invalid UTF-8") from exc
+        finally:
+            self._feeding = False
+
+    def feed(self, payload: bytes):
+        """Eager convenience API; use iter_events to retain accepted prefixes."""
+
+        return list(self.iter_events(payload))
 
     def finish(self):
+        if self._feeding:
+            raise StreamProtocolError("consume or close the event iterator before EOF")
         try:
-            self._consume(self._decoder.decode(b"", final=True))
+            list(self._consume(self._decoder.decode(b"", final=True)))
         except UnicodeError as exc:
             raise StreamProtocolError("stream ends inside a UTF-8 codepoint") from exc
         self._closed = True

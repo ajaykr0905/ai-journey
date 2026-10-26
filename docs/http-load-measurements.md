@@ -36,6 +36,10 @@ use client receipt timestamps of complete SSE events; events delivered in one
 socket read share a timestamp and may produce zero gaps. These are not server
 compute timings. JSON response mode has no token-arrival timing. Cancellation
 means the client stopped receiving; it does not prove that server compute stopped.
+Accepted SSE events are delivered individually before later bytes are parsed.
+A malformed later frame or UTF-8 sequence cannot erase an already received
+token, and a planned token-boundary cancellation stops before that later input
+is inspected, whether the events arrive together or across separate reads.
 For matched streaming/JSON output checks with distinct fresh IDs, the Python API
 provides `measure_http_output_parity`.
 
