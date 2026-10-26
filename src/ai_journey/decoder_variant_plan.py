@@ -78,6 +78,9 @@ class DecoderExperimentPlan:
             }
             if not changes <= set(self.declared_changes):
                 raise ValueError("plan arm changes undeclared architecture controls")
+            hidden = variant.resolved_swiglu_hidden_dim
+            if hidden is not None and hidden > 4 * baseline.gpt2.embedding_dim:
+                raise ValueError("plan SwiGLU width exceeds the bounded CPU contract")
         base = baseline.gpt2
         for name, minimum, maximum in (
             ("context_length", 2, 64),
