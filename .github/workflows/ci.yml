@@ -34,6 +34,13 @@ jobs:
           ruff format --check src/ai_journey/ddp*.py tests/test_ddp*.py
           python -m compileall -q src tests
           python -m pytest -q tests/test_ddp*.py
+      - name: Check modern inference and observability integration
+        run: |
+          sources=(src/ai_journey/serving_metrics.py src/ai_journey/trace_context.py)
+          tests=(tests/test_modern_ddp.py tests/test_modern_serving_cache.py tests/test_serving_metrics.py tests/test_trace_context.py)
+          ruff check "${sources[@]}" "${tests[@]}"
+          ruff format --check "${sources[@]}" "${tests[@]}"
+          python -m pytest -q "${tests[@]}"
       - name: Verify published controls and reproduce installed commands
         run: |
           ai-journey-ddp verify-comparison --report artifacts/ddp-lab-2026-10-22/comparison.json
