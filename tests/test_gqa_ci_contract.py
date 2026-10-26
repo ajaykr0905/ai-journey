@@ -1,7 +1,9 @@
 """The new architecture has an executable installed operational CI path."""
 
 import json
+import importlib
 from pathlib import Path
+import tomllib
 
 import pytest
 
@@ -67,3 +69,32 @@ def test_ci_executes_installed_grouped_training_replay_and_real_crash_verificati
         "tests/test_gqa_cli_integration.py",
     ):
         assert path in required and (ROOT / path).is_file()
+
+
+def test_public_experiment_console_and_installed_cache_replay_are_required(capsys):
+    package = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    entry = package["project"]["scripts"]["ai-journey-gqa-experiment"]
+    module, attribute = entry.split(":")
+    with pytest.raises(SystemExit) as result:
+        getattr(importlib.import_module(module), attribute)(["--help"])
+    assert result.value.code == 0
+    assert "cache-replay" in capsys.readouterr().out
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    job = workflow.split("  grouped-query-cpu:\n", 1)[1].split("  moe-cpu-lab:\n", 1)[0]
+    for operation in (
+        "plan",
+        "public",
+        "verify",
+        "replay",
+        "cache",
+        "cache-verify",
+        "cache-replay",
+    ):
+        assert f"ai-journey-gqa-experiment {operation} " in job
+    assert "6e328e8195c04a297c1e375d21fe663be1ce6178/en_pud-ud-test.conllu" in job
+    required = json.loads((ROOT / "config/deployment_readiness.json").read_text())[
+        "required_files"
+    ]
+    for pattern in ("src/ai_journey/gqa*.py", "tests/test_gqa*.py"):
+        for path in ROOT.glob(pattern):
+            assert path.relative_to(ROOT).as_posix() in required

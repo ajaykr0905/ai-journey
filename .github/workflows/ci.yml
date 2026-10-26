@@ -50,6 +50,22 @@ jobs:
           ai-journey-gpt2-train replay --source "$GITHUB_WORKSPACE/data/day-19-demo-names.txt" --report "$RUNNER_TEMP/gqa-evidence/training.json"
           ai-journey-ddp recover-crash --source "$GITHUB_WORKSPACE/data/day-19-demo-names.txt" --spec "$GITHUB_WORKSPACE/config/gqa-cpu-lab.json" --output "$RUNNER_TEMP/gqa-evidence/recovery.json" --workdir "$RUNNER_TEMP/gqa-evidence/owned"
           ai-journey-ddp verify-crash-recovery --report "$RUNNER_TEMP/gqa-evidence/recovery.json" --workdir "$RUNNER_TEMP/gqa-evidence/owned"
+      - name: Fetch immutable public source for controlled grouped-query experiments
+        run: |
+          curl --fail --location --retry 2 --max-time 60 https://raw.githubusercontent.com/UniversalDependencies/UD_English-PUD/6e328e8195c04a297c1e375d21fe663be1ce6178/en_pud-ud-test.conllu --output "$RUNNER_TEMP/gqa-english.conllu"
+      - name: Replay installed public grouped-query and physical cache observations
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/gqa-installed
+        run: |
+          export PATH="$RUNNER_TEMP/gqa-installed/bin:$PATH"
+          ai-journey-gqa-experiment plan --output "$RUNNER_TEMP/gqa-evidence/plan.json"
+          ai-journey-gqa-experiment public --source en-pud --snapshot "$RUNNER_TEMP/gqa-english.conllu" --plan "$RUNNER_TEMP/gqa-evidence/plan.json" --output "$RUNNER_TEMP/gqa-evidence/public.json"
+          ai-journey-gqa-experiment verify --report "$RUNNER_TEMP/gqa-evidence/public.json"
+          ai-journey-gqa-experiment replay --report "$RUNNER_TEMP/gqa-evidence/public.json" --snapshot "$RUNNER_TEMP/gqa-english.conllu"
+          ai-journey-gqa-experiment cache --report "$RUNNER_TEMP/gqa-evidence/public.json" --snapshot "$RUNNER_TEMP/gqa-english.conllu" --output "$RUNNER_TEMP/gqa-evidence/cache.json"
+          ai-journey-gqa-experiment cache-verify --report "$RUNNER_TEMP/gqa-evidence/cache.json"
+          ai-journey-gqa-experiment cache-replay --report "$RUNNER_TEMP/gqa-evidence/cache.json" --snapshot "$RUNNER_TEMP/gqa-english.conllu"
       - name: Retain actual grouped-query CPU evidence
         if: always()
         uses: actions/upload-artifact@v4

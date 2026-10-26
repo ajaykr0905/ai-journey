@@ -1,5 +1,18 @@
 {
   "required_files": [
+    "docs/gqa-experiments.md",
+    "src/ai_journey/gqa_experiment_plan.py",
+    "src/ai_journey/gqa_experiment.py",
+    "src/ai_journey/gqa_experiment_report.py",
+    "src/ai_journey/gqa_experiment_public.py",
+    "src/ai_journey/gqa_cli.py",
+    "src/ai_journey/gqa_cache_evidence.py",
+    "tests/test_gqa_experiment_plan.py",
+    "tests/test_gqa_experiment.py",
+    "tests/test_gqa_experiment_report.py",
+    "tests/test_gqa_cli.py",
+    "tests/test_gqa_cache_evidence.py",
+    "tests/test_gpt2_optimizer_evidence.py",
     "config/gqa-cpu-lab.json",
     "docs/grouped-query-cpu.md",
     "src/ai_journey/gqa_checkpoint.py",
