@@ -54,6 +54,18 @@ admission proxies, not measured FLOPs or complete allocator-peak accounting.
 Default model initialization uses the declared CPU seed without changing caller
 RNG. Library callers own their rank-local training RNG and process-group scope.
 An exception reached by a live process restores its local model, optimizer, CPU
-RNG, gradients and module modes. Currently every post-forward failure poisons the
-session: use fresh processes, not a tensor restore as a guessed reducer reset.
-No statement here claims recovery of a dead worker's memory or communicator.
+RNG, gradients and module modes. Pre-forward admission failures leave the session
+usable. Once a forward is invoked, only an explicitly common rejection **after
+every backward completed** can raise `MoEDDPRetryableError` and retain usability.
+Tests prove two further same-wrapper serial-equivalent updates after rank-local
+gradient poisoning, clipping failure, post-step exception and finite model or
+moment divergence. Correct the cause before retrying; this is not an automatic
+retry loop.
+
+Forward, pre-backward, interrupted-backward and transport failures instead raise
+`MoEDDPFatalError` and poison the session. Further calls reject immediately. Real
+rank-local forward and backward exceptions exercise this boundary; live tensor
+rollback is not a guessed reducer reset. Transport exceptions never qualify as
+common semantic rejection, even after a successful backward. Use fresh processes
+and a valid durable checkpoint. No statement here claims recovery of a dead
+worker's memory or communicator.
