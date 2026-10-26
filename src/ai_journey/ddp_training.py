@@ -2,6 +2,7 @@
 
 from contextlib import nullcontext
 import copy
+import math
 
 import torch
 import torch.distributed as dist
@@ -70,9 +71,21 @@ def _accumulated_update(
     for index, (inputs, targets) in enumerate(batches):
         context = model.no_sync() if index < len(batches) - 1 else nullcontext()
         with context:
-            losses = token_nll(model(inputs), targets)
-            (losses.mean() / len(batches)).backward()
-            total_loss += losses.detach().double().sum().item()
+            loss = None
+            batch_total = 0.0
+            try:
+                losses = token_nll(model(inputs), targets)
+                loss = losses.mean() / len(batches)
+                batch_total = losses.detach().double().sum().item()
+                if not torch.isfinite(loss) or not math.isfinite(
+                    total_loss + batch_total
+                ):
+                    loss = None
+            except (ValueError, RuntimeError, TypeError):
+                pass
+            require_all_ranks(loss is not None, phase="forward loss validation")
+            loss.backward()
+            total_loss += batch_total
             tokens += targets.numel()
     finite = all(
         parameter.grad is None or torch.isfinite(parameter.grad).all().item()

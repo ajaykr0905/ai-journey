@@ -20,6 +20,7 @@ def _checkpoint_replica(rank, directory, field):
     torch.set_num_threads(1)
     torch.manual_seed(48)
     model = GPT2LanguageModel(GPT2Config(8, 4, 8, 2, 1)).double()
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
     config = GPT2TrainingConfig(
         optimizer_steps=2,
@@ -149,6 +150,10 @@ def _diverged_update(rank, directory, divergence="model"):
     torch.set_num_threads(1)
     torch.manual_seed(48)
     model = GPT2LanguageModel(GPT2Config(8, 4, 8, 2, 1)).double()
+    if divergence == "forward" and rank == 1:
+        model.register_forward_hook(
+            lambda module, inputs, output: output * float("nan")
+        )
 
     class DivergingAdamW(torch.optim.AdamW):
         def step(self, closure=None):
@@ -194,6 +199,7 @@ def _diverged_update(rank, directory, divergence="model"):
             "model": "model fingerprints diverged",
             "moment": "optimizer fingerprints diverged",
             "nonfinite": "optimizer state fingerprinting",
+            "forward": "forward loss validation",
         }[divergence]
         with pytest.raises(RuntimeError, match=expected):
             train_segment(
@@ -219,6 +225,10 @@ def test_divergent_update_restores_full_caller_state_on_both_ranks(tmp_path):
 @pytest.mark.parametrize("divergence", ["moment", "nonfinite"])
 def test_bad_optimizer_moments_roll_back_the_completed_update(tmp_path, divergence):
     mp.spawn(_diverged_update, args=(str(tmp_path), divergence), nprocs=2, join=True)
+
+
+def test_rank_local_forward_failure_restores_both_ranks_before_backward(tmp_path):
+    mp.spawn(_diverged_update, args=(str(tmp_path), "forward"), nprocs=2, join=True)
 
 
 def _invalid_totals(rank, directory):
