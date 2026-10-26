@@ -1,7 +1,10 @@
 """Bounded subprocess supervision for real local distributed workers."""
 
+from contextlib import contextmanager
+import fcntl
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tempfile
@@ -23,6 +26,61 @@ def _paths_alias(left: Path, right: Path) -> bool:
     return left.resolve() == right.resolve() or (
         left.exists() and right.exists() and left.samefile(right)
     )
+
+
+@contextmanager
+def _owned_run(checkpoint: Path, output_dir: Path):
+    """Lease both mutable resources until every child is reaped and log closed.
+
+    Locks are advisory and local-filesystem scoped, not distributed fencing.
+    Keep the empty checkpoint sidecar: unlinking it would let a later opener
+    lock a different inode while an existing waiter still holds the old one.
+    Kernel descriptor cleanup, not a possibly reused PID, recovers dead owners.
+    """
+    descriptors = []
+    try:
+        try:
+            if output_dir.is_symlink():
+                raise ValueError("worker output directory lease must not be a symlink")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            checkpoint.parent.mkdir(parents=True, exist_ok=True)
+            directory_descriptor = os.open(
+                output_dir, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+            )
+            descriptors.append(directory_descriptor)
+            lock_path = checkpoint.with_name(f".{checkpoint.name}.ai-journey-ddp.lock")
+            # Opening never truncates. Reject occupied special files and linked
+            # or nonempty files rather than treating caller data as a lease.
+            lock_descriptor = os.open(
+                lock_path,
+                os.O_RDWR | os.O_CREAT | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+            )
+            descriptors.append(lock_descriptor)
+            metadata = os.fstat(lock_descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or metadata.st_size != 0
+            ):
+                raise ValueError(
+                    "checkpoint lease must be a single-link empty regular file"
+                )
+            for descriptor in descriptors:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError as error:
+                    raise ValueError(
+                        "distributed run artifacts are already owned"
+                    ) from error
+        except OSError as error:
+            raise ValueError(
+                "distributed artifact lease could not be acquired"
+            ) from error
+        yield
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
 
 
 def launch_training(
@@ -95,8 +153,10 @@ def launch_training(
             raise ValueError(
                 "failure injection requires an existing rank and supported mode"
             )
-    output_dir.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="ai-journey-ddp-") as temporary:
+    with (
+        _owned_run(checkpoint, output_dir),
+        tempfile.TemporaryDirectory(prefix="ai-journey-ddp-") as temporary,
+    ):
         rendezvous = (Path(temporary) / "rendezvous").as_uri()
         processes = []
         logs = []
