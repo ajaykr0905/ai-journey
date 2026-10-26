@@ -106,6 +106,21 @@ def _source_digest(value):
         raise ValueError("source_sha256 must be a lowercase SHA-256 digest")
 
 
+def _validate_payload(payload) -> None:
+    """Apply identical metadata and seal admission to every restore entry point."""
+    if not isinstance(payload, dict) or set(payload) != _FIELDS:
+        raise ValueError("MoE checkpoint fields do not match")
+    if type(payload["schema_version"]) is not int or payload["schema_version"] != 1:
+        raise ValueError("MoE checkpoint schema is unsupported")
+    if type(payload["step"]) is not int or not 0 <= payload["step"] <= 1_000_000:
+        raise ValueError("MoE checkpoint step is invalid")
+    _source_digest(payload["source_sha256"])
+    if payload["checkpoint_sha256"] != _digest(
+        {name: value for name, value in payload.items() if name != "checkpoint_sha256"}
+    ):
+        raise ValueError("MoE checkpoint byte seal does not match")
+
+
 def optimizer_contract(model, optimizer) -> list[dict]:
     names = {id(parameter): name for name, parameter in model.named_parameters()}
     return [
@@ -201,17 +216,7 @@ def read_moe_checkpoint(
         raise ValueError(
             "MoE checkpoint is not a bounded weights-only archive"
         ) from exc
-    if not isinstance(payload, dict) or set(payload) != _FIELDS:
-        raise ValueError("MoE checkpoint fields do not match")
-    if type(payload["schema_version"]) is not int or payload["schema_version"] != 1:
-        raise ValueError("MoE checkpoint schema is unsupported")
-    if type(payload["step"]) is not int or not 0 <= payload["step"] <= 1_000_000:
-        raise ValueError("MoE checkpoint step is invalid")
-    _source_digest(payload["source_sha256"])
-    if payload["checkpoint_sha256"] != _digest(
-        {name: value for name, value in payload.items() if name != "checkpoint_sha256"}
-    ):
-        raise ValueError("MoE checkpoint byte seal does not match")
+    _validate_payload(payload)
     return payload
 
 
@@ -226,19 +231,7 @@ def restore_moe_payload(
     """Restore only after provenance, exact schema and optimizer-binding checks."""
     if not isinstance(model, MoEDecoderModel):
         raise TypeError("model must be MoEDecoderModel")
-    if (
-        not isinstance(payload, dict)
-        or set(payload) != _FIELDS
-        or payload["checkpoint_sha256"]
-        != _digest(
-            {
-                name: value
-                for name, value in payload.items()
-                if name != "checkpoint_sha256"
-            }
-        )
-    ):
-        raise ValueError("MoE checkpoint byte seal does not match")
+    _validate_payload(payload)
     _source_digest(source_sha256)
     if (
         payload["source_sha256"] != source_sha256
