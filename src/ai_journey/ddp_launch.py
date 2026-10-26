@@ -48,8 +48,18 @@ def launch_training(
             )
     if not isinstance(resume, bool):
         raise TypeError("resume must be boolean")
+    if checkpoint.is_symlink():
+        raise ValueError("checkpoint output must not be a symlink")
     if checkpoint.resolve() in (source.resolve(), spec.resolve()):
         raise ValueError("checkpoint output must not overwrite an input")
+    protected = {source.resolve(), spec.resolve(), checkpoint.resolve()}
+    worker_outputs = [
+        output_dir / f"rank-{rank}.{suffix}"
+        for rank in range(world_size)
+        for suffix in ("log", "json")
+    ]
+    if any(path.is_symlink() or path.resolve() in protected for path in worker_outputs):
+        raise ValueError("worker outputs must not overwrite inputs or checkpoints")
     if failure_rank is not None:
         integer(failure_rank, "failure_rank")
         if failure_rank >= world_size or failure_mode not in (
