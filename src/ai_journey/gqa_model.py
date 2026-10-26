@@ -91,7 +91,10 @@ class GroupedQueryModel(nn.Module):
                 tuple(f"decoder.{name}" for name in result.idle_expert_parameters),
             )
         logits = self.decoder(token_ids)
-        zero = logits.sum() * 0
+        # A full reduction can overflow even when every logit is finite. The
+        # validated nonempty output supplies one scalar that keeps these inactive
+        # objectives connected to autograd without introducing reduction work.
+        zero = logits[0, 0, 0] * 0
         return MoEModelOutput(logits, zero, zero.double(), (), ())
 
     def forward_with_cache(self, token_ids, *, past_key_values=None):
