@@ -35,3 +35,44 @@ loop is started. Records bind the canonical run UUID, actual process ID, rank
 mapping, resource report, and host observations. Verification recomputes memory
 admission rather than trusting a stored success flag. Digests detect drift;
 they are not hardware attestation or third-party signatures.
+
+## Prepare and verify a run
+
+After installing the package, prepare the existing eight-device analytical
+scenario without launching any workers:
+
+```bash
+ai-journey-resource-plan --config config/day-51-resource-plan.json \
+  --output /tmp/nvidia-resources.json
+ai-journey-gpu-preflight probe --output /tmp/nvidia-host.json
+ai-journey-gpu-preflight plan --resource-report /tmp/nvidia-resources.json \
+  --devices 0 1 2 3 4 5 6 7 --dtype bfloat16 \
+  --output-dir /tmp/nvidia-preflight --output /tmp/nvidia-plan.json
+```
+
+The plan contains a fresh run UUID, expected rank-record paths, memory admission,
+and an argv array for `python -m torch.distributed.run --standalone`. It targets
+the implemented preflight worker with zero automatic restarts. Paths remain
+individual argv elements, including paths containing spaces. No shell command is
+executed by `plan`. Generate the plan on the intended Linux NVIDIA host so its
+Python path and runtime observations are relevant. Darwin reports an unavailable
+host and leaves `preflight_ready` false.
+
+If an authorized operator later executes that argv array on the intended host,
+collect the resulting records using the UUID printed in the plan:
+
+```bash
+ai-journey-gpu-preflight collect --resource-report /tmp/nvidia-resources.json \
+  --devices 0 1 2 3 4 5 6 7 --dtype bfloat16 --run-id UUID_FROM_PLAN \
+  --output-dir /tmp/nvidia-preflight --output /tmp/nvidia-run.json
+ai-journey-gpu-preflight verify --report /tmp/nvidia-run.json
+```
+
+Collection requires every requested rank, distinct process IDs, the same run,
+topology, resource contract, runtime build and visible-device identity. Missing
+records remain a failure. Verification also accepts an individual rank record.
+A valid blocked observation can pass integrity verification while retaining
+`preflight_passed: false`; this is different from passing hardware admission.
+Even a passed preflight retains `training_executed`, `gpu_kernel_executed`, and
+`collective_executed` as false. CUDA training, NCCL collective checks, multi-GPU
+performance and fault recovery require separate implemented and measured work.
