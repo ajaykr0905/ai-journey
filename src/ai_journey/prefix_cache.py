@@ -279,6 +279,10 @@ class PrefixKVStore:
                             resident.last_logits if exact else None,
                             length,
                         )
+                        # Only the charged independent copy may cross the yield.
+                        # Otherwise clear/LRU could uncharge the source tensors
+                        # while this suspended generator still owns them.
+                        del resident
                         if _storage_bytes(value) != size:
                             raise ValueError(
                                 "prefix lease storage differs from reservation"

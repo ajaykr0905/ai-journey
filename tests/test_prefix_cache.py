@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import threading
+import weakref
 
 import pytest
 import torch
@@ -178,6 +179,45 @@ def test_lru_entry_bound_and_lease_exception_cleanup(prefill):
     assert store.snapshot()["active_leases"] == 0
     with store.acquire(identity, tokens) as match:
         assert match is None
+
+
+@pytest.mark.parametrize("eviction", ["clear", "lru"])
+def test_active_lease_does_not_retain_uncharged_evicted_source(prefill, eviction):
+    model, tokens, logits, cache = prefill
+    identity = prefix_identity(model)
+    size = identity.bytes_for(len(tokens))
+    store = PrefixKVStore(max_bytes=2 * size, max_entries=1)
+    store.publish(identity, tokens, cache, logits)
+
+    def resident_refs():
+        return [
+            weakref.ref(tensor)
+            for value, _ in store._entries.values()
+            for tensor in (*value.cache.keys, *value.cache.values, value.last_logits)
+        ]
+
+    old_refs = resident_refs()
+    with store.acquire(identity, tokens) as match:
+        lease_refs = [
+            weakref.ref(tensor)
+            for tensor in (*match.cache.keys, *match.cache.values, match.last_logits)
+        ]
+        if eviction == "clear":
+            store.clear()
+        assert store.publish(
+            replace(identity, namespace="replacement"), tokens, cache, logits
+        )
+        assert all(reference() is None for reference in old_refs)
+        actual_storages = {
+            reference().untyped_storage().data_ptr(): reference()
+            .untyped_storage()
+            .nbytes()
+            for reference in (*old_refs, *lease_refs, *resident_refs())
+            if reference() is not None
+        }
+        assert sum(actual_storages.values()) == 2 * size
+        state = store.snapshot()
+        assert state["resident_bytes"] + state["leased_bytes"] == 2 * size
 
 
 def test_concurrent_leases_never_exceed_the_live_byte_budget(prefill):
