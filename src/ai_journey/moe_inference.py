@@ -8,6 +8,7 @@ import torch
 
 from .moe_checkpoint import _contract, _digest, read_moe_checkpoint, restore_moe_payload
 from .moe_config import MoEConfig
+from .gqa_config import GQAConfig
 from .moe_training import build_moe_optimizer, validate_moe_optimizer
 from .training_models import build_training_model
 
@@ -43,7 +44,7 @@ def _optimizer_from_contract(model, contract):
 def load_moe_model_checkpoint(
     path: Path,
     *,
-    config: MoEConfig,
+    config: MoEConfig | GQAConfig,
     training_contract: Mapping,
     source: bytes,
     max_checkpoint_bytes: int = 64 * 1024 * 1024,
@@ -55,8 +56,8 @@ def load_moe_model_checkpoint(
     A self-sealed checkpoint proves internal integrity, not authorship, public
     licensing or that somebody performed a manual learning exercise.
     """
-    if not isinstance(config, MoEConfig):
-        raise TypeError("config must be MoEConfig")
+    if not isinstance(config, (MoEConfig, GQAConfig)):
+        raise TypeError("config must be an expert or grouped-query decoder contract")
     if type(source) is not bytes or not 0 < len(source) <= 16 * 1024 * 1024:
         raise ValueError("source must be nonempty bounded bytes")
     payload = read_moe_checkpoint(path, max_checkpoint_bytes=max_checkpoint_bytes)

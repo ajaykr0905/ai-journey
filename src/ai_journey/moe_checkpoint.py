@@ -19,6 +19,8 @@ from .checkpoint_archive import (
     validate_checkpoint_tensor_work as _admit_digest_work,
 )
 from .moe_model import MoEDecoderModel
+from .gqa_config import GQAConfig
+from .gqa_model import GroupedQueryModel
 from .moe_resources import expected_checkpoint_records
 from .moe_training import validate_moe_optimizer
 from .training_optimizer_state import validate_serialized_adamw_state
@@ -157,9 +159,14 @@ def save_moe_checkpoint(
     The caller owns data scheduling and supplies its full immutable training
     contract. This seal detects corruption, not authorship or authenticity.
     """
-    if not isinstance(path, Path) or not isinstance(model, MoEDecoderModel):
-        raise TypeError("checkpoint requires a Path and MoEDecoderModel")
-    if expected_checkpoint_records(model.config) > MAX_CHECKPOINT_RECORDS:
+    if not isinstance(path, Path) or not isinstance(
+        model, (MoEDecoderModel, GroupedQueryModel)
+    ):
+        raise TypeError("checkpoint requires a Path and supported CPU decoder")
+    record_config = (
+        model.config.decoder if isinstance(model.config, GQAConfig) else model.config
+    )
+    if expected_checkpoint_records(record_config) > MAX_CHECKPOINT_RECORDS:
         raise ValueError("MoE checkpoint exceeds the declared record-work budget")
     if (
         type(step) is not int
@@ -238,8 +245,8 @@ def restore_moe_payload(
     source_sha256: str,
 ) -> int:
     """Restore only after provenance, exact schema and optimizer-binding checks."""
-    if not isinstance(model, MoEDecoderModel):
-        raise TypeError("model must be MoEDecoderModel")
+    if not isinstance(model, (MoEDecoderModel, GroupedQueryModel)):
+        raise TypeError("model must be a supported expert or grouped-query decoder")
     _validate_payload(payload)
     _source_digest(source_sha256)
     if (

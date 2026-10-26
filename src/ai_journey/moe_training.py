@@ -10,6 +10,7 @@ from torch.nn import functional as F
 from .decoder_variant_optimizer import DecoderOptimizerConfig, build_decoder_optimizer
 from .decoder_variant_training import require_finite_decoder_state
 from .moe_model import MoEDecoderModel
+from .gqa_model import GroupedQueryModel
 from .moe_route_audit import validate_moe_routing
 from .training_optimizer_state import validate_adamw_state
 
@@ -22,8 +23,8 @@ def build_moe_optimizer(
     config: DecoderOptimizerConfig | None = None,
 ):
     """Use exactly the dense comparison's matrix-decay/vector-no-decay builder."""
-    if not isinstance(model, MoEDecoderModel):
-        raise TypeError("model must be MoEDecoderModel")
+    if not isinstance(model, (MoEDecoderModel, GroupedQueryModel)):
+        raise TypeError("model must be a supported expert or grouped-query decoder")
     if config is None:
         config = DecoderOptimizerConfig(weight_decay=weight_decay)
     elif weight_decay != 0.01:
@@ -102,8 +103,8 @@ def train_moe_step(
     sparse forward compute, not sparse optimizer state or sparse weight decay.
     Caller RNG advances on success and is restored exactly on failure.
     """
-    if not isinstance(model, MoEDecoderModel):
-        raise TypeError("model must be MoEDecoderModel")
+    if not isinstance(model, (MoEDecoderModel, GroupedQueryModel)):
+        raise TypeError("model must be a supported expert or grouped-query decoder")
     for value, name, zero in (
         (balance_weight, "balance_weight", True),
         (z_weight, "z_weight", True),
