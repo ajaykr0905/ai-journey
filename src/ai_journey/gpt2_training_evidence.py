@@ -280,11 +280,20 @@ def verify_training_replay(source: bytes, payload: Mapping[str, Any]) -> dict[st
             "training evidence runtime does not match the exact replay environment"
         )
     spec = training_spec_from_mapping(expected["spec"])
+    started = expected["progress"]["started_step"]
+    count = expected["progress"]["completed_step"] - started
     with tempfile.TemporaryDirectory(prefix="gpt2-training-replay-") as directory:
+        checkpoint = Path(directory) / "checkpoint.pt"
+        if started:
+            run_training_experiment(
+                source, spec, checkpoint_path=checkpoint, step_count=started
+            )
         run = run_training_experiment(
             source,
             spec,
-            checkpoint_path=Path(directory) / "checkpoint.pt",
+            checkpoint_path=checkpoint,
+            resume=bool(started),
+            step_count=count or None,
         )
     actual = build_training_evidence(run)
     if actual != expected:

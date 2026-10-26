@@ -872,6 +872,7 @@ def run_training_experiment(
     checkpoint_path: Path,
     resume: bool = False,
     max_parameters: int = 5_000_000,
+    step_count: int | None = None,
 ) -> GPT2TrainingRun:
     """Run or resume a bounded deterministic byte-level GPT-2 experiment."""
 
@@ -881,6 +882,8 @@ def run_training_experiment(
         raise TypeError("checkpoint_path must be pathlib.Path")
     if not isinstance(resume, bool):
         raise TypeError("resume must be a boolean")
+    if step_count is not None and (type(step_count) is not int or step_count <= 0):
+        raise GPT2TrainingError("step_count must be a positive integer")
     if isinstance(max_parameters, bool) or not isinstance(max_parameters, int):
         raise TypeError("max_parameters must be an integer")
     if max_parameters <= 0:
@@ -910,6 +913,13 @@ def run_training_experiment(
                 corpus_fingerprint=corpus.fingerprint(),
             )
         initial_fingerprint = gpt2_model_fingerprint(model)
+        if (
+            step_count is not None
+            and started_step + step_count > spec.training.optimizer_steps
+        ):
+            raise GPT2TrainingError(
+                "step_count exceeds the remaining optimizer schedule"
+            )
         metrics = (
             ()
             if started_step == spec.training.optimizer_steps
@@ -919,6 +929,7 @@ def run_training_experiment(
                 optimizer,
                 spec.training,
                 start_step=started_step,
+                step_count=step_count,
             )
         )
         completed_step = metrics[-1].step if metrics else started_step

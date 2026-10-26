@@ -20,6 +20,12 @@ each optimizer update. Each micro-batch mean loss is divided by four before
 backpropagation. The resulting effective batch is eight sequences, or 64 target
 tokens per update. Twelve updates consume 768 target tokens.
 
+To stop at a durable optimizer boundary, add `--steps 4`. Run the same command
+again with `--resume --steps 4` to continue the next four updates. Omitting
+`--steps` consumes the remaining schedule. Segment reports retain their start and
+completion steps; `replay` reconstructs the preceding updates before checking a
+resumed segment, so its reported initial model is verified too.
+
 AdamW applies weight decay to matrix-shaped parameters and excludes biases and
 normalization vectors. The learning rate warms up for two updates, then follows a
 cosine decay from `0.003` to `0.0003`. Gradients are clipped at a global norm of
