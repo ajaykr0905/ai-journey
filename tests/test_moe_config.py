@@ -84,3 +84,8 @@ def test_parser_rejects_incomplete_or_unknown_fields(mutation):
         payload["gpt2"]["secret_extra"] = 1
     with pytest.raises(ValueError):
         moe_config_from_mapping(payload)
+
+
+def test_huge_capacity_integer_is_a_validation_error_not_float_overflow():
+    with pytest.raises(ValueError, match="capacity_factor"):
+        small_config(capacity_factor=10**1000)
