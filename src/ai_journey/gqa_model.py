@@ -79,3 +79,67 @@ class GroupedQueryModel(nn.Module):
         logits = self.decoder(token_ids)
         zero = logits.sum() * 0
         return MoEModelOutput(logits, zero, zero.double(), (), ())
+
+    def forward_with_cache(self, token_ids, *, past_key_values=None):
+        """Advance native KV heads at absolute RoPE offsets without mutation."""
+        if any(module.training for module in self.modules()):
+            raise ValueError(
+                "cached grouped decoder requires every module in eval mode"
+            )
+        if (
+            not isinstance(token_ids, torch.Tensor)
+            or token_ids.dtype != torch.long
+            or token_ids.ndim != 2
+            or not token_ids.numel()
+            or token_ids.device != self.wte.weight.device
+            or token_ids.device.type != "cpu"
+        ):
+            raise ValueError(
+                "cached grouped decoder requires nonempty CPU long matrices"
+            )
+        batch, time = token_ids.shape
+        if token_ids.min() < 0 or token_ids.max() >= self.config.gpt2.vocab_size:
+            raise ValueError("cached grouped decoder token IDs exceed vocabulary")
+        offset = 0
+        if past_key_values is not None:
+            if not isinstance(past_key_values, tuple) or len(past_key_values) != len(
+                self.h
+            ):
+                raise ValueError("compact cache must have one pair per layer")
+            for index, pair in enumerate(past_key_values):
+                if not isinstance(pair, tuple) or len(pair) != 2:
+                    raise ValueError("compact layer cache must be a key/value pair")
+                for tensor in pair:
+                    if (
+                        not isinstance(tensor, torch.Tensor)
+                        or tensor.ndim != 4
+                        or tensor.shape[:2] != (batch, self.config.kv_heads)
+                        or tensor.shape[-1] != self.config.gpt2.head_dim
+                        or tensor.dtype != self.wte.weight.dtype
+                        or tensor.device != token_ids.device
+                        or not bool(torch.isfinite(tensor).all())
+                    ):
+                        raise ValueError(
+                            "compact cache batch/KV-heads/dtype/device must match"
+                        )
+                if pair[0].shape != pair[1].shape:
+                    raise ValueError("compact key/value lengths must match")
+                if index == 0:
+                    offset = pair[0].shape[2]
+                elif offset != pair[0].shape[2]:
+                    raise ValueError("compact cache layers must share a prefix length")
+        if offset + time > self.config.gpt2.context_length:
+            raise ValueError("cached grouped decoder exceeds context_length")
+        hidden = self.drop(self.wte(token_ids))
+        pairs = []
+        for index, block in enumerate(self.h):
+            key, value = (
+                (None, None) if past_key_values is None else past_key_values[index]
+            )
+            attended, key, value = block.attn.forward_with_cache(
+                block.ln_1(hidden), past_key=key, past_value=value
+            )
+            hidden = hidden + attended
+            hidden = hidden + block.mlp(block.ln_2(hidden))
+            pairs.append((key, value))
+        return self.lm_head(self.ln_f(hidden)), tuple(pairs)
