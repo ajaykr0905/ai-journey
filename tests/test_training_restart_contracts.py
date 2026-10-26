@@ -120,3 +120,36 @@ def test_corrupt_pickle_is_a_training_error(restart_state):
         archive.writestr("archive/version", b"3\n")
     with pytest.raises(ValueError, match="weights-only archive"):
         load_training_checkpoint(path, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("lr", 0.5),
+        ("weight_decay", 0.2),
+        ("betas", (0.8, 0.99)),
+        ("eps", 1e-6),
+        ("maximize", True),
+    ],
+)
+def test_finite_optimizer_control_drift_cannot_override_spec(
+    restart_state, name, value
+):
+    path, kwargs = restart_state
+    payload = torch.load(path, weights_only=True)
+    payload["optimizer_state"]["param_groups"][0][name] = value
+    torch.save(payload, path)
+    original = copy.deepcopy(kwargs["optimizer"].param_groups[0])
+    with pytest.raises(ValueError, match="AdamW controls"):
+        load_training_checkpoint(path, **kwargs)
+    restored = kwargs["optimizer"].param_groups[0]
+    assert restored[name] == original[name]
+
+
+def test_live_optimizer_control_drift_cannot_publish(restart_state):
+    path, kwargs = restart_state
+    original = path.read_bytes()
+    kwargs["optimizer"].param_groups[0]["weight_decay"] = 0.2
+    with pytest.raises(ValueError, match="AdamW controls"):
+        save_training_checkpoint(path, step=1, **kwargs)
+    assert path.read_bytes() == original

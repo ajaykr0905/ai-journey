@@ -531,6 +531,40 @@ def _validate_optimizer_binding(
         raise GPT2TrainingError("optimizer parameters must match the complete model")
 
 
+def _validate_optimizer_contract(
+    model: TrainingModel, optimizer, config: GPT2TrainingConfig, *, step: int
+) -> None:
+    """Bind restored AdamW controls and group order to the declared training run."""
+    validate_adamw_state(model, optimizer, step=step)
+    summary = optimizer_group_summary(model)
+    named = dict(model.named_parameters())
+    groups = optimizer.param_groups
+    expected_names = (summary.decay_names, summary.no_decay_names)
+    if len(groups) != 2:
+        raise GPT2TrainingError("AdamW requires the declared decay and no-decay groups")
+    expected_lr = (
+        learning_rate_at(step - 1, config) if step else config.max_learning_rate
+    )
+    for group, names, decay in zip(
+        groups, expected_names, (config.weight_decay, 0.0), strict=True
+    ):
+        if [id(parameter) for parameter in group["params"]] != [
+            id(named[name]) for name in names
+        ]:
+            raise GPT2TrainingError(
+                "AdamW parameter group order does not match the model"
+            )
+        if (
+            group["lr"] != expected_lr
+            or group["weight_decay"] != decay
+            or tuple(group["betas"]) != (0.9, 0.999)
+            or group["eps"] != 1e-8
+            or group["amsgrad"] is not False
+            or group.get("maximize", False) is not False
+        ):
+            raise GPT2TrainingError("AdamW controls do not match the training contract")
+
+
 def _gradient_norm(parameters: tuple[Tensor, ...]) -> float:
     total = math.fsum(
         float(parameter.grad.detach().double().pow(2).sum()) for parameter in parameters
@@ -696,7 +730,7 @@ def save_training_checkpoint(
     ):
         raise GPT2TrainingError("corpus_fingerprint must be a SHA-256 digest")
     _validate_optimizer_binding(model, optimizer)
-    validate_adamw_state(model, optimizer, step=step)
+    _validate_optimizer_contract(model, optimizer, config, step=step)
     payload = {
         "schema_version": GPT2_TRAINING_CHECKPOINT_SCHEMA_VERSION,
         "step": step,
@@ -817,7 +851,7 @@ def load_training_checkpoint(
         cursor.load_state_dict(payload["cursor_state"])
         torch.set_rng_state(rng_state)
         _validate_optimizer_binding(model, optimizer)
-        validate_adamw_state(model, optimizer, step=step)
+        _validate_optimizer_contract(model, optimizer, config, step=step)
         _require_finite_state(optimizer.state_dict(), "restored optimizer")
         if gpt2_model_fingerprint(model) != payload["model_fingerprint"]:
             raise GPT2TrainingError("checkpoint model fingerprint does not match")
