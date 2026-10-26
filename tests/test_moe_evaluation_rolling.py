@@ -202,6 +202,25 @@ def test_nonfinite_loss_and_float64_model_are_not_published(monkeypatch):
     )
     with pytest.raises(FloatingPointError, match="non-finite"):
         evaluate_moe_rolling_documents(model, DOCUMENTS)
+
+
+@pytest.mark.parametrize("mutation", ["dropless-capacity", "probability-type"])
+def test_resealed_routes_must_match_the_recorded_eval_capacity_and_float_contract(
+    mutation,
+):
+    model = build_matched_moe_experiment_model(plan().arms[1].config, 53)
+    with torch.no_grad():
+        model.h[0].mlp.router.projection.weight.zero_()
+    report = evaluate_moe_rolling_documents(model, DOCUMENTS)
+    route = report["batches"][1]["routing"][0]
+    if mutation == "dropless-capacity":
+        route["capacity"] += 1
+    else:
+        assert all(value.is_integer() for value in route["probability_sums"])
+        route["probability_sums"] = [int(value) for value in route["probability_sums"]]
+    report["report_sha256"] = decoder_comparison_digest(report)
+    with pytest.raises(ValueError, match="rolling routing"):
+        verify_moe_rolling_report(report)
     model.double()
     with pytest.raises(ValueError, match="float32 CPU"):
         evaluate_moe_rolling_documents(model, DOCUMENTS)

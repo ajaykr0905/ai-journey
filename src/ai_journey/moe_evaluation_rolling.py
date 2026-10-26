@@ -96,7 +96,9 @@ def _routing(routing, config, mask):
         validate_moe_routing(row, expert_count=config.expert_count)
         if (
             row["capacity_applied"] is not False
+            or row["capacity"] != 2 * len(indices)
             or row["valid_tokens"] != len(indices)
+            or any(type(value) is not float for value in row["probability_sums"])
             or row["token_indices"] != indices
             or len(row["accepted_per_token"]) != len(mask)
             or any(len(values) != len(mask[0]) for values in row["accepted_per_token"])
