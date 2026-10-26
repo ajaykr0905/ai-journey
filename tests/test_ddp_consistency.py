@@ -144,7 +144,7 @@ def test_rank_specific_checkpoint_moments_roll_back_restoration_everywhere(tmp_p
     mp.spawn(_restore_replica, args=(str(tmp_path),), nprocs=2, join=True)
 
 
-def _diverged_update(rank, directory):
+def _diverged_update(rank, directory, divergence="model"):
     directory = Path(directory)
     torch.set_num_threads(1)
     torch.manual_seed(48)
@@ -156,7 +156,12 @@ def _diverged_update(rank, directory):
             torch.rand(3)
             if rank == 1:
                 with torch.no_grad():
-                    model.wte.weight.add_(0.5)
+                    if divergence == "model":
+                        model.wte.weight.add_(0.5)
+                    elif divergence == "moment":
+                        self.state[model.wte.weight]["exp_avg"].add_(0.5)
+                    else:
+                        self.state[model.wte.weight]["exp_avg_sq"].fill_(float("nan"))
             return result
 
     optimizer = DivergingAdamW(model.parameters(), lr=0.123)
@@ -185,7 +190,12 @@ def _diverged_update(rank, directory):
             None if p.grad is None else p.grad.clone() for p in model.parameters()
         ]
         modes = [module.training for module in wrapped.modules()]
-        with pytest.raises(RuntimeError, match="model fingerprints diverged"):
+        expected = {
+            "model": "model fingerprints diverged",
+            "moment": "optimizer fingerprints diverged",
+            "nonfinite": "optimizer state fingerprinting",
+        }[divergence]
+        with pytest.raises(RuntimeError, match=expected):
             train_segment(
                 wrapped,
                 optimizer,
@@ -204,3 +214,8 @@ def _diverged_update(rank, directory):
 
 def test_divergent_update_restores_full_caller_state_on_both_ranks(tmp_path):
     mp.spawn(_diverged_update, args=(str(tmp_path),), nprocs=2, join=True)
+
+
+@pytest.mark.parametrize("divergence", ["moment", "nonfinite"])
+def test_bad_optimizer_moments_roll_back_the_completed_update(tmp_path, divergence):
+    mp.spawn(_diverged_update, args=(str(tmp_path), divergence), nprocs=2, join=True)

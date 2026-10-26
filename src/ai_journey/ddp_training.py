@@ -9,7 +9,11 @@ from torch.nn.parallel import DistributedDataParallel
 
 from .ddp_metrics import token_nll
 from .ddp_runtime import require_all_ranks
-from .ddp_runtime import reduce_token_totals, require_model_consensus
+from .ddp_runtime import (
+    reduce_token_totals,
+    require_model_consensus,
+    require_optimizer_consensus,
+)
 from .ddp_data import byte_batches
 from .ddp_contracts import integer
 from .gpt2_training import learning_rate_at
@@ -120,6 +124,7 @@ def accumulated_update(
             model, optimizer, batches, gradient_clip=gradient_clip
         )
         result["model_sha256"] = require_model_consensus(model.module)
+        require_optimizer_consensus(optimizer)
         return result
     except Exception:
         model.load_state_dict(saved_model)

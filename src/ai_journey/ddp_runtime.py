@@ -83,6 +83,8 @@ def require_optimizer_consensus(optimizer) -> str:
     def encode(value):
         if isinstance(value, torch.Tensor):
             tensor = value.detach().cpu().contiguous()
+            if not torch.isfinite(tensor).all():
+                raise ValueError("optimizer state contains nonfinite values")
             return [
                 "tensor",
                 str(tensor.dtype),
