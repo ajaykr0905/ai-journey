@@ -17,6 +17,16 @@ model, optimizer, RNG and progress recovery for modern component combinations.
 
 ## Train and resume
 
+The isolated-wheel CI gate also runs
+`python -m ai_journey.checkpoint_journal_readiness --installed-root INSTALL_TARGET
+--repository CHECKOUT --output-dir NEW_PROOF_DIRECTORY`. It trains a two-rank
+control, damages only its newly created latest checkpoint and journal blob,
+restores the older intact version, and checks exact model/AdamW/rank-RNG/metric
+parity after advancing beyond the recorded high water. Existing proof directories
+are rejected; all diagnostic streams and deliberately damaged fixtures remain
+available for inspection. This is CPU process-recovery evidence, not a power-loss
+or storage-system durability benchmark.
+
 Install the package with `python -m pip install -e .`. PyTorch must provide Gloo.
 On Linux, a CPU wheel can be installed first with
 `python -m pip install torch --index-url https://download.pytorch.org/whl/cpu`.

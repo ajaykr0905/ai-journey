@@ -82,6 +82,7 @@ jobs:
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
       PYTHONHASHSEED: "0"
+      GLOO_SOCKET_IFNAME: lo
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -98,8 +99,10 @@ jobs:
         run: |
           ruff check src/ai_journey/moe*.py tests/test_moe*.py
           ruff format --check src/ai_journey/moe*.py tests/test_moe*.py
+          ruff check src/ai_journey/checkpoint*.py src/ai_journey/training_optimizer_state.py tests/test_checkpoint*.py tests/test_serialized_optimizer_admission.py tests/test_training_optimizer_counters.py
+          ruff format --check src/ai_journey/checkpoint*.py src/ai_journey/training_optimizer_state.py tests/test_checkpoint*.py tests/test_serialized_optimizer_admission.py tests/test_training_optimizer_counters.py
           python -m compileall -q src tests
-          python -m pytest -q tests/test_moe*.py tests/test_checkpoint_record_budgets.py tests/test_decoder_document_schedule_admission.py tests/test_document_evaluation_streaming.py tests/test_document_evaluation_finite.py
+          python -m pytest -q tests/test_moe*.py tests/test_checkpoint*.py tests/test_serialized_optimizer_admission.py tests/test_training_optimizer_counters.py tests/test_decoder_document_schedule_admission.py tests/test_document_evaluation_streaming.py tests/test_document_evaluation_finite.py
       - name: Build and install isolated MoE wheel
         run: |
           python -m build --outdir "$RUNNER_TEMP/moe-dist"
@@ -119,6 +122,7 @@ jobs:
           ai-journey-moe-experiment public --source en-pud --snapshot "$RUNNER_TEMP/moe-english.conllu" --plan "$RUNNER_TEMP/moe-evidence/plan.json" --output "$RUNNER_TEMP/moe-evidence/report.json"
           ai-journey-moe-experiment verify --report "$RUNNER_TEMP/moe-evidence/report.json"
           ai-journey-moe-experiment replay --report "$RUNNER_TEMP/moe-evidence/report.json" --snapshot "$RUNNER_TEMP/moe-english.conllu"
+          python -m ai_journey.checkpoint_journal_readiness --installed-root "$RUNNER_TEMP/moe-installed" --repository "$GITHUB_WORKSPACE" --output-dir "$RUNNER_TEMP/moe-evidence/journal"
       - name: Retain measured public CPU evidence
         if: always()
         uses: actions/upload-artifact@v4

@@ -1,5 +1,7 @@
 {
   "required_files": [
+    "src/ai_journey/checkpoint_journal_readiness.py",
+    "tests/test_checkpoint_journal_readiness.py",
     "docs/gqa-experiments.md",
     "src/ai_journey/gqa_experiment_plan.py",
     "src/ai_journey/gqa_experiment.py",
