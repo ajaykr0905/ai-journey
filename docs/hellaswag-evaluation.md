@@ -43,6 +43,23 @@ ai-journey-hellaswag evaluate \
 ai-journey-hellaswag verify --report /tmp/hellaswag-evidence.json
 ```
 
+New schema-2 evidence can be reexecuted against the same verified model:
+
+```bash
+ai-journey-hellaswag replay \
+  --dataset-response /tmp/hellaswag-first-rows.json \
+  --source data/day-19-demo-names.txt --spec config/ddp-lab.json \
+  --checkpoint /tmp/hellaswag-model.pt --report /tmp/hellaswag-evidence.json
+```
+
+Replay requires the same model fingerprint, architecture, dtype, thread count,
+Python/PyTorch build, operating system, machine architecture, and CPU capability.
+It reruns every candidate score and requires the entire regenerated report to
+match. A resealed but self-consistent score change therefore fails replay.
+Legacy reports remain integrity-verifiable but lack the metadata required for
+an exact-replay claim. For local checkpoints, also pass
+`--checkpoint-format local`; omit the checkpoint to replay an initial model.
+
 Omit `--checkpoint` to score the deterministic initial model.
 
 Schema-2 architecture-aware training specs also support RMSNorm, SwiGLU and RoPE

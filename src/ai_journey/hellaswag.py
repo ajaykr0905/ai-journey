@@ -731,28 +731,50 @@ def _payload_digest(payload: dict) -> str:
     ).hexdigest()
 
 
-def seal_evidence(report: dict, protocol: HellaSwagProtocol) -> dict:
-    """Seal measured benchmark output with protocol, runtime and scope limitations."""
+def evaluation_runtime(
+    *, model_dtype: str | None = None, torch_threads: int | None = None
+) -> dict:
+    """Identify the CPU execution boundary required for exact score replay."""
     import torch
 
+    runtime = {
+        "device": "cpu",
+        "torch": str(torch.__version__),
+        "python": platform.python_version(),
+        "operating_system": platform.system(),
+        "machine": platform.machine(),
+    }
+    if model_dtype is not None:
+        runtime.update(
+            model_dtype=model_dtype,
+            torch_threads=torch_threads,
+            cpu_capability=getattr(
+                torch.backends.cpu, "get_cpu_capability", lambda: "unknown"
+            )(),
+            torch_config_sha256=sha256(torch.__config__.show().encode()).hexdigest(),
+        )
+    return runtime
+
+
+def seal_evidence(report: dict, protocol: HellaSwagProtocol) -> dict:
+    """Seal measured benchmark output with protocol, runtime and scope limitations."""
     if (
         not isinstance(report, dict)
         or report.get("protocol_sha256") != protocol.fingerprint
     ):
         raise HellaSwagError("benchmark report does not match the protocol")
     canonical_report = json.loads(json.dumps(report, allow_nan=False))
+    modern_runtime = report.get("schema_version") == 2
     payload = {
-        "schema_version": 1,
+        "schema_version": 2 if modern_runtime else 1,
         "benchmark": "hellaswag_validation",
         "protocol": protocol_mapping(protocol),
         "run": canonical_report,
-        "runtime": {
-            "device": "cpu",
-            "torch": torch.__version__,
-            "python": platform.python_version(),
-            "operating_system": platform.system(),
-            "machine": platform.machine(),
-        },
+        "runtime": evaluation_runtime(
+            model_dtype=report["model_dtype"], torch_threads=report["torch_threads"]
+        )
+        if modern_runtime
+        else evaluation_runtime(),
         "limitations": HELLASWAG_LIMITATIONS.copy(),
     }
     payload["evidence_sha256"] = _payload_digest(payload)
@@ -774,7 +796,7 @@ def verify_evidence(payload: dict) -> dict:
         not isinstance(payload, dict)
         or set(payload) != fields
         or type(payload["schema_version"]) is not int
-        or payload["schema_version"] != 1
+        or payload["schema_version"] not in (1, 2)
         or payload["benchmark"] != "hellaswag_validation"
     ):
         raise HellaSwagError("HellaSwag evidence schema does not match")
@@ -786,6 +808,14 @@ def verify_evidence(payload: dict) -> dict:
     protocol = HellaSwagProtocol.from_mapping(payload["protocol"])
     run = payload["run"]
     runtime = payload["runtime"]
+    runtime_fields = {"device", "torch", "python", "operating_system", "machine"}
+    if payload["schema_version"] == 2:
+        runtime_fields |= {
+            "model_dtype",
+            "torch_threads",
+            "cpu_capability",
+            "torch_config_sha256",
+        }
     if (
         not isinstance(run, dict)
         or run.get("protocol_sha256") != protocol.fingerprint
@@ -793,8 +823,12 @@ def verify_evidence(payload: dict) -> dict:
         or run.get("world_size") != protocol.world_size
         or payload["limitations"] != HELLASWAG_LIMITATIONS
         or not isinstance(runtime, dict)
-        or set(runtime) != {"device", "torch", "python", "operating_system", "machine"}
-        or any(not isinstance(value, str) or not value for value in runtime.values())
+        or set(runtime) != runtime_fields
+        or any(
+            not isinstance(value, str) or not value
+            for name, value in runtime.items()
+            if name != "torch_threads"
+        )
         or runtime.get("device") != "cpu"
     ):
         raise HellaSwagError("HellaSwag evidence provenance does not match")
@@ -845,6 +879,17 @@ def verify_evidence(payload: dict) -> dict:
         raise HellaSwagError(
             "HellaSwag model accounting does not match its architecture"
         )
+    if payload["schema_version"] == 2:
+        if (
+            run["schema_version"] != 2
+            or runtime["model_dtype"] != run["model_dtype"]
+            or type(runtime["torch_threads"]) is not int
+            or runtime["torch_threads"] != run["torch_threads"]
+        ):
+            raise HellaSwagError(
+                "HellaSwag runtime does not match measured model controls"
+            )
+        require_scoring_digest(runtime["torch_config_sha256"], "torch_config_sha256")
     evaluation = run.get("evaluation")
     records = evaluation.get("records") if isinstance(evaluation, dict) else None
     if not isinstance(records, (list, tuple)) or len(records) != protocol.count:

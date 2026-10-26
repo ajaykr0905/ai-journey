@@ -12,6 +12,7 @@ from .gpt2_training import load_training_spec
 from .hellaswag import HellaSwagError, HellaSwagProtocol, compare_evaluations
 from .hellaswag import run_evaluation, seal_evidence
 from .hellaswag_evidence import read_evidence, write_evidence
+from .hellaswag_replay import verify_evaluation_replay
 from .hellaswag_io import (
     read_evaluation_bytes,
     parse_evaluation_json,
@@ -72,6 +73,15 @@ def main(argv=None) -> int:
     evaluate.add_argument("--output", type=Path, required=True)
     verify = commands.add_parser("verify")
     verify.add_argument("--report", type=Path, required=True)
+    replay = commands.add_parser("replay")
+    replay.add_argument("--report", type=Path, required=True)
+    replay.add_argument("--dataset-response", type=Path, required=True)
+    replay.add_argument("--source", type=Path, required=True)
+    replay.add_argument("--spec", type=Path, required=True)
+    replay.add_argument("--checkpoint", type=Path)
+    replay.add_argument(
+        "--checkpoint-format", choices=("distributed", "local"), default="distributed"
+    )
     compare = commands.add_parser("compare")
     compare.add_argument("--baseline", type=Path, required=True)
     compare.add_argument("--candidate", type=Path, required=True)
@@ -101,6 +111,23 @@ def main(argv=None) -> int:
             return 0
         if arguments.command == "verify":
             evidence = read_evidence(arguments.report)
+        elif arguments.command == "replay":
+            evidence = read_evidence(arguments.report)
+            response = read_evaluation_bytes(
+                arguments.dataset_response,
+                maximum=2 * 1024 * 1024,
+                name="dataset response",
+            )
+            HellaSwagProtocol.from_mapping(evidence["protocol"]).source.verify_sample(
+                response
+            )
+            model = _load_model(
+                arguments.source,
+                arguments.spec,
+                arguments.checkpoint,
+                checkpoint_format=arguments.checkpoint_format,
+            )
+            evidence = verify_evaluation_replay(model, response, evidence)
         else:
             inputs = (
                 arguments.dataset_response,
