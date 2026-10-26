@@ -206,6 +206,34 @@ system, machine architecture, CPU capability, and thread count. Replay requires
 that environment because floating-point kernels can differ across platforms;
 `verify` remains portable and checks the published report without re-execution.
 
+## Compare opt-in decoder architectures on CPU
+
+The GPT-2 weight-interoperable model remains unchanged. A separate decoder can
+select RMSNorm, SwiGLU, and RoPE independently or together, then compare all
+five named arms on identical byte windows and a separate held-out file:
+
+```bash
+mkdir -p artifacts
+ai-journey-decoder-compare \
+  --train data/day-19-demo-names.txt \
+  --heldout data/day-21-indian-cities.txt \
+  --output artifacts/decoder-comparison.json
+ai-journey-decoder-verify \
+  --report artifacts/decoder-comparison.json \
+  --train data/day-19-demo-names.txt \
+  --heldout data/day-21-indian-cities.txt
+```
+
+Supply only independently cleared public data. The example is a bounded
+pipeline smoke test: its tiny, different-domain inputs and one-step default
+cannot support model-quality or generalization claims. The JSON records input
+hashes, matched-window digest, architecture fingerprints, parameter counts,
+and training/held-out loss; verification reruns the CPU experiment with the same
+PyTorch version and compares every recorded value. Neither command runs on a
+GPU or demonstrates distributed or production-scale behavior. Increase steps
+only within the CLI's explicit resource limits, and keep the training and
+held-out byte files disjoint.
+
 ## Train the Day 38 full transformer
 
 The installed Day 38 command verifies the pinned Tiny Shakespeare bytes, keeps
