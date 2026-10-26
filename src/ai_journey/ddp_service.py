@@ -14,6 +14,7 @@ import math
 from .ddp_contracts import integer
 from .ddp_generation import SamplingConfig, generate_tokens
 from .gpt2_training import gpt2_model_fingerprint
+from .training_models import base_model_config
 
 
 class AdmissionRejected(RuntimeError):
@@ -193,7 +194,10 @@ class GenerationService:
             or not math.isfinite(deadline)
         ):
             raise ValueError("deadline must be a finite monotonic timestamp")
-        if any(token >= self._model.config.vocab_size for token in request.prompt):
+        if any(
+            token >= base_model_config(self._model).vocab_size
+            for token in request.prompt
+        ):
             raise ValueError("prompt token exceeds vocabulary")
         with self._admitted_request(), self._lock:
             fingerprint = request.fingerprint()
