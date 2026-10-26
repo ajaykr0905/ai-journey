@@ -51,10 +51,64 @@ def _require_checkpoint_phase(success, *, phase):
         raise
 
 
-def checkpoint_run_sha256(model, config, source: bytes) -> str:
+def optimizer_run_contract(model, optimizer, *, serialized_groups=None):
+    """Bind actual AdamW computation and ordered names, not dynamic LR/state.
+
+    These are AdamW's invariant execution/math controls. Scheduler metadata and
+    the current learning rate are deliberately excluded; a checkpoint restores
+    its scheduled LR while the run's schedule remains in training_config.
+    """
+    if not isinstance(optimizer, torch.optim.AdamW):
+        raise ValueError("journal optimizer contract requires AdamW")
+    names = {id(parameter): name for name, parameter in model.named_parameters()}
+    groups = optimizer.param_groups if serialized_groups is None else serialized_groups
+    if not isinstance(groups, list) or len(groups) != len(optimizer.param_groups):
+        raise ValueError("journal optimizer groups do not match")
+    keys = (
+        "betas",
+        "eps",
+        "weight_decay",
+        "amsgrad",
+        "maximize",
+        "foreach",
+        "capturable",
+        "differentiable",
+        "fused",
+        "decoupled_weight_decay",
+    )
+    declared = []
+    for destination, submitted in zip(optimizer.param_groups, groups, strict=True):
+        if not isinstance(submitted, dict):
+            raise ValueError("journal optimizer controls must be mappings")
+        try:
+            ordered_names = [
+                names[id(parameter)] for parameter in destination["params"]
+            ]
+        except KeyError as error:
+            raise ValueError(
+                "journal optimizer binds an unknown model parameter"
+            ) from error
+        declared.append(
+            {
+                "parameter_names": ordered_names,
+                "controls": {key: submitted[key] for key in keys if key in submitted},
+            }
+        )
+    bound = [name for group in declared for name in group["parameter_names"]]
+    if len(bound) != len(set(bound)) or set(bound) != set(names.values()):
+        raise ValueError("journal optimizer must bind every named parameter once")
+    result = {
+        "optimizer_type": f"{type(optimizer).__module__}.{type(optimizer).__qualname__}",
+        "groups": declared,
+    }
+    # Validate finite JSON and normalize tuple-valued controls consistently.
+    return json.loads(json.dumps(result, sort_keys=True, allow_nan=False))
+
+
+def checkpoint_run_sha256(model, config, source: bytes, *, optimizer) -> str:
     """Bind journal ownership to the complete typed replicated run contract."""
     contract = {
-        "schema": "ai-journey-ddp-journal-run-v1",
+        "schema": "ai-journey-ddp-journal-run-v2",
         "world_size": dist.get_world_size(),
         "model_config": model_config_mapping(model.config),
         "model_dtypes": {
@@ -62,6 +116,7 @@ def checkpoint_run_sha256(model, config, source: bytes) -> str:
         },
         "training_config": asdict(config),
         "source_sha256": sha256(source).hexdigest(),
+        "optimizer_contract": optimizer_run_contract(model, optimizer),
     }
     return sha256(
         json.dumps(
@@ -138,7 +193,9 @@ def save_checkpoint(
                     )
                 journal = CheckpointJournal(
                     journal_directory,
-                    run_sha256=checkpoint_run_sha256(model, config, source),
+                    run_sha256=checkpoint_run_sha256(
+                        model, config, source, optimizer=optimizer
+                    ),
                 )
                 recorded = journal.recorded_step
                 if recorded is not None and step <= recorded:
@@ -197,6 +254,7 @@ def load_checkpoint(
     max_bytes: int = 64 * 1024 * 1024,
     expected_sha256=None,
     expected_step=None,
+    expected_optimizer_contract=None,
 ) -> int:
     """Validate on every rank and restore atomically with rank-local RNG state."""
     payload = None
@@ -252,6 +310,15 @@ def load_checkpoint(
         ):
             raise ValueError("rank RNG states do not match world size")
         _validate_model_schema(payload["model"], model)
+        if expected_optimizer_contract is not None and not _exact_contract(
+            optimizer_run_contract(
+                model, optimizer, serialized_groups=payload["optimizer"]["param_groups"]
+            ),
+            expected_optimizer_contract,
+        ):
+            raise ValueError(
+                "checkpoint optimizer invariants differ from declared journal run"
+            )
     except (
         OSError,
         ValueError,
@@ -318,7 +385,13 @@ def load_checkpoint_journal(
     failures are never treated as recoverable corruption.
     """
     selection = [None]
+    expected_optimizer = None
     valid = True
+    try:
+        expected_optimizer = optimizer_run_contract(model, optimizer)
+    except (ValueError, TypeError, KeyError, OverflowError):
+        valid = False
+    require_all_ranks(valid, phase="journal optimizer contract")
     if dist.get_rank() == 0:
         try:
             if (
@@ -327,7 +400,10 @@ def load_checkpoint_journal(
             ):
                 raise ValueError("journal resume requires an existing manifest")
             journal = CheckpointJournal(
-                directory, run_sha256=checkpoint_run_sha256(model, config, source)
+                directory,
+                run_sha256=checkpoint_run_sha256(
+                    model, config, source, optimizer=optimizer
+                ),
             )
             selection[0] = (
                 journal.recorded_step,
@@ -353,6 +429,7 @@ def load_checkpoint_journal(
                 max_bytes=max_bytes,
                 expected_sha256=digest,
                 expected_step=step,
+                expected_optimizer_contract=expected_optimizer,
             )
         except CheckpointRejected:
             continue

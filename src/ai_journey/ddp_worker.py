@@ -114,7 +114,9 @@ def main(argv=None):
                 try:
                     journal = CheckpointJournal(
                         args.journal_directory,
-                        run_sha256=checkpoint_run_sha256(model, spec.training, source),
+                        run_sha256=checkpoint_run_sha256(
+                            model, spec.training, source, optimizer=optimizer
+                        ),
                     )
                     journal_ready = journal.recorded_step is None
                 except (OSError, ValueError, RuntimeError, TypeError):
