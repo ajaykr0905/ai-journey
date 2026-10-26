@@ -81,8 +81,8 @@ def make_server(
     if (
         isinstance(receive_timeout_seconds, bool)
         or not isinstance(receive_timeout_seconds, (int, float))
-        or not math.isfinite(receive_timeout_seconds)
         or not 0 < receive_timeout_seconds <= 30
+        or not math.isfinite(receive_timeout_seconds)
     ):
         raise ValueError("receive timeout must be finite and in (0, 30]")
 

@@ -21,7 +21,10 @@ different local-training checkpoint format.
 The unauthenticated server binds only to `127.0.0.1`. It is not an Internet-facing
 deployment. Accepted connections are bounded before worker creation; overload
 returns 503 with `Retry-After`. The generation token bucket separately returns
-429. Invalid requests return 400, internal generation failures return a generic
+429. Invalid requests return 400, including JSON integers too large for finite
+floating-point sampling controls; they cannot consume generation tokens or an
+inference slot. The measurement client rejects the same controls before opening
+a connection. Internal generation failures return a generic
 500, and a failure after streaming begins emits one terminal `error` SSE event.
 Requests have a ten-second generation deadline and a five-second socket timeout.
 An absolute five-second input budget also covers request headers and body;
