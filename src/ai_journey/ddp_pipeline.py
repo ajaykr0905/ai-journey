@@ -15,32 +15,39 @@ from .ddp_generation import SamplingConfig
 from .ddp_launch import launch_training
 from .ddp_limits import preflight
 from .ddp_service import GenerationService, GenerationRequest
-from .gpt2_model import GPT2LanguageModel, expected_gpt2_parameter_count
 from .gpt2_training import (
     training_spec_from_mapping,
     build_gpt2_optimizer,
     gpt2_model_fingerprint,
 )
+from .training_models import (
+    build_training_model,
+    expected_training_parameters,
+    model_config_mapping,
+)
 
 
 def load_serving_model(checkpoint: Path, spec, source: bytes):
-    if expected_gpt2_parameter_count(spec.model) > 1_000_000:
+    if expected_training_parameters(spec.model) > 1_000_000:
         raise ValueError("serving model exceeds CPU lab parameter budget")
     payload = bounded_checkpoint_load(checkpoint, 64 * 1024 * 1024)
     if (
-        payload["model_config"] != asdict(spec.model)
+        payload["model_config"] != model_config_mapping(spec.model)
         or payload["training_config"] != asdict(spec.training)
         or payload["source_sha256"] != sha256(source).hexdigest()
     ):
         raise ValueError("serving checkpoint provenance does not match")
     with torch.random.fork_rng(devices=[]):
-        model = GPT2LanguageModel(spec.model).double().eval()
+        model = (
+            build_training_model(spec.model, max_parameters=1_000_000).double().eval()
+        )
     model.load_state_dict(payload["model"], strict=True)
     if gpt2_model_fingerprint(model) != payload["model_sha256"]:
         raise ValueError("serving checkpoint model digest does not match")
     optimizer = build_gpt2_optimizer(model, spec.training)
     optimizer.load_state_dict(payload["optimizer"])
     validate_optimizer_state(model, optimizer, step=payload["step"])
+    model.requires_grad_(False)
     return model
 
 
@@ -73,8 +80,8 @@ def run_pipeline(
     training_path.write_bytes(training_source)
     derived_spec.write_text(json.dumps(payload))
     with torch.random.fork_rng(devices=[]):
-        torch.manual_seed(spec.training.seed)
-        initial = GPT2LanguageModel(spec.model).double()
+        torch.random.default_generator.manual_seed(spec.training.seed)
+        initial = build_training_model(spec.model, max_parameters=1_000_000).double()
     before = evaluate_documents(initial, validation_docs)
     checkpoint = directory / "trained.pt"
     ranks = launch_training(
