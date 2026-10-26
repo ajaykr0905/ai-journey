@@ -34,27 +34,50 @@ def benchmark_service(
     integer(warmup, "warmup")
     if repeats > 100 or warmup > 10:
         raise ValueError("benchmark exceeds the CPU measurement budget")
+    if not callable(clock):
+        raise TypeError("benchmark clock must be callable")
+    previous = None
+
+    def now():
+        nonlocal previous
+        value = clock()
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or (previous is not None and value < previous)
+        ):
+            raise ValueError("benchmark clock must be monotonic and finite")
+        previous = value
+        return value
+
+    def generate(identifier):
+        result = service.generate(
+            GenerationRequest(identifier, request.prompt, request.sampling)
+        )
+        if (
+            result.get("finish_reason") not in ("length", "eos")
+            or result.get("model_sha256") != service.model_sha256
+            or type(result.get("tokens")) is not list
+        ):
+            raise RuntimeError("benchmark requires completed model-bound generation")
+        return result
+
     prefix = uuid.uuid4().hex
     outputs = []
     for index in range(warmup):
-        service.generate(
-            GenerationRequest(
-                f"{prefix}-warm-{index}", request.prompt, request.sampling
-            )
-        )
+        generate(f"{prefix}-warm-{index}")
     samples = []
-    window_start = clock()
+    window_start = now()
     for index in range(repeats):
-        started = clock()
-        result = service.generate(
-            GenerationRequest(f"{prefix}-{index}", request.prompt, request.sampling)
-        )
-        elapsed = clock() - started
+        started = now()
+        result = generate(f"{prefix}-{index}")
+        elapsed = now() - started
         if elapsed < 0 or not math.isfinite(elapsed):
             raise ValueError("benchmark clock must be monotonic and finite")
         samples.append(elapsed)
         outputs.append(result["tokens"])
-    window_seconds = clock() - window_start
+    window_seconds = now() - window_start
     if window_seconds <= 0:
         raise ValueError("benchmark window must have positive duration")
     if any(output != outputs[0] for output in outputs):

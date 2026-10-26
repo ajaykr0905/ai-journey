@@ -4,43 +4,109 @@ from dataclasses import asdict
 from hashlib import sha256
 import json
 from pathlib import Path
+import re
 
 import torch
 
 from .ddp_benchmark import benchmark_service
-from .ddp_checkpoint import bounded_checkpoint_load, validate_optimizer_state
+from .ddp_checkpoint import bounded_checkpoint_load
+from .ddp_contracts import integer
 from .ddp_evaluation import documents_from_lines, split_documents, evaluate_documents
 from .ddp_evidence import build_evidence
 from .ddp_generation import SamplingConfig
 from .ddp_launch import launch_training
 from .ddp_limits import preflight
 from .ddp_service import GenerationService, GenerationRequest
-from .gpt2_model import GPT2LanguageModel, expected_gpt2_parameter_count
 from .gpt2_training import (
     training_spec_from_mapping,
     build_gpt2_optimizer,
     gpt2_model_fingerprint,
+    _validate_optimizer_contract,
+)
+from .training_models import (
+    build_training_model,
+    expected_training_parameters,
+    model_config_mapping,
 )
 
 
 def load_serving_model(checkpoint: Path, spec, source: bytes):
-    if expected_gpt2_parameter_count(spec.model) > 1_000_000:
+    if expected_training_parameters(spec.model) > 1_000_000:
         raise ValueError("serving model exceeds CPU lab parameter budget")
     payload = bounded_checkpoint_load(checkpoint, 64 * 1024 * 1024)
+    fields = {
+        "schema_version",
+        "world_size",
+        "step",
+        "model_config",
+        "training_config",
+        "source_sha256",
+        "model_sha256",
+        "model",
+        "optimizer",
+        "rank_rngs",
+    }
     if (
-        payload["model_config"] != asdict(spec.model)
+        type(payload) is not dict
+        or set(payload) != fields
+        or type(payload["schema_version"]) is not int
+        or payload["schema_version"] != 1
+    ):
+        raise ValueError("serving checkpoint schema does not match")
+    integer(payload["step"], "step")
+    integer(payload["world_size"], "world_size", 1)
+    if payload["step"] > spec.training.optimizer_steps or payload["world_size"] > 4:
+        raise ValueError("serving checkpoint progress or topology exceeds lab limits")
+    if (
+        type(payload["rank_rngs"]) is not list
+        or len(payload["rank_rngs"]) != payload["world_size"]
+    ):
+        raise ValueError("serving checkpoint rank RNG states do not match")
+    for state in payload["rank_rngs"]:
+        if (
+            not isinstance(state, torch.Tensor)
+            or state.device.type != "cpu"
+            or state.dtype != torch.uint8
+            or state.shape != torch.get_rng_state().shape
+        ):
+            raise ValueError("serving checkpoint rank RNG state is invalid")
+        try:
+            torch.Generator(device="cpu").set_state(state)
+        except RuntimeError as error:
+            raise ValueError("serving checkpoint rank RNG state is invalid") from error
+    if (
+        payload["model_config"] != model_config_mapping(spec.model)
         or payload["training_config"] != asdict(spec.training)
         or payload["source_sha256"] != sha256(source).hexdigest()
+        or payload["source_sha256"] != spec.source.sha256
+        or not isinstance(payload["model_sha256"], str)
+        or re.fullmatch(r"[0-9a-f]{64}", payload["model_sha256"]) is None
     ):
         raise ValueError("serving checkpoint provenance does not match")
     with torch.random.fork_rng(devices=[]):
-        model = GPT2LanguageModel(spec.model).double().eval()
-    model.load_state_dict(payload["model"], strict=True)
+        model = (
+            build_training_model(spec.model, max_parameters=1_000_000).double().eval()
+        )
+    expected = model.state_dict()
+    state = payload["model"]
+    if (
+        not isinstance(state, dict)
+        or set(state) != set(expected)
+        or any(
+            not isinstance(state[name], torch.Tensor)
+            or state[name].shape != tensor.shape
+            or state[name].dtype != tensor.dtype
+            for name, tensor in expected.items()
+        )
+    ):
+        raise ValueError("serving checkpoint tensor layout does not match")
+    model.load_state_dict(state, strict=True)
     if gpt2_model_fingerprint(model) != payload["model_sha256"]:
         raise ValueError("serving checkpoint model digest does not match")
     optimizer = build_gpt2_optimizer(model, spec.training)
     optimizer.load_state_dict(payload["optimizer"])
-    validate_optimizer_state(model, optimizer, step=payload["step"])
+    _validate_optimizer_contract(model, optimizer, spec.training, step=payload["step"])
+    model.requires_grad_(False)
     return model
 
 
@@ -73,8 +139,8 @@ def run_pipeline(
     training_path.write_bytes(training_source)
     derived_spec.write_text(json.dumps(payload))
     with torch.random.fork_rng(devices=[]):
-        torch.manual_seed(spec.training.seed)
-        initial = GPT2LanguageModel(spec.model).double()
+        torch.random.default_generator.manual_seed(spec.training.seed)
+        initial = build_training_model(spec.model, max_parameters=1_000_000).double()
     before = evaluate_documents(initial, validation_docs)
     checkpoint = directory / "trained.pt"
     ranks = launch_training(

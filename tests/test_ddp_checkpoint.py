@@ -4,6 +4,7 @@ from ai_journey.ddp_checkpoint import save_checkpoint
 from ai_journey.ddp_checkpoint import load_checkpoint
 from ai_journey.ddp_checkpoint import bounded_checkpoint_load
 import zipfile
+import os
 from ai_journey.ddp_contracts import Topology
 from ai_journey.ddp_runtime import process_group
 from ai_journey.gpt2_config import GPT2Config
@@ -138,3 +139,36 @@ def test_malformed_adamw_moment_shape_rolls_back_loaded_parameters(tmp_path):
                 path, model=model, optimizer=optimizer, config=config, source=b"public"
             )
         assert torch.equal(model.wte.weight, original)
+
+
+def test_distributed_checkpoint_fifo_is_rejected_without_waiting_for_a_writer(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "checkpoint.fifo"
+    os.mkfifo(path)
+    original_open = os.open
+
+    def checked_open(candidate, flags, *args, **kwargs):
+        assert flags & os.O_NONBLOCK, "opening a FIFO must never block the loader"
+        return original_open(candidate, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", checked_open)
+    with pytest.raises(ValueError, match="regular-file"):
+        bounded_checkpoint_load(path, 1024)
+
+
+def test_distributed_checkpoint_duplicate_archive_members_reject_before_loading(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "duplicate.pt"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("state/data", b"first")
+        with pytest.warns(UserWarning, match="Duplicate name"):
+            archive.writestr("state/data", b"second")
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("ambiguous archives must not reach torch.load")
+
+    monkeypatch.setattr(torch, "load", unexpected)
+    with pytest.raises(ValueError, match="expanded storage"):
+        bounded_checkpoint_load(path, 1024)
