@@ -20,6 +20,7 @@ from .gpt2_training_evidence_io import (
     load_training_evidence,
     write_training_evidence,
 )
+from .training_paths import validate_training_paths
 
 
 def load_source_bytes(path: Path, *, max_bytes: int = 16 * 1024 * 1024) -> bytes:
@@ -48,9 +49,16 @@ def run_and_publish(
     resume: bool = False,
     max_source_bytes: int = 16 * 1024 * 1024,
     max_parameters: int = 5_000_000,
+    step_count: int | None = None,
 ) -> dict[str, Any]:
     """Run the declared experiment and publish verified JSON evidence."""
 
+    validate_training_paths(
+        source=source_path,
+        spec=spec_path,
+        checkpoint=checkpoint_path,
+        report=report_path,
+    )
     source = load_source_bytes(source_path, max_bytes=max_source_bytes)
     spec = load_training_spec(spec_path)
     run = run_training_experiment(
@@ -59,6 +67,7 @@ def run_and_publish(
         checkpoint_path=checkpoint_path,
         resume=resume,
         max_parameters=max_parameters,
+        step_count=step_count,
     )
     evidence = build_training_evidence(run)
     write_training_evidence(report_path, evidence)
@@ -90,6 +99,9 @@ def _parser() -> argparse.ArgumentParser:
     train.add_argument("--resume", action="store_true")
     train.add_argument("--max-source-bytes", type=int, default=16 * 1024 * 1024)
     train.add_argument("--max-parameters", type=int, default=5_000_000)
+    train.add_argument(
+        "--steps", type=int, help="stop after this many complete optimizer updates"
+    )
     verify = commands.add_parser("verify", help="verify saved evidence")
     verify.add_argument("--report", type=Path, required=True)
     replay = commands.add_parser("replay", help="repeat and compare a saved run")
@@ -113,6 +125,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 resume=arguments.resume,
                 max_source_bytes=arguments.max_source_bytes,
                 max_parameters=arguments.max_parameters,
+                step_count=arguments.steps,
             )
         elif arguments.command == "verify":
             payload = verify_report(arguments.report)

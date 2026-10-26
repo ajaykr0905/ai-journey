@@ -14,7 +14,7 @@ from typing import Any, Mapping
 
 import torch
 
-from .gpt2_model import expected_gpt2_parameter_count
+from .training_models import expected_training_parameters
 from .gpt2_training import (
     GPT2StepMetric,
     GPT2TrainingError,
@@ -54,12 +54,7 @@ def _canonical_digest(payload: Mapping[str, Any]) -> str:
 
 
 def _spec_payload(run: GPT2TrainingRun) -> dict[str, Any]:
-    return {
-        "schema_version": 1,
-        "model": asdict(run.spec.model),
-        "training": asdict(run.spec.training),
-        "source": asdict(run.spec.source),
-    }
+    return run.spec.to_mapping()
 
 
 def _runtime_payload(*, torch_threads: int) -> dict[str, Any]:
@@ -180,7 +175,7 @@ def verify_training_evidence(payload: Mapping[str, Any]) -> dict[str, Any]:
     if (
         isinstance(parameter_count, bool)
         or not isinstance(parameter_count, int)
-        or parameter_count != expected_gpt2_parameter_count(spec.model)
+        or parameter_count != expected_training_parameters(spec.model)
         or groups["decay_parameters"] + groups["no_decay_parameters"] != parameter_count
     ):
         raise GPT2TrainingError("training evidence parameter count is invalid")
@@ -280,11 +275,20 @@ def verify_training_replay(source: bytes, payload: Mapping[str, Any]) -> dict[st
             "training evidence runtime does not match the exact replay environment"
         )
     spec = training_spec_from_mapping(expected["spec"])
+    started = expected["progress"]["started_step"]
+    count = expected["progress"]["completed_step"] - started
     with tempfile.TemporaryDirectory(prefix="gpt2-training-replay-") as directory:
+        checkpoint = Path(directory) / "checkpoint.pt"
+        if started:
+            run_training_experiment(
+                source, spec, checkpoint_path=checkpoint, step_count=started
+            )
         run = run_training_experiment(
             source,
             spec,
-            checkpoint_path=Path(directory) / "checkpoint.pt",
+            checkpoint_path=checkpoint,
+            resume=bool(started),
+            step_count=count or None,
         )
     actual = build_training_evidence(run)
     if actual != expected:

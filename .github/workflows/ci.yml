@@ -108,6 +108,14 @@ jobs:
           ruff format --check "${sources[@]}" "${tests[@]}"
           python -m pytest -q "${tests[@]}"
           ai-journey-decoder-compare --help
+      - name: Check architecture-aware training and restart safety
+        env:
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+        run: |
+          ruff check src/ai_journey/training_artifact.py src/ai_journey/training_models.py src/ai_journey/training_optimizer_state.py src/ai_journey/training_paths.py src/ai_journey/checkpoint_archive.py tests/test_training_restart_contracts.py tests/test_training_models.py tests/test_modern_training.py
+          ruff format --check src/ai_journey/training_artifact.py src/ai_journey/training_models.py src/ai_journey/training_optimizer_state.py src/ai_journey/training_paths.py src/ai_journey/checkpoint_archive.py tests/test_training_restart_contracts.py tests/test_training_models.py tests/test_modern_training.py
+          python -m pytest -q tests/test_training_restart_contracts.py tests/test_training_models.py tests/test_modern_training.py tests/test_gpt2_training_cli.py tests/test_gpt2_training_artifact.py
       - name: Replay verified GPT-2 training controls
         env:
           OMP_NUM_THREADS: "1"
