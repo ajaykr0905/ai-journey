@@ -27,6 +27,7 @@
     "tests/test_moe_capacity.py",
     "tests/test_moe_checkpoint.py",
     "tests/test_moe_checkpoint_records.py",
+    "tests/test_moe_checkpoint_tensor_work.py",
     "tests/test_moe_ci_contract.py",
     "tests/test_moe_cli.py",
     "tests/test_moe_config.py",
