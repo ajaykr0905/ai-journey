@@ -67,3 +67,55 @@ def test_failed_or_stalled_worker_reaps_every_owned_process(
     assert len(owned) == 2
     assert all(process.poll() is not None for process in owned)
     assert not (tmp_path / "state.pt").exists()
+
+
+@pytest.mark.parametrize(
+    "collision", ["source", "spec", "checkpoint", "symlink", "checkpoint-symlink"]
+)
+def test_worker_output_aliases_cannot_truncate_run_inputs(
+    tmp_path, monkeypatch, collision
+):
+    source, spec = prepare_run(tmp_path)
+    checkpoint = tmp_path / "state.pt"
+    preserved = {}
+    if collision == "source":
+        copied = tmp_path / "rank-0.log"
+        copied.write_bytes(source.read_bytes())
+        source = copied
+    elif collision == "spec":
+        copied = tmp_path / "rank-1.json"
+        copied.write_bytes(spec.read_bytes())
+        spec = copied
+    elif collision == "checkpoint":
+        checkpoint = tmp_path / "rank-0.log"
+        checkpoint.write_bytes(b"previous checkpoint")
+    elif collision == "symlink":
+        valuable = tmp_path / "valuable.log"
+        valuable.write_bytes(b"keep caller log")
+        (tmp_path / "rank-0.log").symlink_to(valuable)
+        preserved[valuable] = valuable.read_bytes()
+    else:
+        valuable = tmp_path / "valuable.pt"
+        valuable.write_bytes(b"keep previous checkpoint")
+        checkpoint.symlink_to(valuable)
+        preserved[valuable] = valuable.read_bytes()
+    for path in (source, spec, checkpoint):
+        if path.exists():
+            preserved[path] = path.read_bytes()
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("must reject before launching workers")
+
+    monkeypatch.setattr(subprocess, "Popen", unexpected)
+    expected = (
+        "checkpoint output" if collision == "checkpoint-symlink" else "worker outputs"
+    )
+    with pytest.raises(ValueError, match=expected):
+        launch_training(
+            source=source,
+            spec=spec,
+            checkpoint=checkpoint,
+            output_dir=tmp_path,
+            steps=2,
+        )
+    assert all(path.read_bytes() == value for path, value in preserved.items())

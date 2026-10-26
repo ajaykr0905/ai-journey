@@ -7,6 +7,7 @@ import time
 import torch
 
 from .ddp_contracts import integer
+from .training_models import base_model_config
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,8 @@ class SamplingConfig:
     def __post_init__(self):
         integer(self.max_new_tokens, "max_new_tokens", 1)
         integer(self.seed, "seed")
+        if self.seed >= 2**64:
+            raise ValueError("seed must fit an unsigned 64-bit integer")
         if self.max_new_tokens > 1024:
             raise ValueError("max_new_tokens exceeds CPU lab budget")
         if self.top_k is not None:
@@ -48,6 +51,7 @@ def filter_logits(logits: torch.Tensor, config: SamplingConfig) -> torch.Tensor:
         raise ValueError("each logit row requires at least one finite value")
     values = logits.double().clone()
     if config.temperature > 0:
+        values -= values.amax(dim=-1, keepdim=True)
         values /= config.temperature
     order = torch.argsort(values, dim=-1, descending=True, stable=True)
     ranked = values.gather(1, order)
@@ -141,6 +145,7 @@ def generate_tokens(
 ) -> dict:
     """Generate under a bounded sliding context while preserving caller modes."""
     prompt = tuple(prompt)
+    base = base_model_config(model)
     if cancelled is not None and not callable(cancelled):
         raise TypeError("cancelled must be a callable")
     if on_token is not None and not callable(on_token):
@@ -155,11 +160,11 @@ def generate_tokens(
         raise ValueError("prompt requires 1 to 4096 token ids")
     for token in prompt:
         integer(token, "prompt token")
-        if token >= model.config.vocab_size:
+        if token >= base.vocab_size:
             raise ValueError("prompt token exceeds vocabulary")
     if eos_token is not None:
         integer(eos_token, "eos_token")
-        if eos_token >= model.config.vocab_size:
+        if eos_token >= base.vocab_size:
             raise ValueError("eos_token exceeds vocabulary")
     modes = [(module, module.training) for module in model.modules()]
     sampler = TokenSampler(config)
@@ -177,12 +182,12 @@ def generate_tokens(
                     reason = "deadline"
                     break
                 inputs = torch.tensor(
-                    [history[-model.config.context_length :]], dtype=torch.long
+                    [history[-base.context_length :]], dtype=torch.long
                 )
                 if use_cache:
                     from .ddp_cache import cached_forward
 
-                    if cache is None or cache.length == model.config.context_length:
+                    if cache is None or cache.length == base.context_length:
                         output, cache = cached_forward(model, inputs)
                     else:
                         output, cache = cached_forward(model, inputs[:, -1:], cache)

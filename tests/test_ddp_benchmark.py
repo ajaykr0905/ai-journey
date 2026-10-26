@@ -28,3 +28,59 @@ def test_serving_benchmark_excludes_warmup_and_checks_output_parity():
         <= result["latency_seconds"]["p99"]
     )
     assert service.completed_requests == 4
+
+
+class StubService:
+    model_sha256 = "a" * 64
+
+    def __init__(self, **changes):
+        self.changes = changes
+
+    def generate(self, request):
+        return {
+            "model_sha256": self.model_sha256,
+            "tokens": [1],
+            "finish_reason": "length",
+            **self.changes,
+        }
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [0, 1, 2, float("nan")],
+        [0, 1, 2, float("inf")],
+        [0, 1, 2, True],
+        [0, 1, 2, "3"],
+        [0, 1, 2, 1.5, 2.5, 3],
+    ],
+)
+def test_benchmark_rejects_invalid_absolute_clock_and_between_request_regressions(
+    values,
+):
+    ticks = iter(values)
+    request = GenerationRequest("bench", (1,), SamplingConfig(max_new_tokens=1))
+    with pytest.raises(ValueError, match="clock"):
+        benchmark_service(
+            StubService(),
+            request,
+            repeats=2 if len(values) > 4 else 1,
+            warmup=0,
+            clock=lambda: next(ticks),
+        )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"finish_reason": "cancelled"},
+        {"finish_reason": "deadline"},
+        {"finish_reason": "error"},
+        {"model_sha256": "b" * 64},
+        {"tokens": (1,)},
+    ],
+)
+def test_benchmark_never_reports_incomplete_or_mismatched_work_as_parity(changes):
+    request = GenerationRequest("bench", (1,), SamplingConfig(max_new_tokens=1))
+    with pytest.raises(RuntimeError, match="completed model-bound"):
+        benchmark_service(StubService(**changes), request, repeats=1)

@@ -6,6 +6,15 @@ document-isolated evaluation, cached inference, and a bounded loopback server.
 The checked protocol is `config/ddp-lab.json`; it uses the public CC0 fixture
 `data/day-19-demo-names.txt`, bound to its SHA-256 and an immutable repository URL.
 
+The same worker, optimizer, checkpoint and evidence paths also accept schema-two
+training specs with a tagged `decoder_variant` model contract. RMSNorm, SwiGLU,
+learned positions and RoPE use the shared architecture contracts described in
+`docs/gpt2-training-controls.md`. Modern decoder dimensions and the resolved
+SwiGLU width count toward the same CPU budgets. Checkpoints bind the entire
+architecture, including the RoPE base; equal tensor shapes do not permit resuming
+with a different positional contract. Real two-rank regressions check exact
+model, optimizer, RNG and progress recovery for modern component combinations.
+
 ## Train and resume
 
 Install the package with `python -m pip install -e .`. PyTorch must provide Gloo.
@@ -39,11 +48,24 @@ update restores model, optimizer, RNG, gradients, and module modes. Rank-zero
 checkpoint publication happens only after replicated model fingerprints agree.
 Publication uses a flushed temporary file, atomic replacement, and directory sync.
 
+Use `train --checkpoint-interval 2` to publish every second completed global
+optimizer update and the final update. The interval counts durable optimizer
+steps across resume, never micro-batches. Model and optimizer replicas must agree
+before an update succeeds or a checkpoint is published; rejected updates restore
+the caller's parameters, optimizer settings/moments, RNG, gradients and modes.
+
 The checkpoint contains AdamW moments, the global step, source/config identity,
 and every rank's RNG state. Restore requires the same world size and configuration.
 Archive expansion is bounded before weights-only deserialization. Recovery covers
 completed optimizer boundaries; a failed process can lose work since the last
 published checkpoint.
+
+The `launch_training` Python API accepts `failure_rank=1`, `failure_mode="exit"`
+and `failure_after_step=3` to test a rank exit after the third optimizer update
+but before its checkpoint. With `checkpoint_interval=2`, the checkpoint remains
+at step two. Relaunch with `resume=True` and the remaining schedule to recover in
+fresh processes. The regression compares final model, AdamW moments, per-rank RNG
+and step against an uninterrupted run exactly.
 
 ## Reproduce the acceptance experiments
 

@@ -2,6 +2,7 @@
 
 from contextlib import nullcontext
 import copy
+import math
 
 import torch
 import torch.distributed as dist
@@ -9,10 +10,15 @@ from torch.nn.parallel import DistributedDataParallel
 
 from .ddp_metrics import token_nll
 from .ddp_runtime import require_all_ranks
-from .ddp_runtime import reduce_token_totals, require_model_consensus
+from .ddp_runtime import (
+    reduce_token_totals,
+    require_model_consensus,
+    require_optimizer_consensus,
+)
 from .ddp_data import byte_batches
 from .ddp_contracts import integer
 from .gpt2_training import learning_rate_at
+from .training_models import base_model_config
 
 
 def _accumulated_update(
@@ -28,6 +34,7 @@ def _accumulated_update(
     ):
         raise ValueError("gradient_clip must be positive and finite")
     batches = tuple(batches)
+    model_config = base_model_config(model.module)
     valid = bool(batches)
     for inputs, targets in batches:
         valid = (
@@ -41,14 +48,14 @@ def _accumulated_update(
             inputs.dtype == targets.dtype == torch.long
             and inputs.ndim == 2
             and inputs.shape == targets.shape
-            and 0 < inputs.shape[1] <= model.module.config.context_length
+            and 0 < inputs.shape[1] <= model_config.context_length
             and inputs.numel() > 0
         )
         if valid:
             valid = (
                 min(inputs.min().item(), targets.min().item()) >= 0
                 and max(inputs.max().item(), targets.max().item())
-                < model.module.config.vocab_size
+                < model_config.vocab_size
             )
     require_all_ranks(valid, phase="micro-batch validation")
     signature = (len(batches), tuple(batches[0][0].shape))
@@ -66,9 +73,21 @@ def _accumulated_update(
     for index, (inputs, targets) in enumerate(batches):
         context = model.no_sync() if index < len(batches) - 1 else nullcontext()
         with context:
-            losses = token_nll(model(inputs), targets)
-            (losses.mean() / len(batches)).backward()
-            total_loss += losses.detach().double().sum().item()
+            loss = None
+            batch_total = 0.0
+            try:
+                losses = token_nll(model(inputs), targets)
+                loss = losses.mean() / len(batches)
+                batch_total = losses.detach().double().sum().item()
+                if not torch.isfinite(loss) or not math.isfinite(
+                    total_loss + batch_total
+                ):
+                    loss = None
+            except (ValueError, RuntimeError, TypeError):
+                loss = None
+            require_all_ranks(loss is not None, phase="forward loss validation")
+            loss.backward()
+            total_loss += batch_total
             tokens += targets.numel()
     finite = all(
         parameter.grad is None or torch.isfinite(parameter.grad).all().item()
@@ -96,7 +115,9 @@ def _accumulated_update(
     }
 
 
-def accumulated_update(model, optimizer, batches, *, gradient_clip=1.0) -> dict:
+def accumulated_update(
+    model, optimizer, batches, *, gradient_clip=1.0, learning_rate=None
+) -> dict:
     """Restore caller state if any rank rejects a synchronous optimizer update."""
     parameters = tuple(model.parameters())
     saved_model = copy.deepcopy(model.state_dict())
@@ -105,9 +126,21 @@ def accumulated_update(model, optimizer, batches, *, gradient_clip=1.0) -> dict:
     saved_gradients = [None if p.grad is None else p.grad.clone() for p in parameters]
     modes = [(module, module.training) for module in model.modules()]
     try:
-        return _accumulated_update(
+        if learning_rate is not None:
+            if (
+                isinstance(learning_rate, bool)
+                or not isinstance(learning_rate, (float, int))
+                or not 0 <= learning_rate < float("inf")
+            ):
+                raise ValueError("learning_rate must be finite and nonnegative")
+            for group in optimizer.param_groups:
+                group["lr"] = learning_rate
+        result = _accumulated_update(
             model, optimizer, batches, gradient_clip=gradient_clip
         )
+        result["model_sha256"] = require_model_consensus(model.module)
+        require_optimizer_consensus(optimizer)
+        return result
     except Exception:
         model.load_state_dict(saved_model)
         optimizer.load_state_dict(saved_optimizer)
@@ -150,14 +183,13 @@ def train_segment(
                 epoch=epoch,
             )
         learning_rate = learning_rate_at(step, config)
-        for group in optimizer.param_groups:
-            group["lr"] = learning_rate
         begin = offset * config.accumulation_steps
         result = accumulated_update(
             model,
             optimizer,
             batches[begin : begin + config.accumulation_steps],
             gradient_clip=config.gradient_clip,
+            learning_rate=learning_rate,
         )
         loss, tokens, mean = reduce_token_totals(result["loss_sum"], result["tokens"])
         metrics.append(
@@ -168,7 +200,6 @@ def train_segment(
                 "tokens": tokens,
                 "mean_loss": mean,
                 "learning_rate": learning_rate,
-                "model_sha256": require_model_consensus(model.module),
             }
         )
     return metrics

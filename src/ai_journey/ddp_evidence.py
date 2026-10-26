@@ -1,6 +1,5 @@
 """Integrity-checked evidence for measured local distributed process runs."""
 
-from dataclasses import asdict
 from hashlib import sha256
 import json
 import math
@@ -41,12 +40,7 @@ def build_evidence(source: bytes, spec, ranks: list[dict]) -> dict:
         "schema_version": 1,
         "world_size": len(ranks),
         "source_sha256": sha256(source).hexdigest(),
-        "spec": {
-            "schema_version": 1,
-            "model": asdict(spec.model),
-            "training": asdict(spec.training),
-            "source": asdict(spec.source),
-        },
+        "spec": spec.to_mapping(),
         "ranks": [
             {key: rank[key] for key in ("rank", "pid", "model_sha256")}
             for rank in ranks

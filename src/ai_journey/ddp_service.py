@@ -7,18 +7,25 @@ import re
 import copy
 import threading
 from collections import OrderedDict
+from contextlib import contextmanager
 import time
 import math
 
 from .ddp_contracts import integer
 from .ddp_generation import SamplingConfig, generate_tokens
 from .gpt2_training import gpt2_model_fingerprint
+from .training_models import base_model_config
+from .serving_metrics import ServingMetrics
 
 
 class AdmissionRejected(RuntimeError):
     def __init__(self, retry_after: float):
         super().__init__("generation token budget exhausted")
         self.retry_after = retry_after
+
+
+class ServiceDraining(RuntimeError):
+    """New requests cannot enter a service that is draining admitted work."""
 
 
 class TokenBucket:
@@ -39,16 +46,28 @@ class TokenBucket:
         self.capacity = capacity
         self.rate = refill_per_second
         self.tokens = float(capacity)
+        if not callable(clock):
+            raise TypeError("admission clock must be callable")
         self.clock = clock
-        self.updated = clock()
+        self.updated = self._read_clock()
         self.lock = threading.Lock()
+
+    def _read_clock(self):
+        now = self.clock()
+        if (
+            isinstance(now, bool)
+            or not isinstance(now, (int, float))
+            or not math.isfinite(now)
+        ):
+            raise ValueError("admission clock must return a finite number")
+        return now
 
     def consume(self, cost: int):
         integer(cost, "cost", 1)
         if cost > self.capacity:
             raise ValueError("request cannot fit the admission capacity")
         with self.lock:
-            now = self.clock()
+            now = self._read_clock()
             if now < self.updated:
                 raise RuntimeError("admission clock moved backwards")
             self.tokens = min(
@@ -118,11 +137,44 @@ class GenerationService:
         self._model.requires_grad_(False)
         self.model_sha256 = gpt2_model_fingerprint(self._model)
         self._lock = threading.RLock()
+        self._stats_lock = threading.Lock()
+        self._lifecycle = threading.Condition(self._stats_lock)
+        self._active_requests = 0
+        self._draining = False
         self.completed_requests = 0
         self.generated_tokens = 0
         self._responses = OrderedDict()
         self._cache_capacity = cache_capacity
         self._admission = admission if admission is not None else TokenBucket()
+        self.metrics = ServingMetrics()
+
+    @contextmanager
+    def _admitted_request(self):
+        with self._lifecycle:
+            if self._draining:
+                raise ServiceDraining("service is draining")
+            self._active_requests += 1
+        try:
+            yield
+        finally:
+            with self._lifecycle:
+                self._active_requests -= 1
+                self._lifecycle.notify_all()
+
+    def drain(self, *, timeout_seconds=10):
+        """Stop accepting work and wait at most the declared time for admission to empty."""
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not math.isfinite(timeout_seconds)
+            or not 0 <= timeout_seconds <= 60
+        ):
+            raise ValueError("drain timeout must be finite and in [0, 60]")
+        with self._lifecycle:
+            self._draining = True
+            return self._lifecycle.wait_for(
+                lambda: self._active_requests == 0, timeout=timeout_seconds
+            )
 
     def generate(
         self,
@@ -132,9 +184,68 @@ class GenerationService:
         deadline=None,
         on_token=None,
     ) -> dict:
+        started = time.perf_counter()
+        observation = {"tokens": 0, "cached": False}
+        outcome = "error"
+
+        def observe(index, token):
+            observation["tokens"] += 1
+            if on_token is not None:
+                on_token(index, token)
+
+        try:
+            if on_token is not None and not callable(on_token):
+                raise TypeError("on_token must be callable")
+            output = self._generate(
+                request,
+                cancelled=cancelled,
+                deadline=deadline,
+                on_token=observe,
+                observation=observation,
+            )
+            outcome = {
+                "cancelled": "cancelled",
+                "deadline": "deadline",
+            }.get(output["finish_reason"], "success")
+            return output
+        except (AdmissionRejected, ServiceDraining, ValueError, TypeError):
+            outcome = "rejected"
+            raise
+        finally:
+            self.metrics.record(
+                outcome=outcome,
+                duration_seconds=time.perf_counter() - started,
+                generated_tokens=observation["tokens"],
+                cached=observation["cached"],
+            )
+
+    def _generate(
+        self,
+        request: GenerationRequest,
+        *,
+        cancelled=None,
+        deadline=None,
+        on_token=None,
+        observation=None,
+    ) -> dict:
         if not isinstance(request, GenerationRequest):
             raise TypeError("request must be GenerationRequest")
-        with self._lock:
+        if cancelled is not None and not callable(cancelled):
+            raise TypeError("cancelled must be a callable")
+        if on_token is not None and not callable(on_token):
+            raise TypeError("on_token must be callable")
+        if deadline is not None and (
+            isinstance(deadline, bool)
+            or not isinstance(deadline, (int, float))
+            or not math.isfinite(deadline)
+        ):
+            raise ValueError("deadline must be a finite monotonic timestamp")
+        if any(
+            token >= base_model_config(self._model).vocab_size
+            for token in request.prompt
+        ):
+            raise ValueError("prompt token exceeds vocabulary")
+        with self._admitted_request(), self._lock:
             fingerprint = request.fingerprint()
             if request.request_id in self._responses:
                 previous_fingerprint, previous_output = self._responses[
@@ -143,10 +254,20 @@ class GenerationService:
                 if previous_fingerprint != fingerprint:
                     raise ValueError("request_id was already used with different input")
                 self._responses.move_to_end(request.request_id)
-                if on_token is not None:
-                    for index, token in enumerate(previous_output["tokens"]):
+                observation["cached"] = True
+                response = copy.deepcopy(previous_output)
+                response["tokens"] = []
+                for index, token in enumerate(previous_output["tokens"]):
+                    if cancelled is not None and cancelled():
+                        response["finish_reason"] = "cancelled"
+                        break
+                    if deadline is not None and time.monotonic() >= deadline:
+                        response["finish_reason"] = "deadline"
+                        break
+                    response["tokens"].append(token)
+                    if on_token is not None:
                         on_token(index, token)
-                return copy.deepcopy(previous_output)
+                return response
             self._admission.consume(
                 len(request.prompt) + request.sampling.max_new_tokens
             )
@@ -159,8 +280,9 @@ class GenerationService:
                 deadline=deadline,
                 on_token=on_token,
             )
-            self.completed_requests += 1
-            self.generated_tokens += len(output["tokens"])
+            with self._stats_lock:
+                self.completed_requests += 1
+                self.generated_tokens += len(output["tokens"])
             response = {
                 "request_id": request.request_id,
                 "model_sha256": self.model_sha256,
@@ -176,9 +298,10 @@ class GenerationService:
             return response
 
     def health(self) -> dict:
-        with self._lock:
+        with self._stats_lock:
             return {
-                "ready": True,
+                "ready": not self._draining,
+                "active_requests": self._active_requests,
                 "device": "cpu",
                 "model_sha256": self.model_sha256,
                 "completed_requests": self.completed_requests,

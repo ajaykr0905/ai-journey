@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import math
 import torch
 from .gpt2_training import gpt2_model_fingerprint
+from .training_models import base_model_config
 
 
 @dataclass(frozen=True)
@@ -97,7 +98,8 @@ def cached_attention(attention, inputs: torch.Tensor, past=None):
 
 @torch.inference_mode()
 def cached_forward(model, token_ids: torch.Tensor, cache: KVCache | None = None):
-    """Advance every decoder layer with learned absolute position offsets."""
+    """Advance a validated baseline or modern decoder with model-bound cache state."""
+    base = base_model_config(model)
     if any(module.training for module in model.modules()):
         raise ValueError("cached decoder requires every module in evaluation mode")
     if (
@@ -107,21 +109,29 @@ def cached_forward(model, token_ids: torch.Tensor, cache: KVCache | None = None)
         or token_ids.device.type != "cpu"
     ):
         raise ValueError("cached decoder requires nonempty CPU integer token batches")
-    if token_ids.min() < 0 or token_ids.max() >= model.config.vocab_size:
+    if token_ids.min() < 0 or token_ids.max() >= base.vocab_size:
         raise ValueError("cached decoder token id exceeds vocabulary")
     fingerprint = gpt2_model_fingerprint(model)
     offset = 0 if cache is None else cache.length
-    if offset + token_ids.shape[1] > model.config.context_length:
+    if offset + token_ids.shape[1] > base.context_length:
         raise ValueError("cached decoder context capacity exceeded")
     if cache is not None:
         if (
             cache.model_sha256 != fingerprint
             or len(cache.keys) != len(model.h)
-            or cache.keys[0].shape[:2] != (token_ids.shape[0], model.config.head_count)
-            or cache.keys[0].shape[-1] != model.config.head_dim
+            or cache.keys[0].shape[:2] != (token_ids.shape[0], base.head_count)
+            or cache.keys[0].shape[-1] != base.head_dim
             or cache.keys[0].dtype != model.wte.weight.dtype
         ):
             raise ValueError("cache does not belong to this decoder and batch")
+    if getattr(model.config, "position_kind", None) == "rope":
+        past = None if cache is None else tuple(zip(cache.keys, cache.values))
+        output, pairs = model.forward_with_cache(token_ids, past_key_values=past)
+        return output, KVCache(
+            fingerprint,
+            tuple(pair[0] for pair in pairs),
+            tuple(pair[1] for pair in pairs),
+        )
     positions = torch.arange(offset, offset + token_ids.shape[1])
     hidden = model.wte(token_ids) + model.wpe(positions)
     keys, values = [], []

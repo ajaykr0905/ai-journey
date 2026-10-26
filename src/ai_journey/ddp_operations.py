@@ -60,12 +60,16 @@ def add_commands(commands):
         if name == "serve":
             command.add_argument("--port", type=int, default=8080)
             command.add_argument("--max-seconds", type=int, default=60)
+            command.add_argument("--max-connections", type=int, default=8)
+            command.add_argument("--drain-seconds", type=int, default=10)
         else:
             command.add_argument("--output", type=Path, required=True)
             command.add_argument("--repeats", type=int, default=5)
 
 
 def run_operation(arguments):
+    if arguments.command in ("benchmark", "matrix", "pipeline"):
+        _validate_operation_paths(arguments)
     threads = torch.get_num_threads()
     torch.set_num_threads(1)
     try:
@@ -112,8 +116,17 @@ def run_operation(arguments):
             return report
         if not 0 <= arguments.port <= 65535 or not 1 <= arguments.max_seconds <= 3600:
             raise ValueError("server port or lifetime exceeds lab limits")
-        server = make_server(service, port=arguments.port)
-        timer = threading.Timer(arguments.max_seconds, server.shutdown)
+        if not 0 <= arguments.drain_seconds <= 60:
+            raise ValueError("drain timeout exceeds lab limits")
+        server = make_server(
+            service, port=arguments.port, max_connections=arguments.max_connections
+        )
+
+        def stop():
+            service.drain(timeout_seconds=arguments.drain_seconds)
+            server.shutdown()
+
+        timer = threading.Timer(arguments.max_seconds, stop)
         timer.start()
         print(
             json.dumps(
@@ -128,8 +141,33 @@ def run_operation(arguments):
             server.serve_forever(poll_interval=0.05)
         finally:
             timer.cancel()
-            timer.join(timeout=2)
+            service.drain(timeout_seconds=arguments.drain_seconds)
+            timer.join(timeout=arguments.drain_seconds + 2)
             server.server_close()
         return service.health()
     finally:
         torch.set_num_threads(threads)
+
+
+def _validate_operation_paths(arguments):
+    """Reject destructive output aliases before model, worker or file creation."""
+    output = arguments.output
+    inputs = [arguments.source, arguments.spec]
+    if arguments.command == "benchmark":
+        inputs.append(arguments.checkpoint)
+    if output.is_symlink() or (output.exists() and not output.is_file()):
+        raise ValueError("operation output must be a regular non-symlink path")
+    for source in inputs:
+        if output.resolve() == source.resolve() or (
+            output.exists() and source.exists() and output.samefile(source)
+        ):
+            raise ValueError("operation output aliases a protected input")
+    if arguments.command in ("matrix", "pipeline"):
+        directory = arguments.workdir
+        if directory.is_symlink() or (
+            directory.exists() and (not directory.is_dir() or any(directory.iterdir()))
+        ):
+            raise ValueError("operation workdir must be new or empty")
+        resolved = directory.resolve()
+        if any(path.resolve().is_relative_to(resolved) for path in [*inputs, output]):
+            raise ValueError("operation inputs and report must be outside its workdir")

@@ -6,7 +6,6 @@ from hashlib import sha256
 import os
 from pathlib import Path
 import tempfile
-import stat
 import zipfile
 import pickle
 import math
@@ -15,28 +14,20 @@ import torch
 import torch.distributed as dist
 
 from .ddp_contracts import integer
-from .ddp_runtime import require_all_ranks, require_model_consensus
+from .checkpoint_archive import load_checkpoint_archive
+from .ddp_runtime import (
+    require_all_ranks,
+    require_model_consensus,
+    require_optimizer_consensus,
+)
 from .gpt2_training import gpt2_model_fingerprint
+from .training_models import model_config_mapping
 
 
 def bounded_checkpoint_load(path: Path, max_bytes: int):
     """Bound both archive bytes and expanded tensor storage before deserialization."""
     integer(max_bytes, "max_bytes", 1)
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    with os.fdopen(descriptor, "rb") as stream:
-        info = os.fstat(stream.fileno())
-        if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= max_bytes:
-            raise ValueError("checkpoint exceeds file budget")
-        with zipfile.ZipFile(stream) as archive:
-            records = archive.infolist()
-            if (
-                len(records) > 1024
-                or sum(record.file_size for record in records) > max_bytes
-                or any(record.compress_type != zipfile.ZIP_STORED for record in records)
-            ):
-                raise ValueError("checkpoint exceeds expanded storage budget")
-        stream.seek(0)
-        return torch.load(stream, map_location="cpu", weights_only=True)
+    return load_checkpoint_archive(path, max_bytes=max_bytes)
 
 
 def validate_optimizer_state(model, optimizer, *, step: int):
@@ -109,6 +100,7 @@ def save_checkpoint(
         valid = False
     require_all_ranks(valid, phase="checkpoint state validation")
     fingerprint = require_model_consensus(model)
+    require_optimizer_consensus(optimizer)
     rngs = [None] * dist.get_world_size()
     dist.all_gather_object(rngs, torch.get_rng_state())
     success = True
@@ -127,7 +119,7 @@ def save_checkpoint(
                         "schema_version": 1,
                         "world_size": dist.get_world_size(),
                         "step": step,
-                        "model_config": asdict(model.config),
+                        "model_config": model_config_mapping(model.config),
                         "training_config": asdict(config),
                         "source_sha256": sha256(source).hexdigest(),
                         "model_sha256": fingerprint,
@@ -198,7 +190,7 @@ def load_checkpoint(
         if (
             payload["step"] > config.optimizer_steps
             or payload["world_size"] != dist.get_world_size()
-            or payload["model_config"] != asdict(model.config)
+            or payload["model_config"] != model_config_mapping(model.config)
             or payload["training_config"] != asdict(config)
             or payload["source_sha256"] != sha256(source).hexdigest()
         ):
@@ -238,6 +230,7 @@ def load_checkpoint(
     try:
         require_all_ranks(restored, phase="checkpoint restoration")
         require_model_consensus(model)
+        require_optimizer_consensus(optimizer)
     except Exception:
         model.load_state_dict(saved[0])
         optimizer.load_state_dict(saved[1])

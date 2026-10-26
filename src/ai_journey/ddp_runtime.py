@@ -2,6 +2,9 @@
 
 from contextlib import contextmanager
 from datetime import timedelta
+from hashlib import sha256
+import json
+import math
 
 import torch.distributed as dist
 import torch
@@ -40,16 +43,28 @@ def process_group(topology: Topology, *, rendezvous: str, timeout_seconds: int =
 
 def reduce_token_totals(loss_sum: float, tokens: int) -> tuple[float, int, float]:
     """Reduce additive statistics; never average rank means."""
-    if tokens == 0 and loss_sum == 0:
-        pass
-    else:
-        weighted_mean([(loss_sum, tokens)])
-    values = torch.tensor([loss_sum, tokens], dtype=torch.float64)
-    dist.all_reduce(values, op=dist.ReduceOp.SUM)
-    total_loss, total_tokens = values.tolist()
+    valid = True
+    try:
+        integer(tokens, "tokens")
+        if tokens > (2**63 - 1) // dist.get_world_size():
+            raise ValueError("token total exceeds collective integer capacity")
+        if isinstance(loss_sum, bool) or not isinstance(loss_sum, (int, float)):
+            raise ValueError("loss sum must be numeric")
+        if not (tokens == 0 and loss_sum == 0):
+            weighted_mean([(loss_sum, tokens)])
+    except (TypeError, ValueError, OverflowError):
+        valid = False
+    require_all_ranks(valid, phase="token total validation")
+    loss = torch.tensor(loss_sum, dtype=torch.float64)
+    count = torch.tensor(tokens, dtype=torch.int64)
+    dist.all_reduce(loss, op=dist.ReduceOp.SUM)
+    dist.all_reduce(count, op=dist.ReduceOp.SUM)
+    total_loss, total_tokens = loss.item(), count.item()
+    if not math.isfinite(total_loss):
+        raise ValueError("global loss sum exceeds floating point capacity")
     if total_tokens == 0:
         raise ValueError("global evaluation contains no targets")
-    return total_loss, int(total_tokens), total_loss / total_tokens
+    return total_loss, total_tokens, total_loss / total_tokens
 
 
 def require_all_ranks(success: bool, *, phase: str) -> None:
@@ -72,4 +87,53 @@ def require_model_consensus(model) -> str:
     dist.all_gather(gathered, encoded)
     if any(not torch.equal(encoded, value) for value in gathered):
         raise RuntimeError("replicated model fingerprints diverged")
+    return fingerprint
+
+
+def require_optimizer_consensus(optimizer) -> str:
+    """Compare tensor bytes and all optimizer settings across replicas."""
+
+    def encode(value):
+        if isinstance(value, torch.Tensor):
+            tensor = value.detach().cpu().contiguous()
+            if not torch.isfinite(tensor).all():
+                raise ValueError("optimizer state contains nonfinite values")
+            return [
+                "tensor",
+                str(tensor.dtype),
+                list(tensor.shape),
+                sha256(
+                    tensor.reshape(-1).view(torch.uint8).numpy().tobytes()
+                ).hexdigest(),
+            ]
+        if isinstance(value, dict):
+            return [
+                "dict",
+                [
+                    [encode(key), encode(item)]
+                    for key, item in sorted(
+                        value.items(),
+                        key=lambda pair: (type(pair[0]).__name__, repr(pair[0])),
+                    )
+                ],
+            ]
+        if isinstance(value, (tuple, list)):
+            return [type(value).__name__, [encode(item) for item in value]]
+        if value is None or type(value) in (bool, int, float, str):
+            return [type(value).__name__, value]
+        raise ValueError("unsupported optimizer state value")
+
+    fingerprint = None
+    try:
+        fingerprint = sha256(
+            json.dumps(encode(optimizer.state_dict()), allow_nan=False).encode()
+        ).hexdigest()
+    except (TypeError, ValueError, RuntimeError):
+        pass
+    require_all_ranks(fingerprint is not None, phase="optimizer state fingerprinting")
+    encoded = torch.tensor(list(bytes.fromhex(fingerprint)), dtype=torch.uint8)
+    gathered = [torch.empty_like(encoded) for _ in range(dist.get_world_size())]
+    dist.all_gather(gathered, encoded)
+    if any(not torch.equal(encoded, value) for value in gathered):
+        raise RuntimeError("replicated optimizer fingerprints diverged")
     return fingerprint

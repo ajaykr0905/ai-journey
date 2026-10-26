@@ -4,9 +4,9 @@ from hashlib import sha256
 from pathlib import Path
 
 from .ddp_contracts import integer
-from .gpt2_model import expected_gpt2_parameter_count
 from .gpt2_training import load_training_spec
 from .ddp_data import BatchPlan
+from .training_models import base_model_config, expected_training_parameters
 
 
 def preflight(source: Path, spec_path: Path, *, world_size: int, steps: int):
@@ -25,8 +25,8 @@ def preflight(source: Path, spec_path: Path, *, world_size: int, steps: int):
     if sha256(data).hexdigest() != spec.source.sha256:
         raise ValueError("public source digest does not match specification")
     if (
-        expected_gpt2_parameter_count(spec.model) > 1_000_000
-        or spec.model.context_length > 128
+        expected_training_parameters(spec.model) > 1_000_000
+        or base_model_config(spec.model).context_length > 128
     ):
         raise ValueError("model exceeds CPU parameter or context budget")
     if (
