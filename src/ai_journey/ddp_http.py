@@ -8,6 +8,19 @@ import time
 from .ddp_service import AdmissionRejected, GenerationRequest, event_frame
 
 
+def _unique_fields(pairs):
+    fields = {}
+    for name, value in pairs:
+        if name in fields:
+            raise ValueError("duplicate JSON field")
+        fields[name] = value
+    return fields
+
+
+def _reject_constant(value):
+    raise ValueError("nonfinite JSON constant")
+
+
 def make_server(service, *, host="127.0.0.1", port=0):
     if host != "127.0.0.1":
         raise ValueError("the unauthenticated lab server binds only to loopback")
@@ -70,7 +83,15 @@ def make_server(service, *, host="127.0.0.1", port=0):
                 body = self.rfile.read(int(lengths[0]))
                 if len(body) != int(lengths[0]):
                     raise ValueError("request body is truncated")
-                request = GenerationRequest.from_mapping(json.loads(body))
+                try:
+                    payload = json.loads(
+                        body,
+                        object_pairs_hook=_unique_fields,
+                        parse_constant=_reject_constant,
+                    )
+                except RecursionError as error:
+                    raise ValueError("JSON nesting exceeds parser limits") from error
+                request = GenerationRequest.from_mapping(payload)
                 output = service.generate(
                     request,
                     deadline=time.monotonic() + 10,

@@ -36,6 +36,18 @@ class FailingService:
         raise RuntimeError("internal diagnostic must remain server-side")
 
 
+class RecordingService:
+    def __init__(self):
+        self.calls = 0
+
+    def health(self):
+        return {"ready": True}
+
+    def generate(self, request, **kwargs):
+        self.calls += 1
+        return {"tokens": [], "finish_reason": "length"}
+
+
 @pytest.mark.parametrize("route", ["/generate", "/stream"])
 def test_model_failure_returns_safe_http_error_and_preserves_server(route):
     with serving(FailingService()) as server:
@@ -70,4 +82,23 @@ def test_model_failure_after_stream_start_emits_one_terminal_error():
         assert "internal diagnostic" not in body
         client.request("GET", "/health")
         assert client.getresponse().status == 200
+        client.close()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"request_id":"one","request_id":"two","prompt":[1],"sampling":{}}',
+        b'{"request_id":"one","prompt":[1],"sampling":{"temperature":0,"temperature":1}}',
+    ],
+)
+def test_duplicate_json_fields_are_rejected_before_service_execution(payload):
+    service = RecordingService()
+    with serving(service) as server:
+        client = http.client.HTTPConnection(*server.server_address, timeout=5)
+        client.request("POST", "/generate", body=payload)
+        response = client.getresponse()
+        assert response.status == 400
+        assert json.loads(response.read()) == {"error": "invalid generation request"}
+        assert service.calls == 0
         client.close()
