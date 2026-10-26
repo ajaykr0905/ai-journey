@@ -10,8 +10,10 @@ import json
 import math
 import os
 from pathlib import Path
+import pickle
 import tempfile
 from typing import Any
+import zipfile
 
 import torch
 from torch import Tensor
@@ -20,6 +22,7 @@ from torch.nn import functional as F
 from .gpt2_config import GPT2Config
 from .gpt2_model import GPT2LanguageModel, expected_gpt2_parameter_count
 from .training_optimizer_state import validate_adamw_state
+from .checkpoint_archive import load_checkpoint_archive
 
 
 class GPT2TrainingError(ValueError):
@@ -750,8 +753,16 @@ def load_training_checkpoint(
         raise GPT2TrainingError("checkpoint exceeds its byte budget")
     _validate_optimizer_binding(model, optimizer)
     try:
-        payload = torch.load(path, map_location="cpu", weights_only=True)
-    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        payload = load_checkpoint_archive(path, max_bytes=max_checkpoint_bytes)
+    except (
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+        zipfile.BadZipFile,
+        pickle.UnpicklingError,
+        EOFError,
+    ) as exc:
         raise GPT2TrainingError("checkpoint is not a weights-only archive") from exc
     if (
         not isinstance(payload, dict)

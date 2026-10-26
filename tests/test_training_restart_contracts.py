@@ -1,6 +1,7 @@
 """Adversarial restart contracts for the controlled training entry point."""
 
 import copy
+import zipfile
 
 import pytest
 import torch
@@ -77,3 +78,45 @@ def test_invalid_live_adamw_state_cannot_replace_durable_checkpoint(restart_stat
     with pytest.raises(ValueError, match="AdamW"):
         save_training_checkpoint(path, step=1, **kwargs)
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("kind", ["compressed", "records", "expanded"])
+def test_archive_budget_rejects_before_deserialization(
+    restart_state, monkeypatch, kind
+):
+    path, kwargs = restart_state
+    with zipfile.ZipFile(
+        path,
+        "w",
+        compression=zipfile.ZIP_DEFLATED
+        if kind == "compressed"
+        else zipfile.ZIP_STORED,
+    ) as archive:
+        if kind == "records":
+            for index in range(1025):
+                archive.writestr(f"record-{index}", b"")
+        else:
+            archive.writestr("storage", b"x" * 100000)
+    if kind == "expanded":
+        # The archive itself must fit; its metadata describes storage beyond budget.
+        with path.open("r+b") as stream:
+            data = stream.read()
+            central = data.index(b"PK\x01\x02")
+            stream.seek(central + 24)
+            stream.write((1000000).to_bytes(4, "little"))
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("torch.load must not run")
+
+    monkeypatch.setattr(torch, "load", unexpected)
+    with pytest.raises(ValueError, match="weights-only archive"):
+        load_training_checkpoint(path, max_checkpoint_bytes=200000, **kwargs)
+
+
+def test_corrupt_pickle_is_a_training_error(restart_state):
+    path, kwargs = restart_state
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("archive/data.pkl", b"invalid pickle")
+        archive.writestr("archive/version", b"3\n")
+    with pytest.raises(ValueError, match="weights-only archive"):
+        load_training_checkpoint(path, **kwargs)
