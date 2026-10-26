@@ -6,6 +6,7 @@ import argparse
 import json
 import math
 import re
+import sys
 from collections.abc import Sequence
 from dataclasses import asdict, fields
 from hashlib import sha256
@@ -21,6 +22,7 @@ from .decoder_variant_cli import (
     _standard_variants,
 )
 from .decoder_variant_config import DecoderVariantConfig
+from .decoder_variant_budget import require_comparison_budget
 from .decoder_variant_experiment import run_variant_comparison
 from .decoder_variant_resources import expected_decoder_variant_parameter_count
 from .gpt2_config import GPT2Config
@@ -75,13 +77,13 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def _read_report(path: Path) -> dict[str, object]:
+def _read_report(path: Path, *, max_bytes: int = MAX_REPORT_BYTES) -> dict[str, object]:
     if path.is_symlink() or not path.is_file():
         raise ValueError(f"report must be a regular non-symlink file: {path}")
     with path.open("rb") as stream:
-        payload = stream.read(MAX_REPORT_BYTES + 1)
-    if len(payload) > MAX_REPORT_BYTES:
-        raise ValueError(f"report exceeds {MAX_REPORT_BYTES} bytes: {path}")
+        payload = stream.read(max_bytes + 1)
+    if len(payload) > max_bytes:
+        raise ValueError(f"report exceeds {max_bytes} bytes: {path}")
     report = json.loads(
         payload.decode("utf-8"),
         parse_constant=_reject_constant,
@@ -190,6 +192,12 @@ def _validate_report(report: dict[str, object]) -> dict[str, DecoderVariantConfi
         _digest(name, report[name])
 
     variants = _standard_variants(baseline)
+    require_comparison_budget(
+        base,
+        steps=steps,
+        batch_size=batch_size,
+        evaluation_windows=evaluation_windows,
+    )
     records = report["variants"]
     if type(records) is not list or len(records) != len(variants):
         raise ValueError("variants must contain exactly five arms")
@@ -213,8 +221,14 @@ def _validate_report(report: dict[str, object]) -> dict[str, DecoderVariantConfi
 def main(argv: Sequence[str] | None = None) -> int:
     """Recompute every measurement and compare it with an unchanged report."""
 
+    values = list(sys.argv[1:] if argv is None else argv)
+    if values and values[0] in {"documents", "public"}:
+        from .decoder_variant_document_cli import main as documents_main
+
+        command = "verify-public" if values[0] == "public" else "verify"
+        return documents_main([command, *values[1:]])
     parser = _parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(values)
     try:
         report = _read_report(args.report)
         variants = _validate_report(report)
