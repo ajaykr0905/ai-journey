@@ -18,6 +18,9 @@ OUTCOMES = (
     "protocol_error",
     "transport_error",
 )
+HTTP_LOAD_SCOPE = (
+    "client-observed loopback HTTP on the bounded CPU lab; no production or GPU claim"
+)
 
 
 def http_load_totals(observations, *, work_started_ns, work_finished_ns):
@@ -95,7 +98,7 @@ def run_http_load(endpoint, profile: HTTPWorkloadProfile):
     measured.sort(key=lambda row: row["index"])
     return {
         "schema": "ai-journey-http-load-raw-v1",
-        "scope": "client-observed loopback HTTP on the bounded CPU lab; no production or GPU claim",
+        "scope": HTTP_LOAD_SCOPE,
         "created_at_utc": created,
         "endpoint": endpoint,
         "run_id": run_id,
