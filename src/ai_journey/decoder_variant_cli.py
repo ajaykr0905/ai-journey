@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import math
 from collections.abc import Sequence
 from dataclasses import asdict, replace
@@ -14,6 +13,7 @@ import torch
 from .decoder_variant_config import DecoderVariantConfig
 from .decoder_variant_budget import MAX_WORK_UNITS, require_comparison_budget
 from .decoder_variant_experiment import run_variant_comparison
+from .decoder_variant_report_io import write_new_report
 from .gpt2_config import GPT2Config
 
 MAX_INPUT_BYTES = 1024 * 1024
@@ -184,10 +184,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             evaluation_windows=args.evaluation_windows,
             torch_version=str(torch.__version__),
         )
-        with args.output.open("x", encoding="utf-8") as stream:
-            stream.write(
-                json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n"
-            )
+        write_new_report(args.output, report)
     except (OSError, TypeError, ValueError, FloatingPointError) as exc:
         parser.error(str(exc))
     print(f"report={args.output} device=cpu variants={len(result.variants)}")
