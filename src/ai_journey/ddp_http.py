@@ -7,6 +7,7 @@ import threading
 import time
 
 from .ddp_contracts import integer
+from .serving_metrics import PROMETHEUS_CONTENT_TYPE
 from .ddp_service import (
     AdmissionRejected,
     GenerationRequest,
@@ -94,6 +95,13 @@ def make_server(service, *, host="127.0.0.1", port=0, max_connections=8):
         def do_GET(self):
             if self.path == "/health":
                 self.reply(200, service.health())
+            elif self.path == "/metrics":
+                body = service.metrics.render_prometheus().encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", PROMETHEUS_CONTENT_TYPE)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
             else:
                 self.reply(404, {"error": "unknown route"})
 
