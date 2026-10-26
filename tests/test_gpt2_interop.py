@@ -18,6 +18,8 @@ from ai_journey.gpt2_interop import (
     validate_hugging_face_state_dict,
 )
 from ai_journey.gpt2_model import GPT2LanguageModel
+from ai_journey.decoder_variant_config import DecoderVariantConfig
+from ai_journey.decoder_variant_model import DecoderVariantModel
 
 
 def _tiny_config() -> GPT2Config:
@@ -30,6 +32,36 @@ def _tiny_config() -> GPT2Config:
         embedding_dropout=0,
         attention_dropout=0,
         residual_dropout=0,
+    )
+
+
+def test_baseline_compatible_variant_import_and_export_preserve_exact_logits():
+    baseline = GPT2LanguageModel(_tiny_config()).eval()
+    variant = DecoderVariantModel(DecoderVariantConfig(_tiny_config())).eval()
+    external = export_hugging_face_state(baseline)
+    load_hugging_face_weights(variant, external)
+    tokens = torch.tensor([[1, 2, 3]])
+    with torch.no_grad():
+        assert torch.equal(baseline(tokens), variant(tokens))
+    exported = export_hugging_face_state(variant)
+    assert external.keys() == exported.keys()
+    assert all(torch.equal(value, exported[name]) for name, value in external.items())
+    assert variant.lm_head.weight is variant.wte.weight
+
+
+@pytest.mark.parametrize(
+    "choices",
+    [{"norm_kind": "rmsnorm"}, {"mlp_kind": "swiglu"}, {"position_kind": "rope"}],
+)
+def test_incompatible_variant_rejects_gpt2_weights_before_mutation(choices):
+    model = DecoderVariantModel(DecoderVariantConfig(_tiny_config(), **choices))
+    before = {name: value.clone() for name, value in model.state_dict().items()}
+    with pytest.raises(GPT2InteropError, match="baseline-compatible"):
+        load_hugging_face_weights(model, _valid_state_dict())
+    with pytest.raises(GPT2InteropError, match="baseline-compatible"):
+        export_hugging_face_state(model)
+    assert all(
+        torch.equal(value, before[name]) for name, value in model.state_dict().items()
     )
 
 
