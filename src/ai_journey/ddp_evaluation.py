@@ -104,6 +104,8 @@ def evaluate_documents(model, documents, *, batch_size: int = 4) -> dict:
             ):
                 losses = token_nll(model(inputs), targets)
                 loss_sum += losses[mask].double().sum().item()
+                if not math.isfinite(loss_sum):
+                    raise ValueError("evaluation totals must be finite")
                 tokens += int(mask.sum())
     finally:
         torch.set_rng_state(rng)
@@ -112,11 +114,14 @@ def evaluate_documents(model, documents, *, batch_size: int = 4) -> dict:
     if tokens == 0:
         raise ValueError("evaluation requires at least one target")
     mean = loss_sum / tokens
+    bits_per_byte = mean / math.log(2)
+    if not math.isfinite(bits_per_byte):
+        raise ValueError("evaluation totals must be finite")
     return {
         "loss_sum": loss_sum,
         "tokens": tokens,
         "mean_nll": mean,
-        "bits_per_byte": mean / math.log(2),
+        "bits_per_byte": bits_per_byte,
         "perplexity": math.exp(mean) if mean < 700 else None,
     }
 

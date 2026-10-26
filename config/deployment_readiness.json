@@ -1,5 +1,6 @@
 {
   "required_files": [
+    "tests/test_ddp_evaluation_totals.py",
     "src/ai_journey/prefix_cache.py",
     "tests/test_prefix_cache.py",
     "docs/prefix-kv-cache.md",
