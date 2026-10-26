@@ -54,6 +54,132 @@ def _distribution(values):
     }
 
 
+def _validate_outcome(observation, spec, profile):
+    """Accept only states produced by the collector, including finally overrides."""
+
+    outcome, status = observation["outcome"], observation["status"]
+    tokens = observation["tokens"]
+    error = observation["error_kind"]
+    if error is not None and (
+        type(error) is not str
+        or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", error) is None
+    ):
+        raise ValueError("invalid measured error classification")
+    model, reason = observation["model_sha256"], observation["finish_reason"]
+    terminal = model is not None or reason is not None
+    if terminal:
+        if (
+            status != 200
+            or type(model) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", model) is None
+            or type(reason) is not str
+            or reason not in {"length", "eos", "cancelled", "deadline"}
+        ):
+            raise ValueError(
+                "HTTP terminal metadata requires a valid HTTP 200 generation output"
+            )
+        if reason == "length" and len(tokens) != profile.max_new_tokens:
+            raise ValueError(
+                "completed output does not match the requested token budget"
+            )
+    if tokens and (status != 200 or (not profile.streaming and not terminal)):
+        raise ValueError(
+            "output tokens require a received successful generation response"
+        )
+    cancellation = spec["cancel_after_tokens"]
+    if cancellation is not None:
+        if len(tokens) > cancellation or (terminal and len(tokens) >= cancellation):
+            raise ValueError(
+                "observation continued past its planned client cancellation"
+            )
+        if len(tokens) == cancellation and not (
+            (outcome == "cancelled" and error == "client_closed_stream")
+            or (outcome == "deadline" and error == "client_request_deadline")
+        ):
+            raise ValueError(
+                "reaching the client cancellation boundary must stop receipt"
+            )
+    elapsed = observation["finished_ns"] - observation["started_ns"]
+    if elapsed >= profile.timeout_seconds * 1e9 and (
+        outcome != "deadline" or error != "client_request_deadline"
+    ):
+        raise ValueError("elapsed client deadline must override the recorded outcome")
+
+    if outcome == "completed":
+        if not terminal or reason not in {"length", "eos"} or error is not None:
+            raise ValueError("completed HTTP observation lacks valid terminal evidence")
+    elif outcome == "cancelled":
+        if error == "client_closed_stream":
+            if (
+                status != 200
+                or not profile.streaming
+                or cancellation is None
+                or len(tokens) != cancellation
+                or terminal
+            ):
+                raise ValueError(
+                    "client cancellation does not match its scheduled stream boundary"
+                )
+        elif not terminal or reason != "cancelled" or error is not None:
+            raise ValueError(
+                "server cancellation requires a validated cancelled terminal"
+            )
+    elif outcome == "deadline":
+        if error is None:
+            if not terminal or reason != "deadline":
+                raise ValueError(
+                    "server deadline requires a validated deadline terminal"
+                )
+        elif error == "TimeoutError":
+            if terminal:
+                raise ValueError("socket timeout cannot include a validated terminal")
+        elif error != "client_request_deadline":
+            raise ValueError("deadline observation has an invalid error classification")
+    elif outcome in {"rejected", "http_error"}:
+        if terminal or tokens or error is not None:
+            raise ValueError(
+                "HTTP rejection/error responses cannot carry generation tokens or terminal metadata"
+            )
+        if outcome == "rejected" and status not in {429, 503}:
+            raise ValueError("rejected requests require HTTP 429 or 503")
+        if outcome == "http_error" and (status is None or status in {200, 429, 503}):
+            raise ValueError(
+                "HTTP error classification contradicts the received status"
+            )
+    elif outcome == "protocol_error":
+        if terminal or error not in {
+            "StreamProtocolError",
+            "ValueError",
+            "TypeError",
+            "server_error_event",
+        }:
+            raise ValueError(
+                "protocol failure cannot carry validated terminal metadata"
+            )
+        if error == "server_error_event" and (status != 200 or not profile.streaming):
+            raise ValueError(
+                "server error events require a successful streaming response"
+            )
+    elif outcome == "transport_error":
+        if (
+            terminal
+            or error is None
+            or error
+            in {
+                "TimeoutError",
+                "client_request_deadline",
+                "client_closed_stream",
+                "StreamProtocolError",
+                "ValueError",
+                "TypeError",
+                "server_error_event",
+            }
+        ):
+            raise ValueError(
+                "transport failure requires a transport exception without terminal metadata"
+            )
+
+
 def _validate_observation(observation, spec, profile):
     if type(observation) is not dict or set(observation) != _OBSERVATION_FIELDS:
         raise ValueError("HTTP observation fields differ from the schema")
@@ -99,35 +225,7 @@ def _validate_observation(observation, spec, profile):
         not profile.streaming and times
     ):
         raise ValueError("token receipt timestamps differ from the transport semantics")
-    outcome = observation["outcome"]
-    if outcome == "completed":
-        if (
-            status != 200
-            or type(observation["model_sha256"]) is not str
-            or re.fullmatch(r"[0-9a-f]{64}", observation["model_sha256"]) is None
-            or observation["finish_reason"] not in {"length", "eos"}
-        ):
-            raise ValueError("completed HTTP observation lacks valid terminal evidence")
-        if (
-            observation["finish_reason"] == "length"
-            and len(tokens) != profile.max_new_tokens
-        ):
-            raise ValueError(
-                "completed output does not match the requested token budget"
-            )
-        if spec["cancel_after_tokens"] is not None:
-            raise ValueError(
-                "a planned client cancellation cannot be a completed request"
-            )
-    if outcome == "rejected" and status not in {429, 503}:
-        raise ValueError("rejected requests require HTTP 429 or 503")
-    if outcome == "http_error" and (status is None or status in {200, 429, 503}):
-        raise ValueError("HTTP error classification contradicts the received status")
-    if observation["error_kind"] is not None and (
-        type(observation["error_kind"]) is not str
-        or not 1 <= len(observation["error_kind"]) <= 64
-    ):
-        raise ValueError("invalid measured error classification")
+    _validate_outcome(observation, spec, profile)
 
 
 def validate_http_measurement(raw):
