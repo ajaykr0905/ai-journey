@@ -31,6 +31,7 @@ def test_nested_group_cannot_destroy_its_caller(tmp_path):
 def test_collective_reduction_preserves_token_accounting(tmp_path):
     with process_group(Topology(0, 1), rendezvous=(tmp_path / "rdzv").as_uri()):
         assert reduce_token_totals(12.0, 3) == (12.0, 3, 4.0)
+        assert reduce_token_totals(1.0, 2**53 + 1)[1] == 2**53 + 1
 
 
 def test_quorum_failure_is_raised_before_the_next_phase(tmp_path):

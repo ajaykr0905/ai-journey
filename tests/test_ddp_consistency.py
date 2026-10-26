@@ -7,7 +7,7 @@ import torch.multiprocessing as mp
 
 from ai_journey.ddp_checkpoint import save_checkpoint, load_checkpoint
 from ai_journey.ddp_contracts import Topology
-from ai_journey.ddp_runtime import process_group
+from ai_journey.ddp_runtime import process_group, reduce_token_totals
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 from ai_journey.gpt2_training import GPT2TrainingConfig
@@ -219,3 +219,21 @@ def test_divergent_update_restores_full_caller_state_on_both_ranks(tmp_path):
 @pytest.mark.parametrize("divergence", ["moment", "nonfinite"])
 def test_bad_optimizer_moments_roll_back_the_completed_update(tmp_path, divergence):
     mp.spawn(_diverged_update, args=(str(tmp_path), divergence), nprocs=2, join=True)
+
+
+def _invalid_totals(rank, directory):
+    with process_group(
+        Topology(rank, 2),
+        rendezvous=(Path(directory) / "rdzv").as_uri(),
+        timeout_seconds=5,
+    ):
+        for loss, tokens in ((float("nan"), 1), (0, False), (1, 2**63)):
+            with pytest.raises(RuntimeError, match="token total validation"):
+                reduce_token_totals(loss if rank else 1.0, tokens if rank else 1)
+            assert reduce_token_totals(2.0, 1) == (4.0, 2, 2.0)
+
+
+def test_invalid_rank_local_totals_fail_collectively_without_poisoning_the_group(
+    tmp_path,
+):
+    mp.spawn(_invalid_totals, args=(str(tmp_path),), nprocs=2, join=True)
