@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from ai_journey.decoder_variant_config import DecoderVariantConfig
+from ai_journey.decoder_variant_budget import require_comparison_budget
 from ai_journey.decoder_variant_experiment import run_variant_comparison
 from ai_journey.decoder_variant_runtime import isolated_decoder_runtime
 from ai_journey.gpt2_config import GPT2Config
@@ -76,3 +77,21 @@ def test_runtime_restores_controls_after_failure_and_never_seeds_accelerators(
     assert torch.are_deterministic_algorithms_enabled() == deterministic
     assert torch.is_deterministic_algorithms_warn_only_enabled() == warn_only
     assert torch.equal(torch.get_rng_state(), rng)
+
+
+def test_admission_counts_evaluation_before_constructing_models():
+    base = replace(config().gpt2, context_length=64, embedding_dim=64, layer_count=2)
+    # Training alone is only 8192 work units, below the old 200000 limit.
+    with pytest.raises(ValueError, match="training and evaluation"):
+        require_comparison_budget(base, steps=1, batch_size=1, evaluation_windows=256)
+    require_comparison_budget(
+        config().gpt2, steps=2, batch_size=2, evaluation_windows=4
+    )
+
+
+def test_admission_bounds_peak_attention_independently():
+    base = replace(config().gpt2, context_length=2048)
+    with pytest.raises(ValueError, match="attention"):
+        require_comparison_budget(
+            base, steps=1, batch_size=1, evaluation_windows=1, variant_count=1
+        )

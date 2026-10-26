@@ -21,6 +21,7 @@ from .decoder_variant_cli import (
     _standard_variants,
 )
 from .decoder_variant_config import DecoderVariantConfig
+from .decoder_variant_budget import require_comparison_budget
 from .decoder_variant_experiment import run_variant_comparison
 from .decoder_variant_resources import expected_decoder_variant_parameter_count
 from .gpt2_config import GPT2Config
@@ -190,6 +191,12 @@ def _validate_report(report: dict[str, object]) -> dict[str, DecoderVariantConfi
         _digest(name, report[name])
 
     variants = _standard_variants(baseline)
+    require_comparison_budget(
+        base,
+        steps=steps,
+        batch_size=batch_size,
+        evaluation_windows=evaluation_windows,
+    )
     records = report["variants"]
     if type(records) is not list or len(records) != len(variants):
         raise ValueError("variants must contain exactly five arms")

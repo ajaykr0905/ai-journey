@@ -12,11 +12,11 @@ from pathlib import Path
 import torch
 
 from .decoder_variant_config import DecoderVariantConfig
+from .decoder_variant_budget import MAX_WORK_UNITS, require_comparison_budget
 from .decoder_variant_experiment import run_variant_comparison
 from .gpt2_config import GPT2Config
 
 MAX_INPUT_BYTES = 1024 * 1024
-MAX_WORK_UNITS = 200_000
 REPORT_SCHEMA_VERSION = 2
 REPORT_SCOPE = "matched-byte experiment; held-out NLL is not a generalization claim"
 
@@ -158,6 +158,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
         variants = _standard_variants(baseline)
+        require_comparison_budget(
+            baseline.gpt2,
+            steps=args.steps,
+            batch_size=args.batch_size,
+            evaluation_windows=args.evaluation_windows,
+        )
         result = run_variant_comparison(
             train_bytes=_read_bytes(args.train),
             heldout_bytes=_read_bytes(args.heldout),
