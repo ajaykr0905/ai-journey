@@ -111,3 +111,34 @@ matching training bytes do not authenticate authorship or prove a measurement;
 use the separate full report replay with both original sources for that check.
 Only explicitly public-safe source files belong in these commands. Existing
 public-source pin/license/partition verification is not replaced by this export.
+
+## Deployment-aligned rolling-context likelihood
+
+The original experiment evaluates complete nonoverlapping document windows.
+That protocol intentionally resets context at window boundaries. A separate
+rolling protocol scores each target once from the last available T prefix
+bytes, resetting positions within that truncated window just as full-context
+rebuild generation does. It does not claim indefinitely extending KV positions
+or reuse training-capacity routing as normal inference.
+
+```sh
+ai-journey-moe-experiment rolling --directory trained-top2 \
+  --train cleared-train.txt --heldout cleared-heldout.txt --output rolling.json
+ai-journey-moe-experiment rolling-verify --report rolling.json
+ai-journey-moe-experiment rolling-replay --directory trained-top2 \
+  --train cleared-train.txt --heldout cleared-heldout.txt --report rolling.json
+```
+
+The CLI requires the actual original training and held-out sources bound to the
+trained comparison. The Python `evaluate_moe_rolling_documents` API can evaluate
+other explicitly selected `Document` values and records their identities.
+Routing includes every valid prefix token; likelihood includes only the last
+position of each prefix. Reports retain both context-work and scored-target
+denominators, raw target losses, document-local offsets and exact dropless route
+evidence. They use their own schema and do not replace or mutate old reports.
+The CPU gate charges one full prefix per target (conservatively through the
+existing whole-job gate), not one nonoverlapping window per T targets. This is
+a declared admission bound, not measured throughput, FLOPs, memory or GPU proof.
+Offline verification recomputes accounting; full replay additionally requires
+the recorded model, document bytes and CPU runtime. Neither a seal nor a small
+NLL difference establishes authorship, generalization or architecture superiority.
