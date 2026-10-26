@@ -1,5 +1,6 @@
 """Bounded sampling and inference for checkpoints produced by the CPU DDP lab."""
 
+from contextlib import ExitStack
 from dataclasses import dataclass
 import math
 import time
@@ -142,10 +143,30 @@ def generate_tokens(
     deadline: float | None = None,
     clock=time.monotonic,
     on_token=None,
+    prefix_store=None,
+    prefix_namespace="default",
+    prefix_observation=None,
 ) -> dict:
     """Generate under a bounded sliding context while preserving caller modes."""
     prompt = tuple(prompt)
     base = base_model_config(model)
+    if prefix_store is not None:
+        from .prefix_cache import PrefixKVStore
+
+        if not isinstance(prefix_store, PrefixKVStore) or use_cache is not True:
+            raise ValueError(
+                "prefix reuse requires an explicit store and cached generation"
+            )
+    if prefix_observation is not None and type(prefix_observation) is not dict:
+        raise TypeError("prefix observation must be a caller-owned dictionary")
+    if prefix_observation is not None:
+        prefix_observation.update(
+            outcome="unused",
+            effective_prompt_tokens=min(len(prompt), base.context_length),
+            reused_prompt_tokens=0,
+            forwarded_prefill_tokens=0,
+            prefix_published=False,
+        )
     if cancelled is not None and not callable(cancelled):
         raise TypeError("cancelled must be a callable")
     if on_token is not None and not callable(on_token):
@@ -173,8 +194,8 @@ def generate_tokens(
     cache = None
     try:
         model.eval()
-        with torch.inference_mode():
-            for _ in range(config.max_new_tokens):
+        with torch.inference_mode(), ExitStack() as leases:
+            for index in range(config.max_new_tokens):
                 if cancelled is not None and cancelled():
                     reason = "cancelled"
                     break
@@ -187,7 +208,19 @@ def generate_tokens(
                 if use_cache:
                     from .ddp_cache import cached_forward
 
-                    if cache is None or cache.length == base.context_length:
+                    if index == 0 and prefix_store is not None:
+                        from .prefix_generation import prefix_prefill
+
+                        output, cache = leases.enter_context(
+                            prefix_prefill(
+                                model,
+                                tuple(history[-base.context_length :]),
+                                store=prefix_store,
+                                namespace=prefix_namespace,
+                                observation=prefix_observation,
+                            )
+                        )
+                    elif cache is None or cache.length == base.context_length:
                         output, cache = cached_forward(model, inputs)
                     else:
                         output, cache = cached_forward(model, inputs[:, -1:], cache)

@@ -1,5 +1,9 @@
 {
   "required_files": [
+    "src/ai_journey/prefix_generation.py",
+    "src/ai_journey/prefix_metrics.py",
+    "tests/test_prefix_generation.py",
+    "tests/test_prefix_serving.py",
     "tests/test_moe_ddp_failures.py",
     "tests/test_ddp_evaluation_failure.py",
     "tests/test_ddp_evaluation_totals.py",

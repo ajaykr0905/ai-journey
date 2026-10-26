@@ -246,9 +246,11 @@ class PrefixKVStore:
                 self._reserved -= size
 
     @contextmanager
-    def acquire(self, identity, tokens):
+    def acquire(self, identity, tokens, *, observation=None):
         """Borrow an isolated compatible longest-prefix copy for this context only."""
         _tokens(identity, tokens)
+        if observation is not None and type(observation) is not dict:
+            raise TypeError("prefix observation must be a caller-owned dictionary")
         size = 0
         value = None
         with self._lock:
@@ -269,6 +271,8 @@ class PrefixKVStore:
                     selected, length, exact = key, common, same
             if selected is None or not length:
                 self._counts["misses"] += 1
+                if observation is not None:
+                    observation["outcome"] = "miss"
             else:
                 size = identity.bytes_for(length, logits=exact)
                 if self._reserve(size, protected=selected):
@@ -291,11 +295,15 @@ class PrefixKVStore:
                         self._active += 1
                         self._entries.move_to_end(selected)
                         self._counts["hits"] += 1
+                        if observation is not None:
+                            observation["outcome"] = "hit"
                     finally:
                         self._reserved -= size
                 else:
                     size = 0
                     self._counts["bypasses"] += 1
+                    if observation is not None:
+                        observation["outcome"] = "bypass"
         try:
             yield value
         finally:
