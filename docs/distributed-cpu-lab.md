@@ -256,6 +256,15 @@ Omitting this argument keeps the single-file behavior and checkpoint schema.
 The latest path must be outside the journal. A journal belongs to the exact
 source, architecture, tensor dtypes, training schedule and world size; it cannot
 be adopted for another run.
+The journal run-v2 identity also binds the actual destination AdamW invariant
+controls and ordered parameter names in each group; it does not infer custom
+betas, decay, epsilon or groups from the training specification. The current
+scheduled learning rate and moments/counters are not invariant identity fields.
+Journal recovery compares raw candidate controls before mutating live state.
+`checkpoint_run_sha256(..., optimizer=optimizer)` therefore requires the actual
+optimizer. Pre-publication run-v1 journals are not silently adopted under this
+stronger identity; select a new journal directory. Legacy schema-v1 single-file
+checkpoints retain their existing load behavior when no journal is requested.
 
 `load_checkpoint_journal(directory, model=..., optimizer=..., config=...,
 source=...)` returns `JournalRecovery(step, recorded_step, checkpoint_sha256)`.

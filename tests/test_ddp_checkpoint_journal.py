@@ -57,7 +57,10 @@ def test_latest_invalid_candidate_falls_back_to_fully_valid_state(tmp_path, corr
         )
         expected = snapshot(model, optimizer)
         store = CheckpointJournal(
-            directory, run_sha256=checkpoint_run_sha256(model, config, b"public")
+            directory,
+            run_sha256=checkpoint_run_sha256(
+                model, config, b"public", optimizer=optimizer
+            ),
         )
         assert store.recorded_step == 1
         advance(model, optimizer)
@@ -124,7 +127,10 @@ def test_no_fully_valid_candidate_rejects_without_live_state_mutation(tmp_path, 
         payload["optimizer"]["param_groups"][0]["capturable"] = True
         torch.save(payload, path)
         store = CheckpointJournal(
-            directory, run_sha256=checkpoint_run_sha256(model, config, b"public")
+            directory,
+            run_sha256=checkpoint_run_sha256(
+                model, config, b"public", optimizer=optimizer
+            ),
         )
         store.publish(path, step=1)
         with torch.no_grad():
@@ -233,7 +239,10 @@ def test_manifest_failure_preserves_last_publication_and_ignores_orphan(
             == 1
         )
         store = CheckpointJournal(
-            directory, run_sha256=checkpoint_run_sha256(model, config, b"public")
+            directory,
+            run_sha256=checkpoint_run_sha256(
+                model, config, b"public", optimizer=optimizer
+            ),
         )
         assert store.recorded_step == 1 and len(store.candidates()) == 1
         # Unknown orphan bytes are preserved for explicit inspection, not
