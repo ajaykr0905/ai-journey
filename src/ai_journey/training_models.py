@@ -15,6 +15,11 @@ from .gpt2_model import GPT2LanguageModel, expected_gpt2_parameter_count
 TrainingModelConfig = GPT2Config | DecoderVariantConfig
 TrainingModel = GPT2LanguageModel | DecoderVariantModel
 
+# Parameter counts do not bound nonpersistent T-by-T causal masks or the number
+# of Python decoder blocks. Keep these construction costs bounded independently.
+MAX_CPU_MODEL_LAYERS = 64
+MAX_CPU_ATTENTION_MASK_BYTES = 64 * 1024 * 1024
+
 
 def base_model_config(value: TrainingModelConfig | TrainingModel) -> GPT2Config:
     """Resolve base dimensions without assuming every architecture has flat fields."""
@@ -36,11 +41,24 @@ def expected_training_parameters(config: TrainingModelConfig) -> int:
 def build_training_model(
     config: TrainingModelConfig, *, max_parameters: int = 5_000_000
 ) -> TrainingModel:
-    """Reject an oversized architecture before allocating any model tensors."""
+    """Bound parameters, decoder-block work and peak causal-mask construction."""
     if type(max_parameters) is not int or max_parameters <= 0:
         raise ValueError("max_parameters must be a positive integer")
     if expected_training_parameters(config) > max_parameters:
         raise ValueError("model exceeds the declared parameter budget")
+    base = config.gpt2 if isinstance(config, DecoderVariantConfig) else config
+    if base.layer_count > MAX_CPU_MODEL_LAYERS:
+        raise ValueError(
+            f"CPU model construction exceeds the {MAX_CPU_MODEL_LAYERS}-layer work budget"
+        )
+    # Each block retains a bool mask. torch.tril(torch.ones(..., dtype=bool))
+    # also overlaps one input/output pair while constructing the final block:
+    # (L - 1) retained masks + the two temporary/current masks = (L + 1) T².
+    peak_attention_bytes = (base.layer_count + 1) * base.context_length**2
+    if peak_attention_bytes > MAX_CPU_ATTENTION_MASK_BYTES:
+        raise ValueError(
+            f"CPU attention-mask construction requires {peak_attention_bytes} bytes, exceeding the {MAX_CPU_ATTENTION_MASK_BYTES}-byte budget"
+        )
     return (
         DecoderVariantModel(config)
         if isinstance(config, DecoderVariantConfig)

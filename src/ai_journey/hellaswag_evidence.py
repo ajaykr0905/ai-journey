@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 
 from .hellaswag import HellaSwagError, verify_evidence
+from .hellaswag_io import read_evaluation_bytes, parse_evaluation_json
 
 
 MAX_EVIDENCE_BYTES = 16 * 1024 * 1024
@@ -48,14 +49,8 @@ def write_evidence(path: Path, payload: dict) -> None:
 def read_evidence(path: Path) -> dict:
     """Read one bounded regular file before validating its complete payload."""
     path = Path(path)
-    if (
-        path.is_symlink()
-        or not path.is_file()
-        or not 0 < path.stat().st_size <= MAX_EVIDENCE_BYTES
-    ):
-        raise HellaSwagError("evidence input exceeds the file constraints")
-    try:
-        payload = json.loads(path.read_bytes())
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise HellaSwagError("evidence input must be valid UTF-8 JSON") from error
+    payload = parse_evaluation_json(
+        read_evaluation_bytes(path, maximum=MAX_EVIDENCE_BYTES, name="evidence input"),
+        name="evidence input",
+    )
     return verify_evidence(payload)

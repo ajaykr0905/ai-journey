@@ -8,7 +8,6 @@ from pathlib import Path
 import tempfile
 import zipfile
 import pickle
-import math
 
 import torch
 import torch.distributed as dist
@@ -22,6 +21,7 @@ from .ddp_runtime import (
 )
 from .gpt2_training import gpt2_model_fingerprint
 from .training_models import model_config_mapping
+from .training_optimizer_state import validate_adamw_state
 
 
 def bounded_checkpoint_load(path: Path, max_bytes: int):
@@ -31,60 +31,10 @@ def bounded_checkpoint_load(path: Path, max_bytes: int):
 
 
 def validate_optimizer_state(model, optimizer, *, step: int):
-    """Require finite AdamW moments bound to the restored parameter tensors."""
-    if not isinstance(optimizer, torch.optim.AdamW):
-        raise ValueError("distributed checkpoints require AdamW optimizer state")
-    parameters = tuple(model.parameters())
-    bound = tuple(
-        parameter for group in optimizer.param_groups for parameter in group["params"]
-    )
-    if len(bound) != len(parameters) or {id(parameter) for parameter in bound} != {
-        id(parameter) for parameter in parameters
-    }:
-        raise ValueError("optimizer is not bound to the complete model")
-    if any(not torch.isfinite(parameter).all() for parameter in parameters):
+    """Require finite model values and the shared resumable CPU AdamW contract."""
+    if any(not torch.isfinite(parameter).all() for parameter in model.parameters()):
         raise ValueError("checkpoint model contains nonfinite values")
-    for group in optimizer.param_groups:
-        for name in ("lr", "weight_decay", "eps"):
-            value = group[name]
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
-                or value < 0
-                or (name == "eps" and value == 0)
-            ):
-                raise ValueError("AdamW hyperparameters must be finite and valid")
-        if len(group["betas"]) != 2 or any(
-            isinstance(value, bool) or not math.isfinite(value) or not 0 <= value < 1
-            for value in group["betas"]
-        ):
-            raise ValueError("AdamW beta values are invalid")
-    for parameter in parameters:
-        state = optimizer.state.get(parameter, {})
-        if not state and step == 0:
-            continue
-        required = {"step", "exp_avg", "exp_avg_sq"}
-        if not required <= set(state) or set(state) - (required | {"max_exp_avg_sq"}):
-            raise ValueError("AdamW moment fields do not match")
-        counter = state["step"]
-        if (
-            not isinstance(counter, torch.Tensor)
-            or counter.numel() != 1
-            or not torch.isfinite(counter).all()
-            or counter.item() != step
-        ):
-            raise ValueError("AdamW step counter does not match durable progress")
-        for name in set(state) - {"step"}:
-            value = state[name]
-            if (
-                not isinstance(value, torch.Tensor)
-                or value.shape != parameter.shape
-                or value.dtype != parameter.dtype
-                or not torch.isfinite(value).all()
-                or (name != "exp_avg" and (value < 0).any())
-            ):
-                raise ValueError("AdamW moment tensor is invalid")
+    validate_adamw_state(model, optimizer, step=step)
 
 
 def save_checkpoint(

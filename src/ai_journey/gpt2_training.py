@@ -484,6 +484,10 @@ def build_gpt2_optimizer(
             {"params": no_decay, "weight_decay": 0.0},
         ],
         lr=config.max_learning_rate,
+        capturable=False,
+        differentiable=False,
+        foreach=None,
+        fused=None,
     )
 
 

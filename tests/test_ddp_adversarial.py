@@ -92,5 +92,5 @@ def test_optimizer_hyperparameter_poisoning_is_rejected():
     model = GPT2LanguageModel(GPT2Config(8, 4, 8, 2, 1))
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
     optimizer.param_groups[0]["weight_decay"] = float("nan")
-    with pytest.raises(ValueError, match="hyperparameters"):
+    with pytest.raises(ValueError, match="AdamW weight_decay must be finite and valid"):
         validate_optimizer_state(model, optimizer, step=0)

@@ -72,3 +72,14 @@ All architecture choices use the existing matrix-only weight decay, accumulation
 schedule, clipping, rollback, and exact checkpoint restoration. Checkpoints bind
 the complete architecture, so a different RoPE base cannot reuse an otherwise
 shape-compatible state. This remains a bounded CPU training protocol.
+
+The shared CPU model factory also limits construction to 64 decoder blocks and
+64 MiB of peak dense causal-mask tensors, independently of the declared parameter
+budget. A narrow model can have few trainable values but an enormous square
+attention mask. For context length `T` and `L` blocks, construction admits only
+`(L + 1) × T²` boolean bytes within that limit: previous blocks retain their masks
+while the final `ones` input and `tril` output overlap. The guard runs before any
+model allocation, applies to learned and rotary positions, and leaves standard
+GPT-2 architectures admissible when their parameter budget is explicitly raised.
+It bounds construction work and masks; it does not estimate full training,
+activation, batch, or GPU memory.

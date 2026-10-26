@@ -17,6 +17,23 @@ def validate_adamw_state(model, optimizer, *, step: int) -> None:
     if any(id(parameter) not in parameter_ids for parameter in optimizer.state):
         raise ValueError("AdamW contains state for an unknown parameter")
     for group in optimizer.param_groups:
+        # These controls are not configurable in the deterministic CPU protocol.
+        # In particular, capturable=True can restore finite state successfully
+        # yet fail only when AdamW attempts its next CPU update.
+        for name, expected in (
+            ("capturable", False),
+            ("differentiable", False),
+            ("foreach", None),
+            ("fused", None),
+        ):
+            if (
+                name not in group
+                or type(group[name]) is not type(expected)
+                or group[name] is not expected
+            ):
+                raise ValueError(
+                    f"AdamW CPU execution control {name} must retain {expected!r}"
+                )
         for name in ("lr", "weight_decay", "eps"):
             value = group[name]
             if (

@@ -43,8 +43,42 @@ ai-journey-hellaswag evaluate \
 ai-journey-hellaswag verify --report /tmp/hellaswag-evidence.json
 ```
 
-Omit `--checkpoint` to score the deterministic initial model. Compare two sealed
-reports only when they cover the same protocol rows:
+New schema-2 evidence can be reexecuted against the same verified model:
+
+```bash
+ai-journey-hellaswag replay \
+  --dataset-response /tmp/hellaswag-first-rows.json \
+  --source data/day-19-demo-names.txt --spec config/ddp-lab.json \
+  --checkpoint /tmp/hellaswag-model.pt --report /tmp/hellaswag-evidence.json
+```
+
+Replay requires the same model fingerprint, architecture, dtype, thread count,
+Python/PyTorch build, operating system, machine architecture, and CPU capability.
+It reruns every candidate score and requires the entire regenerated report to
+match. A resealed but self-consistent score change therefore fails replay.
+Legacy reports remain integrity-verifiable but lack the metadata required for
+an exact-replay claim. For local checkpoints, also pass
+`--checkpoint-format local`; omit the checkpoint to replay an initial model.
+
+Omit `--checkpoint` to score the deterministic initial model.
+
+Schema-2 architecture-aware training specs also support RMSNorm, SwiGLU and RoPE
+decoders. To evaluate a checkpoint from `ai-journey-gpt2-train`, pass
+`--checkpoint-format local`; the default `distributed` format remains the CPU
+DDP checkpoint format. Loading validates source, architecture, optimizer progress
+and checkpoint state before scoring. New run records include the complete model
+contract, unique parameter count, actual CPU parameter dtype and PyTorch thread
+count. Initial models retain FP64 evaluation; local checkpoints retain their
+verified FP32 weights. Existing schema-1 evaluation evidence remains readable.
+
+File inputs use bounded regular-file descriptors: dataset responses are limited
+to 2 MiB, protocols to 128 KiB, source bytes to 16 MiB, and saved evidence to
+16 MiB. Symlinks, FIFOs, duplicate JSON keys, nonfinite JSON values, and outputs
+aliasing an input are rejected. Evidence verification also checks completion-only
+token totals, predicted endings, correctness, probabilities, confidence, selected
+row identities and model accounting after its digest is checked.
+
+Compare two sealed reports only when they cover the same protocol rows:
 
 ```bash
 ai-journey-hellaswag compare \

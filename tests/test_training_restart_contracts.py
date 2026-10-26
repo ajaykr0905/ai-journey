@@ -155,6 +155,99 @@ def test_live_optimizer_control_drift_cannot_publish(restart_state):
     assert path.read_bytes() == original
 
 
+def _same_restart_state(left, right):
+    if isinstance(left, torch.Tensor):
+        return isinstance(right, torch.Tensor) and torch.equal(left, right)
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(
+            _same_restart_state(value, right[key]) for key, value in left.items()
+        )
+    if isinstance(left, (tuple, list)):
+        return len(left) == len(right) and all(
+            _same_restart_state(a, b) for a, b in zip(left, right, strict=True)
+        )
+    return left == right
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("capturable", True),
+        ("capturable", 0),
+        ("capturable", None),
+        ("differentiable", True),
+        ("differentiable", 0),
+        ("differentiable", None),
+        ("foreach", True),
+        ("foreach", False),
+        ("foreach", 0),
+        ("foreach", "false"),
+        ("fused", True),
+        ("fused", False),
+        ("fused", 0),
+        ("fused", "false"),
+    ],
+)
+def test_cpu_execution_control_drift_is_rejected_and_restores_every_state(
+    restart_state, name, value
+):
+    path, kwargs = restart_state
+    model, optimizer, cursor = kwargs["model"], kwargs["optimizer"], kwargs["cursor"]
+    model.ln_f.eval()
+    model.wte.weight.grad = torch.ones_like(model.wte.weight)
+    before = copy.deepcopy(
+        (
+            model.state_dict(),
+            optimizer.state_dict(),
+            cursor.state_dict(),
+            torch.get_rng_state(),
+            model.wte.weight.grad,
+        )
+    )
+    modes = [module.training for module in model.modules()]
+    payload = torch.load(path, weights_only=True)
+    for group in payload["optimizer_state"]["param_groups"]:
+        group[name] = value
+    torch.save(payload, path)
+    with pytest.raises(ValueError, match=f"AdamW CPU execution control {name}"):
+        load_training_checkpoint(path, **kwargs)
+    after = (
+        model.state_dict(),
+        optimizer.state_dict(),
+        cursor.state_dict(),
+        torch.get_rng_state(),
+        model.wte.weight.grad,
+    )
+    assert _same_restart_state(before, after)
+    assert [module.training for module in model.modules()] == modes
+
+
+@pytest.mark.parametrize("name", ["capturable", "differentiable", "foreach", "fused"])
+def test_unsupported_live_cpu_execution_controls_cannot_replace_checkpoint(
+    restart_state, name
+):
+    path, kwargs = restart_state
+    original = path.read_bytes()
+    kwargs["optimizer"].param_groups[0][name] = True
+    with pytest.raises(ValueError, match="AdamW CPU execution control"):
+        save_training_checkpoint(path, step=1, **kwargs)
+    assert path.read_bytes() == original
+
+
+def test_default_cpu_execution_controls_restore_and_continue_training(restart_state):
+    path, kwargs = restart_state
+    assert load_training_checkpoint(path, **kwargs) == 1
+    for group in kwargs["optimizer"].param_groups:
+        assert group["capturable"] is group["differentiable"] is False
+        assert group["foreach"] is group["fused"] is None
+    metric = train_optimizer_step(
+        kwargs["model"], kwargs["cursor"], kwargs["optimizer"], kwargs["config"], step=1
+    )
+    assert metric.step == 2
+
+
 @pytest.mark.parametrize(
     "state",
     [{"epoch": 0, "offset": 0}, {"epoch": 0, "offset": 2}, {"epoch": 1, "offset": 1}],

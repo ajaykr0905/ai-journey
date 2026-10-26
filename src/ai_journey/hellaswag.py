@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from hashlib import sha256
 import json
 import math
@@ -293,10 +293,9 @@ def records_from_dataset_server(source: bytes) -> tuple[HellaSwagRecord, ...]:
         raise TypeError("dataset response must be bytes")
     if not 0 < len(source) <= 2 * 1024 * 1024:
         raise HellaSwagError("dataset response exceeds the input budget")
-    try:
-        payload = json.loads(source)
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise HellaSwagError("dataset response must be valid UTF-8 JSON") from error
+    from .hellaswag_io import parse_evaluation_json
+
+    payload = parse_evaluation_json(source, name="dataset response")
     required = {"dataset", "config", "split", "features", "rows", "truncated"}
     if (
         not isinstance(payload, dict)
@@ -663,10 +662,28 @@ def compare_evaluations(baseline: dict, candidate: dict) -> dict:
 def run_evaluation(model, response: bytes, protocol: HellaSwagProtocol) -> dict:
     """Run a pinned validation slice through disjoint local evaluation shards."""
     from .gpt2_model import GPT2LanguageModel
+    from .decoder_variant_model import DecoderVariantModel
     from .gpt2_training import gpt2_model_fingerprint
+    from .training_models import (
+        base_model_config,
+        expected_training_parameters,
+        model_config_mapping,
+    )
+    import torch
 
-    if not isinstance(model, GPT2LanguageModel):
-        raise TypeError("model must be GPT2LanguageModel")
+    if not isinstance(model, (GPT2LanguageModel, DecoderVariantModel)):
+        raise TypeError("model must be GPT2LanguageModel or DecoderVariantModel")
+    if base_model_config(model).vocab_size != 256:
+        raise HellaSwagError("byte evaluation requires vocab_size 256")
+    if expected_training_parameters(model.config) > 1_000_000:
+        raise HellaSwagError("evaluation model exceeds the CPU parameter budget")
+    if any(parameter.device.type != "cpu" for parameter in model.parameters()):
+        raise HellaSwagError("bounded evaluation requires CPU model parameters")
+    dtypes = {str(parameter.dtype) for parameter in model.parameters()}
+    if len(dtypes) != 1 or not dtypes <= {"torch.float32", "torch.float64"}:
+        raise HellaSwagError(
+            "bounded evaluation requires uniform float32 or float64 parameters"
+        )
     if not isinstance(protocol, HellaSwagProtocol):
         raise TypeError("protocol must be HellaSwagProtocol")
     protocol.source.verify_sample(response)
@@ -692,12 +709,15 @@ def run_evaluation(model, response: bytes, protocol: HellaSwagProtocol) -> dict:
         seed=protocol.bootstrap_seed,
     )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "protocol_sha256": protocol.fingerprint,
         "sample_sha256": sha256(response).hexdigest(),
         "records_sha256": records_digest(records),
-        "model_config": asdict(model.config),
+        "model_config": model_config_mapping(model.config),
         "model_sha256": gpt2_model_fingerprint(model),
+        "parameter_count": expected_training_parameters(model.config),
+        "model_dtype": next(iter(dtypes)),
+        "torch_threads": torch.get_num_threads(),
         "world_size": protocol.world_size,
         "evaluation": evaluation,
     }
@@ -711,28 +731,50 @@ def _payload_digest(payload: dict) -> str:
     ).hexdigest()
 
 
-def seal_evidence(report: dict, protocol: HellaSwagProtocol) -> dict:
-    """Seal measured benchmark output with protocol, runtime and scope limitations."""
+def evaluation_runtime(
+    *, model_dtype: str | None = None, torch_threads: int | None = None
+) -> dict:
+    """Identify the CPU execution boundary required for exact score replay."""
     import torch
 
+    runtime = {
+        "device": "cpu",
+        "torch": str(torch.__version__),
+        "python": platform.python_version(),
+        "operating_system": platform.system(),
+        "machine": platform.machine(),
+    }
+    if model_dtype is not None:
+        runtime.update(
+            model_dtype=model_dtype,
+            torch_threads=torch_threads,
+            cpu_capability=getattr(
+                torch.backends.cpu, "get_cpu_capability", lambda: "unknown"
+            )(),
+            torch_config_sha256=sha256(torch.__config__.show().encode()).hexdigest(),
+        )
+    return runtime
+
+
+def seal_evidence(report: dict, protocol: HellaSwagProtocol) -> dict:
+    """Seal measured benchmark output with protocol, runtime and scope limitations."""
     if (
         not isinstance(report, dict)
         or report.get("protocol_sha256") != protocol.fingerprint
     ):
         raise HellaSwagError("benchmark report does not match the protocol")
     canonical_report = json.loads(json.dumps(report, allow_nan=False))
+    modern_runtime = report.get("schema_version") == 2
     payload = {
-        "schema_version": 1,
+        "schema_version": 2 if modern_runtime else 1,
         "benchmark": "hellaswag_validation",
         "protocol": protocol_mapping(protocol),
         "run": canonical_report,
-        "runtime": {
-            "device": "cpu",
-            "torch": torch.__version__,
-            "python": platform.python_version(),
-            "operating_system": platform.system(),
-            "machine": platform.machine(),
-        },
+        "runtime": evaluation_runtime(
+            model_dtype=report["model_dtype"], torch_threads=report["torch_threads"]
+        )
+        if modern_runtime
+        else evaluation_runtime(),
         "limitations": HELLASWAG_LIMITATIONS.copy(),
     }
     payload["evidence_sha256"] = _payload_digest(payload)
@@ -754,7 +796,7 @@ def verify_evidence(payload: dict) -> dict:
         not isinstance(payload, dict)
         or set(payload) != fields
         or type(payload["schema_version"]) is not int
-        or payload["schema_version"] != 1
+        or payload["schema_version"] not in (1, 2)
         or payload["benchmark"] != "hellaswag_validation"
     ):
         raise HellaSwagError("HellaSwag evidence schema does not match")
@@ -765,19 +807,97 @@ def verify_evidence(payload: dict) -> dict:
         raise HellaSwagError("HellaSwag evidence digest does not match")
     protocol = HellaSwagProtocol.from_mapping(payload["protocol"])
     run = payload["run"]
+    runtime = payload["runtime"]
+    runtime_fields = {"device", "torch", "python", "operating_system", "machine"}
+    if payload["schema_version"] == 2:
+        runtime_fields |= {
+            "model_dtype",
+            "torch_threads",
+            "cpu_capability",
+            "torch_config_sha256",
+        }
     if (
         not isinstance(run, dict)
         or run.get("protocol_sha256") != protocol.fingerprint
         or run.get("sample_sha256") != protocol.source.sample_sha256
         or run.get("world_size") != protocol.world_size
         or payload["limitations"] != HELLASWAG_LIMITATIONS
-        or payload["runtime"].get("device") != "cpu"
+        or not isinstance(runtime, dict)
+        or set(runtime) != runtime_fields
+        or any(
+            not isinstance(value, str) or not value
+            for name, value in runtime.items()
+            if name != "torch_threads"
+        )
+        or runtime.get("device") != "cpu"
     ):
         raise HellaSwagError("HellaSwag evidence provenance does not match")
+    from .training_models import (
+        base_model_config,
+        expected_training_parameters,
+        model_config_from_mapping,
+    )
+
+    if type(run.get("schema_version")) is not int or run["schema_version"] not in (
+        1,
+        2,
+    ):
+        raise HellaSwagError("HellaSwag run schema does not match")
+    run_fields = {
+        "schema_version",
+        "protocol_sha256",
+        "sample_sha256",
+        "records_sha256",
+        "model_config",
+        "model_sha256",
+        "world_size",
+        "evaluation",
+    }
+    if run["schema_version"] == 2:
+        run_fields |= {"parameter_count", "model_dtype", "torch_threads"}
+    if set(run) != run_fields:
+        raise HellaSwagError("HellaSwag run fields do not match")
+    from .hellaswag_scored_contract import require_scoring_digest, validate_scored_rows
+
+    for name in ("protocol_sha256", "sample_sha256", "records_sha256", "model_sha256"):
+        require_scoring_digest(run[name], name)
+    config = model_config_from_mapping(run.get("model_config"))
+    if (
+        base_model_config(config).vocab_size != 256
+        or expected_training_parameters(config) > 1_000_000
+    ):
+        raise HellaSwagError(
+            "HellaSwag model configuration exceeds byte CPU constraints"
+        )
+    if run["schema_version"] == 2 and (
+        type(run.get("parameter_count")) is not int
+        or run["parameter_count"] != expected_training_parameters(config)
+        or run.get("model_dtype") not in ("torch.float32", "torch.float64")
+        or type(run.get("torch_threads")) is not int
+        or run["torch_threads"] <= 0
+    ):
+        raise HellaSwagError(
+            "HellaSwag model accounting does not match its architecture"
+        )
+    if payload["schema_version"] == 2:
+        if (
+            run["schema_version"] != 2
+            or runtime["model_dtype"] != run["model_dtype"]
+            or type(runtime["torch_threads"]) is not int
+            or runtime["torch_threads"] != run["torch_threads"]
+        ):
+            raise HellaSwagError(
+                "HellaSwag runtime does not match measured model controls"
+            )
+        require_scoring_digest(runtime["torch_config_sha256"], "torch_config_sha256")
     evaluation = run.get("evaluation")
     records = evaluation.get("records") if isinstance(evaluation, dict) else None
     if not isinstance(records, (list, tuple)) or len(records) != protocol.count:
         raise HellaSwagError("HellaSwag evidence row count does not match")
+    if validate_scored_rows(records, protocol) != run["records_sha256"]:
+        raise HellaSwagError(
+            "HellaSwag selected-record digest does not match scored rows"
+        )
     expected = summarize_scores(
         records,
         bootstrap_samples=protocol.bootstrap_samples,
