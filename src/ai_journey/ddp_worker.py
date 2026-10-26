@@ -10,7 +10,13 @@ import time
 import torch
 from torch.nn.parallel import DistributedDataParallel
 
-from .ddp_checkpoint import save_checkpoint, load_checkpoint
+from .ddp_checkpoint import (
+    save_checkpoint,
+    load_checkpoint,
+    load_checkpoint_journal,
+    checkpoint_run_sha256,
+)
+from .checkpoint_journal import CheckpointJournal
 from .ddp_contracts import Topology, integer
 from .ddp_runtime import process_group, require_all_ranks
 from .ddp_training import train_segment
@@ -62,11 +68,17 @@ def main(argv=None):
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--observe-recovery", action="store_true")
     parser.add_argument("--checkpoint-interval", type=int)
+    parser.add_argument("--journal-directory", type=Path)
     parser.add_argument("--failure-after-step", type=int)
     parser.add_argument(
         "--inject-failure", choices=("exit", "crash", "stall", "nonfinite", "schedule")
     )
     args = parser.parse_args(argv)
+    if args.journal_directory is not None and any(
+        path.resolve().is_relative_to(args.journal_directory.resolve())
+        for path in (args.source, args.spec, args.checkpoint, args.output)
+    ):
+        raise ValueError("journal directory must not contain protected worker paths")
     if args.observe_recovery and not args.resume:
         raise ValueError("recovery observations require a resumed worker")
     if args.checkpoint_interval is not None:
@@ -96,6 +108,18 @@ def main(argv=None):
     optimizer = build_gpt2_optimizer(model, spec.training)
     with process_group(topology, rendezvous=args.rendezvous):
         wrapped = DistributedDataParallel(model)
+        if args.journal_directory is not None and not args.resume:
+            journal_ready = True
+            if topology.rank == 0:
+                try:
+                    journal = CheckpointJournal(
+                        args.journal_directory,
+                        run_sha256=checkpoint_run_sha256(model, spec.training, source),
+                    )
+                    journal_ready = journal.recorded_step is None
+                except (OSError, ValueError, RuntimeError, TypeError):
+                    journal_ready = False
+            require_all_ranks(journal_ready, phase="new checkpoint journal admission")
         if args.inject_failure == "nonfinite":
             model.wte.weight.register_hook(lambda gradient: gradient * float("nan"))
         training = spec.training
@@ -105,19 +129,29 @@ def main(argv=None):
             training = replace(
                 training, accumulation_steps=training.accumulation_steps + 1
             )
-        started = (
-            load_checkpoint(
-                args.checkpoint,
-                model=model,
-                optimizer=optimizer,
-                config=spec.training,
-                source=source,
-            )
-            if args.resume
-            else 0
-        )
+        recovery = None
+        started = 0
+        if args.resume:
+            if args.journal_directory is not None:
+                recovery = load_checkpoint_journal(
+                    args.journal_directory,
+                    model=model,
+                    optimizer=optimizer,
+                    config=spec.training,
+                    source=source,
+                )
+                started = recovery.step
+            else:
+                started = load_checkpoint(
+                    args.checkpoint,
+                    model=model,
+                    optimizer=optimizer,
+                    config=spec.training,
+                    source=source,
+                )
         require_all_ranks(
             started + args.steps <= training.optimizer_steps
+            and (recovery is None or started + args.steps > recovery.recorded_step)
             and (
                 args.failure_after_step is None
                 or started < args.failure_after_step <= started + args.steps
@@ -169,6 +203,11 @@ def main(argv=None):
                     config=spec.training,
                     source=source,
                     step=completed,
+                    journal_directory=(
+                        args.journal_directory
+                        if recovery is None or completed > recovery.recorded_step
+                        else None
+                    ),
                 )
     args.output.write_text(
         json.dumps(
@@ -180,6 +219,17 @@ def main(argv=None):
                 "completed_step": started + args.steps,
                 "model_sha256": fingerprint,
                 "metrics": metrics,
+                **(
+                    {
+                        "journal_recovery": {
+                            "restored_step": recovery.step,
+                            "recorded_step": recovery.recorded_step,
+                            "checkpoint_sha256": recovery.checkpoint_sha256,
+                        }
+                    }
+                    if recovery is not None
+                    else {}
+                ),
             },
             sort_keys=True,
             allow_nan=False,

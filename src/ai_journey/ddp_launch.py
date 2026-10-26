@@ -29,8 +29,10 @@ def _paths_alias(left: Path, right: Path) -> bool:
 
 
 @contextmanager
-def _owned_run(checkpoint: Path, output_dir: Path):
-    """Lease both mutable resources until every child is reaped and log closed.
+def _owned_run(
+    checkpoint: Path, output_dir: Path, journal_directory: Path | None = None
+):
+    """Lease mutable resources until every child is reaped and log closed.
 
     Locks are advisory and local-filesystem scoped, not distributed fencing.
     Keep the empty checkpoint sidecar: unlinking it would let a later opener
@@ -48,6 +50,19 @@ def _owned_run(checkpoint: Path, output_dir: Path):
                 output_dir, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
             )
             descriptors.append(directory_descriptor)
+            if journal_directory is not None:
+                if journal_directory.is_symlink():
+                    raise ValueError("journal directory lease must not be a symlink")
+                journal_directory.mkdir(parents=True, exist_ok=True)
+                # A directory-inode lease spans the complete run. It is distinct
+                # from the journal's internal per-operation lock file, so the
+                # supervised rank-zero publisher does not conflict with itself.
+                descriptors.append(
+                    os.open(
+                        journal_directory,
+                        os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0),
+                    )
+                )
             lock_path = checkpoint.with_name(f".{checkpoint.name}.ai-journey-ddp.lock")
             # Opening never truncates. Reject occupied special files and linked
             # or nonempty files rather than treating caller data as a lease.
@@ -98,6 +113,7 @@ def launch_training(
     failure_mode: str = "exit",
     failure_after_step: int | None = None,
     observe_recovery: bool = False,
+    journal_directory: Path | None = None,
 ) -> list[dict]:
     import json
 
@@ -128,6 +144,22 @@ def launch_training(
     if any(_paths_alias(checkpoint, path) for path in (source, spec)):
         raise ValueError("checkpoint output must not overwrite an input")
     protected = (source, spec, checkpoint)
+    if journal_directory is not None:
+        if (
+            not isinstance(journal_directory, Path)
+            or journal_directory.is_symlink()
+            or (journal_directory.exists() and not journal_directory.is_dir())
+        ):
+            raise ValueError("journal directory must be a non-symlink directory")
+        journal_path, worker_path = journal_directory.resolve(), output_dir.resolve()
+        if (
+            journal_path.is_relative_to(worker_path)
+            or worker_path.is_relative_to(journal_path)
+            or any(path.resolve().is_relative_to(journal_path) for path in protected)
+        ):
+            raise ValueError(
+                "journal directory must be disjoint from worker outputs and protected inputs"
+            )
     worker_outputs = [
         output_dir / f"rank-{rank}.{suffix}"
         for rank in range(world_size)
@@ -154,7 +186,7 @@ def launch_training(
                 "failure injection requires an existing rank and supported mode"
             )
     with (
-        _owned_run(checkpoint, output_dir),
+        _owned_run(checkpoint, output_dir, journal_directory),
         tempfile.TemporaryDirectory(prefix="ai-journey-ddp-") as temporary,
     ):
         rendezvous = (Path(temporary) / "rendezvous").as_uri()
@@ -190,6 +222,10 @@ def launch_training(
                 ]
                 if resume:
                     command.append("--resume")
+                if journal_directory is not None:
+                    command.extend(
+                        ["--journal-directory", str(journal_directory.resolve())]
+                    )
                 if observe_recovery:
                     command.append("--observe-recovery")
                 if checkpoint_interval is not None:

@@ -270,3 +270,38 @@ Manifest publication can become visible before a later directory-fsync error:
 an exception does not imply that nothing committed. Inspect the manifest before
 retrying. The journal is authoritative when enabled; its commit and replacing
 the convenience latest path are not one cross-file atomic transaction.
+
+The supervised CLI opts in explicitly; use a journal disjoint from the source,
+specification, latest checkpoint, report and worker workdir:
+
+```bash
+ai-journey-ddp train --source data/day-19-demo-names.txt \
+  --spec config/ddp-lab.json --checkpoint /tmp/ddp-journal/state.pt \
+  --journal-directory /tmp/ddp-journal/versions \
+  --workdir /tmp/ddp-journal/initial --output /tmp/ddp-journal/initial.json \
+  --steps 2 --checkpoint-interval 1
+ai-journey-ddp train --source data/day-19-demo-names.txt \
+  --spec config/ddp-lab.json --checkpoint /tmp/ddp-journal/state.pt \
+  --journal-directory /tmp/ddp-journal/versions \
+  --workdir /tmp/ddp-journal/resumed --output /tmp/ddp-journal/resumed.json \
+  --resume --steps 2 --checkpoint-interval 1
+```
+
+`--steps` counts additional updates from the **actually restored** version, not
+from the manifest's highest recorded step. Before any update, a resumed journal
+run must be scheduled to finish strictly beyond that high-water mark and within
+the original optimizer schedule. Replayed intermediate steps at or below the
+mark can replace the convenience latest file but are not appended to immutable
+history. Rank JSON files retain the restored step, recorded step and selected
+snapshot SHA-256. The existing general evidence report schema stays unchanged.
+A non-resumed run requires an empty same-contract journal; existing committed
+progress rejects before updates rather than being silently adopted or replaced.
+
+The supervisor leases the journal directory inode for the entire run, including
+child cleanup, in addition to the checkpoint sidecar and worker-output lease.
+This is distinct from `.checkpoint-journal.lock`, which serializes individual
+manifest operations. These advisory local-filesystem leases do not fence remote
+writers or malicious processes. Select an interval that fits the finite retained
+version/byte budgets; there is no automatic pruning, rotation or elastic-world
+conversion. CPU/Gloo tests are recovery-contract evidence, not GPU throughput or
+production disaster-recovery evidence.
