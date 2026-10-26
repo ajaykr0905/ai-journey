@@ -73,6 +73,15 @@ at step two. Relaunch with `resume=True` and the remaining schedule to recover i
 fresh processes. The regression compares final model, AdamW moments, per-rank RNG
 and step against an uninterrupted run exactly.
 
+For an actual abrupt process loss, `failure_mode="crash"` makes only the selected
+owned worker exit via `os._exit(86)`, without process-group or Python cleanup.
+This is distinct from legacy `exit`, which raises a normal exception. An atomic
+`rank-N.crash.json` witness records the completed boundary, PID and local monotonic
+timestamp before that child exits. `WorkerFailure.supervision` retains observed
+exit statuses/timestamps and parent cleanup completion after all owned children
+are reaped; `WorkerTimeout` provides the same observations for a deadline. These
+are CPU-local fault controls, not machine power-loss or production failover proof.
+
 ## Reproduce the acceptance experiments
 
 ```bash
