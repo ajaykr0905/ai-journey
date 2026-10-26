@@ -153,7 +153,7 @@ def _validate_operation_paths(arguments):
     """Reject destructive output aliases before model, worker or file creation."""
     output = arguments.output
     inputs = [arguments.source, arguments.spec]
-    if arguments.command == "benchmark":
+    if arguments.command in ("benchmark", "train"):
         inputs.append(arguments.checkpoint)
     if output.is_symlink() or (output.exists() and not output.is_file()):
         raise ValueError("operation output must be a regular non-symlink path")
@@ -162,7 +162,11 @@ def _validate_operation_paths(arguments):
             output.exists() and source.exists() and output.samefile(source)
         ):
             raise ValueError("operation output aliases a protected input")
-    if arguments.command in ("matrix", "pipeline"):
+    if arguments.command == "train" and output.resolve().is_relative_to(
+        arguments.workdir.resolve()
+    ):
+        raise ValueError("training report must be outside its worker workdir")
+    if arguments.command in ("matrix", "pipeline", "recover", "compare"):
         directory = arguments.workdir
         if directory.is_symlink() or (
             directory.exists() and (not directory.is_dir() or any(directory.iterdir()))

@@ -11,6 +11,12 @@ from .ddp_contracts import integer
 from .ddp_limits import preflight
 
 
+def _paths_alias(left: Path, right: Path) -> bool:
+    return left.resolve() == right.resolve() or (
+        left.exists() and right.exists() and left.samefile(right)
+    )
+
+
 def launch_training(
     *,
     source: Path,
@@ -48,17 +54,23 @@ def launch_training(
             )
     if not isinstance(resume, bool):
         raise TypeError("resume must be boolean")
-    if checkpoint.is_symlink():
-        raise ValueError("checkpoint output must not be a symlink")
-    if checkpoint.resolve() in (source.resolve(), spec.resolve()):
+    if checkpoint.is_symlink() or (checkpoint.exists() and not checkpoint.is_file()):
+        raise ValueError("checkpoint output must be a regular non-symlink path")
+    if any(_paths_alias(checkpoint, path) for path in (source, spec)):
         raise ValueError("checkpoint output must not overwrite an input")
-    protected = {source.resolve(), spec.resolve(), checkpoint.resolve()}
+    protected = (source, spec, checkpoint)
     worker_outputs = [
         output_dir / f"rank-{rank}.{suffix}"
         for rank in range(world_size)
         for suffix in ("log", "json")
     ]
-    if any(path.is_symlink() or path.resolve() in protected for path in worker_outputs):
+    if any(
+        path.is_symlink()
+        or (path.exists() and not path.is_file())
+        or any(_paths_alias(path, target) for target in protected)
+        or any(_paths_alias(path, other) for other in worker_outputs[:index])
+        for index, path in enumerate(worker_outputs)
+    ):
         raise ValueError("worker outputs must not overwrite inputs or checkpoints")
     if failure_rank is not None:
         integer(failure_rank, "failure_rank")

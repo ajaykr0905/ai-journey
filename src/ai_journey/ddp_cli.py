@@ -8,7 +8,12 @@ from .ddp_acceptance import certify_recovery, certify_batch_equivalence
 from .ddp_evidence import build_evidence, read_evidence, write_evidence
 from .ddp_launch import launch_training
 from .gpt2_training import load_training_spec
-from .ddp_operations import add_commands, run_operation, write_report
+from .ddp_operations import (
+    _validate_operation_paths,
+    add_commands,
+    run_operation,
+    write_report,
+)
 
 
 def main(argv=None):
@@ -29,6 +34,8 @@ def main(argv=None):
     add_commands(commands)
     arguments = parser.parse_args(argv)
     try:
+        if arguments.command in ("train", "recover", "compare"):
+            _validate_operation_paths(arguments)
         if arguments.command in (
             "matrix",
             "pipeline",

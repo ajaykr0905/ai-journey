@@ -34,6 +34,12 @@ ai-journey-ddp train --source data/day-19-demo-names.txt \
 ai-journey-ddp verify --report /tmp/ddp-demo/resumed.json
 ```
 
+Keep training reports outside the rank workdir and distinct from the source,
+specification and checkpoint. Recovery/comparison workdirs must be new or empty.
+Artifact admission runs before workers: symlinks, nonregular worker outputs and
+hard links to protected inputs or another rank's artifact are rejected without
+opening/truncating them.
+
 Each rank receives disjoint shuffled samples and the same number of complete
 micro-batches. The effective global batch is
 `world_size × micro_batch_size × accumulation_steps`. The protocol uses
