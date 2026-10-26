@@ -81,7 +81,9 @@ def _train_probe(model, inputs, targets):
 
 
 @isolated_decoder_runtime()
-def run_moe_document_trial(plan, train_bytes, heldout_bytes, *, seed):
+def run_moe_document_trial(
+    plan, train_bytes, heldout_bytes, *, seed, _completed_arm=None
+):
     """Run all declared treatments with matched exposure and explicit objectives."""
 
     if (
@@ -90,6 +92,8 @@ def run_moe_document_trial(plan, train_bytes, heldout_bytes, *, seed):
         or seed not in plan.seeds
     ):
         raise ValueError("MoE trial requires a validated plan and declared seed")
+    if _completed_arm is not None and not callable(_completed_arm):
+        raise TypeError("completed-arm observer must be callable")
     base = plan.arms[0].config.gpt2
     documents = prepare_decoder_documents(
         train_bytes, heldout_bytes, context_length=base.context_length
@@ -184,6 +188,10 @@ def run_moe_document_trial(plan, train_bytes, heldout_bytes, *, seed):
                 "consumed_target_tokens": sum(row["target_tokens"] for row in trace),
             }
         )
+        if _completed_arm is not None:
+            # The private publication seam consumes the completed model before
+            # the next arm is allocated; reports and default execution are unchanged.
+            _completed_arm(arm, model, optimizer, arms[-1], schedule)
     if len({arm["initial_shared_sha256"] for arm in arms}) != 1:
         raise RuntimeError(
             "dense and MoE arms did not share homologous initial tensors"
