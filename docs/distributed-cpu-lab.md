@@ -119,7 +119,10 @@ recomputes state digests from `continuous.pt`/`recovered.pt`, checks preserved
 retain the exact bounded input bytes as `training-spec.json`, and every worker
 loads that witness. Artifact verification hashes those bytes and binds all three
 checkpoints' model/training configuration, source digest and world size to the
-retained specification/report. An older directory without this witness cannot
+retained specification/report. It reconstructs each bounded CPU model without
+changing the caller's RNG, checks exact tensor restoration and recomputes its
+architecture-bound fingerprint; both checkpoint metadata and every reported
+final worker identity must match the actual model state. An older directory without this witness cannot
 prove specification binding and fails artifact verification; the v1 report
 fields themselves are unchanged. Without `--workdir`,
 verification proves internal report consistency only. A digest cannot authenticate
