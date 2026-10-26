@@ -20,6 +20,7 @@ from .decoder_variant_public import (
     verify_public_decoder_report,
 )
 from .decoder_variant_report_io import write_new_report
+from .decoder_variant_restart import run_restarting_decoder_comparison
 from .decoder_variant_verify import _read_report
 from .gpt2_config import GPT2Config
 
@@ -52,6 +53,7 @@ def _parser():
     )
     run.add_argument("--plan", type=Path)
     run.add_argument("--output", type=Path, required=True)
+    run.add_argument("--progress-directory", type=Path)
     verify = commands.add_parser(
         "verify", help="replay a document report without changing artifacts"
     )
@@ -137,8 +139,18 @@ def main(argv=None):
                     split_seed=args.split_seed,
                 )
             else:
-                report = run_decoder_document_comparison(
-                    plan, _read_bytes(args.train), _read_bytes(args.heldout)
+                train_bytes, heldout_bytes = (
+                    _read_bytes(args.train),
+                    _read_bytes(args.heldout),
+                )
+                report = (
+                    run_restarting_decoder_comparison(
+                        plan, train_bytes, heldout_bytes, args.progress_directory
+                    )
+                    if args.progress_directory
+                    else run_decoder_document_comparison(
+                        plan, train_bytes, heldout_bytes
+                    )
                 )
             write_new_report(args.output, report)
             print(

@@ -57,3 +57,18 @@ The defaults select 16 training and four held-out documents; explicit counts
 are capped at 128 and 32. Selection is a bounded protocol, not a claim that the
 selected subset represents the source corpus or that a UD test partition is a
 training benchmark. No network request is made by either command.
+
+## Restart an interrupted comparison
+
+Add `--progress-directory artifacts/decoder-progress` to the `documents` command
+to publish an immutable artifact after each completed seed. Reissue the same
+plan and inputs with that directory to reuse complete seeds. The seed that was
+interrupted starts again from its beginning; this option does not restore a
+partially updated model. Completed artifacts are never overwritten and unrelated
+directory contents are preserved.
+
+Restart checks the plan, source hashes, document identities, schedule, finite
+data and update coverage before reusing evidence. Use only progress from your
+own run: hashes detect corruption, not a maliciously fabricated measurement.
+Always run `ai-journey-decoder-verify documents` on the final report; it recomputes
+all seeds and validates the reused measurements against executable code.

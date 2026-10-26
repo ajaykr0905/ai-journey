@@ -117,6 +117,14 @@ def run_decoder_document_comparison(
         run_decoder_document_trial(plan, train_bytes, heldout_bytes, seed=seed)
         for seed in plan.seeds
     ]
+    return assemble_decoder_document_report(plan, trials)
+
+
+def assemble_decoder_document_report(
+    plan: DecoderExperimentPlan, trials: list[dict]
+) -> dict:
+    """Assemble identical evidence for fresh and completed-seed restart runs."""
+
     report = {
         "schema": DOCUMENT_REPORT_SCHEMA,
         "plan": plan.to_mapping(),
