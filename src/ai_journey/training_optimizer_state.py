@@ -88,6 +88,11 @@ def validate_adamw_state(
             counter = state["step"]
             if (
                 not isinstance(counter, torch.Tensor)
+                # Canonical CPU AdamW uses real scalar counters. Bool and
+                # complex tensors can compare equal to progress yet fail the
+                # next update (or introduce unsupported complex bias correction).
+                or counter.dtype not in (torch.float32, torch.float64)
+                or counter.device.type != "cpu"
                 or counter.numel() != 1
                 or not torch.isfinite(counter).all()
                 or counter.item() != step

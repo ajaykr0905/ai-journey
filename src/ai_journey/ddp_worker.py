@@ -2,7 +2,10 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
+import tempfile
+import time
 
 import torch
 from torch.nn.parallel import DistributedDataParallel
@@ -13,7 +16,39 @@ from .ddp_runtime import process_group, require_all_ranks
 from .ddp_training import train_segment
 from .gpt2_training import build_gpt2_optimizer
 from .ddp_limits import preflight
-from .training_models import build_training_model
+from .training_models import build_training_model, training_model_fingerprint
+
+
+def _write_boundary(path: Path, marker):
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(json.dumps(marker, sort_keys=True, allow_nan=False).encode())
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _abrupt_exit(output: Path, topology: Topology, *, completed_step: int):
+    """Persist a public-safe boundary witness, then exit only this owned child."""
+    _write_boundary(
+        output.with_suffix(".crash.json"),
+        {
+            "schema": "ai-journey-ddp-crash-boundary-v1",
+            "rank": topology.rank,
+            "world_size": topology.world_size,
+            "pid": os.getpid(),
+            "completed_step": completed_step,
+            "observed_ns": time.monotonic_ns(),
+            "exit_code": 86,
+        },
+    )
+    os._exit(86)
 
 
 def main(argv=None):
@@ -25,25 +60,28 @@ def main(argv=None):
     parser.add_argument("--rendezvous", required=True)
     parser.add_argument("--steps", type=int, required=True)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--observe-recovery", action="store_true")
     parser.add_argument("--checkpoint-interval", type=int)
     parser.add_argument("--failure-after-step", type=int)
     parser.add_argument(
-        "--inject-failure", choices=("exit", "stall", "nonfinite", "schedule")
+        "--inject-failure", choices=("exit", "crash", "stall", "nonfinite", "schedule")
     )
     args = parser.parse_args(argv)
+    if args.observe_recovery and not args.resume:
+        raise ValueError("recovery observations require a resumed worker")
     if args.checkpoint_interval is not None:
         integer(args.checkpoint_interval, "checkpoint_interval", 1)
     if args.failure_after_step is not None:
         integer(args.failure_after_step, "failure_after_step", 1)
-        if args.inject_failure != "exit":
-            raise ValueError("late failure supports exit mode only")
+        if args.inject_failure not in ("exit", "crash"):
+            raise ValueError("late failure supports exit/crash modes only")
     if args.inject_failure == "exit" and args.failure_after_step is None:
         raise RuntimeError("injected worker exit before process-group initialization")
     if args.inject_failure == "stall":
-        import time
-
         time.sleep(30)
     topology = Topology(args.rank, args.world_size, args.rank)
+    if args.inject_failure == "crash" and args.failure_after_step is None:
+        _abrupt_exit(args.output, topology, completed_step=0)
     spec = preflight(
         args.source, args.spec, world_size=args.world_size, steps=args.steps
     )
@@ -86,6 +124,19 @@ def main(argv=None):
             ),
             phase="worker schedule validation",
         )
+        if args.observe_recovery:
+            _write_boundary(
+                args.output.with_suffix(".recovery.json"),
+                {
+                    "schema": "ai-journey-ddp-restored-boundary-v1",
+                    "rank": topology.rank,
+                    "world_size": topology.world_size,
+                    "pid": os.getpid(),
+                    "restored_step": started,
+                    "ready_ns": time.monotonic_ns(),
+                    "model_sha256": training_model_fingerprint(model),
+                },
+            )
         metrics = []
         for step in range(started, started + args.steps):
             metrics.extend(
@@ -101,6 +152,8 @@ def main(argv=None):
             )
             completed = step + 1
             if completed == args.failure_after_step:
+                if args.inject_failure == "crash":
+                    _abrupt_exit(args.output, topology, completed_step=completed)
                 raise RuntimeError(
                     f"injected worker exit after optimizer step {completed}"
                 )

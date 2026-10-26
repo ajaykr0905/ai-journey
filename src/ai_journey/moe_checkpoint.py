@@ -30,6 +30,9 @@ _FIELDS = {
     "torch_rng_state",
     "checkpoint_sha256",
 }
+MAX_CHECKPOINT_LOGICAL_BYTES = 128 * 1024 * 1024
+MAX_CHECKPOINT_HASH_ITEMS = 100_000
+MAX_CHECKPOINT_HASH_DEPTH = 64
 
 
 def _contract(value) -> dict:
@@ -50,8 +53,40 @@ def _contract(value) -> dict:
     return json.loads(encoded)
 
 
+def _admit_digest_work(value) -> None:
+    """Bound logical tensor work, including repeated aliases, before copying it.
+
+    ZIP storage limits are insufficient: a four-byte storage can describe a
+    billion-element expanded tensor. Charge each submitted tensor occurrence
+    because canonical sealing processes each occurrence independently.
+    """
+    items, logical_bytes = 0, 0
+
+    def visit(item, depth):
+        nonlocal items, logical_bytes
+        items += 1
+        if depth > MAX_CHECKPOINT_HASH_DEPTH:
+            raise ValueError("checkpoint nesting exceeds its hash-work budget")
+        if items > MAX_CHECKPOINT_HASH_ITEMS:
+            raise ValueError("checkpoint items exceed their hash-work budget")
+        if isinstance(item, torch.Tensor):
+            logical_bytes += item.numel() * item.element_size()
+            if logical_bytes > MAX_CHECKPOINT_LOGICAL_BYTES:
+                raise ValueError("checkpoint logical tensor work exceeds its budget")
+        elif isinstance(item, dict):
+            for key, part in item.items():
+                visit(key, depth + 1)
+                visit(part, depth + 1)
+        elif isinstance(item, (tuple, list)):
+            for part in item:
+                visit(part, depth + 1)
+
+    visit(value, 0)
+
+
 def _digest(value) -> str:
     """Seal submitted metadata types and tensor bytes, not Python equality."""
+    _admit_digest_work(value)
     digest = sha256()
 
     def update(item):

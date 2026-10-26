@@ -47,8 +47,11 @@ Reports retain the model identity, protocol/profile controls, raw monotonic
 timestamps, token ids and classifications. Verification is offline: it checks
 schema, schedule, identities, chronology, concurrency, work coverage and digest,
 then independently recomputes counts, token totals, throughput and nearest-rank
-p50/p95/p99 distributions. Empty successful distributions remain null. A digest
-detects content changes; it cannot authenticate that a timing observation was
+p50/p95/p99 distributions. Empty successful distributions remain null.
+Verification rejects resealed type drift in those derived fields: booleans,
+integers and floating-point values retain their canonical JSON distinctions. All received
+terminal model identities must agree, including deadline/cancelled outputs.
+A digest detects content changes; it cannot authenticate that a timing observation was
 actually collected. Preserve source evidence and inspect the local environment.
 This is a CPU loopback experiment, with no GPU or production-scale claim.
 
