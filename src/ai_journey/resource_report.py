@@ -170,12 +170,20 @@ def verify_resource_report(report: dict[str, object]) -> dict[str, object]:
 
     if not isinstance(report, dict):
         raise TypeError("report must be a dictionary")
-    if report.get("schema_version") != 1:
+    if type(report.get("schema_version")) is not int or report["schema_version"] != 1:
         raise ResourceAccountingError("unsupported resource report schema")
     if report.get("kind") != "analytical_planning_estimate":
         raise ResourceAccountingError("unexpected resource report kind")
     if report.get("measured") is not False:
         raise ResourceAccountingError("resource report must remain unmeasured")
+    try:
+        actual_integrity = seal_resource_report(report)["integrity"]
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ResourceAccountingError("resource report cannot be recomputed") from error
+    if report.get("integrity") != actual_integrity:
+        raise ResourceAccountingError(
+            "resource report integrity does not match recomputation"
+        )
     try:
         model_payload = report["model"]
         workload_payload = report["workload"]

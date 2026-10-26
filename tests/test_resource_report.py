@@ -79,3 +79,26 @@ def test_resource_report_verification_recomputes_every_derived_field():
     mislabeled["measured"] = True
     with pytest.raises(ResourceAccountingError, match="unmeasured"):
         verify_resource_report(mislabeled)
+
+
+def test_resource_schema_does_not_alias_boolean_true_to_version_one():
+    report = seal_resource_report(build_resource_report(make_plan()))
+    report["schema_version"] = True
+    with pytest.raises(ResourceAccountingError, match="schema"):
+        verify_resource_report(report)
+
+
+@pytest.mark.parametrize("reseal", [False, True])
+@pytest.mark.parametrize("field", ["parameter_count", "capacity_fits"])
+def test_resource_report_rejects_python_equal_but_serially_different_values(
+    reseal, field
+):
+    report = seal_resource_report(build_resource_report(make_plan()))
+    if field == "parameter_count":
+        report["parameters"]["count"] = float(report["parameters"]["count"])
+    else:
+        report["memory"]["capacity"]["fits"] = 1
+    if reseal:
+        report = seal_resource_report(report)
+    with pytest.raises(ResourceAccountingError, match="recomputation"):
+        verify_resource_report(report)
