@@ -20,6 +20,7 @@ from .gpt2_training_evidence_io import (
     load_training_evidence,
     write_training_evidence,
 )
+from .training_paths import validate_training_paths
 
 
 def load_source_bytes(path: Path, *, max_bytes: int = 16 * 1024 * 1024) -> bytes:
@@ -52,6 +53,12 @@ def run_and_publish(
 ) -> dict[str, Any]:
     """Run the declared experiment and publish verified JSON evidence."""
 
+    validate_training_paths(
+        source=source_path,
+        spec=spec_path,
+        checkpoint=checkpoint_path,
+        report=report_path,
+    )
     source = load_source_bytes(source_path, max_bytes=max_source_bytes)
     spec = load_training_spec(spec_path)
     run = run_training_experiment(

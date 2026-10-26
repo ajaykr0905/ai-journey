@@ -1,6 +1,7 @@
 from dataclasses import asdict
 from hashlib import sha256
 import json
+import os
 
 import pytest
 
@@ -134,6 +135,34 @@ def test_segment_bounds_reject_before_checkpoint_publication(tmp_path, steps):
             step_count=steps,
         )
     assert not checkpoint.exists()
+
+
+@pytest.mark.parametrize(
+    "alias", ["source_checkpoint", "spec_report", "outputs", "hardlink", "symlink"]
+)
+def test_training_outputs_cannot_alias_inputs_or_each_other(tmp_path, alias):
+    source, spec = prepare_files(tmp_path)
+    checkpoint, report = tmp_path / "state.pt", tmp_path / "report.json"
+    if alias == "source_checkpoint":
+        checkpoint = source
+    elif alias == "spec_report":
+        report = spec
+    elif alias == "outputs":
+        report = checkpoint
+    elif alias == "hardlink":
+        os.link(source, checkpoint)
+    else:
+        report.symlink_to(spec)
+    original = (source.read_bytes(), spec.read_bytes())
+    with pytest.raises(ValueError, match="aliases|non-symlink"):
+        run_and_publish(
+            source_path=source,
+            spec_path=spec,
+            checkpoint_path=checkpoint,
+            report_path=report,
+        )
+    assert (source.read_bytes(), spec.read_bytes()) == original
+    assert not (tmp_path / "state.pt").exists() or alias == "hardlink"
 
 
 def test_cli_main_prints_canonical_verified_report(tmp_path, capsys):
