@@ -1,5 +1,11 @@
 {
   "required_files": [
+    "docs/replicated-moe-cpu.md",
+    "src/ai_journey/moe_ddp_config.py",
+    "src/ai_journey/moe_ddp_resources.py",
+    "src/ai_journey/moe_ddp_training.py",
+    "src/ai_journey/moe_ddp_window.py",
+    "tests/test_moe_ddp_training.py",
     "src/ai_journey/checkpoint_journal_readiness.py",
     "tests/test_checkpoint_journal_readiness.py",
     "docs/gqa-experiments.md",
