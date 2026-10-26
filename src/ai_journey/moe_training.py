@@ -35,6 +35,15 @@ def validate_moe_optimizer(model, optimizer) -> int:
     """Validate global counters without relaxing the existing dense defaults."""
     if not isinstance(optimizer, torch.optim.AdamW) or not optimizer.param_groups:
         raise ValueError("MoE training requires AdamW")
+    if any(
+        group.get("amsgrad") is not False
+        or group.get("maximize") is not False
+        or group.get("decoupled_weight_decay", True) is not True
+        for group in optimizer.param_groups
+    ):
+        raise ValueError(
+            "MoE reference requires minimizing non-AMSGrad decoupled AdamW"
+        )
     steps = []
     for state in optimizer.state.values():
         counter = state.get("step")

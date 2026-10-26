@@ -6,6 +6,10 @@ head retain their existing implementation. Total stored parameter count includes
 every expert; `expected_moe_active_parameters` is only a per-token upper bound,
 not optimizer storage or a memory estimate. Use `build_training_model` to enforce
 the existing parameter, block and causal-mask construction budgets.
+The model factory and checkpoint writer additionally reject architectures whose
+conservative model/AdamW archive estimate exceeds 16,384 records. MoE readers
+explicitly admit up to that record count while retaining byte, compression,
+duplicate-record and strict post-load state checks; legacy readers keep 1,024.
 
 ## Routing and capacity
 

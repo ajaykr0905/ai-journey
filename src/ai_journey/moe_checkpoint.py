@@ -10,8 +10,9 @@ import tempfile
 
 import torch
 
-from .checkpoint_archive import load_checkpoint_archive
+from .checkpoint_archive import MAX_CHECKPOINT_RECORDS, load_checkpoint_archive
 from .moe_model import MoEDecoderModel
+from .moe_resources import expected_checkpoint_records
 from .moe_training import validate_moe_optimizer
 from .training_models import training_model_fingerprint
 
@@ -134,6 +135,8 @@ def save_moe_checkpoint(
     """
     if not isinstance(path, Path) or not isinstance(model, MoEDecoderModel):
         raise TypeError("checkpoint requires a Path and MoEDecoderModel")
+    if expected_checkpoint_records(model.config) > MAX_CHECKPOINT_RECORDS:
+        raise ValueError("MoE checkpoint exceeds the declared record-work budget")
     if (
         type(step) is not int
         or not 0 <= step <= 1_000_000
@@ -191,7 +194,9 @@ def read_moe_checkpoint(
     if type(max_checkpoint_bytes) is not int or max_checkpoint_bytes <= 0:
         raise ValueError("max_checkpoint_bytes must be positive")
     try:
-        payload = load_checkpoint_archive(path, max_bytes=max_checkpoint_bytes)
+        payload = load_checkpoint_archive(
+            path, max_bytes=max_checkpoint_bytes, max_records=MAX_CHECKPOINT_RECORDS
+        )
     except Exception as exc:
         raise ValueError(
             "MoE checkpoint is not a bounded weights-only archive"

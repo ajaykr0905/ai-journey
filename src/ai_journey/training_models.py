@@ -50,6 +50,12 @@ def build_training_model(
         raise ValueError("max_parameters must be a positive integer")
     if expected_training_parameters(config) > max_parameters:
         raise ValueError("model exceeds the declared parameter budget")
+    if isinstance(config, MoEConfig):
+        from .checkpoint_archive import MAX_CHECKPOINT_RECORDS
+        from .moe_resources import expected_checkpoint_records
+
+        if expected_checkpoint_records(config) > MAX_CHECKPOINT_RECORDS:
+            raise ValueError("MoE model exceeds the bounded checkpoint-record budget")
     base = config.gpt2 if isinstance(config, DecoderVariantConfig) else config
     if base.layer_count > MAX_CPU_MODEL_LAYERS:
         raise ValueError(
