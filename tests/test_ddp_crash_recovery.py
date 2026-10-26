@@ -1,4 +1,5 @@
 import copy
+from dataclasses import replace
 from hashlib import sha256
 import json
 import os
@@ -18,6 +19,8 @@ from ai_journey.ddp_cli import main
 from ai_journey.ddp_launch import launch_training
 from ai_journey.ddp_operations import write_report
 from ai_journey.ddp_worker import _write_boundary
+from ai_journey.decoder_variant_config import DecoderVariantConfig
+from ai_journey.gpt2_training import load_training_spec
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -191,6 +194,54 @@ def test_artifact_verification_binds_every_checkpoint_to_the_spec(
     torch.save(payload, path)
     with pytest.raises(ValueError, match="artifacts"):
         verify_crash_recovery(report, directory=copied)
+
+
+@pytest.mark.parametrize("mutation", ["report", "checkpoint", "both"])
+def test_reported_final_model_identity_is_recomputed_from_checkpoint_tensors(
+    crash_evidence, tmp_path, mutation
+):
+    original, _, workdir = crash_evidence
+    report = copy.deepcopy(original)
+    copied = tmp_path / "copy"
+    shutil.copytree(workdir, copied)
+    if mutation in ("report", "both"):
+        for name in ("control_workers", "resumed_workers"):
+            for row in report[name]:
+                row["model_sha256"] = "a" * 64
+    if mutation in ("checkpoint", "both"):
+        for name in ("continuous.pt", "recovered.pt"):
+            path = copied / name
+            payload = torch.load(path, weights_only=True)
+            payload["model_sha256"] = "a" * 64
+            torch.save(payload, path)
+    report["report_sha256"] = crash_recovery_digest(report)
+    with pytest.raises(ValueError, match="artifacts"):
+        verify_crash_recovery(report, directory=copied)
+
+
+def test_valid_artifact_verification_preserves_caller_random_state(crash_evidence):
+    report, _, workdir = crash_evidence
+    before = torch.get_rng_state().clone()
+    assert verify_crash_recovery(report, directory=workdir) == report
+    assert torch.equal(torch.get_rng_state(), before)
+
+
+def test_modern_crash_artifacts_recompute_the_architecture_bound_model_identity(
+    tmp_path,
+):
+    original = load_training_spec(ROOT / "config/ddp-lab.json")
+    spec = replace(
+        original,
+        model=DecoderVariantConfig(original.model, "rmsnorm", "swiglu", "rope"),
+    )
+    path = tmp_path / "modern-spec.json"
+    path.write_text(json.dumps(spec.to_mapping()))
+    workdir = tmp_path / "owned"
+    report = certify_crash_recovery(
+        source=ROOT / "data/day-19-demo-names.txt", spec=path, directory=workdir
+    )
+    assert verify_crash_recovery(report, directory=workdir) == report
+    assert report["state_sha256"]["continuous"] == report["state_sha256"]["recovered"]
 
 
 def test_recovery_report_fifo_cannot_block_waiting_for_a_writer(tmp_path):

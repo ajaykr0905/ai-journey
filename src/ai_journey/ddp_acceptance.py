@@ -17,7 +17,12 @@ from .ddp_launch import WorkerFailure, launch_training
 from .ddp_contracts import integer
 from .ddp_limits import preflight
 from .gpt2_training import training_spec_from_mapping
-from .training_models import model_config_mapping
+from .training_models import (
+    base_model_config,
+    build_training_model,
+    model_config_mapping,
+    training_model_fingerprint,
+)
 
 CRASH_RECOVERY_SCHEMA = "ai-journey-ddp-crash-recovery-v1"
 CRASH_RECOVERY_SCOPE = "CPU-local Gloo crash/restart observations; not GPU, power-loss or production failover evidence. Digests validate internal consistency, not timing authenticity."
@@ -329,9 +334,48 @@ def _verify_crash_artifacts(report, directory):
             if _canonical(actual_contract) != _canonical(expected_contract):
                 raise ValueError("checkpoint specification binding differs")
 
+        model = None
+
+        def model_identity(payload):
+            nonlocal model
+            if model is None:
+                if base_model_config(spec.model).context_length > 128:
+                    raise ValueError("artifact model exceeds CPU context budget")
+                with torch.random.fork_rng(devices=[]):
+                    model = (
+                        build_training_model(spec.model, max_parameters=1_000_000)
+                        .double()
+                        .eval()
+                    )
+            expected, state = model.state_dict(), payload["model"]
+            if (
+                not isinstance(state, dict)
+                or set(state) != set(expected)
+                or any(
+                    not isinstance(state[name], torch.Tensor)
+                    or state[name].dtype != tensor.dtype
+                    or state[name].shape != tensor.shape
+                    or state[name].layout != tensor.layout
+                    or not torch.isfinite(state[name]).all()
+                    for name, tensor in expected.items()
+                )
+            ):
+                raise ValueError("artifact model tensor schema differs")
+            model.load_state_dict(state, strict=True)
+            if any(
+                not torch.equal(tensor, state[name])
+                for name, tensor in model.state_dict().items()
+            ):
+                raise ValueError("artifact model state cannot be restored exactly")
+            identity = training_model_fingerprint(model)
+            if payload["model_sha256"] != identity:
+                raise ValueError("artifact model identity differs from its tensors")
+            return identity
+
         durable_path = directory / "last-durable.pt"
         durable = bounded_checkpoint_load(durable_path, 64 * 1024 * 1024)
         validate_contract(durable)
+        model_identity(durable)
         if (
             durable["step"] != report["last_durable"]["step"]
             or durable["model_sha256"] != report["last_durable"]["model_sha256"]
@@ -339,12 +383,17 @@ def _verify_crash_artifacts(report, directory):
             != report["last_durable"]["checkpoint_sha256"]
         ):
             raise ValueError("last durable checkpoint differs")
-        for name, filename in (
-            ("continuous", "continuous.pt"),
-            ("recovered", "recovered.pt"),
+        for name, filename, workers in (
+            ("continuous", "continuous.pt", "control_workers"),
+            ("recovered", "recovered.pt", "resumed_workers"),
         ):
             payload = bounded_checkpoint_load(directory / filename, 64 * 1024 * 1024)
             validate_contract(payload)
+            identity = model_identity(payload)
+            if any(row["model_sha256"] != identity for row in report[workers]):
+                raise ValueError(
+                    "reported worker identity differs from actual model state"
+                )
             state = {field: _state_digest(payload[field]) for field in _STATE_FIELDS}
             if (
                 state != report["state_sha256"][name]
