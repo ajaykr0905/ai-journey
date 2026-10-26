@@ -325,66 +325,70 @@ def verify_moe_report(report):
         raise ValueError("MoE report omits declared seed trials")
     identities = []
     for trial, seed in zip(trials, plan.seeds, strict=True):
-        _fields(
-            trial,
-            "seed plan_sha256 train_sha256 heldout_sha256 documents evaluation_windows resource_admission batch_schedule_sha256 arms",
-            "trial",
-        )
-        _equal(trial["seed"], seed, "trial seed")
-        _equal(trial["plan_sha256"], plan.fingerprint(), "trial plan")
-        for key in ("train_sha256", "heldout_sha256", "batch_schedule_sha256"):
-            _digest(trial[key])
-        if trial["train_sha256"] == trial["heldout_sha256"]:
-            raise ValueError("MoE training and held-out sources cannot be identical")
-        documents = trial["documents"]
-        _fields(
-            documents,
-            "train_documents heldout_documents train_window_count heldout_target_tokens",
-            "document exposure",
-        )
-        hashes = []
-        for key in ("train_documents", "heldout_documents"):
-            values = documents[key]
-            if type(values) is not list or not 1 <= len(values) <= 2048:
-                raise ValueError("MoE document identities are missing or unbounded")
-            for value in values:
-                _digest(value)
-            hashes.extend(values)
-        if len(set(hashes)) != len(hashes) or len(hashes) > 2048:
-            raise ValueError("MoE document evidence contains duplicates or leakage")
-        _integer(documents["train_window_count"], 1, 1024 * 1024)
-        _integer(documents["heldout_target_tokens"], 1, 8192)
-        _integer(
-            trial["evaluation_windows"],
-            max(
-                len(documents["heldout_documents"]),
-                math.ceil(
-                    documents["heldout_target_tokens"]
-                    / plan.arms[0].config.gpt2.context_length
-                ),
-            ),
-            documents["heldout_target_tokens"],
-        )
-        budget = require_moe_experiment_work(
-            plan, evaluation_windows=trial["evaluation_windows"]
-        )
-        _equal(trial["resource_admission"], budget, "whole-job resource admission")
-        if type(trial["arms"]) is not list or len(trial["arms"]) != len(plan.arms):
-            raise ValueError("MoE report omits declared arms")
-        for index, (arm, declared) in enumerate(
-            zip(trial["arms"], plan.arms, strict=True)
-        ):
-            _arm(arm, declared, plan, trial, budget["model_parameters"][index])
-        if len({arm["initial_shared_sha256"] for arm in trial["arms"]}) != 1:
-            raise ValueError("MoE comparison did not share homologous initial tensors")
-        identities.append(
-            {
-                "train": trial["train_sha256"],
-                "heldout": trial["heldout_sha256"],
-                "documents": documents,
-            }
-        )
+        identities.append(verify_moe_trial(trial, plan, seed=seed))
     for identity in identities[1:]:
         _equal(identity, identities[0], "paired source identity")
     _equal(report["summary"], summarize_moe_trials(plan, trials), "comparison summary")
     return plan
+
+
+def verify_moe_trial(trial, plan, *, seed):
+    """Validate one complete declared seed, shared by final reports and restart."""
+
+    if type(seed) is not int or seed not in plan.seeds:
+        raise ValueError("MoE completed trial requires a declared seed")
+    _fields(
+        trial,
+        "seed plan_sha256 train_sha256 heldout_sha256 documents evaluation_windows resource_admission batch_schedule_sha256 arms",
+        "trial",
+    )
+    _equal(trial["seed"], seed, "trial seed")
+    _equal(trial["plan_sha256"], plan.fingerprint(), "trial plan")
+    for key in ("train_sha256", "heldout_sha256", "batch_schedule_sha256"):
+        _digest(trial[key])
+    if trial["train_sha256"] == trial["heldout_sha256"]:
+        raise ValueError("MoE training and held-out sources cannot be identical")
+    documents = trial["documents"]
+    _fields(
+        documents,
+        "train_documents heldout_documents train_window_count heldout_target_tokens",
+        "document exposure",
+    )
+    hashes = []
+    for key in ("train_documents", "heldout_documents"):
+        values = documents[key]
+        if type(values) is not list or not 1 <= len(values) <= 2048:
+            raise ValueError("MoE document identities are missing or unbounded")
+        for value in values:
+            _digest(value)
+        hashes.extend(values)
+    if len(set(hashes)) != len(hashes) or len(hashes) > 2048:
+        raise ValueError("MoE document evidence contains duplicates or leakage")
+    _integer(documents["train_window_count"], 1, 1024 * 1024)
+    _integer(documents["heldout_target_tokens"], 1, 8192)
+    _integer(
+        trial["evaluation_windows"],
+        max(
+            len(documents["heldout_documents"]),
+            math.ceil(
+                documents["heldout_target_tokens"]
+                / plan.arms[0].config.gpt2.context_length
+            ),
+        ),
+        documents["heldout_target_tokens"],
+    )
+    budget = require_moe_experiment_work(
+        plan, evaluation_windows=trial["evaluation_windows"]
+    )
+    _equal(trial["resource_admission"], budget, "whole-job resource admission")
+    if type(trial["arms"]) is not list or len(trial["arms"]) != len(plan.arms):
+        raise ValueError("MoE report omits declared arms")
+    for index, (arm, declared) in enumerate(zip(trial["arms"], plan.arms, strict=True)):
+        _arm(arm, declared, plan, trial, budget["model_parameters"][index])
+    if len({arm["initial_shared_sha256"] for arm in trial["arms"]}) != 1:
+        raise ValueError("MoE comparison did not share homologous initial tensors")
+    return {
+        "train": trial["train_sha256"],
+        "heldout": trial["heldout_sha256"],
+        "documents": documents,
+    }
