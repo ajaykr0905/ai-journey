@@ -1,5 +1,7 @@
 {
   "required_files": [
+    "src/ai_journey/checkpoint_journal.py",
+    "tests/test_checkpoint_journal.py",
     "docs/moe-core.md",
     "docs/moe-experiments.md",
     "src/ai_journey/moe_capacity.py",
