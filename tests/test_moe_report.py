@@ -1,4 +1,5 @@
 import copy
+from dataclasses import replace
 import json
 
 import pytest
@@ -105,3 +106,62 @@ def test_offline_contract_retains_recorded_runtime_while_replay_is_separate(meas
     report["runtime"]["torch_version"] = "recorded-other-version"
     report["report_sha256"] = decoder_comparison_digest(report)
     verify_moe_report(report)
+
+
+@pytest.mark.parametrize(
+    "mutation", ["unknown", "moved-group", "omitted", "replacement"]
+)
+def test_resealed_optimizer_names_must_bind_the_declared_architecture(
+    measured, monkeypatch, mutation
+):
+    import ai_journey.training_models as models
+
+    report = copy.deepcopy(measured)
+    groups = report["trials"][0]["arms"][1]["optimizer_groups"]
+    original_count = groups["trainable_parameters"]
+    if mutation == "unknown":
+        groups["decay_names"][1] = "nonexistent.parameter"
+    elif mutation == "moved-group":
+        groups["no_decay_names"].append(groups["decay_names"].pop(1))
+    elif mutation == "omitted":
+        groups["decay_names"].pop(1)
+    else:
+        # A real vector from this architecture still cannot replace a matrix.
+        groups["decay_names"][1] = groups["no_decay_names"].pop(0)
+    assert groups["trainable_parameters"] == original_count
+    report["report_sha256"] = decoder_comparison_digest(report)
+    monkeypatch.setattr(
+        models,
+        "build_training_model",
+        lambda *a, **kw: pytest.fail("offline verification must not allocate a model"),
+    )
+    with pytest.raises(ValueError, match="optimizer"):
+        verify_moe_report(report)
+
+
+@pytest.mark.parametrize("norm", ["layernorm", "rmsnorm"])
+@pytest.mark.parametrize("mlp", ["gelu", "swiglu"])
+@pytest.mark.parametrize("position", ["learned", "rope"])
+@pytest.mark.parametrize("layers", [None, (0,), (1,), (0, 1)])
+def test_allocation_free_optimizer_schema_matches_independent_actual_models(
+    norm, mlp, position, layers
+):
+    from ai_journey.decoder_variant_optimizer import decoder_optimizer_groups
+    from ai_journey.moe_experiment import build_matched_moe_experiment_model
+    from ai_journey.moe_report import _expected_optimizer_names, _optimizer_groups
+
+    config = plan().arms[int(layers is not None)].config
+    config = replace(
+        config,
+        gpt2=replace(config.gpt2, layer_count=2),
+        norm_kind=norm,
+        mlp_kind=mlp,
+        position_kind=position,
+    )
+    if layers is not None:
+        config = replace(config, moe_layers=layers)
+    model = build_matched_moe_experiment_model(config, 53)
+    actual = json.loads(json.dumps(decoder_optimizer_groups(model)))
+    expected = _expected_optimizer_names(config)
+    assert {key: actual[key] for key in expected} == expected
+    _optimizer_groups(actual, config, model.parameter_count)
