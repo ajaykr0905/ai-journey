@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from itertools import product
 
 import pytest
 import torch
 
 from ai_journey.decoder_variant_config import DecoderVariantConfig
-from ai_journey.decoder_variant_experiment import run_variant_comparison
+from ai_journey.decoder_variant_experiment import (
+    _build_matched_model,
+    run_variant_comparison,
+)
 from ai_journey.gpt2_config import GPT2Config
 
 
@@ -64,6 +68,34 @@ def test_comparison_is_repeatable_and_uses_shared_evidence() -> None:
     assert all(result.parameter_count > 0 for result in first.variants)
     assert all(result.final_train_nll > 0 for result in first.variants)
     assert all(result.heldout_nll > 0 for result in first.variants)
+
+
+def test_shared_parameters_start_identically_across_all_architecture_arms() -> None:
+    base = _config()
+    base = replace(base, gpt2=replace(base.gpt2, layer_count=2))
+    before = torch.get_rng_state().clone()
+    models = {}
+    for norm, mlp, position in product(
+        ("layernorm", "rmsnorm"), ("gelu", "swiglu"), ("learned", "rope")
+    ):
+        config = replace(base, norm_kind=norm, mlp_kind=mlp, position_kind=position)
+        models[(norm, mlp, position)] = _build_matched_model(config, seed=52)
+
+    assert torch.equal(torch.get_rng_state(), before)
+    reference_by_name = {}
+    for model in models.values():
+        assert model.wte.weight is model.lm_head.weight
+        for name, parameter in model.named_parameters():
+            if name in reference_by_name:
+                assert torch.equal(parameter, reference_by_name[name]), name
+            else:
+                reference_by_name[name] = parameter
+
+    baseline = models[("layernorm", "gelu", "learned")]
+    rope = models[("layernorm", "gelu", "rope")]
+    swiglu = models[("layernorm", "swiglu", "learned")]
+    assert torch.equal(baseline.h[0].attn.c_attn.weight, rope.h[0].attn.c_attn.weight)
+    assert torch.equal(baseline.h[1].attn.c_attn.weight, swiglu.h[1].attn.c_attn.weight)
 
 
 def test_training_offsets_do_not_depend_on_variant_order() -> None:

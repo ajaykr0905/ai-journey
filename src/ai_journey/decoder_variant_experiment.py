@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 
 import torch
+from torch import nn
 from torch.nn import functional as F
 
 from .decoder_variant_config import DecoderVariantConfig
@@ -42,6 +43,32 @@ class ComparisonResult:
     variants: tuple[VariantResult, ...]
 
 
+def _build_matched_model(
+    config: DecoderVariantConfig, seed: int
+) -> DecoderVariantModel:
+    """Keep homologous modules identically initialized across architecture arms.
+
+    Seeding only the constructor per arm is insufficient: a missing position
+    table or a different feed-forward block shifts the RNG stream for later
+    modules. Reapply each standard PyTorch initializer with a seed derived
+    from the module's stable name. Skip the tied output head so the token
+    embedding keeps its Embedding initialization and weight alias.
+    """
+
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(seed)
+        model = DecoderVariantModel(config).cpu()
+        for name, module in model.named_modules():
+            if name == "lm_head" or not isinstance(
+                module, (nn.Embedding, nn.Linear, nn.LayerNorm)
+            ):
+                continue
+            digest = sha256(seed.to_bytes(8, "big") + b"\0" + name.encode()).digest()
+            torch.manual_seed(int.from_bytes(digest[:8], "big") % (2**63))
+            module.reset_parameters()
+    return model
+
+
 def run_variant_comparison(
     *,
     train_bytes: bytes,
@@ -57,7 +84,8 @@ def run_variant_comparison(
 
     This is a deterministic CPU protocol, not a claim about GPU throughput or
     general model quality. Only input hashes and measurements enter the result.
-    Dropout must be disabled so architecture is the sole intended intervention.
+    Dropout must be disabled; shared named modules receive identical initial
+    values so architecture is the sole intended intervention.
     """
 
     if not isinstance(train_bytes, bytes) or not isinstance(heldout_bytes, bytes):
@@ -147,8 +175,7 @@ def run_variant_comparison(
     # fork_rng restores the caller's CPU RNG state; no CUDA state is touched.
     with torch.random.fork_rng(devices=[]):
         for name, config in variants.items():
-            torch.random.default_generator.manual_seed(seed)
-            model = DecoderVariantModel(config).cpu()
+            model = _build_matched_model(config, seed)
             optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
             with torch.no_grad():
                 model.eval()
