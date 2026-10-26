@@ -1,8 +1,10 @@
 import copy
 from dataclasses import replace
 import json
+import math
 
 import pytest
+import torch
 
 from ai_journey.decoder_variant_comparison import decoder_comparison_digest
 from ai_journey.moe_experiment_comparison import run_moe_document_comparison
@@ -165,3 +167,52 @@ def test_allocation_free_optimizer_schema_matches_independent_actual_models(
     expected = _expected_optimizer_names(config)
     assert {key: actual[key] for key in expected} == expected
     _optimizer_groups(actual, config, model.parameter_count)
+
+
+@pytest.mark.parametrize("arm_index", [0, 1])
+def test_resealed_gradient_disappearance_is_not_a_valid_clip_transition(
+    measured, arm_index
+):
+    report = copy.deepcopy(measured)
+    row = report["trials"][0]["arms"][arm_index]["trace"][0]
+    assert row["gradient_norm_before_clip"] > 0.1
+    row["gradient_norm_after_clip"] = 0.0
+    report["report_sha256"] = decoder_comparison_digest(report)
+    with pytest.raises(ValueError, match="clipping"):
+        verify_moe_report(report)
+
+
+@pytest.mark.parametrize("scale", [0.0, 1e-30, 1e-12, 1e-8, 0.001, 1.0, 10.0, 1e6])
+@pytest.mark.parametrize("maximum", [1e-9, 1e-4, 1.0, 1000.0])
+def test_norm_transition_matches_actual_float32_clip_grad_norm_oracles(scale, maximum):
+    from ai_journey.moe_report import _gradient_clip_transition
+
+    generator = torch.Generator().manual_seed(53)
+    parameters = [torch.nn.Parameter(torch.zeros(shape)) for shape in ((17,), (13, 3))]
+    for parameter in parameters:
+        parameter.grad = torch.randn(parameter.shape, generator=generator) * scale
+    precise_before = math.sqrt(
+        math.fsum(float(p.grad.double().square().sum()) for p in parameters)
+    )
+    returned_before = float(
+        torch.nn.utils.clip_grad_norm_(parameters, maximum, error_if_nonfinite=True)
+    )
+    after = math.sqrt(
+        math.fsum(float(p.grad.double().square().sum()) for p in parameters)
+    )
+    # Dense trials record a double-reduced norm; MoE/GQA record the returned
+    # float32 reduction. Both must preserve valid measured artifact semantics.
+    _gradient_clip_transition(precise_before, after, maximum)
+    _gradient_clip_transition(returned_before, after, maximum)
+
+
+def test_transition_rejects_vanished_small_control_and_underreported_clipping():
+    from ai_journey.moe_report import _gradient_clip_transition
+
+    for before, after, maximum in (
+        (1.0, 0.0, 1e-9),
+        (0.1, 0.01, 1.0),
+        (10.0, 0.1, 1.0),
+    ):
+        with pytest.raises(ValueError, match="clipping"):
+            _gradient_clip_transition(before, after, maximum)

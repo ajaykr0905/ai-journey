@@ -90,3 +90,13 @@ def test_wrong_actual_source_rejects_before_execution(measured, monkeypatch):
     )
     with pytest.raises(ValueError, match="source bytes"):
         replay_gqa_experiment_report(measured, TRAIN + b"changed", HELDOUT)
+
+
+def test_resealed_gqa_gradient_disappearance_is_not_a_valid_clip_transition(measured):
+    report = copy.deepcopy(measured)
+    row = report["trials"][0]["arms"][1]["trace"][0]
+    assert row["gradient_norm_before_clip"] > 0.1
+    row["gradient_norm_after_clip"] = 0.0
+    report["report_sha256"] = decoder_comparison_digest(report)
+    with pytest.raises(ValueError, match="clipping"):
+        verify_gqa_experiment_report(report)

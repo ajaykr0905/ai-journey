@@ -49,6 +49,20 @@ def _float(value):
         raise ValueError("MoE measurement must be finite nonnegative float data")
 
 
+def _gradient_clip_transition(before, after, maximum):
+    """Check both sides of the actual CPU clip_grad_norm_ norm transition.
+
+    PyTorch scales by min(1, maximum/(norm+1e-6)), including its epsilon even
+    below the nominal clipping threshold. Float32 reductions/updates need a
+    relative tolerance; the tiny absolute floor admits reduction underflow for
+    the protocol's at-most-two-million gradients without admitting vanished
+    ordinary gradients or swallowing the minimum 1e-9 clipping control.
+    """
+    expected = before * min(1.0, maximum / (before + 1e-6))
+    if not math.isclose(after, expected, rel_tol=2e-5, abs_tol=1e-19):
+        raise ValueError("gradient clipping norm transition contradicts its control")
+
+
 def _digest(value):
     if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
         raise ValueError("MoE evidence requires lowercase SHA-256 identities")
@@ -281,8 +295,7 @@ def _arm(arm, declared, plan, trial, parameters):
             row["gradient_norm_before_clip"],
             row["gradient_norm_after_clip"],
         )
-        if after > min(before, plan.max_gradient_norm) * (1 + 2e-5) + 1e-7:
-            raise ValueError("MoE gradient clipping evidence contradicts its control")
+        _gradient_clip_transition(before, after, plan.max_gradient_norm)
         _equal(
             row["clipped"],
             before > plan.max_gradient_norm,
