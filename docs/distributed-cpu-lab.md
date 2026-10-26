@@ -244,3 +244,29 @@ Automated output does not certify lesson viewing, manual exercises, or reflectio
 
 The synchronization and accumulation behavior follows the
 [PyTorch DDP contract](https://docs.pytorch.org/docs/2.14/generated/torch.nn.parallel.DistributedDataParallel.html).
+
+## Opt-in immutable checkpoint journal
+
+Programmatic `save_checkpoint(..., journal_directory=Path(...))` publishes a
+rank-zero immutable version before replacing the conventional latest checkpoint.
+Omitting this argument keeps the single-file behavior and checkpoint schema.
+The latest path must be outside the journal. A journal belongs to the exact
+source, architecture, tensor dtypes, training schedule and world size; it cannot
+be adopted for another run.
+
+`load_checkpoint_journal(directory, model=..., optimizer=..., config=...,
+source=...)` returns `JournalRecovery(step, recorded_step, checkpoint_sha256)`.
+Every rank hashes and deserializes the **same bounded byte snapshot**, validates
+the declared step and complete existing restore contract, and rolls back a
+rejected candidate before trying an older one. Transport failure is not treated
+as checkpoint corruption. `recorded_step` is only the manifest's high-water mark,
+not evidence that the newest version is usable.
+
+The runtime uses the journal's default limits: 16 committed versions, 64 MiB per
+blob, and 256 MiB total. It never prunes or deletes history. A full journal rejects
+publication. Uncommitted orphan files after an interrupted publication require
+explicit inspection; storage integrity alone does not establish restorability.
+Manifest publication can become visible before a later directory-fsync error:
+an exception does not imply that nothing committed. Inspect the manifest before
+retrying. The journal is authoritative when enabled; its commit and replacing
+the convenience latest path are not one cross-file atomic transaction.

@@ -1,6 +1,6 @@
 """Rank-zero checkpoint publication for replicated CPU GPT-2 workers."""
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 import copy
 from hashlib import sha256
 import json
@@ -15,6 +15,7 @@ import torch.distributed as dist
 
 from .ddp_contracts import integer
 from .checkpoint_archive import load_checkpoint_archive
+from .checkpoint_journal import CheckpointJournal
 from .ddp_runtime import (
     require_all_ranks,
     require_model_consensus,
@@ -28,10 +29,45 @@ from .training_optimizer_state import (
 )
 
 
-def bounded_checkpoint_load(path: Path, max_bytes: int):
+def bounded_checkpoint_load(path: Path, max_bytes: int, *, expected_sha256=None):
     """Bound both archive bytes and expanded tensor storage before deserialization."""
     integer(max_bytes, "max_bytes", 1)
-    return load_checkpoint_archive(path, max_bytes=max_bytes)
+    return load_checkpoint_archive(
+        path, max_bytes=max_bytes, expected_sha256=expected_sha256
+    )
+
+
+class CheckpointRejected(RuntimeError):
+    """Every rank reached a common, transactional checkpoint rejection."""
+
+
+def _require_checkpoint_phase(success, *, phase):
+    try:
+        require_all_ranks(success, phase=phase)
+    except RuntimeError as error:
+        if str(error) == f"at least one rank failed {phase}":
+            raise CheckpointRejected(str(error)) from error
+        # A broken collective is not evidence that another candidate is safe.
+        raise
+
+
+def checkpoint_run_sha256(model, config, source: bytes) -> str:
+    """Bind journal ownership to the complete typed replicated run contract."""
+    contract = {
+        "schema": "ai-journey-ddp-journal-run-v1",
+        "world_size": dist.get_world_size(),
+        "model_config": model_config_mapping(model.config),
+        "model_dtypes": {
+            name: str(value.dtype) for name, value in model.state_dict().items()
+        },
+        "training_config": asdict(config),
+        "source_sha256": sha256(source).hexdigest(),
+    }
+    return sha256(
+        json.dumps(
+            contract, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+    ).hexdigest()
 
 
 def validate_optimizer_state(model, optimizer, *, step: int):
@@ -66,7 +102,14 @@ def _validate_model_schema(state, model) -> None:
 
 
 def save_checkpoint(
-    path: Path, *, model, optimizer, config, source: bytes, step: int
+    path: Path,
+    *,
+    model,
+    optimizer,
+    config,
+    source: bytes,
+    step: int,
+    journal_directory: Path | None = None,
 ) -> str:
     integer(step, "step")
     if step > config.optimizer_steps:
@@ -85,6 +128,23 @@ def save_checkpoint(
     if dist.get_rank() == 0:
         temporary = None
         try:
+            journal = None
+            if journal_directory is not None:
+                if not isinstance(
+                    journal_directory, Path
+                ) or path.resolve().is_relative_to(journal_directory.resolve()):
+                    raise ValueError(
+                        "latest checkpoint must be outside its journal directory"
+                    )
+                journal = CheckpointJournal(
+                    journal_directory,
+                    run_sha256=checkpoint_run_sha256(model, config, source),
+                )
+                recorded = journal.recorded_step
+                if recorded is not None and step <= recorded:
+                    raise ValueError(
+                        "journal checkpoint publication must advance recorded progress"
+                    )
             if path.is_symlink():
                 raise ValueError("checkpoint path must not be a symlink")
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -109,6 +169,8 @@ def save_checkpoint(
                 )
                 handle.flush()
                 os.fsync(handle.fileno())
+            if journal is not None:
+                journal.publish(temporary, step=step)
             os.replace(temporary, path)
             temporary = None
             descriptor = os.open(path.parent, os.O_RDONLY)
@@ -133,6 +195,8 @@ def load_checkpoint(
     config,
     source: bytes,
     max_bytes: int = 64 * 1024 * 1024,
+    expected_sha256=None,
+    expected_step=None,
 ) -> int:
     """Validate on every rank and restore atomically with rank-local RNG state."""
     payload = None
@@ -144,7 +208,9 @@ def load_checkpoint(
             or not 0 < path.stat().st_size <= max_bytes
         ):
             raise ValueError("checkpoint exceeds file constraints")
-        payload = bounded_checkpoint_load(path, max_bytes)
+        payload = bounded_checkpoint_load(
+            path, max_bytes, expected_sha256=expected_sha256
+        )
         expected = {
             "schema_version",
             "world_size",
@@ -165,6 +231,10 @@ def load_checkpoint(
         ):
             raise ValueError("checkpoint schema does not match")
         integer(payload["step"], "step")
+        if expected_step is not None:
+            integer(expected_step, "expected_step")
+            if payload["step"] != expected_step:
+                raise ValueError("checkpoint progress differs from journal entry")
         integer(payload["world_size"], "world_size", 1)
         if (
             payload["step"] > config.optimizer_steps
@@ -193,7 +263,7 @@ def load_checkpoint(
         EOFError,
     ):
         valid = False
-    require_all_ranks(valid, phase="checkpoint validation")
+    _require_checkpoint_phase(valid, phase="checkpoint validation")
     saved = (
         copy.deepcopy(model.state_dict()),
         copy.deepcopy(optimizer.state_dict()),
@@ -213,7 +283,7 @@ def load_checkpoint(
     except (ValueError, RuntimeError, KeyError, TypeError):
         restored = False
     try:
-        require_all_ranks(restored, phase="checkpoint restoration")
+        _require_checkpoint_phase(restored, phase="checkpoint restoration")
         require_model_consensus(model)
         require_optimizer_consensus(optimizer)
     except Exception:
@@ -222,3 +292,69 @@ def load_checkpoint(
         torch.set_rng_state(saved[2])
         raise
     return payload["step"]
+
+
+@dataclass(frozen=True)
+class JournalRecovery:
+    step: int
+    recorded_step: int
+    checkpoint_sha256: str
+
+
+def load_checkpoint_journal(
+    directory: Path,
+    *,
+    model,
+    optimizer,
+    config,
+    source: bytes,
+    max_bytes: int = 64 * 1024 * 1024,
+) -> JournalRecovery:
+    """Collectively restore the newest fully valid same-run byte snapshot.
+
+    Rank zero enumerates only committed byte-intact candidates. Every rank then
+    SHA-binds and validates each snapshot through the ordinary typed restore
+    path. A semantic rejection rolls back before the next candidate; transport
+    failures are never treated as recoverable corruption.
+    """
+    selection = [None]
+    valid = True
+    if dist.get_rank() == 0:
+        try:
+            if (
+                not isinstance(directory, Path)
+                or not (directory / "manifest.json").is_file()
+            ):
+                raise ValueError("journal resume requires an existing manifest")
+            journal = CheckpointJournal(
+                directory, run_sha256=checkpoint_run_sha256(model, config, source)
+            )
+            selection[0] = (
+                journal.recorded_step,
+                [
+                    (item.step, str(item.path), item.sha256)
+                    for item in journal.candidates()
+                ],
+            )
+            valid = bool(selection[0][1])
+        except (OSError, ValueError, RuntimeError, TypeError):
+            valid = False
+    require_all_ranks(valid, phase="checkpoint journal candidates")
+    dist.broadcast_object_list(selection, src=0)
+    recorded, candidates = selection[0]
+    for step, path, digest in candidates:
+        try:
+            restored = load_checkpoint(
+                Path(path),
+                model=model,
+                optimizer=optimizer,
+                config=config,
+                source=source,
+                max_bytes=max_bytes,
+                expected_sha256=digest,
+                expected_step=step,
+            )
+        except CheckpointRejected:
+            continue
+        return JournalRecovery(restored, recorded, digest)
+    raise RuntimeError("no fully valid same-run journal checkpoint remains")
