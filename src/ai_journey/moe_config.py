@@ -105,3 +105,29 @@ def expected_moe_active_parameters(config: MoEConfig) -> int:
     return expected_moe_parameter_count(config) - len(config.moe_layers) * (
         config.expert_count - config.top_k
     ) * expert_parameter_count(config)
+
+
+def expected_decoder_parameter_tensors(config: DecoderVariantConfig) -> int:
+    """Count unique parameter tensors for dense or expert checkpoint work."""
+    if type(config) not in (DecoderVariantConfig, MoEConfig):
+        raise TypeError("tensor count requires an exact dense or MoE config")
+    layers = config.gpt2.layer_count
+    tensors = 12 * layers + 4
+    if config.norm_kind == "rmsnorm":
+        tensors -= 2 * layers + 1
+    if config.position_kind == "rope":
+        tensors -= 1
+    if config.mlp_kind == "swiglu":
+        tensors -= layers
+    if isinstance(config, MoEConfig):
+        expert_tensors = 3 if config.mlp_kind == "swiglu" else 4
+        tensors += len(config.moe_layers) * (
+            (config.expert_count - 1) * expert_tensors + 1
+        )
+    return tensors
+
+
+def expected_moe_parameter_tensors(config: MoEConfig) -> int:
+    if not isinstance(config, MoEConfig):
+        raise TypeError("config must be MoEConfig")
+    return expected_decoder_parameter_tensors(config)

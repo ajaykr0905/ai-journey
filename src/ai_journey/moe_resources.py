@@ -13,6 +13,7 @@ from .moe_config import (
     MoEConfig,
     expected_moe_active_parameters,
     expected_moe_parameter_count,
+    expected_decoder_parameter_tensors,
 )
 
 MAX_JOB_MODEL_PARAMETERS = 5_000_000
@@ -25,25 +26,15 @@ MAX_JOB_CHECKPOINT_RECORDS = MAX_CHECKPOINT_RECORDS
 def expected_checkpoint_records(config):
     """Bound full model/AdamW/RNG archive records, not bytes or allocator peaks.
 
-    Unique parameters have one model storage and three AdamW storages.
-    Tied heads add no storage; 32 more records cover RNG/archive metadata.
+    Each parameter is conservatively charged five storages: model weight,
+    AdamW step/first/second moments and an optional AMSGrad maximum moment.
+    The core CPU reference disallows AMSGrad; its extra slot is a conservative
+    allowance, not a claim that it is executed. Tied heads add no storage;
+    32 more records cover RNG/archive metadata.
     """
     if type(config) not in (DecoderVariantConfig, MoEConfig):
         raise TypeError("checkpoint record estimate requires a dense or MoE config")
-    layers = config.gpt2.layer_count
-    tensors = 12 * layers + 4
-    if config.norm_kind == "rmsnorm":
-        tensors -= 2 * layers + 1
-    if config.position_kind == "rope":
-        tensors -= 1
-    if config.mlp_kind == "swiglu":
-        tensors -= layers
-    if isinstance(config, MoEConfig):
-        expert_tensors = 3 if config.mlp_kind == "swiglu" else 4
-        tensors += len(config.moe_layers) * (
-            (config.expert_count - 1) * expert_tensors + 1
-        )
-    return 4 * tensors + 32
+    return 5 * expected_decoder_parameter_tensors(config) + 32
 
 
 def _control(value, name, maximum):

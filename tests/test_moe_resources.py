@@ -142,7 +142,7 @@ def test_many_small_experts_cannot_bypass_checkpoint_record_work_admission():
     )
     assert estimate["peak_model_parameters"] < resources.MAX_JOB_MODEL_PARAMETERS
     assert estimate["work_units"] < resources.MAX_JOB_WORK_UNITS
-    assert estimate["peak_checkpoint_records"] == 67_888
+    assert estimate["peak_checkpoint_records"] == 84_852
     with pytest.raises(ValueError, match="peak_checkpoint_records"):
         resources.require_moe_job_budget(
             (many_tensors,), seeds=1, steps=1, batch_size=1, evaluation_windows=1
