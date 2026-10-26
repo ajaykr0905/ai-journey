@@ -16,3 +16,13 @@ CPU-only builds return an explicit unavailable reason. Device-query failures
 cannot produce partial success. The visibility-mask identity is hashed; raw
 hardware serials, hostnames, and unrelated environment variables are not recorded.
 Property discovery does not measure GPU kernels, training, or communication.
+
+`admit_gpu_resources()` consumes a verified resource-accounting report rather than
+inventing a second memory model. Its data-parallel size and parameter dtype must
+match the topology. Every requested device is checked separately against the
+smaller of declared and observed capacity, with the declared reserve subtracted
+from observed free memory. Accumulation contributes to global batch and token
+accounting; it does not multiply per-microbatch activation memory. Native bfloat16
+requires compute capability 8 or later. An analytical fit alone remains blocked
+until actual host observations support the request. Sharding estimates remain
+assumptions; this admission check does not implement those training strategies.
