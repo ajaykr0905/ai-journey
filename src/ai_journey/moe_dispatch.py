@@ -69,4 +69,6 @@ def dispatch_experts(
             )
         weighted = outputs * routes.weights[rows, choices].unsqueeze(-1)
         result.index_add_(0, token_indices, weighted)
+    if not bool(torch.isfinite(result).all()):
+        raise ValueError("combined expert outputs must be finite")
     return result.reshape_as(inputs)
