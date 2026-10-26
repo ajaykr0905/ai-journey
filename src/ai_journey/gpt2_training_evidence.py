@@ -14,7 +14,7 @@ from typing import Any, Mapping
 
 import torch
 
-from .gpt2_model import expected_gpt2_parameter_count
+from .training_models import expected_training_parameters
 from .gpt2_training import (
     GPT2StepMetric,
     GPT2TrainingError,
@@ -54,12 +54,7 @@ def _canonical_digest(payload: Mapping[str, Any]) -> str:
 
 
 def _spec_payload(run: GPT2TrainingRun) -> dict[str, Any]:
-    return {
-        "schema_version": 1,
-        "model": asdict(run.spec.model),
-        "training": asdict(run.spec.training),
-        "source": asdict(run.spec.source),
-    }
+    return run.spec.to_mapping()
 
 
 def _runtime_payload(*, torch_threads: int) -> dict[str, Any]:
@@ -180,7 +175,7 @@ def verify_training_evidence(payload: Mapping[str, Any]) -> dict[str, Any]:
     if (
         isinstance(parameter_count, bool)
         or not isinstance(parameter_count, int)
-        or parameter_count != expected_gpt2_parameter_count(spec.model)
+        or parameter_count != expected_training_parameters(spec.model)
         or groups["decay_parameters"] + groups["no_decay_parameters"] != parameter_count
     ):
         raise GPT2TrainingError("training evidence parameter count is invalid")

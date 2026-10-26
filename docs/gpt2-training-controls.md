@@ -59,3 +59,16 @@ The checked run recorded mean loss `12.200964450836182` on update 1 and
 is a small deterministic systems check, not a model-quality result. It provides no
 GPU, distributed, throughput, production, lecture-viewing, or learner-completion
 evidence.
+
+## Train an opt-in decoder architecture
+
+The same `train`, `verify`, and `replay` commands accept a schema-2 training spec.
+Its `model` object is `{"kind":"decoder_variant","config":...}`; `config` holds
+all `DecoderVariantConfig` fields, including the nested `gpt2` dimensions. Build
+this mapping with `GPT2TrainingSpec.to_mapping()` to avoid omitting controls.
+Schema-1 GPT-2 specs and existing baseline checkpoint fingerprints are preserved.
+
+All architecture choices use the existing matrix-only weight decay, accumulation,
+schedule, clipping, rollback, and exact checkpoint restoration. Checkpoints bind
+the complete architecture, so a different RoPE base cannot reuse an otherwise
+shape-compatible state. This remains a bounded CPU training protocol.
