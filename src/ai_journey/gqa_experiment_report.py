@@ -28,6 +28,7 @@ from .moe_report import (
     _integer,
     _score,
     _expected_optimizer_names,
+    _gradient_clip_transition,
     canonical_moe_json,
 )
 
@@ -255,8 +256,7 @@ def verify_gqa_experiment_report(report):
                     before > plan.max_gradient_norm,
                     "GQA clipping decision",
                 )
-                if after > min(before, plan.max_gradient_norm) * (1 + 2e-5) + 1e-7:
-                    raise ValueError("GQA clipping magnitude contradicts its control")
+                _gradient_clip_transition(before, after, plan.max_gradient_norm)
         if len(set(shared)) != 1:
             raise ValueError(
                 "GQA treatments do not share the declared reference/Q tensors"
