@@ -25,8 +25,25 @@ class MoEDDPFatalError(RuntimeError):
     """Tensor rollback does not make an interrupted reducer safe to reuse."""
 
 
+class MoEDDPRetryableError(RuntimeError):
+    """All backwards completed and a common rejection rolled back live data."""
+
+
+class _CommonStepRejection(RuntimeError):
+    pass
+
+
+def _step_agreement(success, *, phase):
+    try:
+        require_all_ranks(success, phase=phase)
+    except RuntimeError as error:
+        if str(error) == f"at least one rank failed {phase}":
+            raise _CommonStepRejection(str(error)) from error
+        raise
+
+
 class MoEDDPTrainingSession:
-    """A bounded CPU/Gloo replica; any post-forward failure poisons this session."""
+    """A CPU/Gloo replica with explicit completed-backward retry boundaries."""
 
     def __init__(self, config: MoEDDPConfig, *, model=None):
         if type(config) is not MoEDDPConfig:
@@ -93,6 +110,7 @@ class MoEDDPTrainingSession:
         )
         modes = [(module, module.training) for module in self.wrapped.modules()]
         invoked = False
+        backward_complete = False
         try:
             self.wrapped.train()
             self.optimizer.zero_grad(set_to_none=True)
@@ -102,7 +120,7 @@ class MoEDDPTrainingSession:
                 output = self.wrapped(window)
             except (ValueError, RuntimeError, TypeError):
                 pass
-            require_all_ranks(output is not None, phase="MoE DDP forward")
+            _step_agreement(output is not None, phase="MoE DDP forward")
             attempted, accepted = (
                 output["attempted_counts"].clone(),
                 output["accepted_counts"].clone(),
@@ -125,14 +143,16 @@ class MoEDDPTrainingSession:
                 + self.config.balance_weight * local_balance
                 + self.config.z_weight * local_z
             )
-            require_all_ranks(
-                bool(torch.isfinite(objective)), phase="MoE DDP objective"
-            )
+            _step_agreement(bool(torch.isfinite(objective)), phase="MoE DDP objective")
             measured = torch.stack(
                 [local_ce.detach(), local_balance.detach(), local_z.detach()]
             )
             dist.all_reduce(measured)
             objective.backward()
+            # Successful local backward alone is insufficient: every reducer
+            # must have completed before a live-wrapper retry is authorized.
+            _step_agreement(True, phase="MoE DDP backward completion")
+            backward_complete = True
             idle = set()
             for index, layer in enumerate(self.config.model.moe_layers):
                 for expert in range(experts):
@@ -152,16 +172,29 @@ class MoEDDPTrainingSession:
                     and parameter.grad is not None
                     and bool(torch.isfinite(parameter.grad).all())
                 )
-            require_all_ranks(finite, phase="MoE DDP finite active gradients")
-            norm = float(
-                torch.nn.utils.clip_grad_norm_(
-                    parameters, self.config.max_gradient_norm, error_if_nonfinite=True
+            _step_agreement(finite, phase="MoE DDP finite active gradients")
+            norm, after = None, None
+            try:
+                norm = float(
+                    torch.nn.utils.clip_grad_norm_(
+                        parameters,
+                        self.config.max_gradient_norm,
+                        error_if_nonfinite=True,
+                    )
                 )
-            )
-            after = math.sqrt(
-                math.fsum(
-                    float(parameter.grad.square().sum()) for parameter in parameters
+                after = math.sqrt(
+                    math.fsum(
+                        float(parameter.grad.square().sum()) for parameter in parameters
+                    )
                 )
+            except (ValueError, RuntimeError, TypeError, OverflowError):
+                pass
+            _step_agreement(
+                norm is not None
+                and after is not None
+                and math.isfinite(norm)
+                and math.isfinite(after),
+                phase="MoE DDP gradient clipping",
             )
             stepped = True
             try:
@@ -172,9 +205,17 @@ class MoEDDPTrainingSession:
                     raise ValueError("MoE DDP optimizer progress differs")
             except (ValueError, RuntimeError, TypeError):
                 stepped = False
-            require_all_ranks(stepped, phase="MoE DDP optimizer update")
-            fingerprint = require_model_consensus(self.model)
-            require_optimizer_consensus(self.optimizer)
+            _step_agreement(stepped, phase="MoE DDP optimizer update")
+            try:
+                fingerprint = require_model_consensus(self.model)
+                require_optimizer_consensus(self.optimizer)
+            except RuntimeError as error:
+                if str(error) in (
+                    "replicated model fingerprints diverged",
+                    "replicated optimizer fingerprints diverged",
+                ):
+                    raise _CommonStepRejection(str(error)) from error
+                raise
             ce, balance, z_loss = measured.tolist()
             return {
                 "step": step + 1,
@@ -194,13 +235,23 @@ class MoEDDPTrainingSession:
                 "capacity_scope": "rank_microbatch",
             }
         except Exception as error:
-            self.model.load_state_dict(saved[0], strict=True)
-            self.optimizer.load_state_dict(saved[1])
-            torch.set_rng_state(saved[2])
-            for parameter, gradient in zip(parameters, saved[3], strict=True):
-                parameter.grad = gradient
+            self.poisoned = invoked
+            try:
+                self.model.load_state_dict(saved[0], strict=True)
+                self.optimizer.load_state_dict(saved[1])
+                torch.set_rng_state(saved[2])
+                for parameter, gradient in zip(parameters, saved[3], strict=True):
+                    parameter.grad = gradient
+            except Exception as rollback_error:
+                raise MoEDDPFatalError(
+                    "MoE DDP local rollback failed; use fresh processes"
+                ) from rollback_error
             if invoked:
-                self.poisoned = True
+                if backward_complete and isinstance(error, _CommonStepRejection):
+                    self.poisoned = False
+                    raise MoEDDPRetryableError(
+                        "MoE DDP update rejected after completed backward; live data restored"
+                    ) from error
                 raise MoEDDPFatalError(
                     "MoE DDP update failed; use fresh processes"
                 ) from error
