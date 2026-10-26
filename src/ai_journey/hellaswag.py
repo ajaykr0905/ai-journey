@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from hashlib import sha256
 import json
 import math
@@ -663,10 +663,28 @@ def compare_evaluations(baseline: dict, candidate: dict) -> dict:
 def run_evaluation(model, response: bytes, protocol: HellaSwagProtocol) -> dict:
     """Run a pinned validation slice through disjoint local evaluation shards."""
     from .gpt2_model import GPT2LanguageModel
+    from .decoder_variant_model import DecoderVariantModel
     from .gpt2_training import gpt2_model_fingerprint
+    from .training_models import (
+        base_model_config,
+        expected_training_parameters,
+        model_config_mapping,
+    )
+    import torch
 
-    if not isinstance(model, GPT2LanguageModel):
-        raise TypeError("model must be GPT2LanguageModel")
+    if not isinstance(model, (GPT2LanguageModel, DecoderVariantModel)):
+        raise TypeError("model must be GPT2LanguageModel or DecoderVariantModel")
+    if base_model_config(model).vocab_size != 256:
+        raise HellaSwagError("byte evaluation requires vocab_size 256")
+    if expected_training_parameters(model.config) > 1_000_000:
+        raise HellaSwagError("evaluation model exceeds the CPU parameter budget")
+    if any(parameter.device.type != "cpu" for parameter in model.parameters()):
+        raise HellaSwagError("bounded evaluation requires CPU model parameters")
+    dtypes = {str(parameter.dtype) for parameter in model.parameters()}
+    if len(dtypes) != 1 or not dtypes <= {"torch.float32", "torch.float64"}:
+        raise HellaSwagError(
+            "bounded evaluation requires uniform float32 or float64 parameters"
+        )
     if not isinstance(protocol, HellaSwagProtocol):
         raise TypeError("protocol must be HellaSwagProtocol")
     protocol.source.verify_sample(response)
@@ -692,12 +710,15 @@ def run_evaluation(model, response: bytes, protocol: HellaSwagProtocol) -> dict:
         seed=protocol.bootstrap_seed,
     )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "protocol_sha256": protocol.fingerprint,
         "sample_sha256": sha256(response).hexdigest(),
         "records_sha256": records_digest(records),
-        "model_config": asdict(model.config),
+        "model_config": model_config_mapping(model.config),
         "model_sha256": gpt2_model_fingerprint(model),
+        "parameter_count": expected_training_parameters(model.config),
+        "model_dtype": next(iter(dtypes)),
+        "torch_threads": torch.get_num_threads(),
         "world_size": protocol.world_size,
         "evaluation": evaluation,
     }
@@ -774,6 +795,35 @@ def verify_evidence(payload: dict) -> dict:
         or payload["runtime"].get("device") != "cpu"
     ):
         raise HellaSwagError("HellaSwag evidence provenance does not match")
+    from .training_models import (
+        base_model_config,
+        expected_training_parameters,
+        model_config_from_mapping,
+    )
+
+    if type(run.get("schema_version")) is not int or run["schema_version"] not in (
+        1,
+        2,
+    ):
+        raise HellaSwagError("HellaSwag run schema does not match")
+    config = model_config_from_mapping(run.get("model_config"))
+    if (
+        base_model_config(config).vocab_size != 256
+        or expected_training_parameters(config) > 1_000_000
+    ):
+        raise HellaSwagError(
+            "HellaSwag model configuration exceeds byte CPU constraints"
+        )
+    if run["schema_version"] == 2 and (
+        type(run.get("parameter_count")) is not int
+        or run["parameter_count"] != expected_training_parameters(config)
+        or run.get("model_dtype") not in ("torch.float32", "torch.float64")
+        or type(run.get("torch_threads")) is not int
+        or run["torch_threads"] <= 0
+    ):
+        raise HellaSwagError(
+            "HellaSwag model accounting does not match its architecture"
+        )
     evaluation = run.get("evaluation")
     records = evaluation.get("records") if isinstance(evaluation, dict) else None
     if not isinstance(records, (list, tuple)) or len(records) != protocol.count:

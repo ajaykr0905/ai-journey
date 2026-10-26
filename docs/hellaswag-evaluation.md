@@ -43,8 +43,18 @@ ai-journey-hellaswag evaluate \
 ai-journey-hellaswag verify --report /tmp/hellaswag-evidence.json
 ```
 
-Omit `--checkpoint` to score the deterministic initial model. Compare two sealed
-reports only when they cover the same protocol rows:
+Omit `--checkpoint` to score the deterministic initial model.
+
+Schema-2 architecture-aware training specs also support RMSNorm, SwiGLU and RoPE
+decoders. To evaluate a checkpoint from `ai-journey-gpt2-train`, pass
+`--checkpoint-format local`; the default `distributed` format remains the CPU
+DDP checkpoint format. Loading validates source, architecture, optimizer progress
+and checkpoint state before scoring. New run records include the complete model
+contract, unique parameter count, actual CPU parameter dtype and PyTorch thread
+count. Initial models retain FP64 evaluation; local checkpoints retain their
+verified FP32 weights. Existing schema-1 evaluation evidence remains readable.
+
+Compare two sealed reports only when they cover the same protocol rows:
 
 ```bash
 ai-journey-hellaswag compare \
