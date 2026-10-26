@@ -28,6 +28,10 @@ class ServiceDraining(RuntimeError):
     """New requests cannot enter a service that is draining admitted work."""
 
 
+class ServiceOverloaded(RuntimeError):
+    """The bounded running-plus-waiting inference capacity has been reached."""
+
+
 class TokenBucket:
     def __init__(
         self,
@@ -129,10 +133,20 @@ class GenerationRequest:
 class GenerationService:
     """Serve a frozen checkpoint snapshot under one serialized inference lock."""
 
-    def __init__(self, model, *, cache_capacity: int = 128, admission=None):
+    def __init__(
+        self,
+        model,
+        *,
+        cache_capacity: int = 128,
+        admission=None,
+        max_inflight_requests=8,
+    ):
         integer(cache_capacity, "cache_capacity", 1)
         if cache_capacity > 4096:
             raise ValueError("response cache exceeds lab budget")
+        integer(max_inflight_requests, "max_inflight_requests", 1)
+        if max_inflight_requests > 64:
+            raise ValueError("inference admission exceeds the lab limit of 64")
         self._model = copy.deepcopy(model).eval()
         self._model.requires_grad_(False)
         self.model_sha256 = gpt2_model_fingerprint(self._model)
@@ -140,6 +154,7 @@ class GenerationService:
         self._stats_lock = threading.Lock()
         self._lifecycle = threading.Condition(self._stats_lock)
         self._active_requests = 0
+        self._max_inflight_requests = max_inflight_requests
         self._draining = False
         self.completed_requests = 0
         self.generated_tokens = 0
@@ -149,10 +164,34 @@ class GenerationService:
         self.metrics = ServingMetrics()
 
     @contextmanager
+    def _inference_slot(self, *, cancelled, deadline):
+        """Honor queued controls without attempting to preempt a running model."""
+        while True:
+            interrupted = None
+            if cancelled is not None and cancelled():
+                interrupted = "cancelled"
+            elif deadline is not None and time.monotonic() >= deadline:
+                interrupted = "deadline"
+            if interrupted is not None:
+                yield interrupted
+                return
+            timeout = 0.05
+            if deadline is not None:
+                timeout = min(timeout, max(0.0, deadline - time.monotonic()))
+            if self._lock.acquire(timeout=timeout):
+                break
+        try:
+            yield None
+        finally:
+            self._lock.release()
+
+    @contextmanager
     def _admitted_request(self):
         with self._lifecycle:
             if self._draining:
                 raise ServiceDraining("service is draining")
+            if self._active_requests >= self._max_inflight_requests:
+                raise ServiceOverloaded("inference queue is full")
             self._active_requests += 1
         try:
             yield
@@ -208,7 +247,13 @@ class GenerationService:
                 "deadline": "deadline",
             }.get(output["finish_reason"], "success")
             return output
-        except (AdmissionRejected, ServiceDraining, ValueError, TypeError):
+        except (
+            AdmissionRejected,
+            ServiceDraining,
+            ServiceOverloaded,
+            ValueError,
+            TypeError,
+        ):
             outcome = "rejected"
             raise
         finally:
@@ -245,7 +290,17 @@ class GenerationService:
             for token in request.prompt
         ):
             raise ValueError("prompt token exceeds vocabulary")
-        with self._admitted_request(), self._lock:
+        with self._admitted_request(), self._inference_slot(
+            cancelled=cancelled, deadline=deadline
+        ) as interrupted:
+            if interrupted is not None:
+                return {
+                    "request_id": request.request_id,
+                    "model_sha256": self.model_sha256,
+                    "tokens": [],
+                    "prompt_tokens": len(request.prompt),
+                    "finish_reason": interrupted,
+                }
             fingerprint = request.fingerprint()
             if request.request_id in self._responses:
                 previous_fingerprint, previous_output = self._responses[

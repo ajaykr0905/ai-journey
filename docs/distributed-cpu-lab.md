@@ -34,6 +34,12 @@ ai-journey-ddp train --source data/day-19-demo-names.txt \
 ai-journey-ddp verify --report /tmp/ddp-demo/resumed.json
 ```
 
+Keep training reports outside the rank workdir and distinct from the source,
+specification and checkpoint. Recovery/comparison workdirs must be new or empty.
+Artifact admission runs before workers: symlinks, nonregular worker outputs and
+hard links to protected inputs or another rank's artifact are rejected without
+opening/truncating them.
+
 Each rank receives disjoint shuffled samples and the same number of complete
 micro-batches. The effective global batch is
 `world_size × micro_batch_size × accumulation_steps`. The protocol uses
@@ -66,6 +72,53 @@ but before its checkpoint. With `checkpoint_interval=2`, the checkpoint remains
 at step two. Relaunch with `resume=True` and the remaining schedule to recover in
 fresh processes. The regression compares final model, AdamW moments, per-rank RNG
 and step against an uninterrupted run exactly.
+
+For an actual abrupt process loss, `failure_mode="crash"` makes only the selected
+owned worker exit via `os._exit(86)`, without process-group or Python cleanup.
+This is distinct from legacy `exit`, which raises a normal exception. An atomic
+`rank-N.crash.json` witness records the completed boundary, PID and local monotonic
+timestamp before that child exits. `WorkerFailure.supervision` retains observed
+exit statuses/timestamps and parent cleanup completion after all owned children
+are reaped; `WorkerTimeout` provides the same observations for a deadline. These
+are CPU-local fault controls, not machine power-loss or production failover proof.
+
+### Measure abrupt-crash recovery
+
+```bash
+ai-journey-ddp recover-crash --source data/day-19-demo-names.txt \
+  --spec config/ddp-lab.json --output /tmp/crash-proof/report.json \
+  --workdir /tmp/crash-proof/owned
+ai-journey-ddp verify-crash-recovery --report /tmp/crash-proof/report.json \
+  --workdir /tmp/crash-proof/owned
+```
+
+This separate, versioned operation leaves clean `recover` evidence unchanged.
+It runs an uninterrupted control, abruptly exits rank one after completed step
+three, reads the actual last durable checkpoint (step two), and resumes the
+remaining two updates in fresh processes. The report computes one lost global
+optimizer update from observed progress; it does not assume zero loss. Controls
+are explicit: `--steps`, `--checkpoint-interval`, `--failure-after-step`,
+`--failure-rank` and `--world-size`, within the existing bounded CPU protocol.
+
+Each resumed rank records a versioned restoration witness after checkpoint
+validation and collective schedule agreement, before further updates. The maximum
+ready timestamp measures when all ranks have observed restoration. Actual crash
+time lies between the child's pre-exit witness and the parent's observed exit;
+the reported `recovery_ready_lower_ns`/`upper_ns` retain that RTO interval rather
+than pretending the exact exit instant was measured. `restoration_wall_ns`
+includes process startup and restore; `resume_completion_wall_ns` additionally
+includes replay and remaining training. These local timings are observations,
+not deterministic or production availability guarantees.
+
+The report validates actual exit status 86, parent reaping, fresh worker PIDs,
+progress, source/specification digests, monotonic chronology and exact final
+model/AdamW/RNG/step parity against the control. Offline verification recomputes
+loss and timing bounds and rejects resealed type drift. With `--workdir`, it also
+recomputes state digests from `continuous.pt`/`recovered.pt`, checks preserved
+`last-durable.pt`, and compares crash/restoration witnesses. Without `--workdir`,
+verification proves internal report consistency only. A digest cannot authenticate
+that timings were collected honestly. Keep the owned artifact directory; no GPU,
+elastic-world-size, machine power-loss or production failover claim follows.
 
 ## Reproduce the acceptance experiments
 

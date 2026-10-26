@@ -4,11 +4,21 @@ import argparse
 import json
 from pathlib import Path
 
-from .ddp_acceptance import certify_recovery, certify_batch_equivalence
+from .ddp_acceptance import (
+    certify_recovery,
+    certify_batch_equivalence,
+    certify_crash_recovery,
+    read_crash_recovery,
+)
 from .ddp_evidence import build_evidence, read_evidence, write_evidence
 from .ddp_launch import launch_training
 from .gpt2_training import load_training_spec
-from .ddp_operations import add_commands, run_operation, write_report
+from .ddp_operations import (
+    _validate_operation_paths,
+    add_commands,
+    run_operation,
+    write_report,
+)
 
 
 def main(argv=None):
@@ -26,9 +36,22 @@ def main(argv=None):
             command.add_argument("--checkpoint-interval", type=int)
     verify = commands.add_parser("verify")
     verify.add_argument("--report", type=Path, required=True)
+    crash = commands.add_parser("recover-crash")
+    for field in ("source", "spec", "output", "workdir"):
+        crash.add_argument(f"--{field}", type=Path, required=True)
+    crash.add_argument("--world-size", type=int, default=2)
+    crash.add_argument("--steps", type=int, default=4)
+    crash.add_argument("--checkpoint-interval", type=int, default=2)
+    crash.add_argument("--failure-after-step", type=int, default=3)
+    crash.add_argument("--failure-rank", type=int, default=1)
+    verify_crash = commands.add_parser("verify-crash-recovery")
+    verify_crash.add_argument("--report", type=Path, required=True)
+    verify_crash.add_argument("--workdir", type=Path)
     add_commands(commands)
     arguments = parser.parse_args(argv)
     try:
+        if arguments.command in ("train", "recover", "compare", "recover-crash"):
+            _validate_operation_paths(arguments)
         if arguments.command in (
             "matrix",
             "pipeline",
@@ -39,6 +62,20 @@ def main(argv=None):
             result = run_operation(arguments)
         elif arguments.command == "verify":
             result = read_evidence(arguments.report)
+        elif arguments.command == "verify-crash-recovery":
+            result = read_crash_recovery(arguments.report, directory=arguments.workdir)
+        elif arguments.command == "recover-crash":
+            result = certify_crash_recovery(
+                source=arguments.source,
+                spec=arguments.spec,
+                directory=arguments.workdir,
+                world_size=arguments.world_size,
+                total_steps=arguments.steps,
+                checkpoint_interval=arguments.checkpoint_interval,
+                failure_after_step=arguments.failure_after_step,
+                failure_rank=arguments.failure_rank,
+            )
+            write_report(arguments.output, result)
         elif arguments.command == "train":
             spec = load_training_spec(arguments.spec)
             ranks = launch_training(
