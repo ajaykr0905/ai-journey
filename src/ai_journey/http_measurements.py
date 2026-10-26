@@ -4,6 +4,8 @@ import http.client
 import json
 import math
 import re
+import socket
+import threading
 import time
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -125,6 +127,19 @@ def measure_http_generation(
     started = time.perf_counter_ns()
     connection = http.client.HTTPConnection(host, port, timeout=timeout_seconds)
     response = None
+    deadline_elapsed = threading.Event()
+    transport_socket = None
+
+    def expire_request():
+        deadline_elapsed.set()
+        if transport_socket is not None:
+            try:
+                transport_socket.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    watchdog = threading.Timer(timeout_seconds, expire_request)
+    watchdog.daemon = True
     result = {
         "request_id": request["request_id"],
         "route": "/stream" if streaming else "/generate",
@@ -142,7 +157,14 @@ def measure_http_generation(
     decoder = GenerationEventDecoder(
         request["request_id"], prompt_tokens=len(request["prompt"]), max_tokens=maximum
     )
+    watchdog.start()
     try:
+        # Capture the socket before getresponse(): HTTP/1.0 responses detach
+        # it from HTTPConnection while the response's file object still reads.
+        connection.connect()
+        transport_socket = connection.sock
+        if deadline_elapsed.is_set():
+            raise TimeoutError("client connection deadline elapsed")
         connection.request(
             "POST",
             result["route"],
@@ -215,10 +237,17 @@ def measure_http_generation(
         result["outcome"] = "transport_error"
         result["error_kind"] = type(exc).__name__
     finally:
+        watchdog.cancel()
         if response is not None:
             response.close()
         connection.close()
         result["finished_ns"] = time.perf_counter_ns()
+        if (
+            deadline_elapsed.is_set()
+            or result["finished_ns"] - started >= timeout_seconds * 1e9
+        ):
+            result["outcome"] = "deadline"
+            result["error_kind"] = "client_request_deadline"
     return result
 
 

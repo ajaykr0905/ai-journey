@@ -15,6 +15,10 @@ ai-journey-http-load verify --report artifacts/http-load.json
 The bounded profile permits at most eight outstanding measured requests, 128
 measured attempts, 16 sequential warmup attempts, 32 output tokens per request,
 8192 total requested input/output tokens, and a declared 120-second I/O budget.
+A per-request watchdog interrupts the actual socket at its whole-request
+deadline, including peers stalled before response headers or inside a stream;
+the timeout is not renewed after each read. Scheduler overhead can still extend
+wall time, so the saved measured window remains the throughput denominator.
 Each run gets a fresh UUID namespace; warmup and measured IDs are distinct to
 avoid response-cache hits. Request prompts and sampling seeds follow the saved
 deterministic schedule. Timings themselves are measured and are not deterministic.
