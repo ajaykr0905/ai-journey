@@ -84,3 +84,21 @@ def test_invalid_admission_clock_cannot_refill_or_mutate_budget(reading):
     readings[0] = 1.0
     bucket.consume(1)
     assert bucket.tokens == 0
+
+
+def test_out_of_vocabulary_prompt_is_rejected_before_charging_admission():
+    bucket = TokenBucket(5, 1, clock=lambda: 0.0)
+    service = GenerationService(
+        GPT2LanguageModel(GPT2Config(8, 4, 8, 2, 1)), admission=bucket
+    )
+    invalid = GenerationRequest(
+        "invalid", (8,), SamplingConfig(max_new_tokens=3, temperature=0)
+    )
+    with pytest.raises(ValueError, match="vocabulary"):
+        service.generate(invalid)
+    assert bucket.tokens == 5
+    assert service.completed_requests == 0
+    valid = GenerationRequest(
+        "valid", (1, 2), SamplingConfig(max_new_tokens=3, temperature=0)
+    )
+    assert len(service.generate(valid)["tokens"]) == 3

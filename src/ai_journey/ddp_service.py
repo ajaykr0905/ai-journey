@@ -156,6 +156,8 @@ class GenerationService:
             or not math.isfinite(deadline)
         ):
             raise ValueError("deadline must be a finite monotonic timestamp")
+        if any(token >= self._model.config.vocab_size for token in request.prompt):
+            raise ValueError("prompt token exceeds vocabulary")
         with self._lock:
             fingerprint = request.fingerprint()
             if request.request_id in self._responses:
