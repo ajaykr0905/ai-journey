@@ -20,6 +20,8 @@ class SamplingConfig:
     def __post_init__(self):
         integer(self.max_new_tokens, "max_new_tokens", 1)
         integer(self.seed, "seed")
+        if self.seed >= 2**64:
+            raise ValueError("seed must fit an unsigned 64-bit integer")
         if self.max_new_tokens > 1024:
             raise ValueError("max_new_tokens exceeds CPU lab budget")
         if self.top_k is not None:
