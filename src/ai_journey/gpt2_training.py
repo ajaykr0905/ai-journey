@@ -10,15 +10,31 @@ import json
 import math
 import os
 from pathlib import Path
+import pickle
 import tempfile
 from typing import Any
+import zipfile
 
 import torch
 from torch import Tensor
 from torch.nn import functional as F
 
 from .gpt2_config import GPT2Config
-from .gpt2_model import GPT2LanguageModel, expected_gpt2_parameter_count
+from .gpt2_model import GPT2LanguageModel
+from .decoder_variant_config import DecoderVariantConfig
+from .decoder_variant_model import DecoderVariantModel
+from .training_models import (
+    TrainingModel,
+    TrainingModelConfig,
+    base_model_config,
+    build_training_model,
+    expected_training_parameters,
+    model_config_from_mapping,
+    model_config_mapping,
+    training_model_fingerprint,
+)
+from .training_optimizer_state import validate_adamw_state
+from .checkpoint_archive import load_checkpoint_archive
 
 
 class GPT2TrainingError(ValueError):
@@ -97,27 +113,28 @@ class GPT2TrainingSource:
 class GPT2TrainingSpec:
     """Complete model, optimizer, and public-source contract for one run."""
 
-    model: GPT2Config
+    model: TrainingModelConfig
     training: GPT2TrainingConfig
     source: GPT2TrainingSource
 
     def __post_init__(self) -> None:
-        if not isinstance(self.model, GPT2Config):
-            raise TypeError("model must be GPT2Config")
+        if not isinstance(self.model, (GPT2Config, DecoderVariantConfig)):
+            raise TypeError("model must be GPT2Config or DecoderVariantConfig")
         if not isinstance(self.training, GPT2TrainingConfig):
             raise TypeError("training must be GPT2TrainingConfig")
         if not isinstance(self.source, GPT2TrainingSource):
             raise TypeError("source must be GPT2TrainingSource")
-        if self.model.vocab_size != 256:
+        base = base_model_config(self.model)
+        if base.vocab_size != 256:
             raise GPT2TrainingError("byte-token training requires vocab_size 256")
-        if self.training.sequence_length > self.model.context_length:
+        if self.training.sequence_length > base.context_length:
             raise GPT2TrainingError("sequence_length exceeds model context_length")
         if any(
             value != 0
             for value in (
-                self.model.embedding_dropout,
-                self.model.attention_dropout,
-                self.model.residual_dropout,
+                base.embedding_dropout,
+                base.attention_dropout,
+                base.residual_dropout,
             )
         ):
             raise GPT2TrainingError(
@@ -125,15 +142,22 @@ class GPT2TrainingSpec:
             )
 
     def fingerprint(self) -> str:
-        payload = {
-            "schema_version": GPT2_TRAINING_SPEC_SCHEMA_VERSION,
-            "model": asdict(self.model),
+        return sha256(
+            json.dumps(
+                self.to_mapping(), sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+
+    def to_mapping(self) -> dict:
+        """Serialize legacy baseline specs unchanged and tag modern specs as v2."""
+        return {
+            "schema_version": 2
+            if isinstance(self.model, DecoderVariantConfig)
+            else GPT2_TRAINING_SPEC_SCHEMA_VERSION,
+            "model": model_config_mapping(self.model),
             "training": asdict(self.training),
             "source": asdict(self.source),
         }
-        return sha256(
-            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -421,11 +445,11 @@ def learning_rate_at(step: int, config: GPT2TrainingConfig) -> float:
     )
 
 
-def optimizer_group_summary(model: GPT2LanguageModel) -> GPT2OptimizerGroups:
+def optimizer_group_summary(model: TrainingModel) -> GPT2OptimizerGroups:
     """Classify matrix parameters for decay and vectors for no decay."""
 
-    if not isinstance(model, GPT2LanguageModel):
-        raise TypeError("model must be GPT2LanguageModel")
+    if not isinstance(model, (GPT2LanguageModel, DecoderVariantModel)):
+        raise TypeError("model must be GPT2LanguageModel or DecoderVariantModel")
     named = tuple(model.named_parameters())
     if len({id(parameter) for _, parameter in named}) != len(named):
         raise RuntimeError("named parameters contain duplicate tensor identities")
@@ -444,7 +468,7 @@ def optimizer_group_summary(model: GPT2LanguageModel) -> GPT2OptimizerGroups:
 
 
 def build_gpt2_optimizer(
-    model: GPT2LanguageModel, config: GPT2TrainingConfig
+    model: TrainingModel, config: GPT2TrainingConfig
 ) -> torch.optim.AdamW:
     """Build AdamW with weight decay only on matrix-shaped parameters."""
 
@@ -464,12 +488,13 @@ def build_gpt2_optimizer(
 
 
 def language_model_loss(
-    model: GPT2LanguageModel, inputs: Tensor, targets: Tensor
+    model: TrainingModel, inputs: Tensor, targets: Tensor
 ) -> Tensor:
     """Calculate finite mean next-token loss for one validated micro-batch."""
 
-    if not isinstance(model, GPT2LanguageModel):
-        raise TypeError("model must be GPT2LanguageModel")
+    if not isinstance(model, (GPT2LanguageModel, DecoderVariantModel)):
+        raise TypeError("model must be GPT2LanguageModel or DecoderVariantModel")
+    base = base_model_config(model)
     for name, tensor in (("inputs", inputs), ("targets", targets)):
         if not isinstance(tensor, Tensor):
             raise TypeError(f"{name} must be a torch.Tensor")
@@ -479,10 +504,10 @@ def language_model_loss(
             raise GPT2TrainingError(f"{name} must match the model device")
     if inputs.shape != targets.shape or inputs.numel() == 0:
         raise GPT2TrainingError("inputs and targets must have the same non-empty shape")
-    if inputs.shape[1] > model.config.context_length:
+    if inputs.shape[1] > base.context_length:
         raise GPT2TrainingError("training sequence exceeds model context length")
     for name, tensor in (("inputs", inputs), ("targets", targets)):
-        if bool(((tensor < 0) | (tensor >= model.config.vocab_size)).any()):
+        if bool(((tensor < 0) | (tensor >= base.vocab_size)).any()):
             raise GPT2TrainingError(f"{name} contain an out-of-range token id")
     logits = model(inputs)
     loss = F.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1))
@@ -492,7 +517,7 @@ def language_model_loss(
 
 
 def _validate_optimizer_binding(
-    model: GPT2LanguageModel, optimizer: torch.optim.Optimizer
+    model: TrainingModel, optimizer: torch.optim.Optimizer
 ) -> None:
     if not isinstance(optimizer, torch.optim.Optimizer):
         raise TypeError("optimizer must be torch.optim.Optimizer")
@@ -504,6 +529,63 @@ def _validate_optimizer_binding(
     expected = {id(parameter) for parameter in model.parameters()}
     if len(actual) != len(set(actual)) or set(actual) != expected:
         raise GPT2TrainingError("optimizer parameters must match the complete model")
+
+
+def _validate_optimizer_contract(
+    model: TrainingModel, optimizer, config: GPT2TrainingConfig, *, step: int
+) -> None:
+    """Bind restored AdamW controls and group order to the declared training run."""
+    validate_adamw_state(model, optimizer, step=step)
+    summary = optimizer_group_summary(model)
+    named = dict(model.named_parameters())
+    groups = optimizer.param_groups
+    expected_names = (summary.decay_names, summary.no_decay_names)
+    if len(groups) != 2:
+        raise GPT2TrainingError("AdamW requires the declared decay and no-decay groups")
+    expected_lr = (
+        learning_rate_at(step - 1, config) if step else config.max_learning_rate
+    )
+    for group, names, decay in zip(
+        groups, expected_names, (config.weight_decay, 0.0), strict=True
+    ):
+        if [id(parameter) for parameter in group["params"]] != [
+            id(named[name]) for name in names
+        ]:
+            raise GPT2TrainingError(
+                "AdamW parameter group order does not match the model"
+            )
+        if (
+            group["lr"] != expected_lr
+            or group["weight_decay"] != decay
+            or tuple(group["betas"]) != (0.9, 0.999)
+            or group["eps"] != 1e-8
+            or group["amsgrad"] is not False
+            or group.get("maximize", False) is not False
+        ):
+            raise GPT2TrainingError("AdamW controls do not match the training contract")
+
+
+def _validate_cursor_progress(
+    cursor: GPT2BatchCursor, config: GPT2TrainingConfig, *, step: int
+) -> None:
+    """Require the durable sampler boundary implied by completed optimizer steps."""
+    if (
+        cursor.sequence_length != config.sequence_length
+        or cursor.batch_size != config.micro_batch_size
+        or cursor.seed != config.seed
+    ):
+        raise GPT2TrainingError("checkpoint cursor controls do not match training")
+    consumed = step * config.accumulation_steps
+    batches_per_epoch = cursor.usable_samples // cursor.batch_size
+    if consumed:
+        epoch, batch_offset = divmod(consumed - 1, batches_per_epoch)
+        expected = {"epoch": epoch, "offset": (batch_offset + 1) * cursor.batch_size}
+    else:
+        expected = {"epoch": 0, "offset": 0}
+    if cursor.state_dict() != expected:
+        raise GPT2TrainingError(
+            "checkpoint cursor progress does not match its optimizer step"
+        )
 
 
 def _gradient_norm(parameters: tuple[Tensor, ...]) -> float:
@@ -530,7 +612,7 @@ def _require_finite_state(value: Any, name: str) -> None:
 
 
 def train_optimizer_step(
-    model: GPT2LanguageModel,
+    model: TrainingModel,
     cursor: GPT2BatchCursor,
     optimizer: torch.optim.Optimizer,
     config: GPT2TrainingConfig,
@@ -539,13 +621,13 @@ def train_optimizer_step(
 ) -> GPT2StepMetric:
     """Accumulate exact mean gradients and apply one scheduled clipped update."""
 
-    if not isinstance(model, GPT2LanguageModel):
-        raise TypeError("model must be GPT2LanguageModel")
+    if not isinstance(model, (GPT2LanguageModel, DecoderVariantModel)):
+        raise TypeError("model must be GPT2LanguageModel or DecoderVariantModel")
     if not isinstance(cursor, GPT2BatchCursor):
         raise TypeError("cursor must be GPT2BatchCursor")
     if not isinstance(config, GPT2TrainingConfig):
         raise TypeError("config must be GPT2TrainingConfig")
-    if cursor.sequence_length > model.config.context_length:
+    if cursor.sequence_length > base_model_config(model).context_length:
         raise GPT2TrainingError("cursor sequence exceeds model context length")
     _validate_optimizer_binding(model, optimizer)
     parameters = tuple(model.parameters())
@@ -609,23 +691,13 @@ def train_optimizer_step(
     return metric
 
 
-def gpt2_model_fingerprint(model: GPT2LanguageModel) -> str:
-    """Hash GPT-2 state names, dtypes, shapes, and canonical CPU bytes."""
-
-    if not isinstance(model, GPT2LanguageModel):
-        raise TypeError("model must be GPT2LanguageModel")
-    digest = sha256()
-    for name, tensor in sorted(model.state_dict().items()):
-        value = tensor.detach().cpu().contiguous()
-        digest.update(name.encode())
-        digest.update(str(value.dtype).encode())
-        digest.update(str(tuple(value.shape)).encode())
-        digest.update(value.view(torch.uint8).numpy().tobytes())
-    return digest.hexdigest()
+def gpt2_model_fingerprint(model: TrainingModel) -> str:
+    """Hash decoder state, preserving the published baseline fingerprint contract."""
+    return training_model_fingerprint(model)
 
 
 def train_optimizer_steps(
-    model: GPT2LanguageModel,
+    model: TrainingModel,
     cursor: GPT2BatchCursor,
     optimizer: torch.optim.Optimizer,
     config: GPT2TrainingConfig,
@@ -659,7 +731,7 @@ def train_optimizer_steps(
 def save_training_checkpoint(
     path: Path,
     *,
-    model: GPT2LanguageModel,
+    model: TrainingModel,
     optimizer: torch.optim.Optimizer,
     cursor: GPT2BatchCursor,
     config: GPT2TrainingConfig,
@@ -681,10 +753,12 @@ def save_training_checkpoint(
     ):
         raise GPT2TrainingError("corpus_fingerprint must be a SHA-256 digest")
     _validate_optimizer_binding(model, optimizer)
+    _validate_optimizer_contract(model, optimizer, config, step=step)
+    _validate_cursor_progress(cursor, config, step=step)
     payload = {
         "schema_version": GPT2_TRAINING_CHECKPOINT_SCHEMA_VERSION,
         "step": step,
-        "model_config": asdict(model.config),
+        "model_config": model_config_mapping(model.config),
         "training_config": asdict(config),
         "training_fingerprint": config.fingerprint(),
         "corpus_fingerprint": corpus_fingerprint,
@@ -725,7 +799,7 @@ def save_training_checkpoint(
 def load_training_checkpoint(
     path: Path,
     *,
-    model: GPT2LanguageModel,
+    model: TrainingModel,
     optimizer: torch.optim.Optimizer,
     cursor: GPT2BatchCursor,
     config: GPT2TrainingConfig,
@@ -748,8 +822,16 @@ def load_training_checkpoint(
         raise GPT2TrainingError("checkpoint exceeds its byte budget")
     _validate_optimizer_binding(model, optimizer)
     try:
-        payload = torch.load(path, map_location="cpu", weights_only=True)
-    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        payload = load_checkpoint_archive(path, max_bytes=max_checkpoint_bytes)
+    except (
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+        zipfile.BadZipFile,
+        pickle.UnpicklingError,
+        EOFError,
+    ) as exc:
         raise GPT2TrainingError("checkpoint is not a weights-only archive") from exc
     if (
         not isinstance(payload, dict)
@@ -758,7 +840,7 @@ def load_training_checkpoint(
         raise GPT2TrainingError("checkpoint fields do not match the schema")
     if payload["schema_version"] != GPT2_TRAINING_CHECKPOINT_SCHEMA_VERSION:
         raise GPT2TrainingError("checkpoint schema version is unsupported")
-    if payload["model_config"] != asdict(model.config):
+    if payload["model_config"] != model_config_mapping(model.config):
         raise GPT2TrainingError("checkpoint model configuration does not match")
     if (
         payload["training_config"] != asdict(config)
@@ -791,8 +873,10 @@ def load_training_checkpoint(
         model.load_state_dict(payload["model_state"], strict=True)
         optimizer.load_state_dict(payload["optimizer_state"])
         cursor.load_state_dict(payload["cursor_state"])
+        _validate_cursor_progress(cursor, config, step=step)
         torch.set_rng_state(rng_state)
         _validate_optimizer_binding(model, optimizer)
+        _validate_optimizer_contract(model, optimizer, config, step=step)
         _require_finite_state(optimizer.state_dict(), "restored optimizer")
         if gpt2_model_fingerprint(model) != payload["model_fingerprint"]:
             raise GPT2TrainingError("checkpoint model fingerprint does not match")
@@ -815,10 +899,15 @@ def training_spec_from_mapping(payload: Mapping[str, Any]) -> GPT2TrainingSpec:
         "source",
     }:
         raise GPT2TrainingError("training spec fields do not match the schema")
-    if payload["schema_version"] != GPT2_TRAINING_SPEC_SCHEMA_VERSION:
+    if type(payload["schema_version"]) is not int or payload["schema_version"] not in (
+        1,
+        2,
+    ):
         raise GPT2TrainingError("training spec schema version is unsupported")
+    model = model_config_from_mapping(payload["model"])
+    if (payload["schema_version"] == 2) != isinstance(model, DecoderVariantConfig):
+        raise GPT2TrainingError("training spec schema does not match its architecture")
     components = {
-        "model": (payload["model"], GPT2Config),
         "training": (payload["training"], GPT2TrainingConfig),
         "source": (payload["source"], GPT2TrainingSource),
     }
@@ -828,7 +917,7 @@ def training_spec_from_mapping(payload: Mapping[str, Any]) -> GPT2TrainingSpec:
         if not isinstance(value, Mapping) or set(value) != expected:
             raise GPT2TrainingError(f"training spec {name} fields are invalid")
         parsed[name] = kind(**value)
-    return GPT2TrainingSpec(**parsed)
+    return GPT2TrainingSpec(model=model, **parsed)
 
 
 def load_training_spec(path: Path, *, max_bytes: int = 1024 * 1024) -> GPT2TrainingSpec:
@@ -858,6 +947,7 @@ def run_training_experiment(
     checkpoint_path: Path,
     resume: bool = False,
     max_parameters: int = 5_000_000,
+    step_count: int | None = None,
 ) -> GPT2TrainingRun:
     """Run or resume a bounded deterministic byte-level GPT-2 experiment."""
 
@@ -867,11 +957,13 @@ def run_training_experiment(
         raise TypeError("checkpoint_path must be pathlib.Path")
     if not isinstance(resume, bool):
         raise TypeError("resume must be a boolean")
+    if step_count is not None and (type(step_count) is not int or step_count <= 0):
+        raise GPT2TrainingError("step_count must be a positive integer")
     if isinstance(max_parameters, bool) or not isinstance(max_parameters, int):
         raise TypeError("max_parameters must be an integer")
     if max_parameters <= 0:
         raise GPT2TrainingError("max_parameters must be positive")
-    parameter_count = expected_gpt2_parameter_count(spec.model)
+    parameter_count = expected_training_parameters(spec.model)
     if parameter_count > max_parameters:
         raise GPT2TrainingError("model exceeds the declared parameter budget")
     corpus = GPT2ByteCorpus.from_bytes(source)
@@ -882,7 +974,7 @@ def run_training_experiment(
     try:
         torch.set_num_threads(GPT2_TRAINING_TORCH_THREADS)
         torch.manual_seed(spec.training.seed)
-        model = GPT2LanguageModel(spec.model)
+        model = build_training_model(spec.model, max_parameters=max_parameters)
         cursor = GPT2BatchCursor(corpus, spec.training)
         optimizer = build_gpt2_optimizer(model, spec.training)
         started_step = 0
@@ -896,6 +988,13 @@ def run_training_experiment(
                 corpus_fingerprint=corpus.fingerprint(),
             )
         initial_fingerprint = gpt2_model_fingerprint(model)
+        if (
+            step_count is not None
+            and started_step + step_count > spec.training.optimizer_steps
+        ):
+            raise GPT2TrainingError(
+                "step_count exceeds the remaining optimizer schedule"
+            )
         metrics = (
             ()
             if started_step == spec.training.optimizer_steps
@@ -905,6 +1004,7 @@ def run_training_experiment(
                 optimizer,
                 spec.training,
                 start_step=started_step,
+                step_count=step_count,
             )
         )
         completed_step = metrics[-1].step if metrics else started_step

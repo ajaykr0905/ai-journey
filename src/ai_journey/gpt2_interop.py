@@ -12,6 +12,7 @@ from torch import Tensor
 
 from .gpt2_config import GPT2Config
 from .gpt2_model import GPT2LanguageModel
+from .decoder_variant_model import DecoderVariantModel
 
 
 class GPT2InteropError(ValueError):
@@ -206,14 +207,32 @@ def convert_hugging_face_state_dict(
     return converted
 
 
+def _compatible_model_config(
+    model: GPT2LanguageModel | DecoderVariantModel,
+) -> GPT2Config:
+    if isinstance(model, DecoderVariantModel):
+        config = model.config
+        if (config.norm_kind, config.mlp_kind, config.position_kind) != (
+            "layernorm",
+            "gelu",
+            "learned",
+        ):
+            raise GPT2InteropError(
+                "Hugging Face GPT-2 weights require the baseline-compatible decoder architecture"
+            )
+        return config.gpt2
+    if isinstance(model, GPT2LanguageModel):
+        return model.config
+    raise TypeError("model must be GPT2LanguageModel or DecoderVariantModel")
+
+
 def load_hugging_face_weights(
-    model: GPT2LanguageModel, state_dict: Mapping[str, Tensor]
+    model: GPT2LanguageModel | DecoderVariantModel, state_dict: Mapping[str, Tensor]
 ) -> None:
     """Load a complete validated Hugging Face state into the independent model."""
 
-    if not isinstance(model, GPT2LanguageModel):
-        raise TypeError("model must be GPT2LanguageModel")
-    converted = convert_hugging_face_state_dict(state_dict, model.config)
+    config = _compatible_model_config(model)
+    converted = convert_hugging_face_state_dict(state_dict, config)
     destination = model.state_dict()
     if set(converted) != set(destination):
         missing = sorted(set(destination) - set(converted))
@@ -259,13 +278,14 @@ def fingerprint_hugging_face_state(
     return digest.hexdigest()
 
 
-def export_hugging_face_state(model: GPT2LanguageModel) -> dict[str, Tensor]:
+def export_hugging_face_state(
+    model: GPT2LanguageModel | DecoderVariantModel,
+) -> dict[str, Tensor]:
     """Export the independent model using Hugging Face names and Conv1D layouts."""
 
-    if not isinstance(model, GPT2LanguageModel):
-        raise TypeError("model must be GPT2LanguageModel")
+    config = _compatible_model_config(model)
     internal = model.state_dict()
-    specs = expected_hugging_face_tensors(model.config)
+    specs = expected_hugging_face_tensors(config)
     exported: dict[str, Tensor] = {}
     for external_key, spec in specs.items():
         internal_key = external_key.removeprefix("transformer.")
@@ -275,5 +295,5 @@ def export_hugging_face_state(model: GPT2LanguageModel) -> dict[str, Tensor]:
             if spec.transpose
             else value.contiguous().clone()
         )
-    validate_hugging_face_state_dict(exported, model.config)
+    validate_hugging_face_state_dict(exported, config)
     return exported
