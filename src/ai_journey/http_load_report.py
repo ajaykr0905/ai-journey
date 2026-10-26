@@ -32,6 +32,10 @@ _OBSERVATION_FIELDS = {
 }
 
 
+def _canonical(payload):
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
 def _integer(value, name, minimum=0):
     if type(value) is not int or value < minimum:
         raise ValueError(f"invalid measured {name}")
@@ -291,7 +295,7 @@ def validate_http_measurement(raw):
                 )
             elif observation["finished_ns"] > started:
                 raise ValueError("warmup overlaps the measured work window")
-            if observation["outcome"] == "completed":
+            if observation["model_sha256"] is not None:
                 models.add(observation["model_sha256"])
     if len(models) > 1:
         raise ValueError("HTTP load observations mix different model identities")
@@ -303,7 +307,7 @@ def validate_http_measurement(raw):
     expected = http_load_totals(
         raw["measured"], work_started_ns=started, work_finished_ns=finished
     )
-    if raw["totals"] != expected:
+    if _canonical(raw["totals"]) != _canonical(expected):
         raise ValueError(
             "HTTP request counts, output tokens or work denominator differ"
         )
@@ -343,11 +347,8 @@ def http_latency_summary(raw):
 
 def http_report_digest(report):
     return sha256(
-        json.dumps(
-            {name: value for name, value in report.items() if name != "report_sha256"},
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
+        _canonical(
+            {name: value for name, value in report.items() if name != "report_sha256"}
         ).encode()
     ).hexdigest()
 
@@ -374,7 +375,9 @@ def verify_http_load_report(report):
         raise ValueError("HTTP report fields or verification scope differ")
     if report["report_sha256"] != http_report_digest(report):
         raise ValueError("HTTP report digest differs")
-    if report["latencies"] != http_latency_summary(report["measurement"]):
+    if _canonical(report["latencies"]) != _canonical(
+        http_latency_summary(report["measurement"])
+    ):
         raise ValueError(
             "HTTP report latency percentiles do not match recorded observations"
         )
