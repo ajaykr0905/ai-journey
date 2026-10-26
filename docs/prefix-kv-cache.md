@@ -40,3 +40,18 @@ The current generator left-truncates overlong prompts and resets positions when
 its context fills. Identity explicitly binds that policy. Prefix reuse operates
 on the effective initial context only; rollover still rebuilds the same complete
 window as uncached generation, rather than slicing old KV and changing semantics.
+
+The existing `ai-journey-ddp serve` operator command accepts
+`--prefix-cache-bytes 8388608 --prefix-cache-entries 64 --prefix-namespace default`.
+Zero bytes is the default and disables prefix reuse. The namespace comes only
+from the trusted operator, never a request field or asserted tenant identity.
+This loopback-only service is not an authenticated multi-tenant boundary.
+
+`GenerationService(..., prefix_store=store)` enables the same integration in
+Python. Fresh request IDs still consume their full prompt/output token admission
+charge and perform new decoding. Whole-response replay remains a separate cache.
+`/metrics` exposes fixed hit/miss/bypass counters, reused/forwarded prefill token
+counts and bounded pool gauges without request IDs, prompts, model IDs or namespace
+labels. Token-generation metrics count prefix-hit decoding as new work, not replay.
+Draining clears resident snapshots; active copies remain charged until decoding
+or cancellation unwinds, and final admission cleanup clears any late publication.
