@@ -156,7 +156,51 @@ def _score(score, config, *, targets, windows, batch_size):
     _equal(score["routing_summary"], expected, "routing summary")
 
 
-def _optimizer_groups(groups, parameters):
+def _expected_optimizer_names(config):
+    """Enumerate the declared module schema, not submitted names or live tensors.
+
+    Ordering matches named_parameters and the fixed matrix/vector AdamW builder.
+    The tied lm_head alias is absent; nonpersistent rotary buffers are not weights.
+    An independent actual-model oracle tests every supported architecture choice.
+    """
+
+    decay, no_decay = ["wte.weight"], []
+    if config.position_kind == "learned":
+        decay.append("wpe.weight")
+
+    def norm(prefix):
+        no_decay.append(f"{prefix}.weight")
+        if config.norm_kind == "layernorm":
+            no_decay.append(f"{prefix}.bias")
+
+    def mlp(prefix):
+        if config.mlp_kind == "swiglu":
+            decay.extend(
+                f"{prefix}.0.{name}_proj.weight" for name in ("gate", "up", "down")
+            )
+        else:
+            for projection in ("c_fc", "c_proj"):
+                decay.append(f"{prefix}.{projection}.weight")
+                no_decay.append(f"{prefix}.{projection}.bias")
+
+    for index in range(config.gpt2.layer_count):
+        prefix = f"h.{index}"
+        norm(f"{prefix}.ln_1")
+        norm(f"{prefix}.ln_2")
+        for projection in ("c_attn", "c_proj"):
+            decay.append(f"{prefix}.attn.{projection}.weight")
+            no_decay.append(f"{prefix}.attn.{projection}.bias")
+        if isinstance(config, MoEConfig) and index in config.moe_layers:
+            decay.append(f"{prefix}.mlp.router.projection.weight")
+            for expert in range(config.expert_count):
+                mlp(f"{prefix}.mlp.experts.{expert}")
+        else:
+            mlp(f"{prefix}.mlp")
+    norm("ln_f")
+    return {"decay_names": decay, "no_decay_names": no_decay}
+
+
+def _optimizer_groups(groups, config, parameters):
     _fields(
         groups, "decay_names no_decay_names trainable_parameters", "optimizer groups"
     )
@@ -180,6 +224,8 @@ def _optimizer_groups(groups, parameters):
         or "wte.weight" not in groups["decay_names"]
     ):
         raise ValueError("MoE optimizer groups duplicate or omit tied parameters")
+    for key, expected in _expected_optimizer_names(config).items():
+        _equal(groups[key], expected, f"optimizer {key} architecture binding")
     _equal(groups["trainable_parameters"], parameters, "optimizer parameter count")
 
 
@@ -205,7 +251,7 @@ def _arm(arm, declared, plan, trial, parameters):
             windows=trial["evaluation_windows"],
             batch_size=plan.evaluation_batch_size,
         )
-    _optimizer_groups(arm["optimizer_groups"], parameters)
+    _optimizer_groups(arm["optimizer_groups"], config, parameters)
     trace = arm["trace"]
     if type(trace) is not list or len(trace) != plan.steps:
         raise ValueError("MoE trace omits a declared optimizer update")

@@ -84,3 +84,61 @@ from its beginning: no partial model/optimizer state is resumed. Corruption,
 changed source/schedule/runtime and noncontiguous progress are rejected before
 new training. Use only your own progress and replay the final report; seals do
 not establish that fabricated measurements were actually collected.
+## Publish a usable trained arm
+
+The comparison reports remain measurement records, not model files. To retain
+one declared MoE treatment after the same complete comparison, publish into a
+new directory (the parent must already exist):
+
+```sh
+ai-journey-moe-experiment publish --plan plan.json --train cleared-train.txt \
+  --heldout cleared-heldout.txt --directory trained-top2 --arm top2 --seed 53
+ai-journey-moe-experiment artifact-verify --directory trained-top2 \
+  --train cleared-train.txt
+```
+
+The directory contains `model.pt` (complete optimizer/model/CPU-RNG state), the
+unchanged `report.json`, and `index.json` binding the selected seed, arm,
+training contract, checkpoint bytes, report seal and actual final-model identity.
+`load_moe_experiment_artifact(Path("trained-top2"), training_bytes)` returns a
+frozen dropless-evaluation model plus its report. RoPE treatments retain their
+actual cache interface; learned-position treatments do not gain one.
+
+The index is the last publication marker. Readers reject an interrupted partial
+directory, and publishers never overwrite even an incomplete directory. Choose
+a new destination after inspecting such a failure. Model/report integrity and
+matching training bytes do not authenticate authorship or prove a measurement;
+use the separate full report replay with both original sources for that check.
+Only explicitly public-safe source files belong in these commands. Existing
+public-source pin/license/partition verification is not replaced by this export.
+
+## Deployment-aligned rolling-context likelihood
+
+The original experiment evaluates complete nonoverlapping document windows.
+That protocol intentionally resets context at window boundaries. A separate
+rolling protocol scores each target once from the last available T prefix
+bytes, resetting positions within that truncated window just as full-context
+rebuild generation does. It does not claim indefinitely extending KV positions
+or reuse training-capacity routing as normal inference.
+
+```sh
+ai-journey-moe-experiment rolling --directory trained-top2 \
+  --train cleared-train.txt --heldout cleared-heldout.txt --output rolling.json
+ai-journey-moe-experiment rolling-verify --report rolling.json
+ai-journey-moe-experiment rolling-replay --directory trained-top2 \
+  --train cleared-train.txt --heldout cleared-heldout.txt --report rolling.json
+```
+
+The CLI requires the actual original training and held-out sources bound to the
+trained comparison. The Python `evaluate_moe_rolling_documents` API can evaluate
+other explicitly selected `Document` values and records their identities.
+Routing includes every valid prefix token; likelihood includes only the last
+position of each prefix. Reports retain both context-work and scored-target
+denominators, raw target losses, document-local offsets and exact dropless route
+evidence. They use their own schema and do not replace or mutate old reports.
+The CPU gate charges one full prefix per target (conservatively through the
+existing whole-job gate), not one nonoverlapping window per T targets. This is
+a declared admission bound, not measured throughput, FLOPs, memory or GPU proof.
+Offline verification recomputes accounting; full replay additionally requires
+the recorded model, document bytes and CPU runtime. Neither a seal nor a small
+NLL difference establishes authorship, generalization or architecture superiority.

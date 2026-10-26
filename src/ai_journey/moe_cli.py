@@ -2,10 +2,12 @@
 
 import argparse
 from dataclasses import asdict
+from hashlib import sha256
 from pathlib import Path
 import re
 
 from .decoder_variant_cli import _read_bytes
+from .ddp_evaluation import documents_from_lines
 from .decoder_variant_comparison import decoder_comparison_digest
 from .decoder_variant_config import DecoderVariantConfig
 from .decoder_variant_public import PUBLIC_SOURCES, public_decoder_partitions
@@ -13,7 +15,16 @@ from .decoder_variant_report_io import write_new_report
 from .decoder_variant_verify import _read_report
 from .gpt2_config import GPT2Config
 from .moe_config import MoEConfig
+from .moe_evaluation_rolling import (
+    evaluate_moe_rolling_documents,
+    replay_moe_rolling_report,
+    verify_moe_rolling_report,
+)
 from .moe_experiment_comparison import run_moe_document_comparison
+from .moe_experiment_artifacts import (
+    load_moe_experiment_artifact,
+    publish_moe_experiment,
+)
 from .moe_experiment_plan import (
     MoEExperimentArm,
     MoEExperimentPlan,
@@ -211,6 +222,38 @@ def _parser():
     replay.add_argument("--train", type=Path)
     replay.add_argument("--heldout", type=Path)
     replay.add_argument("--snapshot", type=Path)
+    publish = commands.add_parser(
+        "publish", help="publish a new trained-arm checkpoint/report artifact directory"
+    )
+    publish.add_argument("--train", type=Path, required=True)
+    publish.add_argument("--heldout", type=Path, required=True)
+    publish.add_argument("--plan", type=Path)
+    publish.add_argument("--directory", type=Path, required=True)
+    publish.add_argument("--arm", required=True)
+    publish.add_argument("--seed", type=int, required=True)
+    artifact = commands.add_parser(
+        "artifact-verify",
+        help="load frozen trained state against actual training bytes",
+    )
+    artifact.add_argument("--directory", type=Path, required=True)
+    artifact.add_argument("--train", type=Path, required=True)
+    rolling = commands.add_parser(
+        "rolling", help="score a trained artifact with once-per-target sliding context"
+    )
+    rolling.add_argument("--output", type=Path, required=True)
+    rolling.add_argument("--batch-size", type=int, default=4)
+    replay_rolling = commands.add_parser(
+        "rolling-replay", help="rerun every rolling prefix against actual trained state"
+    )
+    replay_rolling.add_argument("--report", type=Path, required=True)
+    for command in (rolling, replay_rolling):
+        command.add_argument("--directory", type=Path, required=True)
+        command.add_argument("--train", type=Path, required=True)
+        command.add_argument("--heldout", type=Path, required=True)
+    verify_rolling = commands.add_parser(
+        "rolling-verify", help="check rolling loss and routing accounting offline"
+    )
+    verify_rolling.add_argument("--report", type=Path, required=True)
     return parser
 
 
@@ -218,6 +261,67 @@ def main(argv=None):
     parser = _parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "rolling-verify":
+            verify_moe_rolling_report(
+                _read_report(args.report, max_bytes=MAX_REPORT_BYTES)
+            )
+            print(f"rolling_internally_verified={args.report}")
+            return 0
+        if args.command in {"rolling", "rolling-replay"}:
+            if args.command == "rolling" and (
+                args.output.exists() or args.output.is_symlink()
+            ):
+                raise ValueError("output already exists; choose a new path")
+            model, comparison = load_moe_experiment_artifact(
+                args.directory, _read_bytes(args.train)
+            )
+            heldout_bytes = _read_bytes(args.heldout)
+            if (
+                sha256(heldout_bytes).hexdigest()
+                != comparison["trials"][0]["heldout_sha256"]
+            ):
+                raise ValueError(
+                    "rolling CLI heldout source differs from the trained comparison"
+                )
+            documents = documents_from_lines(heldout_bytes)
+            if args.command == "rolling":
+                report = evaluate_moe_rolling_documents(
+                    model, documents, batch_size=args.batch_size
+                )
+                write_new_report(args.output, report)
+                print(
+                    f"rolling_report={args.output} targets={report['target_tokens']} context_tokens={report['context_tokens']}"
+                )
+            else:
+                replay_moe_rolling_report(
+                    _read_report(args.report, max_bytes=MAX_REPORT_BYTES),
+                    model,
+                    documents,
+                )
+                print(f"rolling_replayed={args.report}")
+            return 0
+        if args.command == "publish":
+            plan = (
+                moe_experiment_plan_from_mapping(_read_report(args.plan))
+                if args.plan
+                else default_moe_plan()
+            )
+            index = publish_moe_experiment(
+                plan,
+                _read_bytes(args.train),
+                _read_bytes(args.heldout),
+                args.directory,
+                arm=args.arm,
+                seed=args.seed,
+            )
+            print(f"artifact={args.directory} arm={index['arm']} seed={index['seed']}")
+            return 0
+        if args.command == "artifact-verify":
+            model, _ = load_moe_experiment_artifact(
+                args.directory, _read_bytes(args.train)
+            )
+            print(f"artifact_verified={args.directory} frozen={not model.training}")
+            return 0
         if args.command in {"plan", "run", "public"}:
             if args.output.exists() or args.output.is_symlink():
                 raise ValueError("output already exists; choose a new path")
