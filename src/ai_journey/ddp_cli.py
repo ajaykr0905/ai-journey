@@ -34,6 +34,7 @@ def main(argv=None):
             command.add_argument("--checkpoint", type=Path, required=True)
             command.add_argument("--resume", action="store_true")
             command.add_argument("--checkpoint-interval", type=int)
+            command.add_argument("--journal-directory", type=Path)
     verify = commands.add_parser("verify")
     verify.add_argument("--report", type=Path, required=True)
     crash = commands.add_parser("recover-crash")
@@ -52,6 +53,14 @@ def main(argv=None):
     try:
         if arguments.command in ("train", "recover", "compare", "recover-crash"):
             _validate_operation_paths(arguments)
+        if (
+            arguments.command == "train"
+            and arguments.journal_directory is not None
+            and arguments.output.resolve().is_relative_to(
+                arguments.journal_directory.resolve()
+            )
+        ):
+            raise ValueError("training report must be outside its checkpoint journal")
         if arguments.command in (
             "matrix",
             "pipeline",
@@ -87,6 +96,7 @@ def main(argv=None):
                 steps=arguments.steps,
                 resume=arguments.resume,
                 checkpoint_interval=arguments.checkpoint_interval,
+                journal_directory=arguments.journal_directory,
             )
             result = build_evidence(arguments.source.read_bytes(), spec, ranks)
             write_evidence(arguments.output, result)

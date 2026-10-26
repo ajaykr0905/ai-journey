@@ -292,6 +292,13 @@ class CheckpointJournal:
         ):
             raise ValueError("journal checkpoint bytes differ from the committed entry")
 
+    @property
+    def recorded_step(self) -> int | None:
+        """Manifest high-water only: this does not prove any version restorable."""
+        with self._locked():
+            entries = self._manifest()
+            return entries[-1]["step"] if entries else None
+
     def candidates(self) -> tuple[CheckpointCandidate, ...]:
         """Return byte-intact versions newest first, never uncommitted orphans.
 
