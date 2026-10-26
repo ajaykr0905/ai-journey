@@ -8,6 +8,7 @@ from .gqa_config import GQAConfig
 from .grouped_rotary_attention import GroupedRotarySelfAttention
 from .moe_config import MoEConfig
 from .moe_model import MoEDecoderModel, MoEModelOutput
+from .gqa_resources import require_gqa_execution_budget
 
 
 class GroupedQueryModel(nn.Module):
@@ -60,6 +61,19 @@ class GroupedQueryModel(nn.Module):
         return self.forward_training(token_ids, token_mask=token_mask).logits
 
     def forward_training(self, token_ids, *, token_mask=None):
+        if (
+            not isinstance(token_ids, torch.Tensor)
+            or token_ids.dtype != torch.long
+            or token_ids.ndim != 2
+            or not token_ids.numel()
+        ):
+            raise ValueError("grouped decoder requires nonempty long token matrices")
+        require_gqa_execution_budget(
+            self.config,
+            batch_size=token_ids.shape[0],
+            sequence_length=token_ids.shape[1],
+            dtype=str(self.wte.weight.dtype).removeprefix("torch."),
+        )
         if token_mask is not None and (
             not isinstance(token_mask, torch.Tensor)
             or token_mask.dtype != torch.bool
@@ -115,9 +129,9 @@ class GroupedQueryModel(nn.Module):
                         or tensor.ndim != 4
                         or tensor.shape[:2] != (batch, self.config.kv_heads)
                         or tensor.shape[-1] != self.config.gpt2.head_dim
+                        or tensor.shape[2] > self.config.gpt2.context_length
                         or tensor.dtype != self.wte.weight.dtype
                         or tensor.device != token_ids.device
-                        or not bool(torch.isfinite(tensor).all())
                     ):
                         raise ValueError(
                             "compact cache batch/KV-heads/dtype/device must match"
@@ -130,6 +144,19 @@ class GroupedQueryModel(nn.Module):
                     raise ValueError("compact cache layers must share a prefix length")
         if offset + time > self.config.gpt2.context_length:
             raise ValueError("cached grouped decoder exceeds context_length")
+        require_gqa_execution_budget(
+            self.config,
+            batch_size=batch,
+            sequence_length=offset + time,
+            query_tokens=time,
+            dtype=str(self.wte.weight.dtype).removeprefix("torch."),
+        )
+        if past_key_values is not None and any(
+            not bool(torch.isfinite(tensor).all())
+            for pair in past_key_values
+            for tensor in pair
+        ):
+            raise ValueError("compact cache values must be finite")
         hidden = self.drop(self.wte(token_ids))
         pairs = []
         for index, block in enumerate(self.h):

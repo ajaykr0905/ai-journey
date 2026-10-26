@@ -9,6 +9,7 @@ from .gpt2_config import GPT2Config
 from .rope import apply_rotary_position_embeddings
 
 MAX_GQA_SCORE_ELEMENTS = 8_000_000
+MAX_GQA_NATIVE_CACHE_BYTES = 64 * 1024 * 1024
 
 
 class GroupedRotarySelfAttention(nn.Module):
@@ -58,9 +59,13 @@ class GroupedRotarySelfAttention(nn.Module):
     ):
         if any(module.training for module in self.modules()):
             raise ValueError("cached grouped attention requires evaluation mode")
-        return self._forward(inputs, past_key=past_key, past_value=past_value)
+        return self._forward(
+            inputs, past_key=past_key, past_value=past_value, materialize_cache=True
+        )
 
-    def _forward(self, inputs, *, past_key=None, past_value=None):
+    def _forward(
+        self, inputs, *, past_key=None, past_value=None, materialize_cache=False
+    ):
         if (
             not isinstance(inputs, Tensor)
             or inputs.ndim != 3
@@ -75,8 +80,6 @@ class GroupedRotarySelfAttention(nn.Module):
             or inputs.dtype not in (torch.float32, torch.float64)
         ):
             raise ValueError("grouped attention requires matching CPU floating inputs")
-        if not bool(torch.isfinite(inputs).all()):
-            raise ValueError("grouped attention inputs must be finite")
         if (past_key is None) != (past_value is None):
             raise ValueError("both compact key/value prefixes must be supplied")
         batch, time, _ = inputs.shape
@@ -90,7 +93,6 @@ class GroupedRotarySelfAttention(nn.Module):
                     or cache.shape[-1] != self.head_dim
                     or cache.dtype != inputs.dtype
                     or cache.device != inputs.device
-                    or not bool(torch.isfinite(cache).all())
                 ):
                     raise ValueError(
                         "compact cache must match batch/KV-heads/dtype/device"
@@ -103,6 +105,19 @@ class GroupedRotarySelfAttention(nn.Module):
             raise ValueError("grouped attention exceeds context_length")
         if batch * self.head_count * time * total > MAX_GQA_SCORE_ELEMENTS:
             raise ValueError("grouped attention exceeds the CPU score-work budget")
+        if (
+            2 * batch * self.kv_heads * total * self.head_dim * inputs.element_size()
+            > MAX_GQA_NATIVE_CACHE_BYTES
+        ):
+            raise ValueError(
+                "grouped attention exceeds the native KV-cache byte budget"
+            )
+        if not bool(torch.isfinite(inputs).all()):
+            raise ValueError("grouped attention inputs must be finite")
+        if past_key is not None and any(
+            not bool(torch.isfinite(cache).all()) for cache in (past_key, past_value)
+        ):
+            raise ValueError("compact cache values must be finite")
         query, key, value = self.c_attn(inputs).split(
             (self.width, self.kv_width, self.kv_width), dim=-1
         )
@@ -121,6 +136,10 @@ class GroupedRotarySelfAttention(nn.Module):
                 torch.cat((past_key, key), 2),
                 torch.cat((past_value, value), 2),
             )
+        elif materialize_cache:
+            # Even a singleton contiguous V view retains the packed QKV storage.
+            # A clone gives the returned native cache its own compact backing.
+            value = value.clone(memory_format=torch.contiguous_format)
         repeats = self.head_count // self.kv_heads
         expanded_key = key.repeat_interleave(repeats, dim=1)
         expanded_value = value.repeat_interleave(repeats, dim=1)
