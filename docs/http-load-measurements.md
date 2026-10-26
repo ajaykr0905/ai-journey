@@ -51,3 +51,24 @@ This is a CPU loopback experiment, with no GPU or production-scale claim.
 Writers publish complete new files atomically and refuse to overwrite reports.
 The commands add no dependencies, perform no retries, and make no network calls
 when verifying an existing report.
+
+## Installed readiness gate
+
+```bash
+ai-journey-http-load readiness --output artifacts/http-readiness.json
+ai-journey-http-load verify --report artifacts/http-readiness.json
+```
+
+Readiness exclusively owns an ephemeral loopback server with a seeded,
+untrained 8-channel float32 CPU control. It invokes the installed console
+command to create the default profile, collect eight actual measured requests
+and one warmup, then verify the sealed report. It checks 32 measured output
+tokens, the server's nine-request/36-token counters and the served model
+identity before stopping that server. Existing services are unaffected.
+
+The dedicated distributed-CPU CI step runs every `test_http_*.py` pytest test,
+checks all HTTP source/test formatting and lint, exercises this installed
+readiness path, and retains its actual report with the other CPU acceptance
+artifacts. This explicit pytest gate covers function tests that unittest
+discovery alone does not execute. Measured timings remain diagnostic evidence
+from a tiny CPU control; readiness makes no trained-model quality claim.

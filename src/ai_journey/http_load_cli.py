@@ -3,6 +3,8 @@
 import argparse
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 
@@ -73,6 +75,11 @@ def _parser():
         "verify", help="check a sealed report and recompute derived metrics offline"
     )
     verify.add_argument("--report", type=Path, required=True)
+    readiness = commands.add_parser(
+        "readiness",
+        help="exercise this installed command against an owned tiny CPU server",
+    )
+    readiness.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -80,7 +87,18 @@ def main(argv=None):
     parser = _parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "verify":
+        if args.command == "readiness":
+            from .http_readiness import run_installed_http_readiness
+
+            sibling = Path(sys.executable).with_name("ai-journey-http-load")
+            summary = run_installed_http_readiness(
+                args.output,
+                command=sibling if sibling.is_file() else "ai-journey-http-load",
+            )
+            print(
+                f"readiness={summary['report']} completed={summary['measured_requests']} output_tokens={summary['measured_output_tokens']}"
+            )
+        elif args.command == "verify":
             report = verify_http_load_report(
                 _read_json(args.report, maximum=4 * 1024 * 1024)
             )
@@ -108,7 +126,15 @@ def main(argv=None):
                 print(
                     f"report={args.output} completed={totals['outcomes']['completed']} rejected={totals['outcomes']['rejected']} attempts={totals['attempted_requests']}"
                 )
-    except (OSError, TypeError, ValueError, KeyError, OverflowError) as exc:
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        KeyError,
+        OverflowError,
+        RuntimeError,
+        subprocess.TimeoutExpired,
+    ) as exc:
         parser.error(str(exc))
     return 0
 

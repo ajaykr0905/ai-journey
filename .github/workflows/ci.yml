@@ -41,6 +41,13 @@ jobs:
           ruff check "${sources[@]}" "${tests[@]}"
           ruff format --check "${sources[@]}" "${tests[@]}"
           python -m pytest -q "${tests[@]}"
+      - name: Gate HTTP measurements and installed loopback readiness
+        run: |
+          ruff check src/ai_journey/http_*.py tests/test_http_*.py
+          ruff format --check src/ai_journey/http_*.py tests/test_http_*.py
+          python -m pytest -q tests/test_http_*.py
+          ai-journey-http-load readiness --output /tmp/ddp-ci/http-load-readiness.json
+          ai-journey-http-load verify --report /tmp/ddp-ci/http-load-readiness.json
       - name: Verify published controls and reproduce installed commands
         run: |
           ai-journey-ddp verify-comparison --report artifacts/ddp-lab-2026-10-22/comparison.json
