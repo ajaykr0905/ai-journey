@@ -243,6 +243,7 @@ def load_checkpoint(
     try:
         require_all_ranks(restored, phase="checkpoint restoration")
         require_model_consensus(model)
+        require_optimizer_consensus(optimizer)
     except Exception:
         model.load_state_dict(saved[0])
         optimizer.load_state_dict(saved[1])
