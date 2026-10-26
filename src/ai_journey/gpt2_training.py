@@ -19,6 +19,7 @@ from torch.nn import functional as F
 
 from .gpt2_config import GPT2Config
 from .gpt2_model import GPT2LanguageModel, expected_gpt2_parameter_count
+from .training_optimizer_state import validate_adamw_state
 
 
 class GPT2TrainingError(ValueError):
@@ -681,6 +682,7 @@ def save_training_checkpoint(
     ):
         raise GPT2TrainingError("corpus_fingerprint must be a SHA-256 digest")
     _validate_optimizer_binding(model, optimizer)
+    validate_adamw_state(model, optimizer, step=step)
     payload = {
         "schema_version": GPT2_TRAINING_CHECKPOINT_SCHEMA_VERSION,
         "step": step,
@@ -793,6 +795,7 @@ def load_training_checkpoint(
         cursor.load_state_dict(payload["cursor_state"])
         torch.set_rng_state(rng_state)
         _validate_optimizer_binding(model, optimizer)
+        validate_adamw_state(model, optimizer, step=step)
         _require_finite_state(optimizer.state_dict(), "restored optimizer")
         if gpt2_model_fingerprint(model) != payload["model_fingerprint"]:
             raise GPT2TrainingError("checkpoint model fingerprint does not match")
