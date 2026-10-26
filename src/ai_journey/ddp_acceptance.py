@@ -1,5 +1,6 @@
 """Executable acceptance oracles for real multi-process training and recovery."""
 
+from dataclasses import asdict
 from pathlib import Path
 import json
 from hashlib import sha256
@@ -15,6 +16,8 @@ from .ddp_checkpoint import bounded_checkpoint_load
 from .ddp_launch import WorkerFailure, launch_training
 from .ddp_contracts import integer
 from .ddp_limits import preflight
+from .gpt2_training import training_spec_from_mapping
+from .training_models import model_config_mapping
 
 CRASH_RECOVERY_SCHEMA = "ai-journey-ddp-crash-recovery-v1"
 CRASH_RECOVERY_SCOPE = "CPU-local Gloo crash/restart observations; not GPU, power-loss or production failover evidence. Digests validate internal consistency, not timing authenticity."
@@ -304,8 +307,31 @@ def verify_crash_recovery(report, *, directory: Path | None = None):
 
 def _verify_crash_artifacts(report, directory):
     try:
+        specification = _read_bytes(
+            directory / "training-spec.json", max_bytes=1024 * 1024
+        )
+        spec = training_spec_from_mapping(_decode_json(specification))
+        if (
+            sha256(specification).hexdigest() != report["spec_sha256"]
+            or spec.source.sha256 != report["source_sha256"]
+            or report["total_steps"] > spec.training.optimizer_steps
+        ):
+            raise ValueError("retained specification differs")
+        expected_contract = {
+            "model_config": model_config_mapping(spec.model),
+            "training_config": asdict(spec.training),
+            "source_sha256": spec.source.sha256,
+            "world_size": report["world_size"],
+        }
+
+        def validate_contract(payload):
+            actual_contract = {field: payload[field] for field in expected_contract}
+            if _canonical(actual_contract) != _canonical(expected_contract):
+                raise ValueError("checkpoint specification binding differs")
+
         durable_path = directory / "last-durable.pt"
         durable = bounded_checkpoint_load(durable_path, 64 * 1024 * 1024)
+        validate_contract(durable)
         if (
             durable["step"] != report["last_durable"]["step"]
             or durable["model_sha256"] != report["last_durable"]["model_sha256"]
@@ -318,6 +344,7 @@ def _verify_crash_artifacts(report, directory):
             ("recovered", "recovered.pt"),
         ):
             payload = bounded_checkpoint_load(directory / filename, 64 * 1024 * 1024)
+            validate_contract(payload)
             state = {field: _state_digest(payload[field]) for field in _STATE_FIELDS}
             if (
                 state != report["state_sha256"][name]
@@ -341,7 +368,7 @@ def _verify_crash_artifacts(report, directory):
         raise ValueError("crash recovery artifacts do not match the report") from error
 
 
-def _read_json(path: Path, *, max_bytes=128 * 1024):
+def _decode_json(payload):
     def unique(pairs):
         result = {}
         for key, value in pairs:
@@ -353,6 +380,10 @@ def _read_json(path: Path, *, max_bytes=128 * 1024):
     def constant(value):
         raise ValueError("nonfinite recovery JSON constant")
 
+    return json.loads(payload, object_pairs_hook=unique, parse_constant=constant)
+
+
+def _read_bytes(path: Path, *, max_bytes):
     descriptor = os.open(
         path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
     )
@@ -363,7 +394,11 @@ def _read_json(path: Path, *, max_bytes=128 * 1024):
         payload = handle.read(max_bytes + 1)
     if len(payload) > max_bytes:
         raise ValueError("recovery JSON exceeds its byte budget")
-    return json.loads(payload, object_pairs_hook=unique, parse_constant=constant)
+    return payload
+
+
+def _read_json(path: Path, *, max_bytes=128 * 1024):
+    return _decode_json(_read_bytes(path, max_bytes=max_bytes))
 
 
 def read_crash_recovery(path: Path, *, directory: Path | None = None):
@@ -402,15 +437,24 @@ def certify_crash_recovery(
         raise ValueError("crash recovery workdir must be new or empty")
     preflight(source, spec, world_size=world_size, steps=total_steps)
     source_sha256 = sha256(source.read_bytes()).hexdigest()
-    spec_sha256 = sha256(spec.read_bytes()).hexdigest()
+    specification = _read_bytes(spec, max_bytes=1024 * 1024)
+    retained_spec = training_spec_from_mapping(_decode_json(specification))
+    if retained_spec.source.sha256 != source_sha256:
+        raise ValueError("retained specification source binding differs")
+    spec_sha256 = sha256(specification).hexdigest()
     directory.mkdir(parents=True, exist_ok=True)
+    spec_witness = directory / "training-spec.json"
+    # Never replace an existing witness. A partial failed run requires inspection,
+    # rather than silently reusing its artifact directory on the next invocation.
+    with spec_witness.open("xb") as handle:
+        handle.write(specification)
     continuous_path, recovered_path = (
         directory / "continuous.pt",
         directory / "recovered.pt",
     )
     control = launch_training(
         source=source,
-        spec=spec,
+        spec=spec_witness,
         checkpoint=continuous_path,
         output_dir=directory / "continuous",
         world_size=world_size,
@@ -419,7 +463,7 @@ def certify_crash_recovery(
     try:
         launch_training(
             source=source,
-            spec=spec,
+            spec=spec_witness,
             checkpoint=recovered_path,
             output_dir=directory / "failed",
             world_size=world_size,
@@ -446,7 +490,7 @@ def certify_crash_recovery(
     resume_started = time.monotonic_ns()
     resumed = launch_training(
         source=source,
-        spec=spec,
+        spec=spec_witness,
         checkpoint=recovered_path,
         output_dir=directory / "resumed",
         world_size=world_size,
