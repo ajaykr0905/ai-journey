@@ -1,6 +1,7 @@
 from dataclasses import asdict
 from hashlib import sha256
 import json
+import os
 
 import pytest
 
@@ -83,6 +84,85 @@ def test_cli_library_runs_verifies_and_replays_training(tmp_path):
 
     assert verify_report(report) == evidence
     assert replay_report(source_path=source, report_path=report) == evidence
+
+
+def test_cli_partial_run_resumes_and_replays_both_segments(tmp_path, capsys):
+    source, spec = prepare_files(tmp_path)
+    checkpoint, report = tmp_path / "partial.pt", tmp_path / "partial.json"
+    arguments = [
+        "train",
+        "--source",
+        str(source),
+        "--spec",
+        str(spec),
+        "--checkpoint",
+        str(checkpoint),
+        "--report",
+        str(report),
+        "--steps",
+        "1",
+    ]
+    assert main(arguments) == 0
+    first = json.loads(capsys.readouterr().out)
+    assert first["progress"] == {"started_step": 0, "completed_step": 1}
+    assert replay_report(source_path=source, report_path=report) == first
+    assert main(arguments + ["--resume"]) == 0
+    resumed = json.loads(capsys.readouterr().out)
+    assert resumed["progress"] == {"started_step": 1, "completed_step": 2}
+    assert replay_report(source_path=source, report_path=report) == resumed
+    complete = run_and_publish(
+        source_path=source,
+        spec_path=spec,
+        checkpoint_path=tmp_path / "full.pt",
+        report_path=tmp_path / "full.json",
+    )
+    assert (
+        resumed["model_fingerprints"]["final"]
+        == complete["model_fingerprints"]["final"]
+    )
+
+
+@pytest.mark.parametrize("steps", [0, -1, 3, True])
+def test_segment_bounds_reject_before_checkpoint_publication(tmp_path, steps):
+    source, spec = prepare_files(tmp_path)
+    checkpoint = tmp_path / "state.pt"
+    with pytest.raises(ValueError, match="step_count"):
+        run_and_publish(
+            source_path=source,
+            spec_path=spec,
+            checkpoint_path=checkpoint,
+            report_path=tmp_path / "report.json",
+            step_count=steps,
+        )
+    assert not checkpoint.exists()
+
+
+@pytest.mark.parametrize(
+    "alias", ["source_checkpoint", "spec_report", "outputs", "hardlink", "symlink"]
+)
+def test_training_outputs_cannot_alias_inputs_or_each_other(tmp_path, alias):
+    source, spec = prepare_files(tmp_path)
+    checkpoint, report = tmp_path / "state.pt", tmp_path / "report.json"
+    if alias == "source_checkpoint":
+        checkpoint = source
+    elif alias == "spec_report":
+        report = spec
+    elif alias == "outputs":
+        report = checkpoint
+    elif alias == "hardlink":
+        os.link(source, checkpoint)
+    else:
+        report.symlink_to(spec)
+    original = (source.read_bytes(), spec.read_bytes())
+    with pytest.raises(ValueError, match="aliases|non-symlink"):
+        run_and_publish(
+            source_path=source,
+            spec_path=spec,
+            checkpoint_path=checkpoint,
+            report_path=report,
+        )
+    assert (source.read_bytes(), spec.read_bytes()) == original
+    assert not (tmp_path / "state.pt").exists() or alias == "hardlink"
 
 
 def test_cli_main_prints_canonical_verified_report(tmp_path, capsys):
