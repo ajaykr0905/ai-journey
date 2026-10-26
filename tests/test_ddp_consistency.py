@@ -11,6 +11,8 @@ from ai_journey.ddp_runtime import process_group
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 from ai_journey.gpt2_training import GPT2TrainingConfig
+from ai_journey.ddp_training import train_segment
+from torch.nn.parallel import DistributedDataParallel
 
 
 def _checkpoint_replica(rank, directory, field):
@@ -140,3 +142,65 @@ def _restore_replica(rank, directory):
 
 def test_rank_specific_checkpoint_moments_roll_back_restoration_everywhere(tmp_path):
     mp.spawn(_restore_replica, args=(str(tmp_path),), nprocs=2, join=True)
+
+
+def _diverged_update(rank, directory):
+    directory = Path(directory)
+    torch.set_num_threads(1)
+    torch.manual_seed(48)
+    model = GPT2LanguageModel(GPT2Config(8, 4, 8, 2, 1)).double()
+
+    class DivergingAdamW(torch.optim.AdamW):
+        def step(self, closure=None):
+            result = super().step(closure)
+            torch.rand(3)
+            if rank == 1:
+                with torch.no_grad():
+                    model.wte.weight.add_(0.5)
+            return result
+
+    optimizer = DivergingAdamW(model.parameters(), lr=0.123)
+    config = GPT2TrainingConfig(
+        optimizer_steps=2,
+        micro_batch_size=1,
+        accumulation_steps=1,
+        sequence_length=4,
+        max_learning_rate=0.01,
+        min_learning_rate=0.001,
+        warmup_steps=0,
+        weight_decay=0,
+        gradient_clip=1,
+        seed=48,
+    )
+    topology = Topology(rank, 2)
+    with process_group(topology, rendezvous=(directory / "rdzv").as_uri()):
+        wrapped = DistributedDataParallel(model).eval()
+        model.h[0].train()
+        for index, parameter in enumerate(model.parameters()):
+            parameter.grad = None if index % 2 else torch.full_like(parameter, 0.25)
+        before_model = copy.deepcopy(model.state_dict())
+        before_optimizer = copy.deepcopy(optimizer.state_dict())
+        before_rng = torch.get_rng_state().clone()
+        gradients = [
+            None if p.grad is None else p.grad.clone() for p in model.parameters()
+        ]
+        modes = [module.training for module in wrapped.modules()]
+        with pytest.raises(RuntimeError, match="model fingerprints diverged"):
+            train_segment(
+                wrapped,
+                optimizer,
+                bytes(range(8)) * 4,
+                config,
+                topology,
+                start_step=0,
+                steps=1,
+            )
+        _assert_same(model.state_dict(), before_model)
+        _assert_same(optimizer.state_dict(), before_optimizer)
+        assert torch.equal(torch.get_rng_state(), before_rng)
+        _assert_same([p.grad for p in model.parameters()], gradients)
+        assert [module.training for module in wrapped.modules()] == modes
+
+
+def test_divergent_update_restores_full_caller_state_on_both_ranks(tmp_path):
+    mp.spawn(_diverged_update, args=(str(tmp_path),), nprocs=2, join=True)

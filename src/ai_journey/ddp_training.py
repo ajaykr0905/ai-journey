@@ -96,7 +96,9 @@ def _accumulated_update(
     }
 
 
-def accumulated_update(model, optimizer, batches, *, gradient_clip=1.0) -> dict:
+def accumulated_update(
+    model, optimizer, batches, *, gradient_clip=1.0, learning_rate=None
+) -> dict:
     """Restore caller state if any rank rejects a synchronous optimizer update."""
     parameters = tuple(model.parameters())
     saved_model = copy.deepcopy(model.state_dict())
@@ -105,9 +107,20 @@ def accumulated_update(model, optimizer, batches, *, gradient_clip=1.0) -> dict:
     saved_gradients = [None if p.grad is None else p.grad.clone() for p in parameters]
     modes = [(module, module.training) for module in model.modules()]
     try:
-        return _accumulated_update(
+        if learning_rate is not None:
+            if (
+                isinstance(learning_rate, bool)
+                or not isinstance(learning_rate, (float, int))
+                or not 0 <= learning_rate < float("inf")
+            ):
+                raise ValueError("learning_rate must be finite and nonnegative")
+            for group in optimizer.param_groups:
+                group["lr"] = learning_rate
+        result = _accumulated_update(
             model, optimizer, batches, gradient_clip=gradient_clip
         )
+        result["model_sha256"] = require_model_consensus(model.module)
+        return result
     except Exception:
         model.load_state_dict(saved_model)
         optimizer.load_state_dict(saved_optimizer)
@@ -150,14 +163,13 @@ def train_segment(
                 epoch=epoch,
             )
         learning_rate = learning_rate_at(step, config)
-        for group in optimizer.param_groups:
-            group["lr"] = learning_rate
         begin = offset * config.accumulation_steps
         result = accumulated_update(
             model,
             optimizer,
             batches[begin : begin + config.accumulation_steps],
             gradient_clip=config.gradient_clip,
+            learning_rate=learning_rate,
         )
         loss, tokens, mean = reduce_token_totals(result["loss_sum"], result["tokens"])
         metrics.append(
@@ -168,7 +180,6 @@ def train_segment(
                 "tokens": tokens,
                 "mean_loss": mean,
                 "learning_rate": learning_rate,
-                "model_sha256": require_model_consensus(model.module),
             }
         )
     return metrics
