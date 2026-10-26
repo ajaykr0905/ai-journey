@@ -1,5 +1,8 @@
 {
   "required_files": [
+    "src/ai_journey/prefix_cache.py",
+    "tests/test_prefix_cache.py",
+    "docs/prefix-kv-cache.md",
     "docs/replicated-moe-cpu.md",
     "src/ai_journey/moe_ddp_config.py",
     "src/ai_journey/moe_ddp_resources.py",
