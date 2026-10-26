@@ -134,6 +134,16 @@ class GenerationService:
     ) -> dict:
         if not isinstance(request, GenerationRequest):
             raise TypeError("request must be GenerationRequest")
+        if cancelled is not None and not callable(cancelled):
+            raise TypeError("cancelled must be a callable")
+        if on_token is not None and not callable(on_token):
+            raise TypeError("on_token must be callable")
+        if deadline is not None and (
+            isinstance(deadline, bool)
+            or not isinstance(deadline, (int, float))
+            or not math.isfinite(deadline)
+        ):
+            raise ValueError("deadline must be a finite monotonic timestamp")
         with self._lock:
             fingerprint = request.fingerprint()
             if request.request_id in self._responses:
@@ -143,10 +153,19 @@ class GenerationService:
                 if previous_fingerprint != fingerprint:
                     raise ValueError("request_id was already used with different input")
                 self._responses.move_to_end(request.request_id)
-                if on_token is not None:
-                    for index, token in enumerate(previous_output["tokens"]):
+                response = copy.deepcopy(previous_output)
+                response["tokens"] = []
+                for index, token in enumerate(previous_output["tokens"]):
+                    if cancelled is not None and cancelled():
+                        response["finish_reason"] = "cancelled"
+                        break
+                    if deadline is not None and time.monotonic() >= deadline:
+                        response["finish_reason"] = "deadline"
+                        break
+                    response["tokens"].append(token)
+                    if on_token is not None:
                         on_token(index, token)
-                return copy.deepcopy(previous_output)
+                return response
             self._admission.consume(
                 len(request.prompt) + request.sampling.max_new_tokens
             )
