@@ -166,7 +166,13 @@ def _validate_operation_paths(arguments):
         arguments.workdir.resolve()
     ):
         raise ValueError("training report must be outside its worker workdir")
-    if arguments.command in ("matrix", "pipeline", "recover", "compare"):
+    if arguments.command in (
+        "matrix",
+        "pipeline",
+        "recover",
+        "compare",
+        "recover-crash",
+    ):
         directory = arguments.workdir
         if directory.is_symlink() or (
             directory.exists() and (not directory.is_dir() or any(directory.iterdir()))

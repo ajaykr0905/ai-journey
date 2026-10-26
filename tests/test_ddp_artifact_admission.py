@@ -9,7 +9,7 @@ from ai_journey.ddp_launch import launch_training
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("command", ["train", "recover", "compare"])
+@pytest.mark.parametrize("command", ["train", "recover", "compare", "recover-crash"])
 @pytest.mark.parametrize("collision", ["source", "spec", "hardlink-source", "workdir"])
 def test_cli_reports_cannot_overwrite_inputs_or_owned_worker_artifacts(
     tmp_path, monkeypatch, command, collision
@@ -33,7 +33,12 @@ def test_cli_reports_cannot_overwrite_inputs_or_owned_worker_artifacts(
     def unexpected(*args, **kwargs):
         raise AssertionError("artifact admission must precede worker creation")
 
-    for name in ("launch_training", "certify_recovery", "certify_batch_equivalence"):
+    for name in (
+        "launch_training",
+        "certify_recovery",
+        "certify_batch_equivalence",
+        "certify_crash_recovery",
+    ):
         monkeypatch.setattr(ddp_cli, name, unexpected)
     argv = [
         command,

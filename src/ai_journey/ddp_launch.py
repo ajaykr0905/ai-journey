@@ -39,6 +39,7 @@ def launch_training(
     failure_rank: int | None = None,
     failure_mode: str = "exit",
     failure_after_step: int | None = None,
+    observe_recovery: bool = False,
 ) -> list[dict]:
     import json
 
@@ -62,6 +63,8 @@ def launch_training(
             )
     if not isinstance(resume, bool):
         raise TypeError("resume must be boolean")
+    if type(observe_recovery) is not bool or (observe_recovery and not resume):
+        raise ValueError("recovery observations require an explicitly resumed run")
     if checkpoint.is_symlink() or (checkpoint.exists() and not checkpoint.is_file()):
         raise ValueError("checkpoint output must be a regular non-symlink path")
     if any(_paths_alias(checkpoint, path) for path in (source, spec)):
@@ -70,7 +73,7 @@ def launch_training(
     worker_outputs = [
         output_dir / f"rank-{rank}.{suffix}"
         for rank in range(world_size)
-        for suffix in ("log", "json", "crash.json")
+        for suffix in ("log", "json", "crash.json", "recovery.json")
     ]
     if any(
         path.is_symlink()
@@ -127,6 +130,8 @@ def launch_training(
                 ]
                 if resume:
                     command.append("--resume")
+                if observe_recovery:
+                    command.append("--observe-recovery")
                 if checkpoint_interval is not None:
                     command.extend(["--checkpoint-interval", str(checkpoint_interval)])
                 if rank == failure_rank:
