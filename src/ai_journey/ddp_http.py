@@ -8,6 +8,7 @@ import time
 
 from .ddp_contracts import integer
 from .serving_metrics import PROMETHEUS_CONTENT_TYPE
+from .trace_context import child_context, parse_traceparent
 from .ddp_service import (
     AdmissionRejected,
     GenerationRequest,
@@ -82,6 +83,17 @@ def make_server(service, *, host="127.0.0.1", port=0, max_connections=8):
         def log_message(self, format, *args):
             pass
 
+        def start_trace(self):
+            values = self.headers.get_all("traceparent", [])
+            parent = parse_traceparent(values[0]) if len(values) == 1 else None
+            self._trace_context = child_context(parent)
+
+        def end_headers(self):
+            context = getattr(self, "_trace_context", None)
+            if context is not None:
+                self.send_header("traceparent", context.to_header())
+            super().end_headers()
+
         def reply(self, status, payload, *, retry_after=None):
             body = json.dumps(payload, allow_nan=False).encode()
             self.send_response(status)
@@ -93,6 +105,7 @@ def make_server(service, *, host="127.0.0.1", port=0, max_connections=8):
             self.wfile.write(body)
 
         def do_GET(self):
+            self.start_trace()
             if self.path == "/health":
                 self.reply(200, service.health())
             elif self.path == "/metrics":
@@ -106,6 +119,7 @@ def make_server(service, *, host="127.0.0.1", port=0, max_connections=8):
                 self.reply(404, {"error": "unknown route"})
 
         def do_POST(self):
+            self.start_trace()
             if self.path not in ("/generate", "/stream"):
                 self.reply(404, {"error": "unknown route"})
                 return
