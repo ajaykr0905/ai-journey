@@ -1,5 +1,13 @@
 {
   "required_files": [
+    "src/ai_journey/checkpoint_archive.py",
+    "src/ai_journey/training_artifact.py",
+    "src/ai_journey/training_models.py",
+    "src/ai_journey/training_optimizer_state.py",
+    "src/ai_journey/training_paths.py",
+    "tests/test_training_restart_contracts.py",
+    "tests/test_training_models.py",
+    "tests/test_modern_training.py",
     "docs/distributed-cpu-lab.md",
     "src/ai_journey/ddp_acceptance.py",
     "src/ai_journey/ddp_benchmark.py",

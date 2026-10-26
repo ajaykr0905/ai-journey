@@ -20,6 +20,12 @@ each optimizer update. Each micro-batch mean loss is divided by four before
 backpropagation. The resulting effective batch is eight sequences, or 64 target
 tokens per update. Twelve updates consume 768 target tokens.
 
+To stop at a durable optimizer boundary, add `--steps 4`. Run the same command
+again with `--resume --steps 4` to continue the next four updates. Omitting
+`--steps` consumes the remaining schedule. Segment reports retain their start and
+completion steps; `replay` reconstructs the preceding updates before checking a
+resumed segment, so its reported initial model is verified too.
+
 AdamW applies weight decay to matrix-shaped parameters and excludes biases and
 normalization vectors. The learning rate warms up for two updates, then follows a
 cosine decay from `0.003` to `0.0003`. Gradients are clipped at a global norm of
@@ -53,3 +59,16 @@ The checked run recorded mean loss `12.200964450836182` on update 1 and
 is a small deterministic systems check, not a model-quality result. It provides no
 GPU, distributed, throughput, production, lecture-viewing, or learner-completion
 evidence.
+
+## Train an opt-in decoder architecture
+
+The same `train`, `verify`, and `replay` commands accept a schema-2 training spec.
+Its `model` object is `{"kind":"decoder_variant","config":...}`; `config` holds
+all `DecoderVariantConfig` fields, including the nested `gpt2` dimensions. Build
+this mapping with `GPT2TrainingSpec.to_mapping()` to avoid omitting controls.
+Schema-1 GPT-2 specs and existing baseline checkpoint fingerprints are preserved.
+
+All architecture choices use the existing matrix-only weight decay, accumulation,
+schedule, clipping, rollback, and exact checkpoint restoration. Checkpoints bind
+the complete architecture, so a different RoPE base cannot reuse an otherwise
+shape-compatible state. This remains a bounded CPU training protocol.
