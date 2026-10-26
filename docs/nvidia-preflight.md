@@ -76,3 +76,18 @@ A valid blocked observation can pass integrity verification while retaining
 Even a passed preflight retains `training_executed`, `gpu_kernel_executed`, and
 `collective_executed` as false. CUDA training, NCCL collective checks, multi-GPU
 performance and fault recovery require separate implemented and measured work.
+
+## CPU package-integrity gate
+
+The dedicated `nvidia-preflight-contracts` CI job checks all `gpu*.py` source and
+tests, builds a wheel and source distribution, and installs the wheel into an
+isolated target. Its installed readiness module runs the real probe, launch-plan,
+collect and verify entry points. Worker records come from fresh sequential
+processes with explicitly assigned rank environments; the planned torchrun
+command is not executed. CPU-only workers write blocked observations and exit 2.
+
+`readiness.json` reports `integrity_smoke_passed: true` separately from
+`hardware_preflight_passed: false`. The job retains command logs, actual host and
+rank observations, the collected run, and package distributions. A green CPU job
+establishes installed command and integrity behavior. It does not establish CUDA
+training, GPU kernel execution or NCCL communication.
