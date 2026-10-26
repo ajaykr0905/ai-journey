@@ -130,6 +130,7 @@ class GenerationService:
         self._model.requires_grad_(False)
         self.model_sha256 = gpt2_model_fingerprint(self._model)
         self._lock = threading.RLock()
+        self._stats_lock = threading.Lock()
         self.completed_requests = 0
         self.generated_tokens = 0
         self._responses = OrderedDict()
@@ -192,8 +193,9 @@ class GenerationService:
                 deadline=deadline,
                 on_token=on_token,
             )
-            self.completed_requests += 1
-            self.generated_tokens += len(output["tokens"])
+            with self._stats_lock:
+                self.completed_requests += 1
+                self.generated_tokens += len(output["tokens"])
             response = {
                 "request_id": request.request_id,
                 "model_sha256": self.model_sha256,
@@ -209,7 +211,7 @@ class GenerationService:
             return response
 
     def health(self) -> dict:
-        with self._lock:
+        with self._stats_lock:
             return {
                 "ready": True,
                 "device": "cpu",

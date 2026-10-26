@@ -1,3 +1,5 @@
+import threading
+
 import pytest
 
 from ai_journey.ddp_generation import SamplingConfig
@@ -102,3 +104,37 @@ def test_out_of_vocabulary_prompt_is_rejected_before_charging_admission():
         "valid", (1, 2), SamplingConfig(max_new_tokens=3, temperature=0)
     )
     assert len(service.generate(valid)["tokens"]) == 3
+
+
+def test_health_remains_responsive_while_inference_is_running(monkeypatch):
+    service, request = service_and_request()
+    entered = threading.Event()
+    release = threading.Event()
+    health_done = threading.Event()
+    snapshots = []
+
+    def blocked_generation(*args, **kwargs):
+        entered.set()
+        assert release.wait(timeout=5)
+        return {"tokens": [1], "prompt_tokens": 2, "finish_reason": "length"}
+
+    def get_health():
+        snapshots.append(service.health())
+        health_done.set()
+
+    monkeypatch.setattr("ai_journey.ddp_service.generate_tokens", blocked_generation)
+    inference = threading.Thread(target=service.generate, args=(request,))
+    health = threading.Thread(target=get_health)
+    inference.start()
+    try:
+        assert entered.wait(timeout=2)
+        health.start()
+        assert health_done.wait(timeout=1)
+        assert snapshots[0]["ready"]
+        assert snapshots[0]["completed_requests"] == 0
+    finally:
+        release.set()
+        inference.join(timeout=5)
+        if health.ident is not None:
+            health.join(timeout=5)
+    assert service.health()["completed_requests"] == 1
