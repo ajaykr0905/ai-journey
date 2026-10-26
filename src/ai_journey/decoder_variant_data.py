@@ -88,6 +88,29 @@ def document_training_schedule(
 
 
 def document_training_batch(documents: DecoderDocuments, rows):
+    """Admit complete bounded document-local windows before tensor allocation."""
+
+    if not isinstance(documents, DecoderDocuments):
+        raise ValueError("document training requires DecoderDocuments")
+    if not isinstance(rows, (tuple, list)) or not 1 <= len(rows) <= 32:
+        raise ValueError("document training rows must contain one to 32 windows")
+    for row in rows:
+        if (
+            not isinstance(row, (tuple, list))
+            or len(row) != 2
+            or any(type(value) is not int for value in row)
+        ):
+            raise ValueError(
+                "document training windows require integer index/start pairs"
+            )
+        index, start = row
+        if not 0 <= index < len(documents.train):
+            raise ValueError(
+                "document training index is outside the training partition"
+            )
+        last_start = len(documents.train[index].content) - documents.context_length - 1
+        if not 0 <= start <= last_start:
+            raise ValueError("document training window is incomplete or out of bounds")
     pieces = [
         documents.train[index].content[start : start + documents.context_length + 1]
         for index, start in rows

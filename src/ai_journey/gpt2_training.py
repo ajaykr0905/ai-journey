@@ -22,6 +22,10 @@ from torch.nn import functional as F
 from .gpt2_config import GPT2Config
 from .gpt2_model import GPT2LanguageModel
 from .decoder_variant_config import DecoderVariantConfig
+from .moe_config import MoEConfig
+from .moe_model import MoEDecoderModel
+from .gqa_config import GQAConfig
+from .gqa_model import GroupedQueryModel
 from .decoder_variant_model import DecoderVariantModel
 from .training_models import (
     TrainingModel,
@@ -33,7 +37,10 @@ from .training_models import (
     model_config_mapping,
     training_model_fingerprint,
 )
-from .training_optimizer_state import validate_adamw_state
+from .training_optimizer_state import (
+    validate_adamw_state,
+    validate_serialized_adamw_state,
+)
 from .checkpoint_archive import load_checkpoint_archive
 
 
@@ -118,8 +125,15 @@ class GPT2TrainingSpec:
     source: GPT2TrainingSource
 
     def __post_init__(self) -> None:
-        if not isinstance(self.model, (GPT2Config, DecoderVariantConfig)):
-            raise TypeError("model must be GPT2Config or DecoderVariantConfig")
+        if not isinstance(self.model, (GPT2Config, DecoderVariantConfig, GQAConfig)):
+            raise TypeError("model must be a supported decoder configuration")
+        if isinstance(self.model, MoEConfig) or (
+            isinstance(self.model, GQAConfig)
+            and isinstance(self.model.decoder, MoEConfig)
+        ):
+            raise GPT2TrainingError(
+                "MoE training requires its explicit auxiliary objective"
+            )
         if not isinstance(self.training, GPT2TrainingConfig):
             raise TypeError("training must be GPT2TrainingConfig")
         if not isinstance(self.source, GPT2TrainingSource):
@@ -149,9 +163,11 @@ class GPT2TrainingSpec:
         ).hexdigest()
 
     def to_mapping(self) -> dict:
-        """Serialize legacy baseline specs unchanged and tag modern specs as v2."""
+        """Preserve v1/v2 mappings; dense grouped-query contracts use v3."""
         return {
-            "schema_version": 2
+            "schema_version": 3
+            if isinstance(self.model, GQAConfig)
+            else 2
             if isinstance(self.model, DecoderVariantConfig)
             else GPT2_TRAINING_SPEC_SCHEMA_VERSION,
             "model": model_config_mapping(self.model),
@@ -448,7 +464,9 @@ def learning_rate_at(step: int, config: GPT2TrainingConfig) -> float:
 def optimizer_group_summary(model: TrainingModel) -> GPT2OptimizerGroups:
     """Classify matrix parameters for decay and vectors for no decay."""
 
-    if not isinstance(model, (GPT2LanguageModel, DecoderVariantModel)):
+    if not isinstance(
+        model, (GPT2LanguageModel, DecoderVariantModel, GroupedQueryModel)
+    ):
         raise TypeError("model must be GPT2LanguageModel or DecoderVariantModel")
     named = tuple(model.named_parameters())
     if len({id(parameter) for _, parameter in named}) != len(named):
@@ -496,7 +514,16 @@ def language_model_loss(
 ) -> Tensor:
     """Calculate finite mean next-token loss for one validated micro-batch."""
 
-    if not isinstance(model, (GPT2LanguageModel, DecoderVariantModel)):
+    if isinstance(model, MoEDecoderModel) or (
+        isinstance(model, GroupedQueryModel)
+        and isinstance(model.config.decoder, MoEConfig)
+    ):
+        raise GPT2TrainingError(
+            "MoE training requires its explicit auxiliary objective"
+        )
+    if not isinstance(
+        model, (GPT2LanguageModel, DecoderVariantModel, GroupedQueryModel)
+    ):
         raise TypeError("model must be GPT2LanguageModel or DecoderVariantModel")
     base = base_model_config(model)
     for name, tensor in (("inputs", inputs), ("targets", targets)):
@@ -625,7 +652,9 @@ def train_optimizer_step(
 ) -> GPT2StepMetric:
     """Accumulate exact mean gradients and apply one scheduled clipped update."""
 
-    if not isinstance(model, (GPT2LanguageModel, DecoderVariantModel)):
+    if not isinstance(
+        model, (GPT2LanguageModel, DecoderVariantModel, GroupedQueryModel)
+    ):
         raise TypeError("model must be GPT2LanguageModel or DecoderVariantModel")
     if not isinstance(cursor, GPT2BatchCursor):
         raise TypeError("cursor must be GPT2BatchCursor")
@@ -874,6 +903,9 @@ def load_training_checkpoint(
     saved_cursor = cursor.state_dict()
     saved_rng = torch.get_rng_state().clone()
     try:
+        validate_serialized_adamw_state(
+            model, optimizer, payload["optimizer_state"], step=step
+        )
         model.load_state_dict(payload["model_state"], strict=True)
         optimizer.load_state_dict(payload["optimizer_state"])
         cursor.load_state_dict(payload["cursor_state"])
@@ -906,10 +938,18 @@ def training_spec_from_mapping(payload: Mapping[str, Any]) -> GPT2TrainingSpec:
     if type(payload["schema_version"]) is not int or payload["schema_version"] not in (
         1,
         2,
+        3,
     ):
         raise GPT2TrainingError("training spec schema version is unsupported")
     model = model_config_from_mapping(payload["model"])
-    if (payload["schema_version"] == 2) != isinstance(model, DecoderVariantConfig):
+    expected_schema = (
+        3
+        if isinstance(model, GQAConfig)
+        else 2
+        if isinstance(model, DecoderVariantConfig)
+        else 1
+    )
+    if payload["schema_version"] != expected_schema:
         raise GPT2TrainingError("training spec schema does not match its architecture")
     components = {
         "training": (payload["training"], GPT2TrainingConfig),

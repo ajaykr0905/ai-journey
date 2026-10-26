@@ -1,8 +1,10 @@
 """Loopback-only HTTP transport for the bounded CPU inference lab."""
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import io
 import json
 import math
+import socket
 import threading
 import time
 
@@ -13,6 +15,7 @@ from .ddp_service import (
     AdmissionRejected,
     GenerationRequest,
     ServiceDraining,
+    ServiceOverloaded,
     event_frame,
 )
 
@@ -28,6 +31,31 @@ def _unique_fields(pairs):
 
 def _reject_constant(value):
     raise ValueError("nonfinite JSON constant")
+
+
+class _ReceiveDeadline(Exception):
+    """Interrupt input without irreversibly shutting down the socket's reader."""
+
+
+class _DeadlineReader(io.RawIOBase):
+    def __init__(self, connection, deadline, expired):
+        super().__init__()
+        self.connection, self.deadline, self.expired = connection, deadline, expired
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            self.expired.set()
+            raise _ReceiveDeadline()
+        self.connection.settimeout(min(5, remaining))
+        try:
+            return self.connection.recv_into(buffer)
+        except TimeoutError as error:
+            self.expired.set()
+            raise _ReceiveDeadline() from error
 
 
 class BoundedHTTPServer(ThreadingHTTPServer):
@@ -68,17 +96,83 @@ class BoundedHTTPServer(ThreadingHTTPServer):
             self._slots.release()
 
 
-def make_server(service, *, host="127.0.0.1", port=0, max_connections=8):
+def make_server(
+    service, *, host="127.0.0.1", port=0, max_connections=8, receive_timeout_seconds=5.0
+):
     if host != "127.0.0.1":
         raise ValueError("the unauthenticated lab server binds only to loopback")
     integer(max_connections, "max_connections", 1)
     if max_connections > 64:
         raise ValueError("max_connections exceeds the lab limit of 64")
+    if (
+        isinstance(receive_timeout_seconds, bool)
+        or not isinstance(receive_timeout_seconds, (int, float))
+        or not 0 < receive_timeout_seconds <= 30
+        or not math.isfinite(receive_timeout_seconds)
+    ):
+        raise ValueError("receive timeout must be finite and in (0, 30]")
 
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
             super().setup()
+            self._input_expired = threading.Event()
+            self._input_complete = False
+            self._receive_deadline = time.monotonic() + receive_timeout_seconds
+            self.rfile.close()
+            self.rfile = io.BufferedReader(
+                _DeadlineReader(
+                    self.connection, self._receive_deadline, self._input_expired
+                )
+            )
+
+        def handle_one_request(self):
+            try:
+                super().handle_one_request()
+            except _ReceiveDeadline:
+                self.close_connection = True
+                self.requestline = getattr(self, "requestline", "")
+                if getattr(self, "request_version", "HTTP/0.9") == "HTTP/0.9":
+                    self.request_version = "HTTP/1.0"
+                try:
+                    self.reply(408, {"error": "request receive deadline exceeded"})
+                except OSError:
+                    pass
+
+        def _complete_input(self):
+            if (
+                self._input_expired.is_set()
+                or time.monotonic() >= self._receive_deadline
+            ):
+                self._input_expired.set()
+                self.reply(408, {"error": "request receive deadline exceeded"})
+                return False
+            self._input_complete = True
             self.connection.settimeout(5)
+            return True
+
+        def finish(self):
+            try:
+                super().finish()
+            finally:
+                if self._input_expired.is_set():
+                    self._drain_expired_input()
+
+        def _drain_expired_input(self):
+            # A read-side shutdown/close with in-flight bytes can reset TCP and
+            # discard the already-sent 408. Half-close the flushed response, then
+            # consume at most 16 KiB for at most 100 ms; an uncooperative sender
+            # cannot retain a connection slot indefinitely.
+            deadline, remaining = time.monotonic() + 0.1, 16 * 1024
+            try:
+                self.connection.shutdown(socket.SHUT_WR)
+                while remaining and (budget := deadline - time.monotonic()) > 0:
+                    self.connection.settimeout(budget)
+                    chunk = self.connection.recv(min(4096, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+            except OSError:
+                pass
 
         def log_message(self, format, *args):
             pass
@@ -106,6 +200,8 @@ def make_server(service, *, host="127.0.0.1", port=0, max_connections=8):
 
         def do_GET(self):
             self.start_trace()
+            if not self._complete_input():
+                return
             if self.path == "/health":
                 self.reply(200, service.health())
             elif self.path == "/ready":
@@ -154,6 +250,8 @@ def make_server(service, *, host="127.0.0.1", port=0, max_connections=8):
                 ):
                     raise ValueError("a bounded Content-Length is required")
                 body = self.rfile.read(int(lengths[0]))
+                if not self._complete_input():
+                    return
                 if len(body) != int(lengths[0]):
                     raise ValueError("request body is truncated")
                 try:
@@ -179,8 +277,12 @@ def make_server(service, *, host="127.0.0.1", port=0, max_connections=8):
                 self.reply(429, {"error": str(error)}, retry_after=error.retry_after)
             except ServiceDraining:
                 self.reply(503, {"error": "service is draining"}, retry_after=1)
+            except ServiceOverloaded:
+                self.reply(503, {"error": "inference queue is full"}, retry_after=1)
             except (ValueError, TypeError, UnicodeError):
-                if streaming:
+                if self._input_expired.is_set():
+                    self.reply(408, {"error": "request receive deadline exceeded"})
+                elif streaming:
                     self.wfile.write(
                         event_frame("error", {"error": "generation failed"})
                     )
@@ -193,7 +295,10 @@ def make_server(service, *, host="127.0.0.1", port=0, max_connections=8):
                     )
                 else:
                     self.reply(500, {"error": "generation failed"})
-            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            except TimeoutError:
+                if not self._input_complete:
+                    self.reply(408, {"error": "request receive deadline exceeded"})
+            except (BrokenPipeError, ConnectionResetError):
                 pass
 
     return BoundedHTTPServer((host, port), Handler, max_connections=max_connections)

@@ -47,6 +47,8 @@ ai-journey-resource-verify = "ai_journey.resource_cli:verify_main"
 ai-journey-decoder-compare = "ai_journey.decoder_variant_cli:main"
 ai-journey-decoder-verify = "ai_journey.decoder_variant_verify:main"
 ai-journey-gpu-preflight = "ai_journey.gpu_preflight_cli:main"
+ai-journey-moe-experiment = "ai_journey.moe_cli:main"
+ai-journey-gqa-experiment = "ai_journey.gqa_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

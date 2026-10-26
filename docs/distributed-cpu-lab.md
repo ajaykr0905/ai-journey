@@ -17,6 +17,16 @@ model, optimizer, RNG and progress recovery for modern component combinations.
 
 ## Train and resume
 
+The isolated-wheel CI gate also runs
+`python -m ai_journey.checkpoint_journal_readiness --installed-root INSTALL_TARGET
+--repository CHECKOUT --output-dir NEW_PROOF_DIRECTORY`. It trains a two-rank
+control, damages only its newly created latest checkpoint and journal blob,
+restores the older intact version, and checks exact model/AdamW/rank-RNG/metric
+parity after advancing beyond the recorded high water. Existing proof directories
+are rejected; all diagnostic streams and deliberately damaged fixtures remain
+available for inspection. This is CPU process-recovery evidence, not a power-loss
+or storage-system durability benchmark.
+
 Install the package with `python -m pip install -e .`. PyTorch must provide Gloo.
 On Linux, a CPU wheel can be installed first with
 `python -m pip install torch --index-url https://download.pytorch.org/whl/cpu`.
@@ -33,6 +43,12 @@ ai-journey-ddp train --source data/day-19-demo-names.txt \
 
 ai-journey-ddp verify --report /tmp/ddp-demo/resumed.json
 ```
+
+Keep training reports outside the rank workdir and distinct from the source,
+specification and checkpoint. Recovery/comparison workdirs must be new or empty.
+Artifact admission runs before workers: symlinks, nonregular worker outputs and
+hard links to protected inputs or another rank's artifact are rejected without
+opening/truncating them.
 
 Each rank receives disjoint shuffled samples and the same number of complete
 micro-batches. The effective global batch is
@@ -67,7 +83,73 @@ at step two. Relaunch with `resume=True` and the remaining schedule to recover i
 fresh processes. The regression compares final model, AdamW moments, per-rank RNG
 and step against an uninterrupted run exactly.
 
+For an actual abrupt process loss, `failure_mode="crash"` makes only the selected
+owned worker exit via `os._exit(86)`, without process-group or Python cleanup.
+This is distinct from legacy `exit`, which raises a normal exception. An atomic
+`rank-N.crash.json` witness records the completed boundary, PID and local monotonic
+timestamp before that child exits. `WorkerFailure.supervision` retains observed
+exit statuses/timestamps and parent cleanup completion after all owned children
+are reaped; `WorkerTimeout` provides the same observations for a deadline. These
+are CPU-local fault controls, not machine power-loss or production failover proof.
+
+### Measure abrupt-crash recovery
+
+```bash
+ai-journey-ddp recover-crash --source data/day-19-demo-names.txt \
+  --spec config/ddp-lab.json --output /tmp/crash-proof/report.json \
+  --workdir /tmp/crash-proof/owned
+ai-journey-ddp verify-crash-recovery --report /tmp/crash-proof/report.json \
+  --workdir /tmp/crash-proof/owned
+```
+
+This separate, versioned operation leaves clean `recover` evidence unchanged.
+It runs an uninterrupted control, abruptly exits rank one after completed step
+three, reads the actual last durable checkpoint (step two), and resumes the
+remaining two updates in fresh processes. The report computes one lost global
+optimizer update from observed progress; it does not assume zero loss. Controls
+are explicit: `--steps`, `--checkpoint-interval`, `--failure-after-step`,
+`--failure-rank` and `--world-size`, within the existing bounded CPU protocol.
+
+Each resumed rank records a versioned restoration witness after checkpoint
+validation and collective schedule agreement, before further updates. The maximum
+ready timestamp measures when all ranks have observed restoration. Actual crash
+time lies between the child's pre-exit witness and the parent's observed exit;
+the reported `recovery_ready_lower_ns`/`upper_ns` retain that RTO interval rather
+than pretending the exact exit instant was measured. `restoration_wall_ns`
+includes process startup and restore; `resume_completion_wall_ns` additionally
+includes replay and remaining training. These local timings are observations,
+not deterministic or production availability guarantees.
+
+The report validates actual exit status 86, parent reaping, fresh worker PIDs,
+progress, source/specification digests, monotonic chronology and exact final
+model/AdamW/RNG/step parity against the control. Offline verification recomputes
+loss and timing bounds and rejects resealed type drift. With `--workdir`, it also
+recomputes state digests from `continuous.pt`/`recovered.pt`, checks preserved
+`last-durable.pt`, and compares crash/restoration witnesses. New crash experiments
+retain the exact bounded input bytes as `training-spec.json`, and every worker
+loads that witness. Artifact verification hashes those bytes and binds all three
+checkpoints' model/training configuration, source digest and world size to the
+retained specification/report. It reconstructs each bounded CPU model without
+changing the caller's RNG, checks exact tensor restoration and recomputes its
+architecture-bound fingerprint; both checkpoint metadata and every reported
+final worker identity must match the actual model state. An older directory without this witness cannot
+prove specification binding and fails artifact verification; the v1 report
+fields themselves are unchanged. Without `--workdir`,
+verification proves internal report consistency only. A digest cannot authenticate
+that timings were collected honestly. Keep the owned artifact directory; no GPU,
+elastic-world-size, machine power-loss or production failover claim follows.
+
 ## Reproduce the acceptance experiments
+
+The local launcher takes nonblocking advisory leases on both the output directory
+and checkpoint path before opening rank logs. A concurrent cooperating launcher
+sharing either resource fails without truncating the active run's diagnostics.
+The empty `.<checkpoint-name>.ai-journey-ddp.lock` sidecar is deliberately retained;
+do not unlink it while a run might own it. Kernel descriptor cleanup releases
+ownership after an abrupt supervisor exit, so no PID guessing, foreign-process
+signals or artifact deletion is needed. Symlink, hard-link, special-file and
+nonempty sidecar collisions fail before workers start. These are local filesystem
+advisory locks, not distributed fencing against noncooperating file writers.
 
 ```bash
 ai-journey-ddp recover --source data/day-19-demo-names.txt \
@@ -175,3 +257,73 @@ Automated output does not certify lesson viewing, manual exercises, or reflectio
 
 The synchronization and accumulation behavior follows the
 [PyTorch DDP contract](https://docs.pytorch.org/docs/2.14/generated/torch.nn.parallel.DistributedDataParallel.html).
+
+## Opt-in immutable checkpoint journal
+
+Programmatic `save_checkpoint(..., journal_directory=Path(...))` publishes a
+rank-zero immutable version before replacing the conventional latest checkpoint.
+Omitting this argument keeps the single-file behavior and checkpoint schema.
+The latest path must be outside the journal. A journal belongs to the exact
+source, architecture, tensor dtypes, training schedule and world size; it cannot
+be adopted for another run.
+The journal run-v2 identity also binds the actual destination AdamW invariant
+controls and ordered parameter names in each group; it does not infer custom
+betas, decay, epsilon or groups from the training specification. The current
+scheduled learning rate and moments/counters are not invariant identity fields.
+Journal recovery compares raw candidate controls before mutating live state.
+`checkpoint_run_sha256(..., optimizer=optimizer)` therefore requires the actual
+optimizer. Pre-publication run-v1 journals are not silently adopted under this
+stronger identity; select a new journal directory. Legacy schema-v1 single-file
+checkpoints retain their existing load behavior when no journal is requested.
+
+`load_checkpoint_journal(directory, model=..., optimizer=..., config=...,
+source=...)` returns `JournalRecovery(step, recorded_step, checkpoint_sha256)`.
+Every rank hashes and deserializes the **same bounded byte snapshot**, validates
+the declared step and complete existing restore contract, and rolls back a
+rejected candidate before trying an older one. Transport failure is not treated
+as checkpoint corruption. `recorded_step` is only the manifest's high-water mark,
+not evidence that the newest version is usable.
+
+The runtime uses the journal's default limits: 16 committed versions, 64 MiB per
+blob, and 256 MiB total. It never prunes or deletes history. A full journal rejects
+publication. Uncommitted orphan files after an interrupted publication require
+explicit inspection; storage integrity alone does not establish restorability.
+Manifest publication can become visible before a later directory-fsync error:
+an exception does not imply that nothing committed. Inspect the manifest before
+retrying. The journal is authoritative when enabled; its commit and replacing
+the convenience latest path are not one cross-file atomic transaction.
+
+The supervised CLI opts in explicitly; use a journal disjoint from the source,
+specification, latest checkpoint, report and worker workdir:
+
+```bash
+ai-journey-ddp train --source data/day-19-demo-names.txt \
+  --spec config/ddp-lab.json --checkpoint /tmp/ddp-journal/state.pt \
+  --journal-directory /tmp/ddp-journal/versions \
+  --workdir /tmp/ddp-journal/initial --output /tmp/ddp-journal/initial.json \
+  --steps 2 --checkpoint-interval 1
+ai-journey-ddp train --source data/day-19-demo-names.txt \
+  --spec config/ddp-lab.json --checkpoint /tmp/ddp-journal/state.pt \
+  --journal-directory /tmp/ddp-journal/versions \
+  --workdir /tmp/ddp-journal/resumed --output /tmp/ddp-journal/resumed.json \
+  --resume --steps 2 --checkpoint-interval 1
+```
+
+`--steps` counts additional updates from the **actually restored** version, not
+from the manifest's highest recorded step. Before any update, a resumed journal
+run must be scheduled to finish strictly beyond that high-water mark and within
+the original optimizer schedule. Replayed intermediate steps at or below the
+mark can replace the convenience latest file but are not appended to immutable
+history. Rank JSON files retain the restored step, recorded step and selected
+snapshot SHA-256. The existing general evidence report schema stays unchanged.
+A non-resumed run requires an empty same-contract journal; existing committed
+progress rejects before updates rather than being silently adopted or replaced.
+
+The supervisor leases the journal directory inode for the entire run, including
+child cleanup, in addition to the checkpoint sidecar and worker-output lease.
+This is distinct from `.checkpoint-journal.lock`, which serializes individual
+manifest operations. These advisory local-filesystem leases do not fence remote
+writers or malicious processes. Select an interval that fits the finite retained
+version/byte budgets; there is no automatic pruning, rotation or elastic-world
+conversion. CPU/Gloo tests are recovery-contract evidence, not GPU throughput or
+production disaster-recovery evidence.

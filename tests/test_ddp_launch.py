@@ -70,7 +70,17 @@ def test_failed_or_stalled_worker_reaps_every_owned_process(
 
 
 @pytest.mark.parametrize(
-    "collision", ["source", "spec", "checkpoint", "symlink", "checkpoint-symlink"]
+    "collision",
+    [
+        "source",
+        "spec",
+        "checkpoint",
+        "symlink",
+        "checkpoint-symlink",
+        "hardlink-source",
+        "hardlink-spec",
+        "hardlink-checkpoint",
+    ],
 )
 def test_worker_output_aliases_cannot_truncate_run_inputs(
     tmp_path, monkeypatch, collision
@@ -94,11 +104,23 @@ def test_worker_output_aliases_cannot_truncate_run_inputs(
         valuable.write_bytes(b"keep caller log")
         (tmp_path / "rank-0.log").symlink_to(valuable)
         preserved[valuable] = valuable.read_bytes()
-    else:
+    elif collision == "checkpoint-symlink":
         valuable = tmp_path / "valuable.pt"
         valuable.write_bytes(b"keep previous checkpoint")
         checkpoint.symlink_to(valuable)
         preserved[valuable] = valuable.read_bytes()
+    else:
+        if collision == "hardlink-source":
+            copied = tmp_path / "source.txt"
+            copied.write_bytes(source.read_bytes())
+            source = copied
+            target = source
+        elif collision == "hardlink-spec":
+            target = spec
+        else:
+            checkpoint.write_bytes(b"keep previous checkpoint")
+            target = checkpoint
+        (tmp_path / "rank-0.log").hardlink_to(target)
     for path in (source, spec, checkpoint):
         if path.exists():
             preserved[path] = path.read_bytes()

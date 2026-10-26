@@ -5,10 +5,100 @@ import math
 import torch
 
 
-def validate_adamw_state(model, optimizer, *, step: int) -> None:
+def validate_serialized_adamw_state(model, optimizer, submitted, *, step: int) -> None:
+    """Check raw moments before load_state_dict can cast or copy malformed views."""
+    if not isinstance(optimizer, torch.optim.AdamW):
+        raise ValueError("serialized AdamW requires an AdamW destination")
+    if type(step) is not int or step < 0:
+        raise ValueError("serialized AdamW progress must be a nonnegative integer")
+    if not isinstance(submitted, dict) or set(submitted) != {"state", "param_groups"}:
+        raise ValueError("serialized AdamW fields do not match")
+    groups, state = submitted["param_groups"], submitted["state"]
+    expected_groups = optimizer.state_dict()["param_groups"]
+    if (
+        not isinstance(groups, list)
+        or len(groups) != len(expected_groups)
+        or not isinstance(state, dict)
+    ):
+        raise ValueError("serialized AdamW group/state schema does not match")
+    known = set()
+    for group, expected, destination in zip(
+        groups, expected_groups, optimizer.param_groups, strict=True
+    ):
+        if not isinstance(group, dict) or not isinstance(group.get("params"), list):
+            raise ValueError("serialized AdamW parameter bindings are invalid")
+        indices = group["params"]
+        if (
+            any(type(index) is not int or index < 0 for index in indices)
+            or indices != expected["params"]
+            or known.intersection(indices)
+            or len(indices) != len(set(indices))
+        ):
+            raise ValueError("serialized AdamW parameter bindings do not match")
+        known.update(indices)
+        if type(group.get("amsgrad")) is not bool:
+            raise ValueError("serialized AdamW amsgrad must be boolean")
+        fields = {"step", "exp_avg", "exp_avg_sq"}
+        if group["amsgrad"]:
+            fields.add("max_exp_avg_sq")
+        for index, parameter in zip(indices, destination["params"], strict=True):
+            raw = state.get(index, {})
+            if not raw and step == 0:
+                continue
+            if not isinstance(raw, dict) or set(raw) != fields:
+                raise ValueError("serialized AdamW moment fields do not match")
+            counter = raw["step"]
+            if (
+                not isinstance(counter, torch.Tensor)
+                or counter.dtype not in (torch.float32, torch.float64)
+                or counter.device.type != "cpu"
+                or counter.numel() != 1
+                or not bool(torch.isfinite(counter).all())
+                or counter.item() != step
+            ):
+                raise ValueError("serialized AdamW counter does not match progress")
+            for name in fields - {"step"}:
+                tensor = raw[name]
+                if (
+                    not isinstance(tensor, torch.Tensor)
+                    or tensor.layout != torch.strided
+                    or tensor.shape != parameter.shape
+                    or tensor.dtype != parameter.dtype
+                    or tensor.device != parameter.device
+                    or not bool(torch.isfinite(tensor).all())
+                    or (name != "exp_avg" and bool((tensor < 0).any()))
+                ):
+                    raise ValueError("serialized AdamW moment tensor schema is invalid")
+    if any(type(index) is not int or index not in known for index in state):
+        raise ValueError("serialized AdamW contains unknown parameter state")
+
+
+def validate_adamw_state(
+    model, optimizer, *, step: int, execution_controls=None
+) -> None:
     """Reject malformed finite moments and controls that cannot resume correctly."""
     if not isinstance(optimizer, torch.optim.AdamW):
         raise ValueError("training checkpoints require AdamW")
+    controls = {
+        "capturable": False,
+        "differentiable": False,
+        "foreach": None,
+        "fused": None,
+    }
+    if execution_controls is not None:
+        if (
+            not isinstance(execution_controls, dict)
+            or set(execution_controls) != set(controls)
+            or execution_controls["capturable"] is not False
+            or execution_controls["differentiable"] is not False
+            or any(
+                execution_controls[name] is not None
+                and execution_controls[name] is not False
+                for name in ("foreach", "fused")
+            )
+        ):
+            raise ValueError("declared CPU execution controls are unsupported")
+        controls = execution_controls
     parameters = tuple(model.parameters())
     parameter_ids = {id(parameter) for parameter in parameters}
     bound = [p for group in optimizer.param_groups for p in group["params"]]
@@ -20,12 +110,7 @@ def validate_adamw_state(model, optimizer, *, step: int) -> None:
         # These controls are not configurable in the deterministic CPU protocol.
         # In particular, capturable=True can restore finite state successfully
         # yet fail only when AdamW attempts its next CPU update.
-        for name, expected in (
-            ("capturable", False),
-            ("differentiable", False),
-            ("foreach", None),
-            ("fused", None),
-        ):
+        for name, expected in controls.items():
             if (
                 name not in group
                 or type(group[name]) is not type(expected)
@@ -71,6 +156,11 @@ def validate_adamw_state(model, optimizer, *, step: int) -> None:
             counter = state["step"]
             if (
                 not isinstance(counter, torch.Tensor)
+                # Canonical CPU AdamW uses real scalar counters. Bool and
+                # complex tensors can compare equal to progress yet fail the
+                # next update (or introduce unsupported complex bias correction).
+                or counter.dtype not in (torch.float32, torch.float64)
+                or counter.device.type != "cpu"
                 or counter.numel() != 1
                 or not torch.isfinite(counter).all()
                 or counter.item() != step

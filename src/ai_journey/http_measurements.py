@@ -79,11 +79,12 @@ def validated_request(request):
     ):
         raise ValueError("invalid benchmark top_k")
     for name in ("temperature", "top_p"):
-        if (
-            isinstance(controls[name], bool)
-            or not isinstance(controls[name], (int, float))
-            or not math.isfinite(controls[name])
-        ):
+        value = controls[name]
+        try:
+            finite = type(value) in (int, float) and math.isfinite(value)
+        except OverflowError:
+            finite = False
+        if not finite:
             raise ValueError(f"invalid benchmark {name}")
     if controls["temperature"] < 0 or not 0 < controls["top_p"] <= 1:
         raise ValueError("invalid benchmark sampling range")

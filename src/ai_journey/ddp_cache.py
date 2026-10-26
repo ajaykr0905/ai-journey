@@ -5,6 +5,7 @@ import math
 import torch
 from .gpt2_training import gpt2_model_fingerprint
 from .training_models import base_model_config
+from .gqa_config import cache_head_count
 
 
 @dataclass(frozen=True)
@@ -119,7 +120,7 @@ def cached_forward(model, token_ids: torch.Tensor, cache: KVCache | None = None)
         if (
             cache.model_sha256 != fingerprint
             or len(cache.keys) != len(model.h)
-            or cache.keys[0].shape[:2] != (token_ids.shape[0], base.head_count)
+            or cache.keys[0].shape[:2] != (token_ids.shape[0], cache_head_count(model))
             or cache.keys[0].shape[-1] != base.head_dim
             or cache.keys[0].dtype != model.wte.weight.dtype
         ):
