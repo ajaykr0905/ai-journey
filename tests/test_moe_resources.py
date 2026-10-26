@@ -92,6 +92,7 @@ def test_arm_admission_is_bounded_and_explicit(invalid):
         ("MAX_JOB_WORK_UNITS", "work_units"),
         ("MAX_JOB_ROUTE_ELEMENTS", "peak_route_elements"),
         ("MAX_JOB_ATTENTION_ELEMENTS", "peak_attention_elements"),
+        ("MAX_JOB_CHECKPOINT_RECORDS", "peak_checkpoint_records"),
     ],
 )
 def test_independent_budgets_admit_exact_boundary_and_reject_above_it(
@@ -126,3 +127,23 @@ def test_dense_optimizer_cost_tracks_stored_not_active_experts():
     assert large["optimizer_work_units"] == 3 * 10 * large["model_parameters"][0] * 2
     assert large["optimizer_work_units"] > small["optimizer_work_units"]
     assert large["active_parameters"][0] < large["model_parameters"][0]
+
+
+def test_many_small_experts_cannot_bypass_checkpoint_record_work_admission():
+    sparse = arms()[1]
+    many_tensors = replace(
+        sparse,
+        gpt2=replace(sparse.gpt2, layer_count=64),
+        expert_count=64,
+        moe_layers=tuple(range(64)),
+    )
+    estimate = resources.estimate_moe_job(
+        (many_tensors,), seeds=1, steps=1, batch_size=1, evaluation_windows=1
+    )
+    assert estimate["peak_model_parameters"] < resources.MAX_JOB_MODEL_PARAMETERS
+    assert estimate["work_units"] < resources.MAX_JOB_WORK_UNITS
+    assert estimate["peak_checkpoint_records"] == 67_888
+    with pytest.raises(ValueError, match="peak_checkpoint_records"):
+        resources.require_moe_job_budget(
+            (many_tensors,), seeds=1, steps=1, batch_size=1, evaluation_windows=1
+        )
