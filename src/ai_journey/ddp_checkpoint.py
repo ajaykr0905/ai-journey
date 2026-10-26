@@ -21,6 +21,7 @@ from .ddp_runtime import (
     require_optimizer_consensus,
 )
 from .gpt2_training import gpt2_model_fingerprint
+from .training_models import model_config_mapping
 
 
 def bounded_checkpoint_load(path: Path, max_bytes: int):
@@ -132,7 +133,7 @@ def save_checkpoint(
                         "schema_version": 1,
                         "world_size": dist.get_world_size(),
                         "step": step,
-                        "model_config": asdict(model.config),
+                        "model_config": model_config_mapping(model.config),
                         "training_config": asdict(config),
                         "source_sha256": sha256(source).hexdigest(),
                         "model_sha256": fingerprint,
@@ -203,7 +204,7 @@ def load_checkpoint(
         if (
             payload["step"] > config.optimizer_steps
             or payload["world_size"] != dist.get_world_size()
-            or payload["model_config"] != asdict(model.config)
+            or payload["model_config"] != model_config_mapping(model.config)
             or payload["training_config"] != asdict(config)
             or payload["source_sha256"] != sha256(source).hexdigest()
         ):

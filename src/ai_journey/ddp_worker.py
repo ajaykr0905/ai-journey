@@ -11,9 +11,9 @@ from .ddp_checkpoint import save_checkpoint, load_checkpoint
 from .ddp_contracts import Topology, integer
 from .ddp_runtime import process_group, require_all_ranks
 from .ddp_training import train_segment
-from .gpt2_model import GPT2LanguageModel
 from .gpt2_training import build_gpt2_optimizer
 from .ddp_limits import preflight
+from .training_models import build_training_model
 
 
 def main(argv=None):
@@ -54,7 +54,7 @@ def main(argv=None):
         raise ValueError("public source digest does not match specification")
     torch.set_num_threads(1)
     torch.manual_seed(spec.training.seed)
-    model = GPT2LanguageModel(spec.model).double()
+    model = build_training_model(spec.model, max_parameters=1_000_000).double()
     optimizer = build_gpt2_optimizer(model, spec.training)
     with process_group(topology, rendezvous=args.rendezvous):
         wrapped = DistributedDataParallel(model)

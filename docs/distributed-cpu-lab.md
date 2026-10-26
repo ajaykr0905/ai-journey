@@ -6,6 +6,15 @@ document-isolated evaluation, cached inference, and a bounded loopback server.
 The checked protocol is `config/ddp-lab.json`; it uses the public CC0 fixture
 `data/day-19-demo-names.txt`, bound to its SHA-256 and an immutable repository URL.
 
+The same worker, optimizer, checkpoint and evidence paths also accept schema-two
+training specs with a tagged `decoder_variant` model contract. RMSNorm, SwiGLU,
+learned positions and RoPE use the shared architecture contracts described in
+`docs/gpt2-training-controls.md`. Modern decoder dimensions and the resolved
+SwiGLU width count toward the same CPU budgets. Checkpoints bind the entire
+architecture, including the RoPE base; equal tensor shapes do not permit resuming
+with a different positional contract. Real two-rank regressions check exact
+model, optimizer, RNG and progress recovery for modern component combinations.
+
 ## Train and resume
 
 Install the package with `python -m pip install -e .`. PyTorch must provide Gloo.

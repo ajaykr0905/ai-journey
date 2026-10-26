@@ -18,6 +18,7 @@ from .ddp_runtime import (
 from .ddp_data import byte_batches
 from .ddp_contracts import integer
 from .gpt2_training import learning_rate_at
+from .training_models import base_model_config
 
 
 def _accumulated_update(
@@ -33,6 +34,7 @@ def _accumulated_update(
     ):
         raise ValueError("gradient_clip must be positive and finite")
     batches = tuple(batches)
+    model_config = base_model_config(model.module)
     valid = bool(batches)
     for inputs, targets in batches:
         valid = (
@@ -46,14 +48,14 @@ def _accumulated_update(
             inputs.dtype == targets.dtype == torch.long
             and inputs.ndim == 2
             and inputs.shape == targets.shape
-            and 0 < inputs.shape[1] <= model.module.config.context_length
+            and 0 < inputs.shape[1] <= model_config.context_length
             and inputs.numel() > 0
         )
         if valid:
             valid = (
                 min(inputs.min().item(), targets.min().item()) >= 0
                 and max(inputs.max().item(), targets.max().item())
-                < model.module.config.vocab_size
+                < model_config.vocab_size
             )
     require_all_ranks(valid, phase="micro-batch validation")
     signature = (len(batches), tuple(batches[0][0].shape))
