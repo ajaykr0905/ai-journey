@@ -1,7 +1,7 @@
 import pytest
 
 from ai_journey.ddp_generation import SamplingConfig
-from ai_journey.ddp_service import GenerationRequest, GenerationService
+from ai_journey.ddp_service import GenerationRequest, GenerationService, TokenBucket
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 
@@ -63,3 +63,24 @@ def test_cached_responses_validate_controls_like_uncached_requests(controls):
     service.generate(request)
     with pytest.raises((TypeError, ValueError)):
         service.generate(request, **controls)
+
+
+@pytest.mark.parametrize("reading", [float("nan"), float("inf"), -float("inf"), True])
+def test_admission_rejects_invalid_initial_clock_reading(reading):
+    with pytest.raises(ValueError, match="clock"):
+        TokenBucket(5, 1, clock=lambda: reading)
+
+
+@pytest.mark.parametrize("reading", [float("nan"), float("inf"), -float("inf"), True])
+def test_invalid_admission_clock_cannot_refill_or_mutate_budget(reading):
+    readings = [0.0]
+    bucket = TokenBucket(5, 1, clock=lambda: readings[0])
+    bucket.consume(5)
+    readings[0] = reading
+    with pytest.raises(ValueError, match="clock"):
+        bucket.consume(1)
+    assert bucket.tokens == 0
+    assert bucket.updated == 0
+    readings[0] = 1.0
+    bucket.consume(1)
+    assert bucket.tokens == 0

@@ -39,16 +39,28 @@ class TokenBucket:
         self.capacity = capacity
         self.rate = refill_per_second
         self.tokens = float(capacity)
+        if not callable(clock):
+            raise TypeError("admission clock must be callable")
         self.clock = clock
-        self.updated = clock()
+        self.updated = self._read_clock()
         self.lock = threading.Lock()
+
+    def _read_clock(self):
+        now = self.clock()
+        if (
+            isinstance(now, bool)
+            or not isinstance(now, (int, float))
+            or not math.isfinite(now)
+        ):
+            raise ValueError("admission clock must return a finite number")
+        return now
 
     def consume(self, cost: int):
         integer(cost, "cost", 1)
         if cost > self.capacity:
             raise ValueError("request cannot fit the admission capacity")
         with self.lock:
-            now = self.clock()
+            now = self._read_clock()
             if now < self.updated:
                 raise RuntimeError("admission clock moved backwards")
             self.tokens = min(
