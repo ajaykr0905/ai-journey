@@ -33,15 +33,18 @@ class RMSNorm(nn.Module):
         if inputs.ndim < 1 or inputs.shape[-1] != self.width:
             raise ValueError("inputs last dimension must match width")
 
-        # Low-precision squared values can overflow even when the normalized
-        # output is representable. Accumulate the RMS in float32 in that case.
+        # Accumulate low-precision inputs in float32, then scale each vector
+        # before squaring: even a finite float32 value can overflow when
+        # squared, while the normalized output remains representable.
         accumulator = (
             inputs.float()
             if inputs.dtype in (torch.float16, torch.bfloat16)
             else inputs
         )
+        scale = accumulator.abs().amax(dim=-1, keepdim=True).clamp_min(1)
+        scaled = accumulator / scale
         inverse_rms = torch.rsqrt(
-            accumulator.square().mean(dim=-1, keepdim=True) + self.eps
+            scaled.square().mean(dim=-1, keepdim=True) + self.eps / scale / scale
         )
-        normalized = (accumulator * inverse_rms).to(dtype=inputs.dtype)
+        normalized = (scaled * inverse_rms).to(dtype=inputs.dtype)
         return normalized * self.weight.to(dtype=inputs.dtype)

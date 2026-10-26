@@ -56,6 +56,23 @@ def test_rms_norm_avoids_half_precision_square_overflow() -> None:
     )
 
 
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+def test_rms_norm_avoids_float32_accumulator_square_overflow(
+    dtype: torch.dtype,
+) -> None:
+    norm = RMSNorm(2).to(dtype=dtype)
+    inputs = torch.tensor([[1e20, -2e20]], dtype=dtype)
+
+    result = norm(inputs)
+    expected = F.rms_norm(inputs.double(), (2,), norm.weight.double(), eps=norm.eps).to(
+        dtype=dtype
+    )
+
+    assert result.dtype == dtype
+    assert torch.isfinite(result).all()
+    torch.testing.assert_close(result, expected)
+
+
 @pytest.mark.parametrize("width", [0, -1, True, 2.5])
 def test_rms_norm_rejects_invalid_width(width: object) -> None:
     with pytest.raises((TypeError, ValueError), match="width"):
