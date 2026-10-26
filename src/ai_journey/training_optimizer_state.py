@@ -5,10 +5,32 @@ import math
 import torch
 
 
-def validate_adamw_state(model, optimizer, *, step: int) -> None:
+def validate_adamw_state(
+    model, optimizer, *, step: int, execution_controls=None
+) -> None:
     """Reject malformed finite moments and controls that cannot resume correctly."""
     if not isinstance(optimizer, torch.optim.AdamW):
         raise ValueError("training checkpoints require AdamW")
+    controls = {
+        "capturable": False,
+        "differentiable": False,
+        "foreach": None,
+        "fused": None,
+    }
+    if execution_controls is not None:
+        if (
+            not isinstance(execution_controls, dict)
+            or set(execution_controls) != set(controls)
+            or execution_controls["capturable"] is not False
+            or execution_controls["differentiable"] is not False
+            or any(
+                execution_controls[name] is not None
+                and execution_controls[name] is not False
+                for name in ("foreach", "fused")
+            )
+        ):
+            raise ValueError("declared CPU execution controls are unsupported")
+        controls = execution_controls
     parameters = tuple(model.parameters())
     parameter_ids = {id(parameter) for parameter in parameters}
     bound = [p for group in optimizer.param_groups for p in group["params"]]
@@ -20,12 +42,7 @@ def validate_adamw_state(model, optimizer, *, step: int) -> None:
         # These controls are not configurable in the deterministic CPU protocol.
         # In particular, capturable=True can restore finite state successfully
         # yet fail only when AdamW attempts its next CPU update.
-        for name, expected in (
-            ("capturable", False),
-            ("differentiable", False),
-            ("foreach", None),
-            ("fused", None),
-        ):
+        for name, expected in controls.items():
             if (
                 name not in group
                 or type(group[name]) is not type(expected)
