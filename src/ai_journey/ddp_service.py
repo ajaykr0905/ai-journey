@@ -123,10 +123,18 @@ class GenerationRequest:
             raise ValueError("request must contain request_id, prompt and sampling")
         if set(payload["sampling"]) - set(SamplingConfig.__dataclass_fields__):
             raise ValueError("unknown sampling field")
+        try:
+            sampling = SamplingConfig(**payload["sampling"])
+        except OverflowError as error:
+            # JSON integers can fit the byte budget without being representable
+            # by the floating-point sampler. Reject before service admission.
+            raise ValueError(
+                "sampling number exceeds finite floating-point range"
+            ) from error
         return cls(
             payload["request_id"],
             tuple(payload["prompt"]),
-            SamplingConfig(**payload["sampling"]),
+            sampling,
         )
 
 

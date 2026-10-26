@@ -128,6 +128,16 @@ elastic-world-size, machine power-loss or production failover claim follows.
 
 ## Reproduce the acceptance experiments
 
+The local launcher takes nonblocking advisory leases on both the output directory
+and checkpoint path before opening rank logs. A concurrent cooperating launcher
+sharing either resource fails without truncating the active run's diagnostics.
+The empty `.<checkpoint-name>.ai-journey-ddp.lock` sidecar is deliberately retained;
+do not unlink it while a run might own it. Kernel descriptor cleanup releases
+ownership after an abrupt supervisor exit, so no PID guessing, foreign-process
+signals or artifact deletion is needed. Symlink, hard-link, special-file and
+nonempty sidecar collisions fail before workers start. These are local filesystem
+advisory locks, not distributed fencing against noncooperating file writers.
+
 ```bash
 ai-journey-ddp recover --source data/day-19-demo-names.txt \
   --spec config/ddp-lab.json --output /tmp/ddp-demo/recovery.json \
