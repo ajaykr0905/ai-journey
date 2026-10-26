@@ -89,3 +89,29 @@ def test_parser_rejects_incomplete_or_unknown_fields(mutation):
 def test_huge_capacity_integer_is_a_validation_error_not_float_overflow():
     with pytest.raises(ValueError, match="capacity_factor"):
         small_config(capacity_factor=10**1000)
+
+
+@pytest.mark.parametrize("mlp", ["gelu", "swiglu"])
+@pytest.mark.parametrize("norm", ["layernorm", "rmsnorm"])
+@pytest.mark.parametrize("positions", ["learned", "rope"])
+def test_parameter_tensor_count_matches_actual_model_without_head_alias(
+    mlp, norm, positions
+):
+    from ai_journey.decoder_variant_config import DecoderVariantConfig
+    from ai_journey.decoder_variant_model import DecoderVariantModel
+    from ai_journey.moe_model import MoEDecoderModel
+    from ai_journey.moe_config import (
+        expected_decoder_parameter_tensors,
+        expected_moe_parameter_tensors,
+    )
+
+    config = small_config(mlp_kind=mlp, norm_kind=norm, position_kind=positions)
+    assert expected_moe_parameter_tensors(config) == len(
+        tuple(MoEDecoderModel(config).parameters())
+    )
+    dense = DecoderVariantConfig(
+        config.gpt2, norm_kind=norm, mlp_kind=mlp, position_kind=positions
+    )
+    assert expected_decoder_parameter_tensors(dense) == len(
+        tuple(DecoderVariantModel(dense).parameters())
+    )

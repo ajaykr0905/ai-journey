@@ -6,18 +6,35 @@ updates of idle experts. Routing/attention elements are admission proxies,
 not a complete training-memory estimate or a GPU-readiness claim.
 """
 
+from .checkpoint_archive import MAX_CHECKPOINT_RECORDS
 from .decoder_variant_config import DecoderVariantConfig
 from .decoder_variant_resources import expected_decoder_variant_parameter_count
 from .moe_config import (
     MoEConfig,
     expected_moe_active_parameters,
     expected_moe_parameter_count,
+    expected_decoder_parameter_tensors,
 )
 
 MAX_JOB_MODEL_PARAMETERS = 5_000_000
 MAX_JOB_WORK_UNITS = 100_000_000
 MAX_JOB_ROUTE_ELEMENTS = 262_144
 MAX_JOB_ATTENTION_ELEMENTS = 8_000_000
+MAX_JOB_CHECKPOINT_RECORDS = MAX_CHECKPOINT_RECORDS
+
+
+def expected_checkpoint_records(config):
+    """Bound full model/AdamW/RNG archive records, not bytes or allocator peaks.
+
+    Each parameter is conservatively charged five storages: model weight,
+    AdamW step/first/second moments and an optional AMSGrad maximum moment.
+    The core CPU reference disallows AMSGrad; its extra slot is a conservative
+    allowance, not a claim that it is executed. Tied heads add no storage;
+    32 more records cover RNG/archive metadata.
+    """
+    if type(config) not in (DecoderVariantConfig, MoEConfig):
+        raise TypeError("checkpoint record estimate requires a dense or MoE config")
+    return 5 * expected_decoder_parameter_tensors(config) + 32
 
 
 def _control(value, name, maximum):
@@ -90,6 +107,9 @@ def estimate_moe_job(
         "peak_model_parameters": max(stored),
         "peak_route_elements": max(route_elements),
         "peak_attention_elements": max(attention_elements),
+        "peak_checkpoint_records": max(
+            expected_checkpoint_records(arm) for arm in arms
+        ),
     }
 
 
@@ -101,6 +121,7 @@ def require_moe_job_budget(arms, **controls):
         ("work_units", MAX_JOB_WORK_UNITS),
         ("peak_route_elements", MAX_JOB_ROUTE_ELEMENTS),
         ("peak_attention_elements", MAX_JOB_ATTENTION_ELEMENTS),
+        ("peak_checkpoint_records", MAX_JOB_CHECKPOINT_RECORDS),
     ):
         if estimate[field] > limit:
             raise ValueError(f"MoE job exceeds {field} budget of {limit}")
