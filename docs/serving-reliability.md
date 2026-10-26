@@ -28,11 +28,15 @@ a connection. Internal generation failures return a generic
 500, and a failure after streaming begins emits one terminal `error` SSE event.
 Requests have a ten-second generation deadline and a five-second socket timeout.
 An absolute five-second input budget also covers request headers and body;
-trickling bytes cannot renew it. The owned socket's receive side is interrupted
-at expiry, incomplete input cannot enter generation, and a body receive timeout
-returns 408 when response framing is available. `make_server` accepts an explicit
+trickling bytes cannot renew it. Each raw socket receive uses the remaining
+absolute budget, so expiry interrupts input without shutting down its read side;
+incomplete input cannot enter generation. The server flushes a 408 response,
+half-closes its write side and drains at most 16 KiB for at most 100 ms before
+releasing the connection slot. This bounded grace protects the response from a
+TCP reset caused by bytes already in flight; it is not an unlimited drain for
+uncooperative senders. `make_server` accepts an explicit
 `receive_timeout_seconds` in `(0, 30]` for bounded local operating checks. This
-timer ends after input receipt and does not shorten an admitted decode deadline.
+input budget ends after receipt and does not shorten an admitted decode deadline.
 The service separately bounds running-plus-waiting generation calls to eight by
 default (`GenerationService(max_inflight_requests=...)`, maximum 64); a full
 inference queue returns 503 with `Retry-After` without charging the token bucket.

@@ -1,6 +1,7 @@
 """Loopback-only HTTP transport for the bounded CPU inference lab."""
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import io
 import json
 import math
 import socket
@@ -30,6 +31,31 @@ def _unique_fields(pairs):
 
 def _reject_constant(value):
     raise ValueError("nonfinite JSON constant")
+
+
+class _ReceiveDeadline(Exception):
+    """Interrupt input without irreversibly shutting down the socket's reader."""
+
+
+class _DeadlineReader(io.RawIOBase):
+    def __init__(self, connection, deadline, expired):
+        super().__init__()
+        self.connection, self.deadline, self.expired = connection, deadline, expired
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            self.expired.set()
+            raise _ReceiveDeadline()
+        self.connection.settimeout(min(5, remaining))
+        try:
+            return self.connection.recv_into(buffer)
+        except TimeoutError as error:
+            self.expired.set()
+            raise _ReceiveDeadline() from error
 
 
 class BoundedHTTPServer(ThreadingHTTPServer):
@@ -89,37 +115,64 @@ def make_server(
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
             super().setup()
-            self.connection.settimeout(min(5, receive_timeout_seconds))
             self._input_expired = threading.Event()
             self._input_complete = False
-            self._receive_timer = threading.Timer(
-                receive_timeout_seconds, self._expire_receive
+            self._receive_deadline = time.monotonic() + receive_timeout_seconds
+            self.rfile.close()
+            self.rfile = io.BufferedReader(
+                _DeadlineReader(
+                    self.connection, self._receive_deadline, self._input_expired
+                )
             )
-            self._receive_timer.daemon = True
-            self._receive_timer.start()
 
-        def _expire_receive(self):
-            self._input_expired.set()
+        def handle_one_request(self):
             try:
-                self.connection.shutdown(socket.SHUT_RD)
-            except OSError:
-                pass
-
-        def _stop_receive_timer(self):
-            self._receive_timer.cancel()
-            self._receive_timer.join(timeout=1)
+                super().handle_one_request()
+            except _ReceiveDeadline:
+                self.close_connection = True
+                self.requestline = getattr(self, "requestline", "")
+                if getattr(self, "request_version", "HTTP/0.9") == "HTTP/0.9":
+                    self.request_version = "HTTP/1.0"
+                try:
+                    self.reply(408, {"error": "request receive deadline exceeded"})
+                except OSError:
+                    pass
 
         def _complete_input(self):
-            self._stop_receive_timer()
-            if self._input_expired.is_set():
+            if (
+                self._input_expired.is_set()
+                or time.monotonic() >= self._receive_deadline
+            ):
+                self._input_expired.set()
                 self.reply(408, {"error": "request receive deadline exceeded"})
                 return False
             self._input_complete = True
+            self.connection.settimeout(5)
             return True
 
         def finish(self):
-            self._stop_receive_timer()
-            super().finish()
+            try:
+                super().finish()
+            finally:
+                if self._input_expired.is_set():
+                    self._drain_expired_input()
+
+        def _drain_expired_input(self):
+            # A read-side shutdown/close with in-flight bytes can reset TCP and
+            # discard the already-sent 408. Half-close the flushed response, then
+            # consume at most 16 KiB for at most 100 ms; an uncooperative sender
+            # cannot retain a connection slot indefinitely.
+            deadline, remaining = time.monotonic() + 0.1, 16 * 1024
+            try:
+                self.connection.shutdown(socket.SHUT_WR)
+                while remaining and (budget := deadline - time.monotonic()) > 0:
+                    self.connection.settimeout(budget)
+                    chunk = self.connection.recv(min(4096, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+            except OSError:
+                pass
 
         def log_message(self, format, *args):
             pass
