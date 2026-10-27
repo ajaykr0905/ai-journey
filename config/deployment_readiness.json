@@ -1,5 +1,13 @@
 {
   "required_files": [
+    "config/moe-ddp-cpu.json",
+    "src/ai_journey/moe_ddp_cli.py",
+    "src/ai_journey/moe_ddp_data.py",
+    "src/ai_journey/moe_ddp_evidence.py",
+    "src/ai_journey/moe_ddp_launch.py",
+    "src/ai_journey/moe_ddp_plan.py",
+    "src/ai_journey/moe_ddp_worker.py",
+    "tests/test_moe_ddp_operator.py",
     "tests/test_prefix_ci_contract.py",
     "src/ai_journey/prefix_readiness.py",
     "src/ai_journey/prefix_report.py",

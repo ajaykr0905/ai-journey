@@ -1,0 +1,56 @@
+{
+  "run": {
+    "accumulation_steps": 2,
+    "balance_weight": 0.01,
+    "capacity_scope": "rank_microbatch",
+    "learning_rate": 0.002,
+    "max_gradient_norm": 1,
+    "micro_batch_size": 1,
+    "model": {
+      "capacity_factor": 1.25,
+      "expert_count": 4,
+      "gpt2": {
+        "activation_function": "gelu_new",
+        "attention_dropout": 0.1,
+        "context_length": 4,
+        "embedding_dim": 4,
+        "embedding_dropout": 0.1,
+        "head_count": 2,
+        "layer_count": 1,
+        "layer_norm_epsilon": 0.00001,
+        "residual_dropout": 0.1,
+        "vocab_size": 256
+      },
+      "min_capacity": 1,
+      "mlp_kind": "gelu",
+      "moe_layers": [
+        0
+      ],
+      "norm_kind": "layernorm",
+      "position_kind": "learned",
+      "rope_base": 10000,
+      "swiglu_hidden_dim": null,
+      "top_k": 2
+    },
+    "optimizer": {
+      "beta1": 0.9,
+      "beta2": 0.999,
+      "epsilon": 1e-8,
+      "weight_decay": 0.01
+    },
+    "optimizer_steps": 4,
+    "schema": "ai-journey-moe-ddp-v1",
+    "seed": 53,
+    "sequence_length": 4,
+    "world_size": 2,
+    "z_weight": 0.001
+  },
+  "schema": "ai-journey-public-moe-ddp-plan-v1",
+  "source": {
+    "license": "CC0-1.0",
+    "name": "Synthetic public name-like tokens",
+    "revision": "sha256:f3670d269756a7b8800389c29599c25b2eccc63ca16e7b4f84b532d21f973411",
+    "sha256": "f3670d269756a7b8800389c29599c25b2eccc63ca16e7b4f84b532d21f973411",
+    "url": "https://github.com/ajaykr0905/ai-journey/blob/10c33105bf0ae8c4a205ecf098fdeea43ea070c0/data/day-19-demo-names.txt"
+  }
+}
