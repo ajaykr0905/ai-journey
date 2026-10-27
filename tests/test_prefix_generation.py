@@ -1,4 +1,6 @@
 from itertools import product
+from contextlib import contextmanager
+import weakref
 
 import pytest
 import torch
@@ -161,3 +163,48 @@ def test_small_budget_bypasses_cache_without_changing_real_generation(model):
         model, (1, 2), config, use_cache=True, prefix_store=store
     ) == generate_tokens(model, (1, 2), config)
     assert store.snapshot()["entries"] == 0
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_owned_generation_releases_borrowed_tensors_before_lease_accounting(
+    model, monkeypatch, failure
+):
+    store = PrefixKVStore(max_bytes=64 * 1024)
+    config = SamplingConfig(max_new_tokens=1, temperature=0)
+    generate_tokens(model, (1, 2), config, use_cache=True, prefix_store=store)
+    acquire = store.acquire
+    inspected = []
+
+    @contextmanager
+    def checked(*args, **kwargs):
+        try:
+            with acquire(*args, **kwargs) as match:
+                references = [
+                    weakref.ref(tensor)
+                    for tensor in (
+                        *match.cache.keys,
+                        *match.cache.values,
+                        match.last_logits,
+                    )
+                ]
+                try:
+                    yield match
+                finally:
+                    match = None
+        finally:
+            inspected.append(True)
+            assert all(reference() is None for reference in references)
+
+    monkeypatch.setattr(store, "acquire", checked)
+    if failure:
+
+        def fail(index, token):
+            raise RuntimeError("controlled delivery failure")
+
+        with pytest.raises(RuntimeError, match="delivery"):
+            generate_tokens(
+                model, (1, 2), config, use_cache=True, prefix_store=store, on_token=fail
+            )
+    else:
+        generate_tokens(model, (1, 2), config, use_cache=True, prefix_store=store)
+    assert inspected == [True]

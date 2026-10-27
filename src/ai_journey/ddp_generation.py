@@ -192,6 +192,12 @@ def generate_tokens(
     history = list(prompt)
     reason = "length"
     cache = None
+    output = None
+
+    def release_prefix_references():
+        nonlocal cache, output
+        cache = output = None
+
     try:
         model.eval()
         with torch.inference_mode(), ExitStack() as leases:
@@ -220,6 +226,9 @@ def generate_tokens(
                                 observation=prefix_observation,
                             )
                         )
+                        # LIFO: release this driver's tensor aliases before
+                        # prefill closes and its isolated lease is uncharged.
+                        leases.callback(release_prefix_references)
                     elif cache is None or cache.length == base.context_length:
                         output, cache = cached_forward(model, inputs)
                     else:
