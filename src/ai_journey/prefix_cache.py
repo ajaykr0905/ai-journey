@@ -309,6 +309,7 @@ class PrefixKVStore:
         finally:
             if value is not None:
                 with self._lock:
+                    value = None
                     self._leased -= size
                     self._active -= 1
 
