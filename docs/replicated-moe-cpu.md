@@ -1,5 +1,14 @@
 # Replicated expert optimizer windows on CPU
 
+The isolated-wheel CI gate runs
+`python -m ai_journey.moe_ddp_readiness --installed-root INSTALL_TARGET --repository CHECKOUT --output-dir NEW_PROOF_DIRECTORY`.
+It operates the checked public plan, verifies each phase's archive before reuse,
+and compares four uninterrupted updates with two plus two in fresh ranks: exact
+model/optimizer, per-rank RNG, data cursor and every raw rank metric. Existing
+proof directories are never reused. All command streams and worker evidence are
+retained; an outer controller deadline stops only its explicitly owned process
+group after the inner worker supervisor's graceful deadline has expired.
+
 This opt-in library is separate from the plain-CE DDP training worker. It runs
 replicated float64 CPU/Gloo models: every rank stores every expert. It is not
 expert parallelism, GPU validation, a speed result or production recovery proof.

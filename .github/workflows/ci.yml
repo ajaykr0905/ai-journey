@@ -168,6 +168,12 @@ jobs:
           ai-journey-moe-experiment verify --report "$RUNNER_TEMP/moe-evidence/report.json"
           ai-journey-moe-experiment replay --report "$RUNNER_TEMP/moe-evidence/report.json" --snapshot "$RUNNER_TEMP/moe-english.conllu"
           python -m ai_journey.checkpoint_journal_readiness --installed-root "$RUNNER_TEMP/moe-installed" --repository "$GITHUB_WORKSPACE" --output-dir "$RUNNER_TEMP/moe-evidence/journal"
+      - name: Prove installed replicated expert restart from public bytes
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/moe-installed
+        run: |
+          python -m ai_journey.moe_ddp_readiness --installed-root "$RUNNER_TEMP/moe-installed" --repository "$GITHUB_WORKSPACE" --output-dir "$RUNNER_TEMP/moe-evidence/replicated"
       - name: Retain measured public CPU evidence
         if: always()
         uses: actions/upload-artifact@v4
