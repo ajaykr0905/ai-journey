@@ -55,3 +55,25 @@ counts and bounded pool gauges without request IDs, prompts, model IDs or namesp
 labels. Token-generation metrics count prefix-hit decoding as new work, not replay.
 Draining clears resident snapshots; active copies remain charged until decoding
 or cancellation unwinds, and final admission cleanup clears any late publication.
+
+To exercise the installed package, with its installation target on `PYTHONPATH`:
+
+```sh
+python -m ai_journey.prefix_readiness --installed-root /absolute/install-target --output-dir /absolute/new-run
+python -m ai_journey.prefix_readiness --verify-report /absolute/new-run/report.json --artifact-dir /absolute/new-run
+```
+
+The bounded readiness run starts only its own existing serving operator, using a
+seeded **untrained step-zero float64 CPU GQA control**. Six fresh HTTP IDs cover
+JSON/SSE, cold/exact/branch/interior/miss/seeded prefixes and context rollover,
+with outputs compared to actual full uncached generation. A seventh request
+closes its stream after one received token. That proves client cancellation and
+settled lease cleanup, not a guarantee that a fast server avoided all later work.
+The report retains actual timestamps, forwarded/reused/generated counts, compact
+resident bytes, source/spec/checkpoint witnesses and owned-child clean exit.
+No latency threshold, speedup, GPU or production claim is made.
+
+Offline digest verification checks internal consistency, not measurement
+authenticity. Optional artifact verification checks retained bytes and loads the
+bounded fixed checkpoint to recompute its actual tensor identity. Raw observations
+and child logs remain alongside the sealed report, including validation failures.

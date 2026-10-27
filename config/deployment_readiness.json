@@ -1,5 +1,8 @@
 {
   "required_files": [
+    "src/ai_journey/prefix_readiness.py",
+    "src/ai_journey/prefix_report.py",
+    "tests/test_prefix_readiness.py",
     "src/ai_journey/moe_ddp_checkpoint.py",
     "tests/test_moe_ddp_checkpoint.py",
     "src/ai_journey/prefix_generation.py",
