@@ -1,5 +1,6 @@
 {
   "required_files": [
+    "tests/test_prefix_ci_contract.py",
     "src/ai_journey/prefix_readiness.py",
     "src/ai_journey/prefix_report.py",
     "tests/test_prefix_readiness.py",
