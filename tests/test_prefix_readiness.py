@@ -3,12 +3,99 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+from io import BytesIO
+import shutil
 
 import pytest
 import torch
 
 from ai_journey.prefix_readiness import main, run_prefix_readiness
 from ai_journey.prefix_report import seal_prefix_report, verify_prefix_report
+
+
+@pytest.mark.parametrize(
+    "stage", ["step_permanent", "step_transient", "serving_transient"]
+)
+def test_every_artifact_checkpoint_reopen_is_bound_to_reported_snapshot(
+    actual, tmp_path, monkeypatch, stage
+):
+    from ai_journey import ddp_checkpoint, ddp_pipeline
+    from ai_journey.ddp_generation import SamplingConfig, generate_tokens
+    from ai_journey.gpt2_training import load_training_spec
+    from ai_journey.training_models import training_model_fingerprint
+
+    original_directory, original_report = actual
+    directory = tmp_path / "owned-artifacts"
+    shutil.copytree(original_directory, directory)
+    checkpoint = directory / "checkpoint.pt"
+    checkpoint_a = checkpoint.read_bytes()
+    model = ddp_pipeline.load_serving_model(
+        checkpoint,
+        load_training_spec(directory / "spec.json"),
+        (directory / "source.txt").read_bytes(),
+    )
+    with torch.no_grad():
+        next(model.parameters()).view(-1)[0].add_(1e-12)
+    identity_b = training_model_fingerprint(model)
+    assert identity_b != original_report["model_sha256"]
+    payload = torch.load(BytesIO(checkpoint_a), weights_only=True)
+    payload["model"] = copy.deepcopy(model.state_dict())
+    payload["model_sha256"] = identity_b
+    encoded = BytesIO()
+    torch.save(payload, encoded)
+    checkpoint_b = encoded.getvalue()
+    report_b = copy.deepcopy(original_report)
+    report_b["model_sha256"] = identity_b
+    for row in report_b["rows"]:
+        tokens = generate_tokens(
+            model,
+            row["request"]["prompt"],
+            SamplingConfig(**row["request"]["sampling"]),
+            use_cache=False,
+        )["tokens"]
+        row["control_tokens"] = tokens
+        row["observation"]["tokens"] = tokens
+        row["observation"]["model_sha256"] = identity_b
+    report_b["cancellation"]["tokens"] = report_b["rows"][0]["control_tokens"][:1]
+    report_b = seal_prefix_report(report_b)
+    assert report_b["checkpoint_sha256"] == sha256(checkpoint_a).hexdigest()
+    step_load = ddp_checkpoint.bounded_checkpoint_load
+    serving_load = ddp_pipeline.bounded_checkpoint_load
+    swaps = []
+
+    def replace(candidate, args, kwargs, *, boundary, real):
+        if not stage.startswith(boundary) or candidate != checkpoint:
+            return real(candidate, *args, **kwargs)
+        swaps.append(boundary)
+        checkpoint.write_bytes(checkpoint_b)
+        try:
+            return real(candidate, *args, **kwargs)
+        finally:
+            if stage.endswith("transient"):
+                checkpoint.write_bytes(checkpoint_a)
+
+    monkeypatch.setattr(
+        ddp_checkpoint,
+        "bounded_checkpoint_load",
+        lambda candidate, *args, **kwargs: replace(
+            candidate, args, kwargs, boundary="step", real=step_load
+        ),
+    )
+    monkeypatch.setattr(
+        ddp_pipeline,
+        "bounded_checkpoint_load",
+        lambda candidate, *args, **kwargs: replace(
+            candidate, args, kwargs, boundary="serving", real=serving_load
+        ),
+    )
+    with pytest.raises(ValueError, match="SHA-256"):
+        verify_prefix_report(
+            original_report if stage == "step_transient" else report_b,
+            directory=directory,
+        )
+    assert len(swaps) == 1
+    if stage.endswith("transient"):
+        assert checkpoint.read_bytes() == checkpoint_a
 
 
 @pytest.fixture(scope="module")

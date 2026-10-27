@@ -30,10 +30,13 @@ from .training_models import (
 )
 
 
-def load_serving_model(checkpoint: Path, spec, source: bytes):
+def load_serving_model(checkpoint: Path, spec, source: bytes, *, expected_sha256=None):
+    """Validate a serving checkpoint, optionally binding its exact loaded bytes."""
     if expected_training_parameters(spec.model) > 1_000_000:
         raise ValueError("serving model exceeds CPU lab parameter budget")
-    payload = bounded_checkpoint_load(checkpoint, 64 * 1024 * 1024)
+    payload = bounded_checkpoint_load(
+        checkpoint, 64 * 1024 * 1024, expected_sha256=expected_sha256
+    )
     fields = {
         "schema_version",
         "world_size",
