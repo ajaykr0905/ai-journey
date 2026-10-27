@@ -362,7 +362,11 @@ def verify_prefix_report(report, *, directory=None):
         from .training_models import training_model_fingerprint
 
         checkpoint = directory / "checkpoint.pt"
-        payload = bounded_checkpoint_load(checkpoint, 4 * 1024 * 1024)
+        payload = bounded_checkpoint_load(
+            checkpoint,
+            4 * 1024 * 1024,
+            expected_sha256=report["checkpoint_sha256"],
+        )
         if (
             type(payload) is not dict
             or type(payload.get("step")) is not int
@@ -375,6 +379,7 @@ def verify_prefix_report(report, *, directory=None):
             checkpoint,
             training_spec_from_mapping(spec_mapping),
             artifacts["source.txt"],
+            expected_sha256=report["checkpoint_sha256"],
         )
         if training_model_fingerprint(model) != report["model_sha256"]:
             raise ValueError(
