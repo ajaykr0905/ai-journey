@@ -39,6 +39,39 @@ def fixture():
     return source, spec, payload
 
 
+def test_serving_loader_can_bind_the_exact_archive_without_changing_legacy_calls(
+    tmp_path,
+):
+    source, spec, payload = fixture()
+    path = tmp_path / "state.pt"
+    torch.save(payload, path)
+    expected = sha256(path.read_bytes()).hexdigest()
+    before = torch.get_rng_state().clone()
+    loaded = ddp_pipeline.load_serving_model(
+        path, spec, source, expected_sha256=expected
+    )
+    assert gpt2_model_fingerprint(loaded) == payload["model_sha256"]
+    assert torch.equal(before, torch.get_rng_state())
+    assert not loaded.training
+
+
+def test_serving_loader_rejects_changed_archive_before_allocating_a_model(
+    tmp_path, monkeypatch
+):
+    source, spec, payload = fixture()
+    path = tmp_path / "state.pt"
+    torch.save(payload, path)
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("digest rejection must precede model allocation")
+
+    monkeypatch.setattr(ddp_pipeline, "build_training_model", unexpected)
+    with pytest.raises(ValueError, match="SHA-256"):
+        ddp_pipeline.load_serving_model(
+            path, spec, source, expected_sha256=sha256(b"different archive").hexdigest()
+        )
+
+
 @pytest.mark.parametrize(
     "change",
     [

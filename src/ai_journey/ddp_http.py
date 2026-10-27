@@ -208,7 +208,7 @@ def make_server(
                 health = service.health()
                 self.reply(200 if health["ready"] else 503, health)
             elif self.path == "/metrics":
-                body = service.metrics.render_prometheus().encode("utf-8")
+                body = service.render_metrics().encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", PROMETHEUS_CONTENT_TYPE)
                 self.send_header("Content-Length", str(len(body)))

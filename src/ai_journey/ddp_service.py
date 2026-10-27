@@ -148,6 +148,8 @@ class GenerationService:
         cache_capacity: int = 128,
         admission=None,
         max_inflight_requests=8,
+        prefix_store=None,
+        prefix_namespace="default",
     ):
         integer(cache_capacity, "cache_capacity", 1)
         if cache_capacity > 4096:
@@ -155,6 +157,14 @@ class GenerationService:
         integer(max_inflight_requests, "max_inflight_requests", 1)
         if max_inflight_requests > 64:
             raise ValueError("inference admission exceeds the lab limit of 64")
+        if prefix_store is not None:
+            from .prefix_cache import PrefixKVStore, prefix_identity
+
+            if not isinstance(prefix_store, PrefixKVStore):
+                raise TypeError(
+                    "prefix_store must be an explicit bounded PrefixKVStore"
+                )
+            prefix_identity(model, namespace=prefix_namespace)
         self._model = copy.deepcopy(model).eval()
         self._model.requires_grad_(False)
         self.model_sha256 = gpt2_model_fingerprint(self._model)
@@ -170,6 +180,21 @@ class GenerationService:
         self._cache_capacity = cache_capacity
         self._admission = admission if admission is not None else TokenBucket()
         self.metrics = ServingMetrics()
+        self._prefix_store = prefix_store
+        self._prefix_namespace = prefix_namespace
+        self.prefix_metrics = None
+        if prefix_store is not None:
+            from .prefix_metrics import PrefixMetrics
+
+            self.prefix_metrics = PrefixMetrics(prefix_store)
+
+    def render_metrics(self):
+        text = self.metrics.render_prometheus()
+        return (
+            text
+            if self.prefix_metrics is None
+            else text + self.prefix_metrics.render_prometheus()
+        )
 
     @contextmanager
     def _inference_slot(self, *, cancelled, deadline):
@@ -206,6 +231,12 @@ class GenerationService:
         finally:
             with self._lifecycle:
                 self._active_requests -= 1
+                if (
+                    self._draining
+                    and self._active_requests == 0
+                    and self._prefix_store is not None
+                ):
+                    self._prefix_store.clear()
                 self._lifecycle.notify_all()
 
     def drain(self, *, timeout_seconds=10):
@@ -219,9 +250,12 @@ class GenerationService:
             raise ValueError("drain timeout must be finite and in [0, 60]")
         with self._lifecycle:
             self._draining = True
-            return self._lifecycle.wait_for(
+            drained = self._lifecycle.wait_for(
                 lambda: self._active_requests == 0, timeout=timeout_seconds
             )
+        if self._prefix_store is not None:
+            self._prefix_store.clear()
+        return drained
 
     def generate(
         self,
@@ -232,7 +266,7 @@ class GenerationService:
         on_token=None,
     ) -> dict:
         started = time.perf_counter()
-        observation = {"tokens": 0, "cached": False}
+        observation = {"tokens": 0, "cached": False, "prefix": {}}
         outcome = "error"
 
         def observe(index, token):
@@ -265,6 +299,8 @@ class GenerationService:
             outcome = "rejected"
             raise
         finally:
+            if self.prefix_metrics is not None:
+                self.prefix_metrics.record(observation["prefix"])
             self.metrics.record(
                 outcome=outcome,
                 duration_seconds=time.perf_counter() - started,
@@ -334,6 +370,15 @@ class GenerationService:
             self._admission.consume(
                 len(request.prompt) + request.sampling.max_new_tokens
             )
+            prefix_arguments = (
+                {}
+                if self._prefix_store is None
+                else {
+                    "prefix_store": self._prefix_store,
+                    "prefix_namespace": self._prefix_namespace,
+                    "prefix_observation": observation["prefix"],
+                }
+            )
             output = generate_tokens(
                 self._model,
                 request.prompt,
@@ -342,6 +387,7 @@ class GenerationService:
                 cancelled=cancelled,
                 deadline=deadline,
                 on_token=on_token,
+                **prefix_arguments,
             )
             with self._stats_lock:
                 self.completed_requests += 1

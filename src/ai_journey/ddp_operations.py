@@ -62,6 +62,9 @@ def add_commands(commands):
             command.add_argument("--max-seconds", type=int, default=60)
             command.add_argument("--max-connections", type=int, default=8)
             command.add_argument("--drain-seconds", type=int, default=10)
+            command.add_argument("--prefix-cache-bytes", type=int, default=0)
+            command.add_argument("--prefix-cache-entries", type=int, default=64)
+            command.add_argument("--prefix-namespace", default="default")
         else:
             command.add_argument("--output", type=Path, required=True)
             command.add_argument("--repeats", type=int, default=5)
@@ -100,10 +103,28 @@ def run_operation(arguments):
             write_report(arguments.output, report)
             return report
         spec = preflight(arguments.source, arguments.spec, world_size=1, steps=1)
+        prefix_arguments = {}
+        if command == "serve":
+            from .prefix_cache import PrefixKVStore
+
+            budget = getattr(arguments, "prefix_cache_bytes", 0)
+            if type(budget) is not int or budget < 0:
+                raise ValueError("prefix cache budget must be zero (off) or positive")
+            if budget:
+                prefix_arguments = {
+                    "prefix_store": PrefixKVStore(
+                        max_bytes=budget,
+                        max_entries=getattr(arguments, "prefix_cache_entries", 64),
+                    ),
+                    "prefix_namespace": getattr(
+                        arguments, "prefix_namespace", "default"
+                    ),
+                }
         service = GenerationService(
             load_serving_model(
                 arguments.checkpoint, spec, arguments.source.read_bytes()
-            )
+            ),
+            **prefix_arguments,
         )
         if command == "benchmark":
             request = GenerationRequest(
