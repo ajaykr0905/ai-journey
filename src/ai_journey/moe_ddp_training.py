@@ -2,6 +2,7 @@
 
 import copy
 import math
+import json
 
 import torch
 import torch.distributed as dist
@@ -19,6 +20,7 @@ from .moe_ddp_window import MoEOptimizerWindow, validate_moe_ddp_window
 from .moe_training import build_moe_optimizer, validate_moe_optimizer
 from .moe_model import MoEDecoderModel
 from .training_models import build_training_model
+from .ddp_checkpoint import optimizer_run_contract
 
 
 class MoEDDPFatalError(RuntimeError):
@@ -31,6 +33,20 @@ class MoEDDPRetryableError(RuntimeError):
 
 class _CommonStepRejection(RuntimeError):
     pass
+
+
+def validate_moe_ddp_optimizer(session):
+    actual = optimizer_run_contract(session.model, session.optimizer)
+    if json.dumps(actual, sort_keys=True, allow_nan=False) != json.dumps(
+        session._optimizer_contract, sort_keys=True, allow_nan=False
+    ) or any(
+        group["lr"] != session.config.learning_rate
+        for group in session.optimizer.param_groups
+    ):
+        raise ValueError(
+            "MoE DDP optimizer differs from its declared fixed-rate protocol"
+        )
+    return validate_moe_optimizer(session.model, session.optimizer)
 
 
 def _step_agreement(success, *, phase):
@@ -78,6 +94,7 @@ class MoEDDPTrainingSession:
         self.optimizer = build_moe_optimizer(
             self.model, learning_rate=config.learning_rate, config=config.optimizer
         )
+        self._optimizer_contract = optimizer_run_contract(self.model, self.optimizer)
         self.wrapped = DistributedDataParallel(
             MoEOptimizerWindow(self.model, config), find_unused_parameters=True
         )
@@ -89,7 +106,7 @@ class MoEDDPTrainingSession:
         count, valid = 0, True
         try:
             count = validate_moe_ddp_window(window, self.config)
-            step = validate_moe_optimizer(self.model, self.optimizer)
+            step = validate_moe_ddp_optimizer(self)
             require_finite_decoder_state(self.model.state_dict())
             if step >= self.config.optimizer_steps:
                 raise ValueError("MoE DDP optimizer schedule is complete")
@@ -201,7 +218,7 @@ class MoEDDPTrainingSession:
                 self.optimizer.step()
                 require_finite_decoder_state(self.model.state_dict())
                 require_finite_decoder_state(self.optimizer.state_dict())
-                if validate_moe_optimizer(self.model, self.optimizer) != step + 1:
+                if validate_moe_ddp_optimizer(self) != step + 1:
                     raise ValueError("MoE DDP optimizer progress differs")
             except (ValueError, RuntimeError, TypeError):
                 stepped = False

@@ -69,3 +69,28 @@ rollback is not a guessed reducer reset. Transport exceptions never qualify as
 common semantic rejection, even after a successful backward. Use fresh processes
 and a valid durable checkpoint. No statement here claims recovery of a dead
 worker's memory or communicator.
+
+## Replicated stochastic checkpoint boundary
+
+`save_moe_ddp_checkpoint(path, session=session, source=source_bytes,
+data_contract=...)` collectively stores the existing sealed MoE payload inside
+`ai-journey-replicated-moe-checkpoint-v1`, adding exact run/world/data contracts,
+all rank-local CPU RNG states and `data_cursor.next_update_index`. This zero-based
+next update index equals the count of completed optimizer updates. The caller's
+nonempty finite JSON data contract must describe its scheduling algorithm; no
+unrecorded sampler state is inferred. New sessions enforce their declared fixed
+learning rate, invariant optimizer controls and ordered groups.
+
+`load_moe_ddp_checkpoint(...)` admits the complete outer run and common loaded
+seal across ranks before restoring. It reuses the existing typed MoE optimizer /
+architecture restoration and then selects each rank's saved CPU RNG. Rejected
+archive, cursor, source, world, data schedule, optimizer controls, moments or RNG
+preserve caller state. Tests run uninterrupted and split execution in genuinely
+fresh two-rank processes with dropout enabled; weights, optimizer, RNG and metrics
+match exactly in that fixed local protocol, not across arbitrary platforms.
+
+Saving returns `MoEDDPCheckpointIdentity(payload_sha256, archive_sha256)`. The
+payload seal hashes canonical submitted metadata/tensors; the archive SHA hashes
+serialized file bytes. They are deliberately distinct. Only `archive_sha256`
+belongs in the loader's `expected_archive_sha256` argument; passing the payload
+seal rejects before mutation. Both identities detect changes, not authorship.
