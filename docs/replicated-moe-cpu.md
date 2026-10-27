@@ -94,3 +94,74 @@ payload seal hashes canonical submitted metadata/tensors; the archive SHA hashes
 serialized file bytes. They are deliberately distinct. Only `archive_sha256`
 belongs in the loader's `expected_archive_sha256` argument; passing the payload
 seal rejects before mutation. Both identities detect changes, not authorship.
+
+## Public-byte operator workflow
+
+Use the strict public plan at `config/moe-ddp-cpu.json` with the repository's
+CC0-authored `data/day-19-demo-names.txt`. The plan pins source URL, revision,
+license and exact SHA-256. Declaring a public URL does not itself prove a source's
+licensing or authenticity. `plan` checks the actual local bytes without starting
+a process group or constructing a model:
+
+```sh
+ai-journey-moe-ddp plan --config config/moe-ddp-cpu.json \
+  --source data/day-19-demo-names.txt
+
+ai-journey-moe-ddp train --config config/moe-ddp-cpu.json \
+  --source data/day-19-demo-names.txt --steps 2 \
+  --checkpoint /tmp/moe-restart.pt --workdir /tmp/moe-first-workers \
+  --output /tmp/moe-first.json
+
+ai-journey-moe-ddp train --config config/moe-ddp-cpu.json \
+  --source data/day-19-demo-names.txt --steps 2 --resume \
+  --checkpoint /tmp/moe-restart.pt --workdir /tmp/moe-resume-workers \
+  --output /tmp/moe-resume.json
+
+ai-journey-moe-ddp verify --report /tmp/moe-resume.json \
+  --checkpoint /tmp/moe-restart.pt
+```
+
+Choose unused artifact paths; the example names are not automatically cleaned.
+Before the console entry is installed, the same arguments work with
+`python -m ai_journey.moe_ddp_cli` under `PYTHONPATH=src`. `--steps` is the number
+of **additional** updates for this invocation, within the immutable full plan.
+Resume needs the same plan/source/world and a fresh empty worker directory.
+Overrunning the restored schedule rejects collectively before any update.
+Non-resume refuses an existing checkpoint. Inputs, report and worker outputs
+must be disjoint; old reports/logs are never silently overwritten.
+
+The sampler shuffles bounded sample IDs with a private Python RNG, drops only
+the global incomplete-window tail, then rank-strides the common order. It
+materializes only the next selected microbatches, not every source window.
+Every byte position is eligible; no padding mask or external tokenizer is
+inferred. Capacity applies independently per rank/microbatch, even though CE
+and auxiliary objectives use the global token-weighted definition above.
+Each rank's CPU dropout generator starts at `seed + 1000 + rank`; checkpoint
+restoration replaces that state with its exact saved boundary.
+
+The supervisor leases the checkpoint sidecar and worker directory through child
+reaping and log closure. These are local advisory locks, not distributed fencing.
+It supervises only its own rank processes with a bounded deadline (default 60s,
+maximum 300s). On failure, inspect retained `rank-0.log` / `rank-1.log`, correct
+the cause and use fresh processes with a valid checkpoint. A failed invocation
+may have published its final checkpoint before report publication failed; do
+not infer that absence of a report means no durable progress.
+
+Worker `rank-N.json` receipts retain rank/PID, exact start/end, both checkpoint
+identities and raw `metrics`. The report contains `workers` plus a recomputed
+global `metrics` view with `rank_routing` and `rank_schedule`. Finite JSON,
+source/plan identity, rank agreement, sample cursors, token-major capacity,
+route conservation, globally weighted load balance, objective and clipping
+accounting are checked. Retained evidence has a 4MiB limit and is admitted
+conservatively before execution. Source bytes are bounded to 1MiB and 65,536
+complete samples, independently of model/work/attention limits.
+
+`verify --report` checks internal consistency, not measurement authenticity or
+fresh training replay. Adding `--checkpoint` binds the actual immutable byte
+snapshot to `archive_sha256`, verifies the outer payload seal/cursor/rank RNGs
+and performs a typed **single-CPU** model/optimizer restore without changing
+caller CPU RNG. It does not reopen source bytes, execute collectives or claim
+that an arbitrary resealed report was genuinely measured. The separate installed
+readiness gate runs uninterrupted four updates versus two plus fresh two-rank
+resume, comparing exact raw metric sequences, weights, optimizer slots, rank
+RNG states and cursor; exact parity is specific to that fixed local runtime.
