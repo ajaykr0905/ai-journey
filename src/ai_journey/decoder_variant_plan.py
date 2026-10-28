@@ -141,6 +141,7 @@ class DecoderExperimentPlan:
             batch_size=self.batch_size,
             evaluation_windows=self.evaluation_batch_size,
             variant_count=len(self.variants),
+            seed_count=len(self.seeds),
         )
 
     def to_mapping(self) -> dict:

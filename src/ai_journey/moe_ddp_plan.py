@@ -12,6 +12,7 @@ from .moe_ddp_config import MoEDDPConfig, moe_ddp_config_from_mapping
 from .moe_ddp_resources import require_moe_ddp_budget
 
 SCHEMA = "ai-journey-public-moe-ddp-plan-v1"
+MAX_PLAN_BYTES = 64 * 1024
 MAX_REPORT_BYTES = 4 * 1024 * 1024
 MAX_SAMPLES = 65536
 
@@ -58,6 +59,9 @@ class PublicMoEDDPPlan:
             or url.fragment
         ):
             raise ValueError("public source URL must be credential-free HTTPS")
+        # Guarantee canonical round-trip; the reader also bounds raw formatting.
+        if len(canonical(self.to_mapping()).encode("utf-8")) > MAX_PLAN_BYTES:
+            raise ValueError("public MoE plan exceeds its canonical wire byte budget")
         require_moe_ddp_budget(self.run)
         positions = (
             self.run.world_size
@@ -76,7 +80,7 @@ class PublicMoEDDPPlan:
             # routing evidence. Charge both representations before training.
             positions * self.run.optimizer_steps * len(self.run.model.moe_layers) * 256
             + rows * (4096 + 256 * self.run.model.expert_count)
-            + 65536
+            + MAX_PLAN_BYTES
         )
         if estimate > MAX_REPORT_BYTES:
             raise ValueError(
@@ -152,7 +156,9 @@ def source_admission(plan, source):
 
 
 def read_public_moe_ddp_plan(config_path: Path, source_path: Path):
-    value = json.loads(_read_bytes(config_path, 65536), object_pairs_hook=unique_fields)
+    value = json.loads(
+        _read_bytes(config_path, MAX_PLAN_BYTES), object_pairs_hook=unique_fields
+    )
     plan = public_moe_ddp_plan_from_mapping(value)
     source = _read_bytes(source_path, 1024 * 1024)
     source_admission(plan, source)
