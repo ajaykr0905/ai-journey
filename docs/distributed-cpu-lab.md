@@ -292,6 +292,32 @@ The runtime uses the journal's default limits: 16 committed versions, 64 MiB per
 blob, and 256 MiB total. It never prunes or deletes history. A full journal rejects
 publication. Uncommitted orphan files after an interrupted publication require
 explicit inspection; storage integrity alone does not establish restorability.
+Inspect without creating or modifying a directory, manifest or lease file:
+
+```bash
+python -m ai_journey.checkpoint_journal_cli \
+  --directory /tmp/ddp-journal/versions --run-sha256 RUN_SHA256
+```
+
+Use the exact `checkpoint_run_sha256(..., optimizer=optimizer)` identity for this
+run. Nondefault durable budgets must also be supplied with `--max-versions` and
+`--max-total-bytes`; the reader verifies the caller's identity and budgets against
+the manifest seal rather than adopting an unknown run. The equivalent public API
+is `CheckpointJournal(..., create=False).inspect()`; normal construction still
+creates a new empty journal when necessary. Read-only opening never initializes a
+missing journal or lease. Inspection takes a nonblocking shared lease and rejects
+an active journal writer, invalid manifest or inventory above 258 files.
+
+The JSON reports the sealed committed high-water, every committed version's
+intact/missing/corrupt/symlink state, unexpected files and reserved versus remaining
+version/byte capacity. Damaged versions still consume their committed slots and
+byte reservation. `observed_regular_file_bytes` is the sum of observed regular
+file lengths, including metadata and unexpected files, not allocated disk usage
+or a prediction of future checkpoint sizes. Unexpected files are never opened;
+no version is deserialized, repaired, deleted or declared semantically restorable.
+As with publication, advisory leases coordinate cooperating local processes, not
+malicious writers that ignore the lock.
+
 Manifest publication can become visible before a later directory-fsync error:
 an exception does not imply that nothing committed. Inspect the manifest before
 retrying. The journal is authoritative when enabled; its commit and replacing

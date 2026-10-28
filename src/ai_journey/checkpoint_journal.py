@@ -21,6 +21,7 @@ MAX_MANIFEST_BYTES = 64 * 1024
 MAX_BLOB_BYTES = 64 * 1024 * 1024
 MAX_TOTAL_BYTES = 256 * 1024 * 1024
 MAX_VERSIONS = 128
+MAX_INSPECTION_FILES = 2 * MAX_VERSIONS + 2
 
 
 def _integer(value, name, minimum, maximum):
@@ -90,22 +91,26 @@ class CheckpointJournal:
         run_sha256: str,
         max_versions: int = 16,
         max_total_bytes: int = MAX_TOTAL_BYTES,
+        create: bool = True,
     ):
         if not isinstance(directory, Path):
             raise TypeError("journal directory must be pathlib.Path")
         _digest(run_sha256)
         _integer(max_versions, "max_versions", 1, MAX_VERSIONS)
         _integer(max_total_bytes, "max_total_bytes", 1, MAX_TOTAL_BYTES)
+        if type(create) is not bool:
+            raise ValueError("journal create must be a boolean")
         if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
             raise ValueError("journal directory must be a non-symlink directory")
         self.directory = directory
         self.run_sha256 = run_sha256
         self.max_versions = max_versions
         self.max_total_bytes = max_total_bytes
-        self.directory.mkdir(parents=True, exist_ok=True)
-        with self._locked():
+        if create:
+            self.directory.mkdir(parents=True, exist_ok=True)
+        with self._locked(read_only=not create):
             manifest = self.directory / "manifest.json"
-            if manifest.exists() or manifest.is_symlink():
+            if not create or manifest.exists() or manifest.is_symlink():
                 self._manifest()
             else:
                 if any(
@@ -116,12 +121,14 @@ class CheckpointJournal:
                 self._write_manifest([])
 
     @contextmanager
-    def _locked(self):
+    def _locked(self, *, read_only=False):
         if self.directory.is_symlink() or not self.directory.is_dir():
             raise ValueError("journal directory changed")
         descriptor = os.open(
             self.directory / ".checkpoint-journal.lock",
-            os.O_RDWR | os.O_CREAT | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0),
+            (os.O_RDONLY if read_only else os.O_RDWR | os.O_CREAT)
+            | os.O_NONBLOCK
+            | getattr(os, "O_NOFOLLOW", 0),
             0o600,
         )
         try:
@@ -129,7 +136,10 @@ class CheckpointJournal:
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise ValueError("journal lease must be an unaliased regular file")
             try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(
+                    descriptor,
+                    (fcntl.LOCK_SH if read_only else fcntl.LOCK_EX) | fcntl.LOCK_NB,
+                )
             except BlockingIOError as error:
                 raise RuntimeError("checkpoint journal is busy") from error
             yield
@@ -298,6 +308,104 @@ class CheckpointJournal:
         with self._locked():
             entries = self._manifest()
             return entries[-1]["step"] if entries else None
+
+    def inspect(self) -> dict:
+        """Read a bounded, leased inventory; do not create, repair or load blobs.
+
+        Missing or corrupt versions still reserve their manifest slots and byte
+        budget. Observed file lengths are not allocated disk usage or evidence
+        that a byte-intact checkpoint satisfies a model's restore contract.
+        """
+        with self._locked(read_only=True):
+            entries = self._manifest()
+            observed = {}
+            with os.scandir(self.directory) as files:
+                for item in files:
+                    if len(observed) >= MAX_INSPECTION_FILES:
+                        raise ValueError(
+                            "journal inventory exceeds its bounded file count"
+                        )
+                    info = item.stat(follow_symlinks=False)
+                    kind = (
+                        "symlink"
+                        if stat.S_ISLNK(info.st_mode)
+                        else "regular"
+                        if stat.S_ISREG(info.st_mode)
+                        else "directory"
+                        if stat.S_ISDIR(info.st_mode)
+                        else "other"
+                    )
+                    observed[item.name] = {"kind": kind, "size_bytes": info.st_size}
+            versions = []
+            for entry in entries:
+                metadata = observed.get(entry["filename"])
+                if metadata is None:
+                    integrity = "missing"
+                elif metadata["kind"] == "symlink":
+                    integrity = "symlink"
+                elif metadata["kind"] != "regular":
+                    integrity = "not_regular"
+                elif metadata["size_bytes"] != entry["size_bytes"]:
+                    integrity = "size_mismatch"
+                else:
+                    try:
+                        payload = _read_bytes(
+                            self.directory / entry["filename"], entry["size_bytes"]
+                        )
+                        integrity = (
+                            "intact"
+                            if sha256(payload).hexdigest() == entry["sha256"]
+                            else "sha256_mismatch"
+                        )
+                    except OSError:
+                        integrity = "unreadable_or_changed"
+                    except ValueError:
+                        integrity = "changed_during_read"
+                versions.append(
+                    {
+                        **entry,
+                        "integrity": integrity,
+                        "observed_size_bytes": (
+                            metadata["size_bytes"] if metadata is not None else None
+                        ),
+                    }
+                )
+            known = {"manifest.json", ".checkpoint-journal.lock"}
+            known.update(entry["filename"] for entry in entries)
+            committed_bytes = sum(entry["size_bytes"] for entry in entries)
+            return {
+                "schema": "ai-journey-checkpoint-journal-inspection-v1",
+                "run_sha256": self.run_sha256,
+                "manifest_sha256": _seal(
+                    {
+                        "schema": SCHEMA,
+                        "run_sha256": self.run_sha256,
+                        "max_versions": self.max_versions,
+                        "max_total_bytes": self.max_total_bytes,
+                        "entries": entries,
+                    }
+                ),
+                "recorded_step": entries[-1]["step"] if entries else None,
+                "capacity": {
+                    "max_versions": self.max_versions,
+                    "used_versions": len(entries),
+                    "remaining_versions": self.max_versions - len(entries),
+                    "max_total_bytes": self.max_total_bytes,
+                    "committed_bytes": committed_bytes,
+                    "remaining_bytes": self.max_total_bytes - committed_bytes,
+                },
+                "versions": versions,
+                "unexpected_files": [
+                    {"filename": name, **observed[name]}
+                    for name in sorted(observed.keys() - known)
+                ],
+                "observed_regular_file_bytes": sum(
+                    item["size_bytes"]
+                    for item in observed.values()
+                    if item["kind"] == "regular"
+                ),
+                "scope": "byte integrity only; semantic restorability is untested",
+            }
 
     def candidates(self) -> tuple[CheckpointCandidate, ...]:
         """Return byte-intact versions newest first, never uncommitted orphans.
