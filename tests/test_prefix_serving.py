@@ -121,6 +121,73 @@ def test_default_off_and_server_owned_namespace_isolation(model):
     assert two.prefix_metrics.snapshot()["attempts"]["miss"] == 1
 
 
+@pytest.mark.parametrize(
+    "max_bytes,prompts,publications,evictions,bypasses",
+    [
+        (8192, ((1, 2, 3, 4), (5, 4, 3, 2)), 2, 1, 0),
+        (1, ((1, 2, 3, 4),), 0, 0, 1),
+    ],
+)
+def test_http_scrape_distinguishes_pool_churn_from_lookup_misses(
+    model, max_bytes, prompts, publications, evictions, bypasses
+):
+    pool = PrefixKVStore(max_bytes=max_bytes, max_entries=1)
+    service = GenerationService(model, prefix_store=pool)
+    uncached = GenerationService(model)
+
+    def scrape(server):
+        connection = http.client.HTTPConnection(*server.server_address, timeout=2)
+        try:
+            connection.request("GET", "/metrics")
+            response = connection.getresponse()
+            assert response.status == 200
+            text = response.read().decode()
+        finally:
+            connection.close()
+        samples = {
+            name: float(value)
+            for line in text.splitlines()
+            if line and not line.startswith("#")
+            for name, value in (line.rsplit(" ", 1),)
+        }
+        for private in ("private-pool", service.model_sha256):
+            assert private not in text
+        assert text.count("outcome=") == 8  # Five serving and three prefix labels.
+        return samples
+
+    with serving(service) as (endpoint, server):
+        for index, prompt in enumerate(prompts):
+            identifier = f"private-pool-{index}"
+            actual = measure_http_generation(endpoint, mapping(identifier, prompt))
+            expected = uncached.generate(request(identifier, prompt))
+            assert actual["outcome"] == "completed"
+            assert actual["tokens"] == expected["tokens"]
+        state = pool.snapshot()
+        assert (state["publications"], state["evictions"], state["bypasses"]) == (
+            publications,
+            evictions,
+            bypasses,
+        )
+        observed = scrape(server)
+        assert observed['ai_journey_prefix_attempts_total{outcome="miss"}'] == len(
+            prompts
+        )
+        assert observed['ai_journey_prefix_attempts_total{outcome="bypass"}'] == 0
+        for field, count in (
+            ("publications", publications),
+            ("evictions", evictions),
+            ("bypasses", bypasses),
+        ):
+            assert observed[f"ai_journey_prefix_pool_{field}_total"] == count
+        assert observed["ai_journey_serving_generated_tokens_total"] == 3 * len(prompts)
+        assert service.drain(timeout_seconds=1)
+        drained = scrape(server)
+        assert drained["ai_journey_prefix_pool_evictions_total"] == publications
+        assert drained["ai_journey_prefix_entries"] == 0
+        assert drained["ai_journey_prefix_resident_bytes"] == 0
+        assert drained["ai_journey_serving_generated_tokens_total"] == 3 * len(prompts)
+
+
 @pytest.mark.parametrize("control", ["cancel", "error", "deadline"])
 def test_interruption_releases_leases_and_admission_without_replay(model, control):
     pool = PrefixKVStore(max_bytes=8192)
