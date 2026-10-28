@@ -40,6 +40,16 @@ Accepted SSE events are delivered individually before later bytes are parsed.
 A malformed later frame or UTF-8 sequence cannot erase an already received
 token, and a planned token-boundary cancellation stops before that later input
 is inspected, whether the events arrive together or across separate reads.
+Successful generation metadata also requires complete HTTP body framing. A peer
+that closes before its declared `Content-Length` is exhausted is recorded as
+`transport_error` / `IncompleteRead`, even if it sent valid JSON or an SSE
+`done` event. Already accepted SSE tokens remain partial observations, not
+successful-output throughput; JSON tokens are admitted only after the bounded
+body completes. Truncated chunked responses likewise remain transport failures.
+Correct length-delimited, chunked and connection-close bodies are supported.
+Intentional client cancellation still stops at its token boundary without waiting
+for HTTP completion, and an expired whole-request deadline remains the overriding
+classification.
 For matched streaming/JSON output checks with distinct fresh IDs, the Python API
 provides `measure_http_output_parity`.
 
