@@ -49,7 +49,7 @@ def validate_checkpoint_tensor_work(value) -> None:
 def load_checkpoint_archive(
     path: Path, *, max_bytes: int, max_records: int = 1024, expected_sha256=None
 ):
-    """Bound archive expansion before invoking PyTorch weights-only loading.
+    """Load one bounded immutable snapshot after ZIP and optional digest admission.
 
     Expert architectures may explicitly admit more small tensor records; the
     legacy 1024-record default and all other archive safeguards remain intact.
@@ -71,20 +71,23 @@ def load_checkpoint_archive(
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= max_bytes:
             raise ValueError("checkpoint exceeds its regular-file byte budget")
-        if expected_sha256 is not None:
-            # The manifest's identity must bind the exact bytes deserialized,
-            # not a hash followed by a second path open or a mutable file view.
-            snapshot = stream.read(max_bytes + 1)
-            after = os.fstat(stream.fileno())
-            if (
-                len(snapshot) != info.st_size
-                or after.st_size != info.st_size
-                or after.st_mtime_ns != info.st_mtime_ns
-                or sha256(snapshot).hexdigest() != expected_sha256
-            ):
-                raise ValueError("checkpoint snapshot differs from its SHA-256")
-            stream = BytesIO(snapshot)
-        with zipfile.ZipFile(stream) as archive:
+        # Both ZIP admission and deserialization must see these same bytes, even
+        # when the caller has no externally supplied archive identity.
+        snapshot = stream.read(max_bytes + 1)
+        after = os.fstat(stream.fileno())
+        if (
+            len(snapshot) != info.st_size
+            or after.st_size != info.st_size
+            or after.st_mtime_ns != info.st_mtime_ns
+        ):
+            raise ValueError("checkpoint snapshot changed during its bounded read")
+        if (
+            expected_sha256 is not None
+            and sha256(snapshot).hexdigest() != expected_sha256
+        ):
+            raise ValueError("checkpoint snapshot differs from its SHA-256")
+        admitted = BytesIO(snapshot)
+        with zipfile.ZipFile(admitted) as archive:
             records = archive.infolist()
             if (
                 len(records) > max_records
@@ -93,7 +96,7 @@ def load_checkpoint_archive(
                 or any(record.compress_type != zipfile.ZIP_STORED for record in records)
             ):
                 raise ValueError("checkpoint exceeds its expanded storage budget")
-        stream.seek(0)
-        payload = torch.load(stream, map_location="cpu", weights_only=True)
+        admitted.seek(0)
+        payload = torch.load(admitted, map_location="cpu", weights_only=True)
         validate_checkpoint_tensor_work(payload)
         return payload
