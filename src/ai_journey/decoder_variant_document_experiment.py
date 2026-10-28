@@ -61,6 +61,7 @@ def run_decoder_document_trial(
         batch_size=plan.batch_size,
         evaluation_windows=2 * evaluation_windows,
         variant_count=len(plan.variants),
+        seed_count=len(plan.seeds),
     )
     schedule = document_training_schedule(
         documents, seed=seed, steps=plan.steps, batch_size=plan.batch_size
