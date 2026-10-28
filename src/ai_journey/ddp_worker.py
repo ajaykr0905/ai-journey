@@ -22,6 +22,7 @@ from .ddp_runtime import process_group, require_all_ranks
 from .ddp_training import train_segment
 from .gpt2_training import build_gpt2_optimizer
 from .ddp_limits import preflight
+from .ddp_data import SAMPLER_V1, SAMPLER_V2, SAMPLERS, data_contract
 from .training_models import build_training_model, training_model_fingerprint
 
 
@@ -40,12 +41,17 @@ def _write_boundary(path: Path, marker):
             temporary.unlink(missing_ok=True)
 
 
-def _abrupt_exit(output: Path, topology: Topology, *, completed_step: int):
+def _abrupt_exit(
+    output: Path, topology: Topology, *, completed_step: int, contract=None
+):
     """Persist a public-safe boundary witness, then exit only this owned child."""
     _write_boundary(
         output.with_suffix(".crash.json"),
         {
-            "schema": "ai-journey-ddp-crash-boundary-v1",
+            "schema": "ai-journey-ddp-crash-boundary-v2"
+            if contract is not None
+            else "ai-journey-ddp-crash-boundary-v1",
+            **({"data_contract": contract} if contract is not None else {}),
             "rank": topology.rank,
             "world_size": topology.world_size,
             "pid": os.getpid(),
@@ -65,6 +71,7 @@ def main(argv=None):
     parser.add_argument("--world-size", type=int, required=True)
     parser.add_argument("--rendezvous", required=True)
     parser.add_argument("--steps", type=int, required=True)
+    parser.add_argument("--sampler", choices=SAMPLERS, default=SAMPLER_V1)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--observe-recovery", action="store_true")
     parser.add_argument("--checkpoint-interval", type=int)
@@ -92,7 +99,11 @@ def main(argv=None):
     if args.inject_failure == "stall":
         time.sleep(30)
     topology = Topology(args.rank, args.world_size, args.rank)
-    if args.inject_failure == "crash" and args.failure_after_step is None:
+    if (
+        args.inject_failure == "crash"
+        and args.failure_after_step is None
+        and args.sampler == SAMPLER_V1
+    ):
         _abrupt_exit(args.output, topology, completed_step=0)
     spec = preflight(
         args.source, args.spec, world_size=args.world_size, steps=args.steps
@@ -102,6 +113,14 @@ def main(argv=None):
 
     if sha256(source).hexdigest() != spec.source.sha256:
         raise ValueError("public source digest does not match specification")
+    contract = (
+        data_contract(source, spec.training, topology.world_size)
+        if args.sampler == SAMPLER_V2
+        else None
+    )
+    contract_fields = {"data_contract": contract} if contract is not None else {}
+    if args.inject_failure == "crash" and args.failure_after_step is None:
+        _abrupt_exit(args.output, topology, completed_step=0, contract=contract)
     torch.set_num_threads(1)
     torch.manual_seed(spec.training.seed)
     model = build_training_model(spec.model, max_parameters=1_000_000).double()
@@ -115,7 +134,11 @@ def main(argv=None):
                     journal = CheckpointJournal(
                         args.journal_directory,
                         run_sha256=checkpoint_run_sha256(
-                            model, spec.training, source, optimizer=optimizer
+                            model,
+                            spec.training,
+                            source,
+                            optimizer=optimizer,
+                            sampler=args.sampler,
                         ),
                     )
                     journal_ready = journal.recorded_step is None
@@ -141,6 +164,7 @@ def main(argv=None):
                     optimizer=optimizer,
                     config=spec.training,
                     source=source,
+                    sampler=args.sampler,
                 )
                 started = recovery.step
             else:
@@ -150,6 +174,7 @@ def main(argv=None):
                     optimizer=optimizer,
                     config=spec.training,
                     source=source,
+                    sampler=args.sampler,
                 )
         require_all_ranks(
             started + args.steps <= training.optimizer_steps
@@ -167,7 +192,11 @@ def main(argv=None):
                     CheckpointJournal(
                         args.journal_directory,
                         run_sha256=checkpoint_run_sha256(
-                            model, spec.training, source, optimizer=optimizer
+                            model,
+                            spec.training,
+                            source,
+                            optimizer=optimizer,
+                            sampler=args.sampler,
                         ),
                         create=False,
                     ).admit_schedule(
@@ -184,7 +213,10 @@ def main(argv=None):
             _write_boundary(
                 args.output.with_suffix(".recovery.json"),
                 {
-                    "schema": "ai-journey-ddp-restored-boundary-v1",
+                    "schema": "ai-journey-ddp-restored-boundary-v2"
+                    if contract is not None
+                    else "ai-journey-ddp-restored-boundary-v1",
+                    **contract_fields,
                     "rank": topology.rank,
                     "world_size": topology.world_size,
                     "pid": os.getpid(),
@@ -204,12 +236,18 @@ def main(argv=None):
                     topology,
                     start_step=step,
                     steps=1,
+                    sampler=args.sampler,
                 )
             )
             completed = step + 1
             if completed == args.failure_after_step:
                 if args.inject_failure == "crash":
-                    _abrupt_exit(args.output, topology, completed_step=completed)
+                    _abrupt_exit(
+                        args.output,
+                        topology,
+                        completed_step=completed,
+                        contract=contract,
+                    )
                 raise RuntimeError(
                     f"injected worker exit after optimizer step {completed}"
                 )
@@ -225,6 +263,7 @@ def main(argv=None):
                     config=spec.training,
                     source=source,
                     step=completed,
+                    sampler=args.sampler,
                     journal_directory=(
                         args.journal_directory
                         if recovery is None or completed > recovery.recorded_step
@@ -234,6 +273,11 @@ def main(argv=None):
     args.output.write_text(
         json.dumps(
             {
+                **(
+                    {"schema_version": 2, **contract_fields}
+                    if contract is not None
+                    else {}
+                ),
                 "rank": args.rank,
                 "world_size": args.world_size,
                 "pid": __import__("os").getpid(),

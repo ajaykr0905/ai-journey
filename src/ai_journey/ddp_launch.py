@@ -12,6 +12,7 @@ import time
 
 from .ddp_contracts import integer
 from .ddp_limits import preflight
+from .ddp_data import SAMPLER_V1, sampler_options, validate_sampler
 
 
 class WorkerFailure(RuntimeError):
@@ -114,9 +115,11 @@ def launch_training(
     failure_after_step: int | None = None,
     observe_recovery: bool = False,
     journal_directory: Path | None = None,
+    sampler=SAMPLER_V1,
 ) -> list[dict]:
     import json
 
+    validate_sampler(sampler)
     integer(world_size, "world_size", 1)
     integer(steps, "steps", 1)
     integer(timeout_seconds, "timeout_seconds", 1)
@@ -222,6 +225,8 @@ def launch_training(
                 ]
                 if resume:
                     command.append("--resume")
+                if sampler_options(sampler):
+                    command.extend(["--sampler", sampler])
                 if journal_directory is not None:
                     command.extend(
                         ["--journal-directory", str(journal_directory.resolve())]

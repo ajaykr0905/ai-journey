@@ -13,6 +13,7 @@ from .ddp_comparison import compare_decompositions, write_comparison, verify_com
 from .ddp_generation import SamplingConfig
 from .ddp_http import make_server
 from .ddp_limits import preflight
+from .ddp_data import SAMPLER_V1, SAMPLERS, sampler_options
 from .ddp_pipeline import run_pipeline, load_serving_model
 from .ddp_service import GenerationService, GenerationRequest
 
@@ -51,12 +52,14 @@ def add_commands(commands):
         for field in ("source", "spec", "output", "workdir"):
             command.add_argument(f"--{field}", type=Path, required=True)
         command.add_argument("--steps", type=int, default=4)
+        command.add_argument("--sampler", choices=SAMPLERS, default=SAMPLER_V1)
     verify = commands.add_parser("verify-comparison")
     verify.add_argument("--report", type=Path, required=True)
     for name in ("serve", "benchmark"):
         command = commands.add_parser(name)
         for field in ("source", "spec", "checkpoint"):
             command.add_argument(f"--{field}", type=Path, required=True)
+        command.add_argument("--sampler", choices=SAMPLERS, default=SAMPLER_V1)
         if name == "serve":
             command.add_argument("--port", type=int, default=8080)
             command.add_argument("--max-seconds", type=int, default=60)
@@ -71,6 +74,7 @@ def add_commands(commands):
 
 
 def run_operation(arguments):
+    options = sampler_options(getattr(arguments, "sampler", SAMPLER_V1))
     if arguments.command in ("benchmark", "matrix", "pipeline"):
         _validate_operation_paths(arguments)
     threads = torch.get_num_threads()
@@ -90,6 +94,7 @@ def run_operation(arguments):
                 spec_path=arguments.spec,
                 directory=arguments.workdir,
                 steps=arguments.steps,
+                **options,
             )
             write_comparison(arguments.output, report)
             return report
@@ -99,6 +104,7 @@ def run_operation(arguments):
                 spec_path=arguments.spec,
                 directory=arguments.workdir,
                 steps=arguments.steps,
+                **options,
             )
             write_report(arguments.output, report)
             return report
@@ -122,7 +128,7 @@ def run_operation(arguments):
                 }
         service = GenerationService(
             load_serving_model(
-                arguments.checkpoint, spec, arguments.source.read_bytes()
+                arguments.checkpoint, spec, arguments.source.read_bytes(), **options
             ),
             **prefix_arguments,
         )

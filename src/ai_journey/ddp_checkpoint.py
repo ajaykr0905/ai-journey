@@ -14,6 +14,7 @@ import torch
 import torch.distributed as dist
 
 from .ddp_contracts import integer
+from .ddp_data import SAMPLER_V1, SAMPLER_V2, data_contract, validate_sampler
 from .checkpoint_archive import load_checkpoint_archive
 from .checkpoint_journal import CheckpointJournal
 from .ddp_runtime import (
@@ -105,8 +106,11 @@ def optimizer_run_contract(model, optimizer, *, serialized_groups=None):
     return json.loads(json.dumps(result, sort_keys=True, allow_nan=False))
 
 
-def checkpoint_run_sha256(model, config, source: bytes, *, optimizer) -> str:
+def checkpoint_run_sha256(
+    model, config, source: bytes, *, optimizer, sampler=SAMPLER_V1
+) -> str:
     """Bind journal ownership to the complete typed replicated run contract."""
+    validate_sampler(sampler)
     contract = {
         "schema": "ai-journey-ddp-journal-run-v2",
         "world_size": dist.get_world_size(),
@@ -118,6 +122,9 @@ def checkpoint_run_sha256(model, config, source: bytes, *, optimizer) -> str:
         "source_sha256": sha256(source).hexdigest(),
         "optimizer_contract": optimizer_run_contract(model, optimizer),
     }
+    if sampler == SAMPLER_V2:
+        contract["schema"] = "ai-journey-ddp-journal-run-v3"
+        contract["data_contract"] = data_contract(source, config, dist.get_world_size())
     return sha256(
         json.dumps(
             contract, sort_keys=True, separators=(",", ":"), allow_nan=False
@@ -165,7 +172,9 @@ def save_checkpoint(
     source: bytes,
     step: int,
     journal_directory: Path | None = None,
+    sampler=SAMPLER_V1,
 ) -> str:
+    validate_sampler(sampler)
     integer(step, "step")
     if step > config.optimizer_steps:
         raise ValueError("step exceeds schedule")
@@ -194,7 +203,7 @@ def save_checkpoint(
                 journal = CheckpointJournal(
                     journal_directory,
                     run_sha256=checkpoint_run_sha256(
-                        model, config, source, optimizer=optimizer
+                        model, config, source, optimizer=optimizer, sampler=sampler
                     ),
                 )
                 recorded = journal.recorded_step
@@ -211,7 +220,16 @@ def save_checkpoint(
                 temporary = Path(handle.name)
                 torch.save(
                     {
-                        "schema_version": 1,
+                        "schema_version": 2 if sampler == SAMPLER_V2 else 1,
+                        **(
+                            {
+                                "data_contract": data_contract(
+                                    source, config, dist.get_world_size()
+                                )
+                            }
+                            if sampler == SAMPLER_V2
+                            else {}
+                        ),
                         "world_size": dist.get_world_size(),
                         "step": step,
                         "model_config": model_config_mapping(model.config),
@@ -255,11 +273,13 @@ def load_checkpoint(
     expected_sha256=None,
     expected_step=None,
     expected_optimizer_contract=None,
+    sampler=SAMPLER_V1,
 ) -> int:
     """Validate on every rank and restore atomically with rank-local RNG state."""
     payload = None
     valid = True
     try:
+        validate_sampler(sampler)
         if (
             path.is_symlink()
             or not path.is_file()
@@ -281,13 +301,20 @@ def load_checkpoint(
             "optimizer",
             "rank_rngs",
         }
+        if sampler == SAMPLER_V2:
+            expected.add("data_contract")
         if (
             not isinstance(payload, dict)
             or set(payload) != expected
             or type(payload["schema_version"]) is not int
-            or payload["schema_version"] != 1
+            or payload["schema_version"] != (2 if sampler == SAMPLER_V2 else 1)
         ):
             raise ValueError("checkpoint schema does not match")
+        if sampler == SAMPLER_V2 and not _exact_contract(
+            payload["data_contract"],
+            data_contract(source, config, dist.get_world_size()),
+        ):
+            raise ValueError("checkpoint sampler data contract does not match")
         integer(payload["step"], "step")
         if expected_step is not None:
             integer(expected_step, "expected_step")
@@ -376,6 +403,7 @@ def load_checkpoint_journal(
     config,
     source: bytes,
     max_bytes: int = 64 * 1024 * 1024,
+    sampler=SAMPLER_V1,
 ) -> JournalRecovery:
     """Collectively restore the newest fully valid same-run byte snapshot.
 
@@ -388,6 +416,7 @@ def load_checkpoint_journal(
     expected_optimizer = None
     valid = True
     try:
+        validate_sampler(sampler)
         expected_optimizer = optimizer_run_contract(model, optimizer)
     except (ValueError, TypeError, KeyError, OverflowError):
         valid = False
@@ -402,7 +431,7 @@ def load_checkpoint_journal(
             journal = CheckpointJournal(
                 directory,
                 run_sha256=checkpoint_run_sha256(
-                    model, config, source, optimizer=optimizer
+                    model, config, source, optimizer=optimizer, sampler=sampler
                 ),
             )
             selection[0] = (
@@ -430,6 +459,7 @@ def load_checkpoint_journal(
                 expected_sha256=digest,
                 expected_step=step,
                 expected_optimizer_contract=expected_optimizer,
+                sampler=sampler,
             )
         except CheckpointRejected:
             continue

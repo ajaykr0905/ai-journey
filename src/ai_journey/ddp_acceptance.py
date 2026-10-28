@@ -16,6 +16,13 @@ from .ddp_checkpoint import bounded_checkpoint_load
 from .ddp_launch import WorkerFailure, launch_training
 from .ddp_contracts import integer
 from .ddp_limits import preflight
+from .ddp_data import (
+    SAMPLER_V1,
+    SAMPLER_V2,
+    data_contract,
+    sampler_options,
+    validate_data_contract,
+)
 from .gpt2_training import training_spec_from_mapping
 from .training_models import (
     base_model_config,
@@ -25,6 +32,7 @@ from .training_models import (
 )
 
 CRASH_RECOVERY_SCHEMA = "ai-journey-ddp-crash-recovery-v1"
+CRASH_RECOVERY_SCHEMA_V2 = "ai-journey-ddp-crash-recovery-v2"
 CRASH_RECOVERY_SCOPE = "CPU-local Gloo crash/restart observations; not GPU, power-loss or production failover evidence. Digests validate internal consistency, not timing authenticity."
 _STATE_FIELDS = ("model", "optimizer", "rank_rngs", "step")
 
@@ -98,6 +106,7 @@ def _crash_metrics(report):
 
 def verify_crash_recovery(report, *, directory: Path | None = None):
     """Recompute loss/latency bounds and reject inconsistent local crash evidence."""
+    v2 = type(report) is dict and report.get("schema") == CRASH_RECOVERY_SCHEMA_V2
     _fields(
         report,
         (
@@ -119,11 +128,12 @@ def verify_crash_recovery(report, *, directory: Path | None = None):
             "state_sha256",
             "metrics",
             "report_sha256",
+            *(("data_contract",) if v2 else ()),
         ),
         "report",
     )
     if (
-        report["schema"] != CRASH_RECOVERY_SCHEMA
+        report["schema"] not in (CRASH_RECOVERY_SCHEMA, CRASH_RECOVERY_SCHEMA_V2)
         or report["scope"] != CRASH_RECOVERY_SCOPE
     ):
         raise ValueError("recovery evidence schema or CPU scope differs")
@@ -136,6 +146,12 @@ def verify_crash_recovery(report, *, directory: Path | None = None):
     interval = integer(report["checkpoint_interval"], "checkpoint_interval", 1)
     if world > 4 or total > 128 or interval > 128:
         raise ValueError("recovery exceeds bounded CPU protocol")
+    if v2:
+        validate_data_contract(
+            report["data_contract"],
+            world_size=world,
+            source_sha256=report["source_sha256"],
+        )
     crash = report["injection"]
     _fields(
         crash,
@@ -147,6 +163,7 @@ def verify_crash_recovery(report, *, directory: Path | None = None):
             "completed_step",
             "observed_ns",
             "exit_code",
+            *(("data_contract",) if v2 else ()),
         ),
         "crash boundary",
     )
@@ -160,7 +177,17 @@ def verify_crash_recovery(report, *, directory: Path | None = None):
     ):
         integer(crash[field], field, 0 if field == "rank" else 1)
     if (
-        crash["schema"] != "ai-journey-ddp-crash-boundary-v1"
+        crash["schema"]
+        != (
+            "ai-journey-ddp-crash-boundary-v2"
+            if v2
+            else "ai-journey-ddp-crash-boundary-v1"
+        )
+        or (
+            v2
+            and _canonical(crash["data_contract"])
+            != _canonical(report["data_contract"])
+        )
         or crash["world_size"] != world
         or crash["rank"] >= world
         or crash["exit_code"] != 86
@@ -280,13 +307,24 @@ def verify_crash_recovery(report, *, directory: Path | None = None):
                 "restored_step",
                 "ready_ns",
                 "model_sha256",
+                *(("data_contract",) if v2 else ()),
             ),
             "restoration boundary",
         )
         for field in ("rank", "world_size", "pid", "restored_step", "ready_ns"):
             integer(witness[field], field, 0 if field == "rank" else 1)
         if (
-            witness["schema"] != "ai-journey-ddp-restored-boundary-v1"
+            witness["schema"]
+            != (
+                "ai-journey-ddp-restored-boundary-v2"
+                if v2
+                else "ai-journey-ddp-restored-boundary-v1"
+            )
+            or (
+                v2
+                and _canonical(witness["data_contract"])
+                != _canonical(report["data_contract"])
+            )
             or witness["rank"] != rank
             or witness["world_size"] != world
             or witness["pid"] != report["resumed_workers"][rank]["pid"]
@@ -328,8 +366,24 @@ def _verify_crash_artifacts(report, directory):
             "source_sha256": spec.source.sha256,
             "world_size": report["world_size"],
         }
+        if report["schema"] == CRASH_RECOVERY_SCHEMA_V2:
+            validate_data_contract(
+                report["data_contract"],
+                spec.training,
+                world_size=report["world_size"],
+                source_sha256=spec.source.sha256,
+            )
+            expected_contract.update(
+                schema_version=2, data_contract=report["data_contract"]
+            )
 
         def validate_contract(payload):
+            if report["schema"] == CRASH_RECOVERY_SCHEMA and (
+                type(payload.get("schema_version")) is not int
+                or payload["schema_version"] != 1
+                or "data_contract" in payload
+            ):
+                raise ValueError("legacy checkpoint sampler version differs")
             actual_contract = {field: payload[field] for field in expected_contract}
             if _canonical(actual_contract) != _canonical(expected_contract):
                 raise ValueError("checkpoint specification binding differs")
@@ -464,8 +518,10 @@ def certify_crash_recovery(
     checkpoint_interval=2,
     failure_after_step=3,
     failure_rank=1,
+    sampler=SAMPLER_V1,
 ):
     """Measure an owned abrupt loss, fresh restoration, and exact final-state parity."""
+    options = sampler_options(sampler)
     integer(world_size, "world_size", 1)
     integer(total_steps, "total_steps", 1)
     integer(checkpoint_interval, "checkpoint_interval", 1)
@@ -508,6 +564,7 @@ def certify_crash_recovery(
         output_dir=directory / "continuous",
         world_size=world_size,
         steps=total_steps,
+        **options,
     )
     try:
         launch_training(
@@ -521,6 +578,7 @@ def certify_crash_recovery(
             failure_rank=failure_rank,
             failure_mode="crash",
             failure_after_step=failure_after_step,
+            **options,
         )
     except WorkerFailure as failure:
         supervision = failure.supervision
@@ -546,12 +604,24 @@ def certify_crash_recovery(
         steps=total_steps - durable["step"],
         resume=True,
         observe_recovery=True,
+        **options,
     )
     resume_finished = time.monotonic_ns()
     expected = bounded_checkpoint_load(continuous_path, 64 * 1024 * 1024)
     actual = bounded_checkpoint_load(recovered_path, 64 * 1024 * 1024)
     if not all(exact_state(expected[name], actual[name]) for name in _STATE_FIELDS):
         raise RuntimeError("crash recovery does not reproduce uninterrupted state")
+    contract = (
+        data_contract(source.read_bytes(), retained_spec.training, world_size)
+        if sampler == SAMPLER_V2
+        else None
+    )
+    if contract is not None and any(
+        _canonical(payload.get("data_contract")) != _canonical(contract)
+        or payload.get("schema_version") != 2
+        for payload in (durable, expected, actual)
+    ):
+        raise RuntimeError("crash recovery sampler contract differs")
     if (
         sha256(source.read_bytes()).hexdigest() != source_sha256
         or sha256(spec.read_bytes()).hexdigest() != spec_sha256
@@ -574,7 +644,10 @@ def certify_crash_recovery(
         ]
 
     report = {
-        "schema": CRASH_RECOVERY_SCHEMA,
+        "schema": CRASH_RECOVERY_SCHEMA_V2
+        if contract is not None
+        else CRASH_RECOVERY_SCHEMA,
+        **({"data_contract": contract} if contract is not None else {}),
         "scope": CRASH_RECOVERY_SCOPE,
         "source_sha256": source_sha256,
         "spec_sha256": spec_sha256,
@@ -628,9 +701,16 @@ def exact_state(left, right) -> bool:
 
 
 def certify_recovery(
-    *, source: Path, spec: Path, directory: Path, world_size=2, split_steps=2
+    *,
+    source: Path,
+    spec: Path,
+    directory: Path,
+    world_size=2,
+    split_steps=2,
+    sampler=SAMPLER_V1,
 ) -> dict:
     """Compare an uninterrupted run to a stopped run resumed in fresh processes."""
+    options = sampler_options(sampler)
     continuous_path = directory / "continuous.pt"
     resumed_path = directory / "resumed.pt"
     continuous = launch_training(
@@ -640,6 +720,7 @@ def certify_recovery(
         output_dir=directory / "continuous",
         world_size=world_size,
         steps=split_steps * 2,
+        **options,
     )
     first = launch_training(
         source=source,
@@ -648,6 +729,7 @@ def certify_recovery(
         output_dir=directory / "first",
         world_size=world_size,
         steps=split_steps,
+        **options,
     )
     resumed = launch_training(
         source=source,
@@ -657,6 +739,7 @@ def certify_recovery(
         world_size=world_size,
         steps=split_steps,
         resume=True,
+        **options,
     )
     expected = bounded_checkpoint_load(continuous_path, 64 * 1024 * 1024)
     actual = bounded_checkpoint_load(resumed_path, 64 * 1024 * 1024)
@@ -671,6 +754,18 @@ def certify_recovery(
     if {rank["pid"] for rank in first} & {rank["pid"] for rank in resumed}:
         raise RuntimeError("restart evidence requires fresh worker processes")
     return {
+        **(
+            {
+                "schema_version": 2,
+                "data_contract": data_contract(
+                    source.read_bytes(),
+                    training_spec_from_mapping(json.loads(spec.read_bytes())).training,
+                    world_size,
+                ),
+            }
+            if sampler == SAMPLER_V2
+            else {}
+        ),
         "world_size": world_size,
         "completed_step": split_steps * 2,
         "exact_state": verified,
@@ -681,9 +776,17 @@ def certify_recovery(
 
 
 def certify_batch_equivalence(
-    *, source: Path, spec: Path, directory: Path, world_size=2, steps=2, tolerance=1e-10
+    *,
+    source: Path,
+    spec: Path,
+    directory: Path,
+    world_size=2,
+    steps=2,
+    tolerance=1e-10,
+    sampler=SAMPLER_V1,
 ) -> dict:
     """Compare DDP against one process with the same effective global batch."""
+    options = sampler_options(sampler)
     directory.mkdir(parents=True, exist_ok=True)
     payload = json.loads(spec.read_text())
     payload["training"]["micro_batch_size"] *= world_size
@@ -700,6 +803,7 @@ def certify_batch_equivalence(
         output_dir=directory / "distributed",
         world_size=world_size,
         steps=steps,
+        **options,
     )
     serial = launch_training(
         source=source,
@@ -708,6 +812,7 @@ def certify_batch_equivalence(
         output_dir=directory / "serial",
         world_size=1,
         steps=steps,
+        **options,
     )
     expected = bounded_checkpoint_load(serial_path, 64 * 1024 * 1024)["model"]
     actual = bounded_checkpoint_load(distributed_path, 64 * 1024 * 1024)["model"]
@@ -719,6 +824,7 @@ def certify_batch_equivalence(
     ] != [metric["tokens"] for metric in serial[0]["metrics"]]:
         raise RuntimeError("DDP does not match the equivalent global-batch oracle")
     return {
+        **({"schema_version": 2, "sampler": sampler} if sampler == SAMPLER_V2 else {}),
         "world_size": world_size,
         "steps": steps,
         "max_parameter_error": maximum_error,

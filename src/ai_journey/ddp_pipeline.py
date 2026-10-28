@@ -16,6 +16,13 @@ from .ddp_evidence import build_evidence
 from .ddp_generation import SamplingConfig
 from .ddp_launch import launch_training
 from .ddp_limits import preflight
+from .ddp_data import (
+    SAMPLER_V1,
+    SAMPLER_V2,
+    data_contract,
+    sampler_options,
+    validate_sampler,
+)
 from .ddp_service import GenerationService, GenerationRequest
 from .gpt2_training import (
     training_spec_from_mapping,
@@ -30,8 +37,11 @@ from .training_models import (
 )
 
 
-def load_serving_model(checkpoint: Path, spec, source: bytes, *, expected_sha256=None):
+def load_serving_model(
+    checkpoint: Path, spec, source: bytes, *, expected_sha256=None, sampler=SAMPLER_V1
+):
     """Validate a serving checkpoint, optionally binding its exact loaded bytes."""
+    validate_sampler(sampler)
     if expected_training_parameters(spec.model) > 1_000_000:
         raise ValueError("serving model exceeds CPU lab parameter budget")
     payload = bounded_checkpoint_load(
@@ -49,17 +59,27 @@ def load_serving_model(checkpoint: Path, spec, source: bytes, *, expected_sha256
         "optimizer",
         "rank_rngs",
     }
+    if sampler == SAMPLER_V2:
+        fields.add("data_contract")
     if (
         type(payload) is not dict
         or set(payload) != fields
         or type(payload["schema_version"]) is not int
-        or payload["schema_version"] != 1
+        or payload["schema_version"] != (2 if sampler == SAMPLER_V2 else 1)
     ):
         raise ValueError("serving checkpoint schema does not match")
     integer(payload["step"], "step")
     integer(payload["world_size"], "world_size", 1)
     if payload["step"] > spec.training.optimizer_steps or payload["world_size"] > 4:
         raise ValueError("serving checkpoint progress or topology exceeds lab limits")
+    if sampler == SAMPLER_V2 and json.dumps(
+        payload["data_contract"], sort_keys=True, allow_nan=False
+    ) != json.dumps(
+        data_contract(source, spec.training, payload["world_size"]),
+        sort_keys=True,
+        allow_nan=False,
+    ):
+        raise ValueError("serving checkpoint sampler data contract does not match")
     if (
         type(payload["rank_rngs"]) is not list
         or len(payload["rank_rngs"]) != payload["world_size"]
@@ -121,7 +141,9 @@ def run_pipeline(
     validation_count=4,
     world_size=2,
     steps=2,
+    sampler=SAMPLER_V1,
 ):
+    options = sampler_options(sampler)
     original_spec = preflight(source, spec_path, world_size=world_size, steps=steps)
     original = source.read_bytes()
     if sha256(original).hexdigest() != original_spec.source.sha256:
@@ -153,8 +175,9 @@ def run_pipeline(
         output_dir=directory / "ranks",
         world_size=world_size,
         steps=steps,
+        **options,
     )
-    model = load_serving_model(checkpoint, spec, training_source)
+    model = load_serving_model(checkpoint, spec, training_source, **options)
     after = evaluate_documents(model, validation_docs)
     service = GenerationService(model)
     request = GenerationRequest(
@@ -163,13 +186,18 @@ def run_pipeline(
     generation = service.generate(request)
     benchmark = benchmark_service(service, request, repeats=3, warmup=1)
     return {
-        "schema_version": 1,
+        "schema_version": 2 if sampler == SAMPLER_V2 else 1,
+        **(
+            {"data_contract": data_contract(training_source, spec.training, world_size)}
+            if sampler == SAMPLER_V2
+            else {}
+        ),
         "public_source_sha256": sha256(original).hexdigest(),
         "training_documents": [document.digest for document in train_docs],
         "validation_documents": [document.digest for document in validation_docs],
         "validation_before": before,
         "validation_after": after,
-        "distributed": build_evidence(training_source, spec, ranks),
+        "distributed": build_evidence(training_source, spec, ranks, **options),
         "generation": generation,
         "serving_benchmark": benchmark,
         "limitations": "CPU fixture acceptance only; retain held-out regressions and timing variability.",

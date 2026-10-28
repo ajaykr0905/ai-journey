@@ -8,6 +8,7 @@ from pathlib import Path
 from .ddp_checkpoint import bounded_checkpoint_load
 from .ddp_evidence import build_evidence, verify_evidence, digest
 from .ddp_launch import launch_training
+from .ddp_data import SAMPLER_V1, SAMPLER_V2, sampler_options
 from .gpt2_training import load_training_spec
 
 
@@ -19,9 +20,10 @@ ARMS = (
 
 
 def compare_decompositions(
-    *, source: Path, spec_path: Path, directory: Path, steps=4
+    *, source: Path, spec_path: Path, directory: Path, steps=4, sampler=SAMPLER_V1
 ) -> dict:
     """Keep model/data/seed/optimizer/token budget fixed while redistributing work."""
+    options = sampler_options(sampler)
     directory.mkdir(parents=True, exist_ok=True)
     base = json.loads(spec_path.read_text())
     records, states = [], []
@@ -40,6 +42,7 @@ def compare_decompositions(
             output_dir=directory / name,
             world_size=world,
             steps=steps,
+            **options,
         )
         states.append(bounded_checkpoint_load(checkpoint, 64 * 1024 * 1024)["model"])
         records.append(
@@ -49,7 +52,7 @@ def compare_decompositions(
                 "micro_batch_size": microbatch,
                 "accumulation_steps": accumulation,
                 "evidence": build_evidence(
-                    source.read_bytes(), load_training_spec(path), ranks
+                    source.read_bytes(), load_training_spec(path), ranks, **options
                 ),
             }
         )
@@ -62,7 +65,8 @@ def compare_decompositions(
             "global-batch decomposition changes the trained state beyond tolerance"
         )
     report = {
-        "schema_version": 1,
+        "schema_version": 2 if sampler == SAMPLER_V2 else 1,
+        **({"sampler": sampler} if sampler == SAMPLER_V2 else {}),
         "hypothesis": "Equivalent global batches reproduce parameter updates within FP64 rounding tolerance.",
         "fixed_conditions": [
             "model",
@@ -85,10 +89,19 @@ def compare_decompositions(
 
 
 def verify_comparison(report):
-    if report.get("schema_version") != 1 or digest(
-        {key: value for key, value in report.items() if key != "evidence_sha256"}
-    ) != report.get("evidence_sha256"):
+    if (
+        type(report.get("schema_version")) is not int
+        or report["schema_version"] not in (1, 2)
+        or digest(
+            {key: value for key, value in report.items() if key != "evidence_sha256"}
+        )
+        != report.get("evidence_sha256")
+    ):
         raise ValueError("comparison schema or digest does not match")
+    if (report["schema_version"] == 2 and report.get("sampler") != SAMPLER_V2) or (
+        report["schema_version"] == 1 and "sampler" in report
+    ):
+        raise ValueError("comparison sampler version does not match")
     if report["absolute_tolerance"] != 1e-10 or report["global_batch_size"] != 4:
         raise ValueError(
             "comparison must retain the declared tolerance and global batch"
@@ -97,7 +110,7 @@ def verify_comparison(report):
         ARMS
     ):
         raise ValueError("comparison requires all predeclared arms")
-    specs = []
+    specs, source_extents = [], []
     for expected, arm, error in zip(
         ARMS, report["arms"], report["max_parameter_errors"]
     ):
@@ -115,6 +128,10 @@ def verify_comparison(report):
         ):
             raise ValueError("comparison controls or observed error are invalid")
         evidence = verify_evidence(arm["evidence"])
+        if evidence["schema_version"] != report["schema_version"]:
+            raise ValueError("comparison cannot mix sampler versions")
+        if evidence["schema_version"] == 2:
+            source_extents.append(evidence["data_contract"]["source_bytes"])
         spec = json.loads(json.dumps(evidence["spec"]))
         training = spec["training"]
         if (
@@ -126,6 +143,8 @@ def verify_comparison(report):
         specs.append(spec)
     if any(spec != specs[0] for spec in specs):
         raise ValueError("comparison changed a fixed experimental condition")
+    if source_extents and len(set(source_extents)) != 1:
+        raise ValueError("comparison changed the declared source extent")
     return report
 
 

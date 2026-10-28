@@ -11,6 +11,13 @@ import tempfile
 import torch
 
 from .ddp_contracts import integer
+from .ddp_data import (
+    SAMPLER_V1,
+    SAMPLER_V2,
+    data_contract,
+    validate_data_contract,
+    validate_sampler,
+)
 from .gpt2_training import training_spec_from_mapping, learning_rate_at
 
 
@@ -29,15 +36,35 @@ def digest(payload):
     ).hexdigest()
 
 
-def build_evidence(source: bytes, spec, ranks: list[dict]) -> dict:
+def build_evidence(
+    source: bytes, spec, ranks: list[dict], *, sampler=SAMPLER_V1
+) -> dict:
+    validate_sampler(sampler)
     if not ranks or any(
         rank["metrics"] != ranks[0]["metrics"]
         or rank["model_sha256"] != ranks[0]["model_sha256"]
         for rank in ranks
     ):
         raise ValueError("workers disagree on measured training evidence")
+    contract = (
+        data_contract(source, spec.training, len(ranks))
+        if sampler == SAMPLER_V2
+        else None
+    )
+    if any(
+        (
+            type(rank.get("schema_version")) is not int
+            or rank["schema_version"] != 2
+            or digest(rank.get("data_contract")) != digest(contract)
+        )
+        if contract is not None
+        else "data_contract" in rank or "schema_version" in rank
+        for rank in ranks
+    ):
+        raise ValueError("worker sampler evidence differs from the selected run")
     payload = {
-        "schema_version": 1,
+        "schema_version": 2 if contract is not None else 1,
+        **({"data_contract": contract} if contract is not None else {}),
         "world_size": len(ranks),
         "source_sha256": sha256(source).hexdigest(),
         "spec": spec.to_mapping(),
@@ -80,10 +107,16 @@ def verify_evidence(payload: dict) -> dict:
         "evidence_sha256",
     }
     if (
+        isinstance(payload, dict)
+        and type(payload.get("schema_version")) is int
+        and payload["schema_version"] == 2
+    ):
+        fields.add("data_contract")
+    if (
         not isinstance(payload, dict)
         or set(payload) != fields
         or type(payload["schema_version"]) is not int
-        or payload["schema_version"] != 1
+        or payload["schema_version"] not in (1, 2)
     ):
         raise ValueError("distributed evidence schema does not match")
     unsigned = {
@@ -95,6 +128,13 @@ def verify_evidence(payload: dict) -> dict:
     if world > 4:
         raise ValueError("world size exceeds CPU lab budget")
     spec = training_spec_from_mapping(payload["spec"])
+    if payload["schema_version"] == 2:
+        validate_data_contract(
+            payload["data_contract"],
+            spec.training,
+            world_size=world,
+            source_sha256=spec.source.sha256,
+        )
     if (
         payload["source_sha256"] != spec.source.sha256
         or payload["limitations"] != LIMITATIONS

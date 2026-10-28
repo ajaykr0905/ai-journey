@@ -12,6 +12,7 @@ from .ddp_acceptance import (
 )
 from .ddp_evidence import build_evidence, read_evidence, write_evidence
 from .ddp_launch import launch_training
+from .ddp_data import SAMPLER_V1, SAMPLERS, sampler_options
 from .gpt2_training import load_training_spec
 from .ddp_operations import (
     _validate_operation_paths,
@@ -30,6 +31,7 @@ def main(argv=None):
             command.add_argument(f"--{field}", type=Path, required=True)
         command.add_argument("--world-size", type=int, default=2)
         command.add_argument("--steps", type=int, default=2)
+        command.add_argument("--sampler", choices=SAMPLERS, default=SAMPLER_V1)
         if name == "train":
             command.add_argument("--checkpoint", type=Path, required=True)
             command.add_argument("--resume", action="store_true")
@@ -45,11 +47,13 @@ def main(argv=None):
     crash.add_argument("--checkpoint-interval", type=int, default=2)
     crash.add_argument("--failure-after-step", type=int, default=3)
     crash.add_argument("--failure-rank", type=int, default=1)
+    crash.add_argument("--sampler", choices=SAMPLERS, default=SAMPLER_V1)
     verify_crash = commands.add_parser("verify-crash-recovery")
     verify_crash.add_argument("--report", type=Path, required=True)
     verify_crash.add_argument("--workdir", type=Path)
     add_commands(commands)
     arguments = parser.parse_args(argv)
+    options = sampler_options(getattr(arguments, "sampler", SAMPLER_V1))
     try:
         if arguments.command in ("train", "recover", "compare", "recover-crash"):
             _validate_operation_paths(arguments)
@@ -83,6 +87,7 @@ def main(argv=None):
                 checkpoint_interval=arguments.checkpoint_interval,
                 failure_after_step=arguments.failure_after_step,
                 failure_rank=arguments.failure_rank,
+                **options,
             )
             write_report(arguments.output, result)
         elif arguments.command == "train":
@@ -97,8 +102,11 @@ def main(argv=None):
                 resume=arguments.resume,
                 checkpoint_interval=arguments.checkpoint_interval,
                 journal_directory=arguments.journal_directory,
+                **options,
             )
-            result = build_evidence(arguments.source.read_bytes(), spec, ranks)
+            result = build_evidence(
+                arguments.source.read_bytes(), spec, ranks, **options
+            )
             write_evidence(arguments.output, result)
         else:
             function = (
@@ -113,6 +121,7 @@ def main(argv=None):
                 directory=arguments.workdir,
                 world_size=arguments.world_size,
                 **{step_field: arguments.steps},
+                **options,
             )
             write_report(arguments.output, result)
     except (OSError, ValueError, RuntimeError, TimeoutError) as error:
