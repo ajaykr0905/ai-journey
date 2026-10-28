@@ -407,6 +407,44 @@ class CheckpointJournal:
                 "scope": "byte integrity only; semantic restorability is untested",
             }
 
+    def admit_schedule(
+        self, *, start_step: int, steps: int, checkpoint_interval: int | None = None
+    ) -> dict:
+        """Require room for all new publications before a supervised run updates.
+
+        Count global interval boundaries and the final partial interval, without
+        charging replay at or below the sealed high-water. This is an observation,
+        not a reservation: the supervisor must retain its exclusive run lease.
+        Future archive byte sizes are unknown and remain publication-time checks.
+        """
+        _integer(start_step, "start_step", 0, 1_000_000)
+        _integer(steps, "steps", 1, 1_000_000 - start_step)
+        if checkpoint_interval is not None and (
+            type(checkpoint_interval) is not int or checkpoint_interval <= 0
+        ):
+            raise ValueError("journal checkpoint_interval must be a positive integer")
+        report = self.inspect()
+        end = start_step + steps
+        cutoff = max(start_step, report["recorded_step"] or 0)
+        required = 0
+        if end > cutoff:
+            required = (
+                1
+                if checkpoint_interval is None
+                else end // checkpoint_interval
+                - cutoff // checkpoint_interval
+                + int(end % checkpoint_interval != 0)
+            )
+        available = report["capacity"]["remaining_versions"]
+        if required > available:
+            raise ValueError("journal schedule exceeds its durable version capacity")
+        return {
+            "recorded_step": report["recorded_step"],
+            "required_new_versions": required,
+            "remaining_versions_after": available - required,
+            "scope": "version capacity only; future checkpoint byte sizes are not predicted",
+        }
+
     def candidates(self) -> tuple[CheckpointCandidate, ...]:
         """Return byte-intact versions newest first, never uncommitted orphans.
 

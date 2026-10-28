@@ -160,6 +160,26 @@ def main(argv=None):
             ),
             phase="worker schedule validation",
         )
+        if args.journal_directory is not None:
+            capacity_ready = True
+            if topology.rank == 0:
+                try:
+                    CheckpointJournal(
+                        args.journal_directory,
+                        run_sha256=checkpoint_run_sha256(
+                            model, spec.training, source, optimizer=optimizer
+                        ),
+                        create=False,
+                    ).admit_schedule(
+                        start_step=started,
+                        steps=args.steps,
+                        checkpoint_interval=args.checkpoint_interval,
+                    )
+                except (OSError, ValueError, RuntimeError, TypeError):
+                    capacity_ready = False
+            require_all_ranks(
+                capacity_ready, phase="checkpoint journal version admission"
+            )
         if args.observe_recovery:
             _write_boundary(
                 args.output.with_suffix(".recovery.json"),

@@ -348,6 +348,18 @@ history. Rank JSON files retain the restored step, recorded step and selected
 snapshot SHA-256. The existing general evidence report schema stays unchanged.
 A non-resumed run requires an empty same-contract journal; existing committed
 progress rejects before updates rather than being silently adopted or replaced.
+Before the first optimizer update, all ranks also reject a schedule whose new
+publications cannot fit the journal's remaining version slots. Admission counts
+global `--checkpoint-interval` boundaries and the final partial interval exactly;
+without an interval, only the final checkpoint consumes a slot. Already recorded
+or replayed steps at or below the manifest high-water consume no new slots.
+For example, 15 retained versions leave room for one final-only resumed save,
+not an interval checkpoint followed by a separate final partial checkpoint.
+`CheckpointJournal(..., create=False).admit_schedule(start_step=..., steps=...,
+checkpoint_interval=...)` exposes the same count and remaining version capacity.
+This read-only check neither reserves future slots nor predicts archive sizes:
+the existing exclusive supervised-run lease must remain held, and each actual
+publication still checks its per-blob and total-byte budgets.
 
 The supervisor leases the journal directory inode for the entire run, including
 child cleanup, in addition to the checkpoint sidecar and worker-output lease.
