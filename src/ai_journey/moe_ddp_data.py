@@ -4,7 +4,7 @@ import torch
 
 from .ddp_contracts import Topology
 from .ddp_data import shard_indices
-from .moe_ddp_plan import MAX_SAMPLES, source_admission
+from .moe_ddp_plan import MAX_SAMPLES, SAMPLER_V2, source_admission
 
 
 def public_moe_ddp_schedule(plan, source_bytes, *, rank, update_index):
@@ -23,7 +23,9 @@ def public_moe_ddp_schedule(plan, source_bytes, *, rank, update_index):
     updates = count // global_batch
     epoch, offset = divmod(update_index, updates)
     ids = shard_indices(
-        count - count % global_batch,
+        # V1 truncated original IDs; retain it for existing checkpoint replay.
+        # V2 shuffles all IDs. Window slices consume only complete global groups.
+        count if plan.sampler == SAMPLER_V2 else count - count % global_batch,
         Topology(rank, run.world_size),
         seed=run.seed,
         epoch=epoch,

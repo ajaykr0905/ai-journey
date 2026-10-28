@@ -12,6 +12,7 @@
     "tests/test_moe_ddp_operator.py",
     "tests/test_moe_ddp_plan_wire_budget.py",
     "tests/test_moe_ddp_input_snapshot.py",
+    "tests/test_moe_ddp_sampler_versions.py",
     "tests/test_prefix_ci_contract.py",
     "src/ai_journey/prefix_readiness.py",
     "src/ai_journey/prefix_report.py",

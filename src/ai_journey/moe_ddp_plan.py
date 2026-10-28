@@ -12,6 +12,9 @@ from .moe_ddp_config import MoEDDPConfig, moe_ddp_config_from_mapping
 from .moe_ddp_resources import require_moe_ddp_budget
 
 SCHEMA = "ai-journey-public-moe-ddp-plan-v1"
+SCHEMA_V2 = "ai-journey-public-moe-ddp-plan-v2"
+SAMPLER_V1 = "rank-strided-epoch-shuffle-v1"
+SAMPLER_V2 = "rank-strided-full-epoch-shuffle-v2"
 MAX_PLAN_BYTES = 64 * 1024
 MAX_REPORT_BYTES = 4 * 1024 * 1024
 MAX_SAMPLES = 65536
@@ -34,6 +37,7 @@ def unique_fields(pairs):
 class PublicMoEDDPPlan:
     run: MoEDDPConfig
     source: GPT2TrainingSource
+    sampler: str = SAMPLER_V1
 
     def __post_init__(self):
         if (
@@ -44,6 +48,11 @@ class PublicMoEDDPPlan:
             raise ValueError(
                 "public byte MoE plan requires exact run/source and vocab256"
             )
+        if type(self.sampler) is not str or self.sampler not in (
+            SAMPLER_V1,
+            SAMPLER_V2,
+        ):
+            raise ValueError("public MoE plan requires a supported sampler version")
         if any(
             type(value) is not str or not value.strip() or len(value) > 4096
             for value in asdict(self.source).values()
@@ -88,20 +97,27 @@ class PublicMoEDDPPlan:
             )
 
     def to_mapping(self):
-        return {
-            "schema": SCHEMA,
+        mapping = {
+            "schema": SCHEMA if self.sampler == SAMPLER_V1 else SCHEMA_V2,
             "run": self.run.to_mapping(),
             "source": asdict(self.source),
         }
+        if self.sampler == SAMPLER_V2:
+            mapping["sampler"] = self.sampler
+        return mapping
 
     def fingerprint(self):
         return sha256(canonical(self.to_mapping()).encode()).hexdigest()
 
     def data_contract(self):
         return {
-            "schema": "ai-journey-public-byte-window-v1",
+            "schema": (
+                "ai-journey-public-byte-window-v1"
+                if self.sampler == SAMPLER_V1
+                else "ai-journey-public-byte-window-v2"
+            ),
             "plan_sha256": self.fingerprint(),
-            "sampler": "rank-strided-epoch-shuffle-v1",
+            "sampler": self.sampler,
             "tail_policy": "drop_global_incomplete_window",
             "capacity_scope": "rank_microbatch",
             "rank_rng": "cpu_generator_seed_plus_1000_plus_rank",
@@ -109,11 +125,19 @@ class PublicMoEDDPPlan:
 
 
 def public_moe_ddp_plan_from_mapping(value):
-    if (
-        type(value) is not dict
-        or set(value) != {"schema", "run", "source"}
-        or value["schema"] != SCHEMA
-    ):
+    if type(value) is not dict:
+        raise ValueError("public MoE DDP plan fields differ")
+    if value.get("schema") == SCHEMA:
+        expected = {"schema", "run", "source"}
+        sampler = SAMPLER_V1
+    elif value.get("schema") == SCHEMA_V2:
+        expected = {"schema", "run", "source", "sampler"}
+        sampler = value.get("sampler")
+        if type(sampler) is not str or sampler != SAMPLER_V2:
+            raise ValueError("public MoE v2 plan requires its explicit sampler")
+    else:
+        raise ValueError("public MoE DDP plan fields differ")
+    if set(value) != expected:
         raise ValueError("public MoE DDP plan fields differ")
     source = value["source"]
     if type(source) is not dict or set(source) != {
@@ -126,7 +150,9 @@ def public_moe_ddp_plan_from_mapping(value):
         raise ValueError("public MoE DDP source fields differ")
     try:
         return PublicMoEDDPPlan(
-            moe_ddp_config_from_mapping(value["run"]), GPT2TrainingSource(**source)
+            moe_ddp_config_from_mapping(value["run"]),
+            GPT2TrainingSource(**source),
+            sampler=sampler,
         )
     except (ValueError, TypeError, OverflowError) as error:
         raise ValueError("public MoE DDP plan is invalid") from error
