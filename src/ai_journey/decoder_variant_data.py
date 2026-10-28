@@ -10,12 +10,49 @@ import torch
 
 from .ddp_evaluation import Document, documents_from_lines
 
+_MAX_SOURCE_BYTES = 1024 * 1024
+
 
 @dataclass(frozen=True)
 class DecoderDocuments:
     train: tuple[Document, ...]
     heldout: tuple[Document, ...]
     context_length: int
+
+    def __post_init__(self):
+        if type(self.context_length) is not int or not 1 <= self.context_length <= 64:
+            raise ValueError("document context_length must be an integer in [1, 64]")
+        partitions = (self.train, self.heldout)
+        if any(
+            type(partition) is not tuple or not partition for partition in partitions
+        ):
+            raise ValueError("document partitions must be nonempty tuples")
+        if len(self.train) + len(self.heldout) > 2048:
+            raise ValueError("document partitions exceed 2048 documents")
+        if any(
+            not isinstance(doc, Document)
+            for partition in partitions
+            for doc in partition
+        ):
+            raise ValueError("document partitions must contain Document entries")
+        # Line parsing can add one newline when a bounded source ends without it.
+        if any(
+            sum(len(doc.content) for doc in partition) > _MAX_SOURCE_BYTES + 1
+            for partition in partitions
+        ):
+            raise ValueError("document partition exceeds one MiB plus EOF newline")
+        identities = tuple(
+            {doc.digest for doc in partition} for partition in partitions
+        )
+        if any(
+            len(digests) != len(partition)
+            for digests, partition in zip(identities, partitions, strict=True)
+        ):
+            raise ValueError("document partitions must be content-distinct")
+        if identities[0] & identities[1]:
+            raise ValueError("training and held-out documents must be content-disjoint")
+        if not any(len(doc.content) > self.context_length for doc in self.train):
+            raise ValueError("training documents contain no complete context window")
 
     def evidence(self) -> dict:
         """Publish identities and coverage without publishing source text."""
@@ -35,22 +72,14 @@ def prepare_decoder_documents(
 ) -> DecoderDocuments:
     """Treat each nonempty line as a document, rejecting all exact leakage."""
 
-    if type(context_length) is not int or not 1 <= context_length <= 64:
-        raise ValueError("document context_length must be an integer in [1, 64]")
     if any(not isinstance(value, bytes) for value in (train_bytes, heldout_bytes)):
         raise TypeError("document sources must be bytes")
-    if any(len(value) > 1024 * 1024 for value in (train_bytes, heldout_bytes)):
+    if any(len(value) > _MAX_SOURCE_BYTES for value in (train_bytes, heldout_bytes)):
         raise ValueError("document source exceeds one MiB")
     train, heldout = (
         documents_from_lines(train_bytes),
         documents_from_lines(heldout_bytes),
     )
-    if len(train) + len(heldout) > 2048:
-        raise ValueError("document partitions exceed 2048 documents")
-    if {doc.digest for doc in train} & {doc.digest for doc in heldout}:
-        raise ValueError("training and held-out documents must be content-disjoint")
-    if not any(len(doc.content) > context_length for doc in train):
-        raise ValueError("training documents contain no complete context window")
     return DecoderDocuments(train, heldout, context_length)
 
 
