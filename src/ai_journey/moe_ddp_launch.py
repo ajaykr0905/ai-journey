@@ -12,6 +12,7 @@ from .checkpoint_journal import _read_bytes
 from .ddp_launch import _owned_run, _paths_alias, WorkerFailure, WorkerTimeout
 from .moe_ddp_plan import (
     MAX_REPORT_BYTES,
+    canonical,
     read_public_moe_ddp_plan,
     unique_fields,
 )
@@ -26,8 +27,14 @@ def launch_moe_ddp(
     steps: int,
     resume: bool = False,
     timeout_seconds: int = 60,
+    expected_plan_sha256: str | None = None,
 ):
-    plan, _ = read_public_moe_ddp_plan(config, source)
+    plan, source_bytes = read_public_moe_ddp_plan(config, source)
+    if expected_plan_sha256 is not None and (
+        type(expected_plan_sha256) is not str
+        or expected_plan_sha256 != plan.fingerprint()
+    ):
+        raise ValueError("admitted public MoE plan identity changed before launch")
     if (
         type(steps) is not int
         or not 1 <= steps <= plan.run.optimizer_steps
@@ -60,6 +67,12 @@ def launch_moe_ddp(
             raise ValueError(
                 "worker directory must be empty; previous logs are retained"
             )
+        # Both replicas must consume the same admitted bytes, not reopen caller
+        # paths that can change while the owned subprocesses are starting.
+        snapshot_config = Path(temporary) / "plan.json"
+        snapshot_source = Path(temporary) / "source.bin"
+        snapshot_config.write_text(canonical(plan.to_mapping()), encoding="utf-8")
+        snapshot_source.write_bytes(source_bytes)
         processes, logs = [], []
         try:
             for rank in range(plan.run.world_size):
@@ -70,9 +83,9 @@ def launch_moe_ddp(
                     "-m",
                     "ai_journey.moe_ddp_worker",
                     "--config",
-                    str(config.resolve()),
+                    str(snapshot_config),
                     "--source",
-                    str(source.resolve()),
+                    str(snapshot_source),
                     "--checkpoint",
                     str(checkpoint.resolve()),
                     "--output",

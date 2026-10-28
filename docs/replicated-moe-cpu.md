@@ -139,12 +139,37 @@ Overrunning the restored schedule rejects collectively before any update.
 Non-resume refuses an existing checkpoint. Inputs, report and worker outputs
 must be disjoint; old reports/logs are never silently overwritten.
 
-The sampler shuffles bounded sample IDs with a private Python RNG, drops only
-the global incomplete-window tail, then rank-strides the common order. It
-materializes only the next selected microbatches, not every source window.
-Every byte position is eligible; no padding mask or external tokenizer is
-inferred. Capacity applies independently per rank/microbatch, even though CE
-and auxiliary objectives use the global token-weighted definition above.
+Sampler selection is explicit and immutable for a run:
+
+- Existing `ai-journey-public-moe-ddp-plan-v1` plans have exactly `schema`,
+  `run` and `source`. The default constructor and checked `config/moe-ddp-cpu.json`
+  retain their exact canonical bytes, hashes and historical schedule. That v1
+  schedule truncates the original sample IDs to a complete global-window count
+  **before** shuffling, so the same trailing sample IDs are omitted every epoch.
+- New `ai-journey-public-moe-ddp-plan-v2` plans additionally require
+  `"sampler": "rank-strided-full-epoch-shuffle-v2"`. V2 shuffles the **full**
+  bounded sample population using a private Python RNG, drops the shuffled
+  incomplete-window tail, then rank-strides the common order. With ten samples
+  and a global window of four, it shuffles all ten and selects the first eight,
+  rather than permanently excluding original IDs eight and nine. A sample can
+  still fall in the dropped tail of an individual epoch; no coverage guarantee
+  across a finite number of epochs is inferred.
+
+To opt in, create a new copy of the checked plan, change only its top-level
+schema to `ai-journey-public-moe-ddp-plan-v2` and add the exact sampler selector.
+The Python interface is `PublicMoEDDPPlan(run, source, sampler=SAMPLER_V2)`, with
+`SAMPLER_V2` imported from `ai_journey.moe_ddp_plan`. The same `plan`, `train`,
+`verify` and source-admission commands apply; no launcher flag infers a version.
+Unknown selectors, a v2 plan without a selector and a selector added to a v1
+plan reject. V2 uses a distinct plan identity and checkpoint data contract.
+Resuming either version with the other rejects before live state changes;
+there is no automatic v1 checkpoint upgrade. Keep the original plan for old
+reports/checkpoints, or start a new run with v2.
+
+Both samplers materialize only the next selected microbatches, not every source
+window. All selected byte positions are eligible; no padding mask or external
+tokenizer is inferred. Capacity applies independently per rank/microbatch, even
+though CE and auxiliary objectives use the global token-weighted definition above.
 Each rank's CPU dropout generator starts at `seed + 1000 + rank`; checkpoint
 restoration replaces that state with its exact saved boundary.
 

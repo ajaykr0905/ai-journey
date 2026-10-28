@@ -315,3 +315,98 @@ def test_cli_passes_journal_and_rejects_report_inside_it(tmp_path, monkeypatch, 
     with pytest.raises(SystemExit) as error:
         ddp_cli.main(argv)
     assert error.value.code == 2 and len(captured) == 1
+
+
+def test_impossible_version_schedule_rejects_before_any_checkpoint_or_update(tmp_path):
+    source, spec = _run_spec(tmp_path)
+    value = json.loads(spec.read_bytes())
+    value["training"]["optimizer_steps"] = 17
+    spec.write_text(json.dumps(value))
+    checkpoint, journal = tmp_path / "state.pt", tmp_path / "journal"
+    with pytest.raises(RuntimeError, match="worker failed"):
+        launch_training(
+            source=source,
+            spec=spec,
+            checkpoint=checkpoint,
+            output_dir=tmp_path / "rejected",
+            world_size=2,
+            steps=17,
+            checkpoint_interval=1,
+            journal_directory=journal,
+            # The existing public failure boundary would witness an update if
+            # capacity admission did not run before the training loop.
+            failure_rank=1,
+            failure_mode="crash",
+            failure_after_step=1,
+        )
+    assert not checkpoint.exists()
+    assert json.loads((journal / "manifest.json").read_bytes())["entries"] == []
+    assert not (tmp_path / "rejected/rank-1.crash.json").exists()
+    assert all(
+        "checkpoint journal version admission"
+        in (tmp_path / "rejected" / f"rank-{rank}.log").read_text()
+        for rank in (0, 1)
+    )
+
+
+def test_resumed_capacity_admission_preserves_bytes_and_accepts_a_fitting_schedule(
+    tmp_path,
+):
+    source, spec = _run_spec(tmp_path)
+    value = json.loads(spec.read_bytes())
+    value["training"]["optimizer_steps"] = 18
+    spec.write_text(json.dumps(value))
+    checkpoint, journal = tmp_path / "state.pt", tmp_path / "journal"
+    launch_training(
+        source=source,
+        spec=spec,
+        checkpoint=checkpoint,
+        output_dir=tmp_path / "initial",
+        world_size=1,
+        steps=15,
+        checkpoint_interval=1,
+        journal_directory=journal,
+    )
+    before = (
+        checkpoint.read_bytes(),
+        {path.name: path.read_bytes() for path in journal.iterdir()},
+    )
+    with pytest.raises(RuntimeError, match="worker failed"):
+        launch_training(
+            source=source,
+            spec=spec,
+            checkpoint=checkpoint,
+            output_dir=tmp_path / "too-many-versions",
+            world_size=1,
+            steps=2,
+            checkpoint_interval=2,
+            journal_directory=journal,
+            resume=True,
+            failure_rank=0,
+            failure_mode="crash",
+            failure_after_step=16,
+        )
+    assert before == (
+        checkpoint.read_bytes(),
+        {path.name: path.read_bytes() for path in journal.iterdir()},
+    )
+    assert not (tmp_path / "too-many-versions/rank-0.crash.json").exists()
+    assert (
+        "checkpoint journal version admission"
+        in (tmp_path / "too-many-versions/rank-0.log").read_text()
+    )
+    ranks = launch_training(
+        source=source,
+        spec=spec,
+        checkpoint=checkpoint,
+        output_dir=tmp_path / "fitting-resume",
+        world_size=1,
+        steps=2,
+        journal_directory=journal,
+        resume=True,
+    )
+    assert ranks[0]["started_step"] == 15
+    assert ranks[0]["completed_step"] == 17
+    entries = json.loads((journal / "manifest.json").read_bytes())["entries"]
+    assert [entry["step"] for entry in entries] == [*range(1, 16), 17]
+    assert torch.load(checkpoint, weights_only=True)["step"] == 17

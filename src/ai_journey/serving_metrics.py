@@ -26,6 +26,27 @@ PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 _MAX_COUNTER = 2**63 - 1
 
 
+def _duration_seconds(value, name):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be finite and nonnegative")
+    try:
+        duration = float(value)
+    except OverflowError as error:
+        raise ValueError(f"{name} must be finite and nonnegative") from error
+    if not math.isfinite(duration) or duration < 0:
+        raise ValueError(f"{name} must be finite and nonnegative")
+    return duration
+
+
+def _histogram_snapshot(bins, total):
+    cumulative = tuple(accumulate(bins))
+    return {
+        "buckets": tuple(zip((*DURATION_BUCKETS, math.inf), cumulative, strict=True)),
+        "sum": total,
+        "count": cumulative[-1],
+    }
+
+
 class ServingMetrics:
     """Record completed operations atomically without retaining request content.
 
@@ -39,6 +60,8 @@ class ServingMetrics:
         self._requests = dict.fromkeys(OUTCOMES, 0)
         self._duration_bins = [0] * (len(DURATION_BUCKETS) + 1)
         self._duration_sum = 0.0
+        self._queue_wait_bins = [0] * (len(DURATION_BUCKETS) + 1)
+        self._queue_wait_sum = 0.0
         self._generated_tokens = 0
         self._cache_hits = 0
 
@@ -46,18 +69,7 @@ class ServingMetrics:
         """Reject invalid observations before changing any counter or bucket."""
         if not isinstance(outcome, str) or outcome not in OUTCOMES:
             raise ValueError("outcome must be a fixed serving outcome")
-        if isinstance(duration_seconds, bool) or not isinstance(
-            duration_seconds, (int, float)
-        ):
-            raise ValueError("duration_seconds must be finite and nonnegative")
-        try:
-            duration = float(duration_seconds)
-        except OverflowError as error:
-            raise ValueError(
-                "duration_seconds must be finite and nonnegative"
-            ) from error
-        if not math.isfinite(duration) or duration < 0:
-            raise ValueError("duration_seconds must be finite and nonnegative")
+        duration = _duration_seconds(duration_seconds, "duration_seconds")
         if (
             type(generated_tokens) is not int
             or not 0 <= generated_tokens <= _MAX_COUNTER
@@ -81,24 +93,33 @@ class ServingMetrics:
             self._generated_tokens += new_tokens
             self._cache_hits += int(cached)
 
+    def observe_queue_wait(self, duration_seconds):
+        """Observe each admitted wait ending in execution or queued interruption."""
+        duration = _duration_seconds(duration_seconds, "queue wait")
+        bucket = bisect_left(DURATION_BUCKETS, duration)
+        with self._lock:
+            total = self._queue_wait_sum + duration
+            if not math.isfinite(total) or sum(self._queue_wait_bins) == _MAX_COUNTER:
+                raise ValueError("serving metric accumulation exceeds finite capacity")
+            self._queue_wait_bins[bucket] += 1
+            self._queue_wait_sum = total
+
     def snapshot(self) -> dict:
         """Return an independent, coherent copy of all metric families."""
         with self._lock:
-            cumulative = tuple(accumulate(self._duration_bins))
             return {
                 "requests": self._requests.copy(),
-                "duration_seconds": {
-                    "buckets": tuple(
-                        zip((*DURATION_BUCKETS, math.inf), cumulative, strict=True)
-                    ),
-                    "sum": self._duration_sum,
-                    "count": cumulative[-1],
-                },
+                "duration_seconds": _histogram_snapshot(
+                    self._duration_bins, self._duration_sum
+                ),
+                "queue_wait_seconds": _histogram_snapshot(
+                    self._queue_wait_bins, self._queue_wait_sum
+                ),
                 "generated_tokens": self._generated_tokens,
                 "cache_hits": self._cache_hits,
             }
 
-    def render_prometheus(self) -> str:
+    def render_prometheus(self, *, operational_state=None) -> str:
         """Render one coherent scrape without prompt or request-ID labels."""
         values = self.snapshot()
         lines = [
@@ -129,21 +150,74 @@ class ServingMetrics:
                     f"{metric} {values[key]}",
                 )
             )
-        histogram = "ai_journey_serving_request_duration_seconds"
-        lines.extend(
+        for name, key, help_text in (
             (
-                f"# HELP {histogram} Completed serving operation duration in seconds.",
-                f"# TYPE {histogram} histogram",
-            )
-        )
-        duration = values["duration_seconds"]
-        for bound, count in duration["buckets"]:
-            label = "+Inf" if math.isinf(bound) else str(bound)
-            lines.append(f'{histogram}_bucket{{le="{label}"}} {count}')
-        lines.extend(
+                "request_duration_seconds",
+                "duration_seconds",
+                "Completed serving operation duration in seconds.",
+            ),
             (
-                f'{histogram}_sum {duration["sum"]}',
-                f'{histogram}_count {duration["count"]}',
+                "queue_wait_seconds",
+                "queue_wait_seconds",
+                "Admitted wait until execution or queued interruption in seconds.",
+            ),
+        ):
+            histogram = f"ai_journey_serving_{name}"
+            lines.extend(
+                (f"# HELP {histogram} {help_text}", f"# TYPE {histogram} histogram")
             )
-        )
+            duration = values[key]
+            for bound, count in duration["buckets"]:
+                label = "+Inf" if math.isinf(bound) else str(bound)
+                lines.append(f'{histogram}_bucket{{le="{label}"}} {count}')
+            lines.extend(
+                (
+                    f'{histogram}_sum {duration["sum"]}',
+                    f'{histogram}_count {duration["count"]}',
+                )
+            )
+        if operational_state is not None:
+            self._append_operational_gauges(lines, operational_state)
         return "\n".join(lines) + "\n"
+
+    @staticmethod
+    def _append_operational_gauges(lines, state):
+        names = (
+            "active_requests",
+            "running_requests",
+            "queued_requests",
+            "request_capacity",
+        )
+        if (
+            not isinstance(state, dict)
+            or any(
+                type(state.get(name)) is not int or not 0 <= state[name] <= 64
+                for name in names
+            )
+            or type(state.get("draining")) is not bool
+        ):
+            raise ValueError(
+                "operational state requires bounded counts and boolean draining"
+            )
+        if not (
+            state["active_requests"]
+            == state["running_requests"] + state["queued_requests"]
+            and state["active_requests"] <= state["request_capacity"]
+            and state["request_capacity"] >= 1
+        ):
+            raise ValueError("operational state counts must fit admission capacity")
+        for name, help_text in (
+            ("active_requests", "Admitted requests currently running or waiting."),
+            ("running_requests", "Requests currently holding an inference slot."),
+            ("queued_requests", "Admitted requests waiting for an inference slot."),
+            ("request_capacity", "Maximum running plus waiting request count."),
+            ("draining", "Whether new inference admission has stopped."),
+        ):
+            metric = f"ai_journey_serving_{name}"
+            lines.extend(
+                (
+                    f"# HELP {metric} {help_text}",
+                    f"# TYPE {metric} gauge",
+                    f"{metric} {int(state[name])}",
+                )
+            )

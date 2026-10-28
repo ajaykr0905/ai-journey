@@ -76,6 +76,7 @@ def main(argv=None):
                     steps=args.steps,
                     resume=args.resume,
                     timeout_seconds=args.timeout_seconds,
+                    expected_plan_sha256=plan.fingerprint(),
                 )
                 report = build_moe_ddp_evidence(plan, source, workers)
                 verify_moe_ddp_archive(report, args.checkpoint)

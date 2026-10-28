@@ -28,6 +28,25 @@ def test_snapshot_is_deserialized_even_if_path_changes_after_digest(
     assert original(path, weights_only=True)["value"].item() == 2
 
 
+def test_archive_admission_binds_loaded_bytes_without_an_expected_digest(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "checkpoint.pt"
+    torch.save({"value": torch.tensor([1.0])}, path)
+    assert path.stat().st_size < 10000
+    original = torch.load
+
+    def grow_after_admission(stream, **kwargs):
+        torch.save({"value": torch.ones(10000)}, path)
+        assert path.stat().st_size > 10000
+        return original(stream, **kwargs)
+
+    monkeypatch.setattr(torch, "load", grow_after_admission)
+    payload = load_checkpoint_archive(path, max_bytes=10000)
+    assert torch.equal(payload["value"], torch.tensor([1.0]))
+    assert original(path, weights_only=True)["value"].numel() == 10000
+
+
 @pytest.mark.parametrize("digest", ["0" * 64, True, "A" * 64, "bad"])
 def test_bad_snapshot_identity_rejects_before_deserialization(
     tmp_path, monkeypatch, digest
