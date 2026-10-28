@@ -142,6 +142,7 @@
     "src/ai_journey/http_readiness.py",
     "tests/test_http_stream.py",
     "tests/test_http_measurements.py",
+    "tests/test_http_body_framing.py",
     "tests/test_http_load_profile.py",
     "tests/test_http_load.py",
     "tests/test_http_load_report.py",
