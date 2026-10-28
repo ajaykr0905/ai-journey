@@ -53,6 +53,11 @@ charge and perform new decoding. Whole-response replay remains a separate cache.
 `/metrics` exposes fixed hit/miss/bypass counters, reused/forwarded prefill token
 counts and bounded pool gauges without request IDs, prompts, model IDs or namespace
 labels. Token-generation metrics count prefix-hit decoding as new work, not replay.
+The `ai_journey_prefix_pool_{publications,evictions,bypasses}_total` counters
+separately expose retained snapshots, LRU/clear removals, and lease/publication
+capacity bypasses. A lookup miss can still be followed by a publication bypass;
+these pool counters are not request-outcome counts. Draining clears residents
+and increments pool evictions without changing generated-token totals.
 Draining clears resident snapshots; active copies remain charged until decoding
 or cancellation unwinds, and final admission cleanup clears any late publication.
 

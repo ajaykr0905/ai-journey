@@ -35,7 +35,7 @@ class PrefixMetrics:
                 "reused_prompt_tokens": self._reused,
                 "forwarded_prefill_tokens": self._forwarded,
             }
-        # Pool gauges are a separate instantaneous snapshot, not a transactional
+        # Pool telemetry is a separate instantaneous snapshot, not a transactional
         # claim about requests currently executing between prefill and recording.
         return {**result, "pool": self.store.snapshot()}
 
@@ -49,6 +49,23 @@ class PrefixMetrics:
         for field in ("reused_prompt_tokens", "forwarded_prefill_tokens"):
             name = f"ai_journey_prefix_{field}_total"
             lines += [f"# TYPE {name} counter", f"{name} {state[field]}"]
+        for field, help_text in (
+            ("publications", "Prefill snapshots copied into the resident prefix pool."),
+            (
+                "evictions",
+                "Resident snapshots removed by LRU pressure or explicit clearing.",
+            ),
+            (
+                "bypasses",
+                "Lease or publication reservations bypassed for lack of pool capacity.",
+            ),
+        ):
+            name = f"ai_journey_prefix_pool_{field}_total"
+            lines += [
+                f"# HELP {name} {help_text}",
+                f"# TYPE {name} counter",
+                f"{name} {state['pool'][field]}",
+            ]
         for field in (
             "resident_bytes",
             "leased_bytes",

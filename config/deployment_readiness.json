@@ -155,6 +155,7 @@
     "tests/test_ddp_metrics_integration.py",
     "tests/test_ddp_http_tracing.py",
     "tests/test_ddp_service_reliability.py",
+    "tests/test_ddp_service_observability.py",
     "tests/test_ddp_http_reliability.py",
     "tests/test_ddp_service_drain.py",
     "tests/test_ddp_sampling_limits.py",
