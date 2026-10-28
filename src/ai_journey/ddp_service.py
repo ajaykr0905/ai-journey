@@ -218,6 +218,16 @@ class GenerationService:
             if self._lock.acquire(timeout=timeout):
                 break
         try:
+            # Controls may change between the last poll and lock acquisition.
+            interrupted = None
+            if cancelled is not None and cancelled():
+                interrupted = "cancelled"
+            elif deadline is not None and time.monotonic() >= deadline:
+                interrupted = "deadline"
+            if interrupted is not None:
+                self.metrics.observe_queue_wait(time.perf_counter() - started)
+                yield interrupted
+                return
             with self._lifecycle:
                 self._queued_requests.remove(ticket)
                 self._running_requests.add(ticket)
