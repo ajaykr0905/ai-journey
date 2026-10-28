@@ -61,6 +61,64 @@ micro-batches. The effective global batch is
 updates. Incomplete global batches are discarded explicitly. Epoch and cursor
 positions are reconstructed from the durable global optimizer step.
 
+### Opt in to full-population epoch shuffling
+
+Omitting `--sampler` keeps the original `rank-strided-truncated-shuffle-v1`
+schedule, schema-one checkpoints, journal identity and report bytes. This legacy
+schedule truncates sample IDs to a complete global update before shuffling, so
+an original tail is permanently excluded. Nothing silently upgrades an existing
+checkpoint or changes the shared training-spec serialization.
+
+Use `--sampler rank-strided-full-epoch-shuffle-v2` on **every** initial, resumed,
+recovery, comparison, pipeline, serving and benchmark command for a new v2 run:
+
+```bash
+ai-journey-ddp train --source data/day-19-demo-names.txt \
+  --spec config/ddp-lab.json --checkpoint /tmp/ddp-v2/state.pt \
+  --output /tmp/ddp-v2/initial.json --workdir /tmp/ddp-v2/initial --steps 2 \
+  --sampler rank-strided-full-epoch-shuffle-v2
+ai-journey-ddp train --source data/day-19-demo-names.txt \
+  --spec config/ddp-lab.json --checkpoint /tmp/ddp-v2/state.pt \
+  --output /tmp/ddp-v2/resumed.json --workdir /tmp/ddp-v2/resumed --steps 2 \
+  --resume --sampler rank-strided-full-epoch-shuffle-v2
+ai-journey-ddp verify --report /tmp/ddp-v2/resumed.json
+```
+
+V2 shuffles all `(source_bytes - 1) // sequence_length` sample IDs using the
+existing epoch-local Python RNG, takes only complete global update groups, then
+constructs equal rank-local micro-batches. It does not consume caller-global
+Python or Torch RNG. For ten samples with global batch four, seed 48 and epoch
+zero, the full order is `[0, 6, 8, 7, 2, 3, 1, 9, 5, 4]`: only IDs 5 and 4 are
+dropped in that epoch. Original tail IDs 8 and 9 are eligible. This removes a
+structural exclusion, not a guarantee that every sample appears within any
+arbitrarily chosen number of epochs.
+
+The opt-in Python interfaces use the same keyword-only `sampler` selector on
+`byte_batches`, `train_segment`, checkpoint save/load/journal recovery,
+`launch_training`, acceptance operations and `load_serving_model`. Schema-two
+checkpoints and evidence bind the exact v2 data contract: sampler, source digest
+and byte extent, sequence length, world size, micro-batch size, accumulation and
+seed. Boolean/float aliases of integer fields are rejected. V2 journal run-v3
+identity includes that contract; legacy journal run-v2 identity is unchanged.
+Cross-version restore fails before live state mutation. Start a separate v2 run
+and journal rather than reinterpreting v1 progress.
+
+Crash reports and their witnesses are versioned only for v2. Verification infers
+the version from each artifact, never an external sampler flag; retained archive
+verification binds the durable, continuous and recovered checkpoint contracts to
+the report and specification. Digest-only verification establishes consistency,
+not source or timing authenticity. Comparison arms cannot mix sampler versions.
+Pipeline contracts describe the derived training split, not held-out documents.
+Serving requires the matching explicit selector and validates the checkpoint's
+training topology, which need not equal the single serving process.
+
+The operator's existing training spec still requires zero dropout. Regressions
+check its actual two-rank epoch-boundary restart, journal fallback, abrupt crash,
+evidence, serving and comparison paths. A separate fresh-two-rank regression
+uses the public training/checkpoint interfaces with nonzero dropout and checks
+exact complete model/AdamW/per-rank RNG state and concatenated metrics. That is
+not a dropout-enabled operator spec, GPU, expert-parallel or scaling result.
+
 The worker uses DDP `no_sync()` for intermediate micro-batches. The final backward
 pass synchronizes gradients, then all ranks agree on gradient validity before
 clipping and updating. A rank-local optimizer exception or nonfinite parameter
@@ -223,6 +281,8 @@ The unauthenticated lab server binds only to `127.0.0.1`. Bodies are limited to
 with the same request ID and input reuses a bounded cached response; a conflicting
 input for a retained ID is rejected. Token callbacks stop generation when a stream
 disconnects. The library also supports explicit cancellation callbacks.
+Queued cancellation and deadlines are rechecked when decoding becomes available,
+before admission charges, response-cache lookups or model work.
 
 Cached generation uses model-bound keys/values and absolute position offsets. At
 context capacity it rebuilds the sliding window, preserving uncached semantics.

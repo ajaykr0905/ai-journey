@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import http.client
 import json
@@ -11,6 +12,78 @@ from ai_journey.ddp_service import GenerationRequest, GenerationService, TokenBu
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 from test_ddp_metrics_integration import server_for
+
+
+@pytest.mark.parametrize("handoff", ["cancelled", "valid", "callback-error"])
+def test_decode_handoff_preserves_budget_and_capacity_for_fresh_work(handoff):
+    bucket = TokenBucket(6 if handoff == "valid" else 4, 1, clock=lambda: 0.0)
+    service = GenerationService(
+        GPT2LanguageModel(GPT2Config(8, 4, 8, 2, 1)),
+        admission=bucket,
+        max_inflight_requests=2,
+    )
+    active_entered, active_release, first_read, allow_first_return, cancelled = (
+        threading.Event() for _ in range(5)
+    )
+    request = GenerationRequest(
+        "active", (1,), SamplingConfig(max_new_tokens=1, temperature=0)
+    )
+
+    def pause_active(index, token):
+        active_entered.set()
+        assert active_release.wait(timeout=5)
+
+    def queued_cancellation():
+        observed = cancelled.is_set()
+        if not first_read.is_set():
+            first_read.set()
+            assert allow_first_return.wait(timeout=5)
+        if observed and handoff == "callback-error":
+            raise RuntimeError("cancellation callback failed")
+        return observed
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        active = workers.submit(service.generate, request, on_token=pause_active)
+        try:
+            assert active_entered.wait(timeout=5)
+            queued = workers.submit(
+                service.generate,
+                replace(request, request_id="queued"),
+                cancelled=queued_cancellation,
+            )
+            assert first_read.wait(timeout=5)
+            assert service.health()["queued_requests"] == 1
+            if handoff != "valid":
+                cancelled.set()
+            active_release.set()
+            assert active.result(timeout=5)["finish_reason"] == "length"
+        finally:
+            active_release.set()
+            allow_first_return.set()
+        if handoff == "callback-error":
+            with pytest.raises(RuntimeError, match="cancellation callback failed"):
+                queued.result(timeout=5)
+        else:
+            output = queued.result(timeout=5)
+            assert output["finish_reason"] == (
+                "length" if handoff == "valid" else "cancelled"
+            )
+            assert len(output["tokens"]) == (1 if handoff == "valid" else 0)
+
+    assert bucket.tokens == 2
+    fresh = service.generate(
+        replace(request, request_id="fresh"), deadline=time.monotonic() + 5
+    )
+    assert fresh["finish_reason"] == "length"
+    assert service.health()["active_requests"] == 0
+    assert service.health()["completed_requests"] == (3 if handoff == "valid" else 2)
+    assert service.metrics.snapshot()["requests"] == {
+        "success": 3 if handoff == "valid" else 2,
+        "cancelled": int(handoff == "cancelled"),
+        "deadline": 0,
+        "error": int(handoff == "callback-error"),
+        "rejected": 0,
+    }
 
 
 @pytest.mark.parametrize("control", ["deadline", "cancelled"])

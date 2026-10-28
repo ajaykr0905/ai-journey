@@ -206,6 +206,8 @@
     "tests/test_ddp_comparison.py",
     "tests/test_ddp_contracts.py",
     "tests/test_ddp_data.py",
+    "tests/test_ddp_sampler_versions.py",
+    "tests/test_ddp_sampler_recovery.py",
     "tests/test_ddp_evaluation.py",
     "tests/test_ddp_evidence.py",
     "tests/test_ddp_generation.py",

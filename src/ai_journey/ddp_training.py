@@ -15,7 +15,7 @@ from .ddp_runtime import (
     require_model_consensus,
     require_optimizer_consensus,
 )
-from .ddp_data import byte_batches
+from .ddp_data import SAMPLER_V1, byte_batches, validate_sampler
 from .ddp_contracts import integer
 from .gpt2_training import learning_rate_at
 from .training_models import base_model_config
@@ -154,10 +154,19 @@ def accumulated_update(
 
 
 def train_segment(
-    model, optimizer, source: bytes, config, topology, *, start_step: int, steps: int
+    model,
+    optimizer,
+    source: bytes,
+    config,
+    topology,
+    *,
+    start_step: int,
+    steps: int,
+    sampler=SAMPLER_V1,
 ) -> list[dict]:
     """Reconstruct rank-local epoch cursors from the durable global update count."""
     integer(start_step, "start_step")
+    validate_sampler(sampler)
     integer(steps, "steps", 1)
     if start_step + steps > config.optimizer_steps:
         raise ValueError("segment exceeds the optimizer schedule")
@@ -170,6 +179,7 @@ def train_segment(
             micro_batch_size=config.micro_batch_size,
             accumulation_steps=config.accumulation_steps,
             seed=config.seed,
+            sampler=sampler,
         )
         epoch, offset = divmod(step, plan.updates_per_epoch)
         if epoch:
@@ -181,6 +191,7 @@ def train_segment(
                 accumulation_steps=config.accumulation_steps,
                 seed=config.seed,
                 epoch=epoch,
+                sampler=sampler,
             )
         learning_rate = learning_rate_at(step, config)
         begin = offset * config.accumulation_steps
