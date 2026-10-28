@@ -281,6 +281,8 @@ The unauthenticated lab server binds only to `127.0.0.1`. Bodies are limited to
 with the same request ID and input reuses a bounded cached response; a conflicting
 input for a retained ID is rejected. Token callbacks stop generation when a stream
 disconnects. The library also supports explicit cancellation callbacks.
+Queued cancellation and deadlines are rechecked when decoding becomes available,
+before admission charges, response-cache lookups or model work.
 
 Cached generation uses model-bound keys/values and absolute position offsets. At
 context capacity it rebuilds the sliding window, preserving uncached semantics.
