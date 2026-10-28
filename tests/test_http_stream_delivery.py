@@ -20,6 +20,7 @@ class FakeSocket:
 
 class FakeResponse:
     status = 200
+    length = None
 
     def __init__(self, chunks):
         self.chunks = iter(chunks)

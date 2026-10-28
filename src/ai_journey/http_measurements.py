@@ -95,6 +95,12 @@ def validated_request(request):
     }
 
 
+def _require_complete_http_body(response):
+    # Sized http.client reads can return EOF without raising IncompleteRead.
+    if response.length is not None and response.length > 0:
+        raise http.client.IncompleteRead(b"", response.length)
+
+
 def measure_http_generation(
     endpoint, request, *, streaming=True, timeout_seconds=10.0, cancel_after_tokens=None
 ):
@@ -203,6 +209,7 @@ def measure_http_generation(
                             result["outcome"] = "cancelled"
                             result["error_kind"] = "client_closed_stream"
                             return result
+            _require_complete_http_body(response)
             output = decoder.finish()
             if decoder.error is not None:
                 result["outcome"] = "protocol_error"
@@ -212,6 +219,7 @@ def measure_http_generation(
             payload = response.read(1024 * 1024 + 1)
             if len(payload) > 1024 * 1024:
                 raise StreamProtocolError("JSON response exceeds its byte budget")
+            _require_complete_http_body(response)
             output = validate_generation_output(
                 strict_json(payload),
                 request_id=request["request_id"],

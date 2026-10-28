@@ -14,6 +14,15 @@ reuse the saved raw last-token logits. Branches reuse the longest common prefix.
 An interior-prefix request leaves its final token for computation because there
 are no saved logits for that earlier position.
 
+Generated `KVCache` values carry a separate full-configuration architecture SHA,
+preserved by cloning and pool copies. Direct `cached_forward` reuse and prefix
+publication reject incompatible architecture even when weight fingerprints match
+(for example, different baseline LayerNorm epsilon). Published weight fingerprints,
+prefix identities and report schemas are unchanged. The old three-argument
+`KVCache(...)` constructor remains available for storage/copying, but its unbound
+values cannot be reused or published; regenerate them with `cached_forward`
+instead of inferring architecture from weights alone.
+
 Admission reserves compact tensor bytes before cloning. The byte ceiling covers
 resident KV/logit snapshots, publication reservations and in-scope leased copies,
 not model weights, inference workspace, Python metadata or allocator RSS. Entry
