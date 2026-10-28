@@ -16,6 +16,10 @@ ai-journey-resource-verify \
   --report artifacts/day-51-resource-plan.json
 ```
 
+The output must not alias the protected config, including resolved symlink paths
+or existing hardlinks. Disjoint existing reports can still be atomically replaced;
+the planner never treats its input plan as an output report.
+
 The pinned plan uses a 6,738,415,616-parameter dense SwiGLU decoder, sequence
 length 2,048, and a global batch of eight formed by one sequence on each of
 eight data-parallel ranks. It models 1,000 optimizer steps with BF16 parameters,

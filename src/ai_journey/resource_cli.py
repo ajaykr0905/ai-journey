@@ -64,6 +64,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.config.resolve() == args.output.resolve() or (
+        args.config.exists()
+        and args.output.exists()
+        and args.config.samefile(args.output)
+    ):
+        raise ResourceAccountingError(
+            "resource output must not alias its protected config"
+        )
     plan = load_resource_plan(args.config)
     report = seal_resource_report(build_resource_report(plan))
     save_resource_report(args.output, report)
