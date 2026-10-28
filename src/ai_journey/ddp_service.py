@@ -171,7 +171,9 @@ class GenerationService:
         self._lock = threading.RLock()
         self._stats_lock = threading.Lock()
         self._lifecycle = threading.Condition(self._stats_lock)
-        self._active_requests = 0
+        # Opaque admission tickets track lifecycle only, never request content.
+        self._queued_requests = set()
+        self._running_requests = set()
         self._max_inflight_requests = max_inflight_requests
         self._draining = False
         self.completed_requests = 0
@@ -189,7 +191,7 @@ class GenerationService:
             self.prefix_metrics = PrefixMetrics(prefix_store)
 
     def render_metrics(self):
-        text = self.metrics.render_prometheus()
+        text = self.metrics.render_prometheus(operational_state=self.health())
         return (
             text
             if self.prefix_metrics is None
@@ -197,8 +199,9 @@ class GenerationService:
         )
 
     @contextmanager
-    def _inference_slot(self, *, cancelled, deadline):
+    def _inference_slot(self, ticket, *, cancelled, deadline):
         """Honor queued controls without attempting to preempt a running model."""
+        started = time.perf_counter()
         while True:
             interrupted = None
             if cancelled is not None and cancelled():
@@ -206,6 +209,7 @@ class GenerationService:
             elif deadline is not None and time.monotonic() >= deadline:
                 interrupted = "deadline"
             if interrupted is not None:
+                self.metrics.observe_queue_wait(time.perf_counter() - started)
                 yield interrupted
                 return
             timeout = 0.05
@@ -214,9 +218,20 @@ class GenerationService:
             if self._lock.acquire(timeout=timeout):
                 break
         try:
+            with self._lifecycle:
+                self._queued_requests.remove(ticket)
+                self._running_requests.add(ticket)
+            self.metrics.observe_queue_wait(time.perf_counter() - started)
             yield None
         finally:
-            self._lock.release()
+            with self._lifecycle:
+                self._running_requests.discard(ticket)
+                self._lock.release()
+                self._lifecycle.notify_all()
+
+    @property
+    def _active_requests(self):
+        return len(self._queued_requests) + len(self._running_requests)
 
     @contextmanager
     def _admitted_request(self):
@@ -225,12 +240,14 @@ class GenerationService:
                 raise ServiceDraining("service is draining")
             if self._active_requests >= self._max_inflight_requests:
                 raise ServiceOverloaded("inference queue is full")
-            self._active_requests += 1
+            ticket = object()
+            self._queued_requests.add(ticket)
         try:
-            yield
+            yield ticket
         finally:
             with self._lifecycle:
-                self._active_requests -= 1
+                self._queued_requests.discard(ticket)
+                self._running_requests.discard(ticket)
                 if (
                     self._draining
                     and self._active_requests == 0
@@ -334,8 +351,8 @@ class GenerationService:
             for token in request.prompt
         ):
             raise ValueError("prompt token exceeds vocabulary")
-        with self._admitted_request(), self._inference_slot(
-            cancelled=cancelled, deadline=deadline
+        with self._admitted_request() as ticket, self._inference_slot(
+            ticket, cancelled=cancelled, deadline=deadline
         ) as interrupted:
             if interrupted is not None:
                 return {
@@ -411,6 +428,10 @@ class GenerationService:
             return {
                 "ready": not self._draining,
                 "active_requests": self._active_requests,
+                "running_requests": len(self._running_requests),
+                "queued_requests": len(self._queued_requests),
+                "request_capacity": self._max_inflight_requests,
+                "draining": self._draining,
                 "device": "cpu",
                 "model_sha256": self.model_sha256,
                 "completed_requests": self.completed_requests,

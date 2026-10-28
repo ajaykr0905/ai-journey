@@ -68,6 +68,12 @@ Prometheus metrics record service-call outcomes, durations, cache hits and newly
 generated tokens. Cached replay does not count as new model computation. HTTP
 parse failures and connection-limit rejections occur before a service call and
 are not included in those counters. No prompt or request-ID labels are retained.
+`/health` and the serving gauges expose admitted, running and queued requests,
+the admission capacity, and drain state from the same lifecycle snapshot. Scrapes
+do not wait for the inference lock. The `queue_wait_seconds` histogram observes
+each admitted request when it starts execution or leaves the queue through
+cancellation/deadline; it is separate from completed-operation duration, so its
+count may exceed the completed-request count while generation is running.
 Valid W3C `traceparent` values receive a new child span ID in response headers;
 invalid or ambiguous parents start fresh context. Baggage and opaque extensions
 are not propagated. This is context propagation, not an OpenTelemetry exporter.
