@@ -1,10 +1,12 @@
 """Validated model-bound key/value cache for GPT-2 inference."""
 
 from dataclasses import dataclass
+from hashlib import sha256
+import json
 import math
 import torch
 from .gpt2_training import gpt2_model_fingerprint
-from .training_models import base_model_config
+from .training_models import base_model_config, model_config_mapping
 from .gqa_config import cache_head_count
 
 
@@ -13,6 +15,7 @@ class KVCache:
     model_sha256: str
     keys: tuple[torch.Tensor, ...]
     values: tuple[torch.Tensor, ...]
+    architecture_sha256: str | None = None
 
     def __post_init__(self):
         if (
@@ -23,6 +26,15 @@ class KVCache:
             )
         ):
             raise ValueError("cache must be bound to a model SHA-256")
+        if self.architecture_sha256 is not None and (
+            type(self.architecture_sha256) is not str
+            or len(self.architecture_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.architecture_sha256
+            )
+        ):
+            raise ValueError("cache architecture must be a SHA-256 identity")
         if not self.keys or len(self.keys) != len(self.values):
             raise ValueError("cache must contain key/value pairs for every layer")
         reference = self.keys[0]
@@ -62,6 +74,7 @@ class KVCache:
             self.model_sha256,
             tuple(tensor.clone() for tensor in self.keys),
             tuple(tensor.clone() for tensor in self.values),
+            self.architecture_sha256,
         )
 
 
@@ -113,10 +126,20 @@ def cached_forward(model, token_ids: torch.Tensor, cache: KVCache | None = None)
     if token_ids.min() < 0 or token_ids.max() >= base.vocab_size:
         raise ValueError("cached decoder token id exceeds vocabulary")
     fingerprint = gpt2_model_fingerprint(model)
+    architecture = sha256(
+        json.dumps(
+            model_config_mapping(model.config),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode()
+    ).hexdigest()
     offset = 0 if cache is None else cache.length
     if offset + token_ids.shape[1] > base.context_length:
         raise ValueError("cached decoder context capacity exceeded")
     if cache is not None:
+        if cache.architecture_sha256 != architecture:
+            raise ValueError("cache architecture does not belong to this decoder")
         if (
             cache.model_sha256 != fingerprint
             or len(cache.keys) != len(model.h)
@@ -132,6 +155,7 @@ def cached_forward(model, token_ids: torch.Tensor, cache: KVCache | None = None)
             fingerprint,
             tuple(pair[0] for pair in pairs),
             tuple(pair[1] for pair in pairs),
+            architecture,
         )
     positions = torch.arange(offset, offset + token_ids.shape[1])
     hidden = model.wte(token_ids) + model.wpe(positions)
@@ -144,5 +168,5 @@ def cached_forward(model, token_ids: torch.Tensor, cache: KVCache | None = None)
         keys.append(state[0])
         values.append(state[1])
     return model.lm_head(model.ln_f(hidden)), KVCache(
-        fingerprint, tuple(keys), tuple(values)
+        fingerprint, tuple(keys), tuple(values), architecture
     )

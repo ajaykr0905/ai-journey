@@ -138,6 +138,7 @@ def _copy_value(cache, logits, length):
             .clone(memory_format=torch.contiguous_format)
             for value in cache.values
         ),
+        cache.architecture_sha256,
     )
     return PrefixMatch(
         result,
@@ -204,6 +205,7 @@ class PrefixKVStore:
         if (
             not isinstance(cache, KVCache)
             or cache.model_sha256 != identity.model_sha256
+            or cache.architecture_sha256 != identity.architecture_sha256
             or len(cache.keys) != identity.layers
             or any(
                 value.shape != shape

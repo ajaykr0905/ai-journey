@@ -199,6 +199,7 @@
     "tests/test_ddp_adversarial.py",
     "tests/test_ddp_benchmark.py",
     "tests/test_ddp_cache.py",
+    "tests/test_ddp_cache_architecture.py",
     "tests/test_ddp_checkpoint.py",
     "tests/test_ddp_cli.py",
     "tests/test_ddp_comparison.py",
