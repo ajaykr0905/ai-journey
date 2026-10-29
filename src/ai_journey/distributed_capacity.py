@@ -135,6 +135,26 @@ class GradientBucket:
     slices: tuple[BucketSlice, ...]
 
 
+@dataclass(frozen=True)
+class BucketSync:
+    """Collective cost assigned to one gradient bucket."""
+
+    bucket_index: int
+    payload_bytes: int
+    wire_bytes_per_rank: int
+    seconds: float
+
+
+@dataclass(frozen=True)
+class GradientSyncSchedule:
+    """Ordered communication schedule for one backward pass."""
+
+    algorithm: str
+    buckets: tuple[BucketSync, ...]
+    wire_bytes_per_rank: int
+    seconds: float
+
+
 def ring_all_reduce(
     payload_bytes: int, topology: ClusterTopology
 ) -> CollectiveEstimate:
@@ -291,3 +311,48 @@ def bucketize_gradients(
     if slices:
         buckets.append(GradientBucket(len(buckets), filled, tuple(slices)))
     return tuple(buckets)
+
+
+def gradient_sync_schedule(
+    buckets: tuple[GradientBucket, ...],
+    topology: ClusterTopology,
+    *,
+    algorithm: str,
+) -> GradientSyncSchedule:
+    """Estimate ordered bucket collectives for flat or hierarchical rings."""
+
+    if not isinstance(buckets, tuple) or not buckets:
+        raise DistributedCapacityError("buckets must be a nonempty tuple")
+    if not isinstance(topology, ClusterTopology):
+        raise TypeError("topology must be a ClusterTopology")
+    if algorithm not in {"flat_ring", "hierarchical_ring"}:
+        raise DistributedCapacityError("unsupported gradient synchronization algorithm")
+    estimates = []
+    for expected_index, bucket in enumerate(buckets):
+        if not isinstance(bucket, GradientBucket) or bucket.index != expected_index:
+            raise DistributedCapacityError(
+                "gradient buckets must be ordered and contiguous"
+            )
+        if bucket.payload_bytes != sum(part.length_bytes for part in bucket.slices):
+            raise DistributedCapacityError(
+                "gradient bucket payload does not match its slices"
+            )
+        collective = (
+            ring_all_reduce(bucket.payload_bytes, topology)
+            if algorithm == "flat_ring"
+            else hierarchical_all_reduce(bucket.payload_bytes, topology)
+        )
+        estimates.append(
+            BucketSync(
+                bucket.index,
+                bucket.payload_bytes,
+                collective.wire_bytes_per_rank,
+                collective.seconds,
+            )
+        )
+    return GradientSyncSchedule(
+        algorithm,
+        tuple(estimates),
+        sum(estimate.wire_bytes_per_rank for estimate in estimates),
+        math.fsum(estimate.seconds for estimate in estimates),
+    )
