@@ -1,0 +1,99 @@
+"""Deterministic checkpoint capacity and recovery planning primitives."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from .resource_accounting import DecoderSpec, bytes_per_element
+
+
+class CheckpointPlanningError(ValueError):
+    """Raised when a checkpoint planning assumption is invalid."""
+
+
+@dataclass(frozen=True)
+class RankCheckpointFile:
+    """One rank's checkpoint payload decomposition."""
+
+    rank: int
+    components: tuple[tuple[str, int], ...]
+
+    @property
+    def payload_bytes(self) -> int:
+        return sum(size for _, size in self.components)
+
+
+@dataclass(frozen=True)
+class CheckpointImage:
+    """The files and coordinator metadata for one checkpoint image."""
+
+    sharded: bool
+    rank_files: tuple[RankCheckpointFile, ...]
+    metadata_bytes: int
+
+    @property
+    def total_bytes(self) -> int:
+        return sum(file.payload_bytes for file in self.rank_files) + self.metadata_bytes
+
+
+def checkpoint_image(
+    model: DecoderSpec,
+    *,
+    parameter_dtype: str,
+    optimizer_dtype: str,
+    optimizer_slots: int,
+    world_size: int,
+    sharded: bool,
+    master_parameter_dtype: str | None = None,
+    rank_local_bytes: int = 0,
+    metadata_bytes: int = 0,
+) -> CheckpointImage:
+    """Build an exact checkpoint file inventory from declared state copies."""
+
+    if not isinstance(model, DecoderSpec):
+        raise TypeError("model must be a DecoderSpec")
+    for name, value in (
+        ("optimizer_slots", optimizer_slots),
+        ("world_size", world_size),
+        ("rank_local_bytes", rank_local_bytes),
+        ("metadata_bytes", metadata_bytes),
+    ):
+        if type(value) is not int:
+            raise TypeError(f"{name} must be an integer")
+    if optimizer_slots < 0:
+        raise CheckpointPlanningError("optimizer_slots must be nonnegative")
+    if world_size <= 0:
+        raise CheckpointPlanningError("world_size must be positive")
+    if rank_local_bytes < 0 or metadata_bytes < 0:
+        raise CheckpointPlanningError("checkpoint byte counts must be nonnegative")
+    if not isinstance(sharded, bool):
+        raise TypeError("sharded must be a boolean")
+
+    parameter_count = model.parameter_count
+    global_components = {
+        "parameters": parameter_count * bytes_per_element(parameter_dtype),
+        "optimizer": (
+            parameter_count * bytes_per_element(optimizer_dtype) * optimizer_slots
+        ),
+    }
+    if master_parameter_dtype is not None:
+        global_components["master_parameters"] = parameter_count * bytes_per_element(
+            master_parameter_dtype
+        )
+
+    rank_components = [[] for _ in range(world_size)]
+    if sharded:
+        for name, size in global_components.items():
+            base, remainder = divmod(size, world_size)
+            for rank in range(world_size):
+                rank_components[rank].append((name, base + (rank < remainder)))
+    else:
+        rank_components[0].extend(global_components.items())
+    for components in rank_components:
+        if rank_local_bytes:
+            components.append(("rank_local", rank_local_bytes))
+    rank_files = tuple(
+        RankCheckpointFile(rank, tuple(components))
+        for rank, components in enumerate(rank_components)
+    )
+    return CheckpointImage(sharded, rank_files, metadata_bytes)
