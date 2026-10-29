@@ -83,3 +83,54 @@ class ClusterTopology:
     @property
     def crosses_nodes(self) -> bool:
         return self.node_count > 1
+
+    @property
+    def collective_link(self) -> LinkProfile:
+        """Return the conservative link used by a flat cross-rank ring."""
+
+        return self.inter_node if self.crosses_nodes else self.intra_node
+
+
+@dataclass(frozen=True)
+class CollectiveEstimate:
+    """Per-rank wire work and lower-bound time for one collective."""
+
+    operation: str
+    payload_bytes: int
+    world_size: int
+    steps: int
+    wire_bytes_per_rank: int
+    seconds: float
+    link_scope: str
+
+
+def ring_all_reduce(
+    payload_bytes: int, topology: ClusterTopology
+) -> CollectiveEstimate:
+    """Estimate a flat ring reduce-scatter plus all-gather.
+
+    Payloads are split into equal ceiling-sized chunks so non-divisible tensors
+    cannot silently undercount padding on the wire.
+    """
+
+    payload = _positive_integer(payload_bytes, "payload_bytes")
+    if not isinstance(topology, ClusterTopology):
+        raise TypeError("topology must be a ClusterTopology")
+    if topology.world_size == 1:
+        return CollectiveEstimate("all_reduce", payload, 1, 0, 0, 0.0, "local")
+    chunk = math.ceil(payload / topology.world_size)
+    steps = 2 * (topology.world_size - 1)
+    wire_bytes = steps * chunk
+    link = topology.collective_link
+    seconds = (
+        wire_bytes / link.bandwidth_bytes_per_second + steps * link.latency_seconds
+    )
+    return CollectiveEstimate(
+        "all_reduce",
+        payload,
+        topology.world_size,
+        steps,
+        wire_bytes,
+        seconds,
+        "inter_node" if topology.crosses_nodes else "intra_node",
+    )
