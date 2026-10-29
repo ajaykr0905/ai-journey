@@ -1,0 +1,17 @@
+{
+  "batch_size": 1,
+  "dtype": "bfloat16",
+  "memory_bandwidth_bytes_per_second": 1000000000000,
+  "model": {
+    "attention_heads": 32,
+    "feed_forward_size": 11008,
+    "hidden_size": 4096,
+    "kv_heads": 32,
+    "layer_count": 32,
+    "tie_embeddings": false,
+    "use_bias": false,
+    "vocab_size": 32000
+  },
+  "peak_flops_per_second": 100000000000000,
+  "sequence_length": 2048
+}
