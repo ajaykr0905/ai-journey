@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
+import json
 
 from .checkpoint_planning import (
     checkpoint_image,
@@ -11,6 +13,7 @@ from .checkpoint_planning import (
 )
 from .distributed_capacity import (
     ClusterTopology,
+    LinkProfile,
     bucketize_gradients,
     gradient_sync_schedule,
 )
@@ -20,6 +23,10 @@ from .fsdp_planning import (
     sharded_training_state,
 )
 from .resource_accounting import DecoderSpec, bytes_per_element
+
+
+class DistributedCapacityReportError(ValueError):
+    """Raised when distributed capacity evidence cannot be verified."""
 
 
 @dataclass(frozen=True)
@@ -144,3 +151,83 @@ def build_distributed_capacity_report(
             "Allocator fragmentation and kernel workspaces are excluded.",
         ],
     }
+
+
+def _canonical_report_bytes(report: dict[str, object]) -> bytes:
+    unsigned = {key: value for key, value in report.items() if key != "integrity"}
+    return json.dumps(
+        unsigned,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def seal_distributed_capacity_report(
+    report: dict[str, object],
+) -> dict[str, object]:
+    """Attach a deterministic SHA-256 digest without mutating the report."""
+
+    if not isinstance(report, dict):
+        raise TypeError("report must be a dictionary")
+    sealed = {key: value for key, value in report.items() if key != "integrity"}
+    sealed["integrity"] = {
+        "algorithm": "sha256",
+        "digest": hashlib.sha256(_canonical_report_bytes(sealed)).hexdigest(),
+    }
+    return sealed
+
+
+def verify_distributed_capacity_report(
+    report: dict[str, object],
+) -> dict[str, object]:
+    """Rebuild every derived field and reject integrity or assumption drift."""
+
+    if not isinstance(report, dict):
+        raise TypeError("report must be a dictionary")
+    if report.get("schema_version") != 1:
+        raise DistributedCapacityReportError("unsupported report schema")
+    if report.get("kind") != "analytical_distributed_capacity":
+        raise DistributedCapacityReportError("unexpected report kind")
+    if report.get("measured") is not False:
+        raise DistributedCapacityReportError("capacity report must remain unmeasured")
+    try:
+        expected_integrity = seal_distributed_capacity_report(report)["integrity"]
+    except (TypeError, ValueError, OverflowError) as error:
+        raise DistributedCapacityReportError(
+            "capacity report is not canonical"
+        ) from error
+    if report.get("integrity") != expected_integrity:
+        raise DistributedCapacityReportError("capacity report integrity mismatch")
+    try:
+        model_payload = report["model"]
+        topology_payload = report["topology"]
+        assumptions = report["assumptions"]
+        if not all(
+            isinstance(item, dict)
+            for item in (model_payload, topology_payload, assumptions)
+        ):
+            raise TypeError("plan sections must be objects")
+        topology_payload = dict(topology_payload)
+        topology = ClusterTopology(
+            world_size=topology_payload["world_size"],
+            workers_per_node=topology_payload["workers_per_node"],
+            intra_node=LinkProfile(**topology_payload["intra_node"]),
+            inter_node=LinkProfile(**topology_payload["inter_node"]),
+        )
+        plan = DistributedCapacityPlan(
+            model=DecoderSpec(**model_payload),
+            topology=topology,
+            **assumptions,
+        )
+        expected = seal_distributed_capacity_report(
+            build_distributed_capacity_report(plan)
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise DistributedCapacityReportError(
+            "capacity report cannot be rebuilt"
+        ) from error
+    if report != expected:
+        raise DistributedCapacityReportError("capacity report derived fields drifted")
+    return report

@@ -1,7 +1,12 @@
+import pytest
+
 from ai_journey.distributed_capacity import ClusterTopology, LinkProfile
 from ai_journey.distributed_capacity_report import (
     DistributedCapacityPlan,
+    DistributedCapacityReportError,
     build_distributed_capacity_report,
+    seal_distributed_capacity_report,
+    verify_distributed_capacity_report,
 )
 from ai_journey.resource_accounting import DecoderSpec
 
@@ -53,3 +58,27 @@ def test_distributed_capacity_report_is_deterministic_for_same_plan():
     assert build_distributed_capacity_report(
         _plan()
     ) == build_distributed_capacity_report(_plan())
+
+
+def test_distributed_capacity_report_seal_detects_tampering():
+    sealed = seal_distributed_capacity_report(
+        build_distributed_capacity_report(_plan())
+    )
+    assert verify_distributed_capacity_report(sealed) is sealed
+
+    tampered = {**sealed, "measured": True}
+    with pytest.raises(DistributedCapacityReportError, match="unmeasured"):
+        verify_distributed_capacity_report(tampered)
+
+
+def test_distributed_capacity_report_recomputes_derived_fields():
+    sealed = seal_distributed_capacity_report(
+        build_distributed_capacity_report(_plan())
+    )
+    drifted = {
+        **sealed,
+        "gradient_sync": {**sealed["gradient_sync"], "bucket_count": 999},
+    }
+    drifted = seal_distributed_capacity_report(drifted)
+    with pytest.raises(DistributedCapacityReportError, match="derived fields"):
+        verify_distributed_capacity_report(drifted)
