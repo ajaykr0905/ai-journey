@@ -6,6 +6,7 @@ from ai_journey.distributed_capacity import (
     GradientBucket,
     LinkProfile,
     bucketize_gradients,
+    estimate_backward_overlap,
     gradient_sync_schedule,
     hierarchical_all_reduce,
     ring_all_gather,
@@ -158,3 +159,36 @@ def test_gradient_sync_schedule_rejects_tampered_or_reordered_buckets():
         gradient_sync_schedule((tampered,), topology, algorithm="flat_ring")
     with pytest.raises(DistributedCapacityError, match="unsupported"):
         gradient_sync_schedule(buckets, topology, algorithm="tree")
+
+
+def test_backward_overlap_exposes_only_the_collective_tail():
+    topology = ClusterTopology(2, 2, link(100.0, 0.01), link())
+    buckets = bucketize_gradients({"model": 20}, bucket_bytes=10)
+    schedule = gradient_sync_schedule(buckets, topology, algorithm="flat_ring")
+
+    estimate = estimate_backward_overlap(
+        schedule, backward_seconds=1.0, release_fractions=(0.2, 0.8)
+    )
+
+    assert schedule.seconds == pytest.approx(0.24)
+    assert estimate.bucket_finish_seconds == pytest.approx((0.32, 0.92))
+    assert estimate.step_seconds == 1.0
+    assert estimate.exposed_seconds == 0
+    assert estimate.overlapped_seconds == pytest.approx(0.24)
+
+
+def test_backward_overlap_validates_release_count_order_and_bounds():
+    topology = ClusterTopology(2, 2, link(), link())
+    schedule = gradient_sync_schedule(
+        bucketize_gradients({"model": 2}, bucket_bytes=1),
+        topology,
+        algorithm="flat_ring",
+    )
+    with pytest.raises(DistributedCapacityError, match="bucket count"):
+        estimate_backward_overlap(
+            schedule, backward_seconds=1, release_fractions=(0.5,)
+        )
+    with pytest.raises(DistributedCapacityError, match="ordered"):
+        estimate_backward_overlap(
+            schedule, backward_seconds=1, release_fractions=(0.8, 0.2)
+        )

@@ -155,6 +155,18 @@ class GradientSyncSchedule:
     seconds: float
 
 
+@dataclass(frozen=True)
+class OverlapEstimate:
+    """Serialized communication overlap against a backward timeline."""
+
+    backward_seconds: float
+    communication_seconds: float
+    overlapped_seconds: float
+    exposed_seconds: float
+    step_seconds: float
+    bucket_finish_seconds: tuple[float, ...]
+
+
 def ring_all_reduce(
     payload_bytes: int, topology: ClusterTopology
 ) -> CollectiveEstimate:
@@ -355,4 +367,52 @@ def gradient_sync_schedule(
         tuple(estimates),
         sum(estimate.wire_bytes_per_rank for estimate in estimates),
         math.fsum(estimate.seconds for estimate in estimates),
+    )
+
+
+def estimate_backward_overlap(
+    schedule: GradientSyncSchedule,
+    *,
+    backward_seconds: float,
+    release_fractions: tuple[float, ...],
+) -> OverlapEstimate:
+    """Place ready gradient buckets on one serialized communication stream."""
+
+    if not isinstance(schedule, GradientSyncSchedule):
+        raise TypeError("schedule must be a GradientSyncSchedule")
+    backward = _positive_finite(backward_seconds, "backward_seconds")
+    if not isinstance(release_fractions, tuple) or len(release_fractions) != len(
+        schedule.buckets
+    ):
+        raise DistributedCapacityError(
+            "release_fractions must match the gradient bucket count"
+        )
+    previous = -1.0
+    finish = 0.0
+    finishes = []
+    for fraction, bucket in zip(release_fractions, schedule.buckets, strict=True):
+        if (
+            isinstance(fraction, bool)
+            or not isinstance(fraction, (int, float))
+            or not math.isfinite(fraction)
+            or not 0 <= fraction <= 1
+            or fraction < previous
+        ):
+            raise DistributedCapacityError(
+                "release fractions must be finite, ordered, and in [0, 1]"
+            )
+        start = max(finish, backward * fraction)
+        finish = start + bucket.seconds
+        finishes.append(finish)
+        previous = float(fraction)
+    step = max(backward, finish)
+    exposed = step - backward
+    overlapped = max(0.0, schedule.seconds - exposed)
+    return OverlapEstimate(
+        backward,
+        schedule.seconds,
+        overlapped,
+        exposed,
+        step,
+        tuple(finishes),
     )
