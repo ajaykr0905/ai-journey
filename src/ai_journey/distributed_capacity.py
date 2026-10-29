@@ -6,6 +6,7 @@ hardware, execute collectives, or claim measured network performance.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 import math
 
@@ -114,6 +115,24 @@ class HierarchicalEstimate:
     local_all_gather: CollectiveEstimate
     seconds: float
     wire_bytes_per_rank: int
+
+
+@dataclass(frozen=True)
+class BucketSlice:
+    """A contiguous byte range from one named gradient group."""
+
+    parameter_group: str
+    offset_bytes: int
+    length_bytes: int
+
+
+@dataclass(frozen=True)
+class GradientBucket:
+    """One ordered collective payload assembled from gradient slices."""
+
+    index: int
+    payload_bytes: int
+    slices: tuple[BucketSlice, ...]
 
 
 def ring_all_reduce(
@@ -229,3 +248,46 @@ def hierarchical_all_reduce(
         math.fsum(phase.seconds for phase in phases),
         sum(phase.wire_bytes_per_rank for phase in phases),
     )
+
+
+def bucketize_gradients(
+    parameter_group_bytes: Mapping[str, int], *, bucket_bytes: int
+) -> tuple[GradientBucket, ...]:
+    """Split ordered gradient groups into bounded collective payloads."""
+
+    limit = _positive_integer(bucket_bytes, "bucket_bytes")
+    if not isinstance(parameter_group_bytes, Mapping) or not parameter_group_bytes:
+        raise DistributedCapacityError(
+            "parameter_group_bytes must be a nonempty mapping"
+        )
+    normalized = []
+    for name, size in parameter_group_bytes.items():
+        if not isinstance(name, str) or not name:
+            raise DistributedCapacityError(
+                "gradient group names must be nonempty strings"
+            )
+        if type(size) is not int:
+            raise TypeError("gradient group sizes must be integers")
+        if size < 0:
+            raise DistributedCapacityError("gradient group sizes must be nonnegative")
+        if size:
+            normalized.append((name, size))
+    if not normalized:
+        raise DistributedCapacityError("at least one gradient group must contain bytes")
+
+    buckets: list[GradientBucket] = []
+    slices: list[BucketSlice] = []
+    filled = 0
+    for name, size in normalized:
+        offset = 0
+        while offset < size:
+            length = min(limit - filled, size - offset)
+            slices.append(BucketSlice(name, offset, length))
+            filled += length
+            offset += length
+            if filled == limit:
+                buckets.append(GradientBucket(len(buckets), filled, tuple(slices)))
+                slices, filled = [], 0
+    if slices:
+        buckets.append(GradientBucket(len(buckets), filled, tuple(slices)))
+    return tuple(buckets)

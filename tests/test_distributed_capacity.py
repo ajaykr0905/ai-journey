@@ -4,6 +4,7 @@ from ai_journey.distributed_capacity import (
     ClusterTopology,
     DistributedCapacityError,
     LinkProfile,
+    bucketize_gradients,
     hierarchical_all_reduce,
     ring_all_gather,
     ring_all_reduce,
@@ -98,3 +99,33 @@ def test_hierarchical_all_reduce_degenerates_to_local_ring_on_one_node():
     flat = ring_all_reduce(32, topology)
     assert hierarchical.seconds == flat.seconds
     assert hierarchical.wire_bytes_per_rank == flat.wire_bytes_per_rank
+
+
+def test_gradient_buckets_preserve_order_offsets_and_every_byte():
+    buckets = bucketize_gradients(
+        {"embedding": 3, "blocks": 10, "unused": 0, "head": 2}, bucket_bytes=6
+    )
+
+    assert [bucket.payload_bytes for bucket in buckets] == [6, 6, 3]
+    assert [bucket.index for bucket in buckets] == [0, 1, 2]
+    assert [
+        (part.parameter_group, part.offset_bytes, part.length_bytes)
+        for bucket in buckets
+        for part in bucket.slices
+    ] == [
+        ("embedding", 0, 3),
+        ("blocks", 0, 3),
+        ("blocks", 3, 6),
+        ("blocks", 9, 1),
+        ("head", 0, 2),
+    ]
+    assert sum(bucket.payload_bytes for bucket in buckets) == 15
+
+
+def test_gradient_bucket_admission_rejects_empty_and_ambiguous_groups():
+    with pytest.raises(DistributedCapacityError, match="nonempty mapping"):
+        bucketize_gradients({}, bucket_bytes=1)
+    with pytest.raises(DistributedCapacityError, match="contain bytes"):
+        bucketize_gradients({"zero": 0}, bucket_bytes=1)
+    with pytest.raises(TypeError, match="sizes"):
+        bucketize_gradients({"bad": True}, bucket_bytes=1)
