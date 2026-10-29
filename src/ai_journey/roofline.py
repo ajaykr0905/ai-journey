@@ -58,6 +58,75 @@ class KernelWorkload:
         return self.flops / self.total_bytes
 
 
+@dataclass(frozen=True)
+class RooflineHardware:
+    """Declared peak compute and memory bandwidth for analytical planning."""
+
+    peak_flops_per_second: float
+    memory_bandwidth_bytes_per_second: float
+
+    def __post_init__(self) -> None:
+        _positive_finite(self.peak_flops_per_second, "peak_flops_per_second")
+        _positive_finite(
+            self.memory_bandwidth_bytes_per_second,
+            "memory_bandwidth_bytes_per_second",
+        )
+
+    @property
+    def ridge_point(self) -> float:
+        """Return the arithmetic intensity where the two ceilings intersect."""
+
+        return self.peak_flops_per_second / self.memory_bandwidth_bytes_per_second
+
+
+@dataclass(frozen=True)
+class RooflineEstimate:
+    """Lower-bound timing and bottleneck classification for one workload."""
+
+    workload: KernelWorkload
+    hardware: RooflineHardware
+    compute_seconds: float
+    memory_seconds: float
+    lower_bound_seconds: float
+    attainable_flops_per_second: float
+    bottleneck: str
+
+
+def analyze_roofline(
+    workload: KernelWorkload, hardware: RooflineHardware
+) -> RooflineEstimate:
+    """Classify one workload against declared roofline ceilings.
+
+    Times are analytical lower bounds. Equality at the ridge is reported
+    explicitly instead of being assigned to either limiting resource.
+    """
+
+    if not isinstance(workload, KernelWorkload):
+        raise TypeError("workload must be a KernelWorkload")
+    if not isinstance(hardware, RooflineHardware):
+        raise TypeError("hardware must be RooflineHardware")
+    compute_seconds = workload.flops / hardware.peak_flops_per_second
+    memory_seconds = workload.total_bytes / hardware.memory_bandwidth_bytes_per_second
+    if compute_seconds > memory_seconds:
+        bottleneck = "compute"
+    elif memory_seconds > compute_seconds:
+        bottleneck = "memory"
+    else:
+        bottleneck = "ridge"
+    return RooflineEstimate(
+        workload=workload,
+        hardware=hardware,
+        compute_seconds=compute_seconds,
+        memory_seconds=memory_seconds,
+        lower_bound_seconds=max(compute_seconds, memory_seconds),
+        attainable_flops_per_second=min(
+            hardware.peak_flops_per_second,
+            hardware.memory_bandwidth_bytes_per_second * workload.arithmetic_intensity,
+        ),
+        bottleneck=bottleneck,
+    )
+
+
 def matmul_workload(
     *,
     rows: int,
