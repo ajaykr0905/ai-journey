@@ -48,6 +48,34 @@ class CheckpointWriteEstimate:
     total_seconds: float
 
 
+@dataclass(frozen=True)
+class CheckpointRetention:
+    """Whole checkpoint images that fit within a storage budget."""
+
+    image_bytes: int
+    storage_budget_bytes: int
+    retained_images: int
+    consumed_bytes: int
+    remaining_bytes: int
+
+    def covers_interval(self, interval_steps: int, required_history_steps: int) -> bool:
+        """Return whether retained images cover a requested rollback history."""
+
+        for name, value in (
+            ("interval_steps", interval_steps),
+            ("required_history_steps", required_history_steps),
+        ):
+            if type(value) is not int:
+                raise TypeError(f"{name} must be an integer")
+            if value < 0:
+                raise CheckpointPlanningError(f"{name} must be nonnegative")
+        if required_history_steps == 0:
+            return True
+        if interval_steps == 0:
+            return False
+        return self.retained_images * interval_steps >= required_history_steps
+
+
 def _positive_rate(value: float, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"{name} must be a number")
@@ -154,4 +182,28 @@ def checkpoint_write_estimate(
         shared_bandwidth_floor_seconds=shared_floor,
         metadata_write_seconds=metadata_seconds,
         total_seconds=max(slowest, shared_floor) + metadata_seconds,
+    )
+
+
+def checkpoint_retention(
+    image: CheckpointImage, *, storage_budget_bytes: int
+) -> CheckpointRetention:
+    """Compute whole-image retention without overcommitting storage."""
+
+    if not isinstance(image, CheckpointImage):
+        raise TypeError("image must be a CheckpointImage")
+    if type(storage_budget_bytes) is not int:
+        raise TypeError("storage_budget_bytes must be an integer")
+    if storage_budget_bytes < 0:
+        raise CheckpointPlanningError("storage_budget_bytes must be nonnegative")
+    if image.total_bytes <= 0:
+        raise CheckpointPlanningError("checkpoint image must contain bytes")
+    retained = storage_budget_bytes // image.total_bytes
+    consumed = retained * image.total_bytes
+    return CheckpointRetention(
+        image_bytes=image.total_bytes,
+        storage_budget_bytes=storage_budget_bytes,
+        retained_images=retained,
+        consumed_bytes=consumed,
+        remaining_bytes=storage_budget_bytes - consumed,
     )

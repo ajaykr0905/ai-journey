@@ -1,8 +1,10 @@
 import pytest
 
 from ai_journey.checkpoint_planning import (
+    CheckpointImage,
     CheckpointPlanningError,
     checkpoint_image,
+    checkpoint_retention,
     checkpoint_write_estimate,
 )
 from ai_journey.resource_accounting import DecoderSpec
@@ -102,4 +104,41 @@ def test_checkpoint_write_estimate_rejects_nonfinite_rates():
             image,
             rank_bandwidth_bytes_per_second=float("inf"),
             shared_bandwidth_bytes_per_second=100,
+        )
+
+
+def test_checkpoint_retention_never_counts_partial_images():
+    model = DecoderSpec(32, 1, 8, 2, 1, 16)
+    image = checkpoint_image(
+        model,
+        parameter_dtype="float32",
+        optimizer_dtype="float32",
+        optimizer_slots=0,
+        world_size=1,
+        sharded=False,
+    )
+    budget = image.total_bytes * 3 + image.total_bytes // 2
+    retention = checkpoint_retention(image, storage_budget_bytes=budget)
+    assert retention.retained_images == 3
+    assert retention.consumed_bytes == image.total_bytes * 3
+    assert retention.remaining_bytes == image.total_bytes // 2
+    assert retention.covers_interval(100, 300)
+    assert not retention.covers_interval(100, 301)
+
+
+def test_checkpoint_retention_rejects_empty_images_and_negative_budgets():
+    empty = checkpoint_image(
+        DecoderSpec(32, 1, 8, 2, 1, 16),
+        parameter_dtype="float32",
+        optimizer_dtype="float32",
+        optimizer_slots=0,
+        world_size=1,
+        sharded=False,
+    )
+    with pytest.raises(CheckpointPlanningError, match="nonnegative"):
+        checkpoint_retention(empty, storage_budget_bytes=-1)
+    with pytest.raises(CheckpointPlanningError, match="contain bytes"):
+        checkpoint_retention(
+            CheckpointImage(sharded=False, rank_files=(), metadata_bytes=0),
+            storage_budget_bytes=100,
         )
