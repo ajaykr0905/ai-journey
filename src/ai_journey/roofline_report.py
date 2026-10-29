@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import math
 
 from .resource_accounting import DecoderSpec, ResourceAccountingError
 from .roofline import RooflineHardware
@@ -79,7 +80,7 @@ def build_roofline_report(plan: RooflinePlan) -> dict[str, object]:
             "total_compulsory_bytes": sum(
                 item["total_bytes"] for item in operations.values()
             ),
-            "serial_lower_bound_seconds": sum(
+            "serial_lower_bound_seconds": math.fsum(
                 item["lower_bound_seconds"] for item in operations.values()
             ),
         },
