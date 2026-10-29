@@ -52,6 +52,17 @@ class RankTrainingState:
         )
 
 
+@dataclass(frozen=True)
+class RankAllGatherPeak:
+    """Largest temporary full-parameter materialization on one rank."""
+
+    rank: int
+    parameter_group: str
+    local_bytes: int
+    materialized_bytes: int
+    transient_bytes: int
+
+
 def partition_parameter_groups(
     parameter_group_bytes: Mapping[str, int], *, world_size: int
 ) -> tuple[ParameterShard, ...]:
@@ -109,6 +120,44 @@ def decoder_parameter_shards(
     width = bytes_per_element(dtype)
     groups = {name: count * width for name, count in model.parameter_groups().items()}
     return partition_parameter_groups(groups, world_size=world_size)
+
+
+def all_gather_transient_peaks(
+    parameter_group_bytes: Mapping[str, int],
+    shards: tuple[ParameterShard, ...],
+) -> tuple[RankAllGatherPeak, ...]:
+    """Find each rank's largest missing group payload during FSDP all-gather."""
+
+    if not shards:
+        raise FSDPPlanningError("shards must be nonempty")
+    expected = partition_parameter_groups(parameter_group_bytes, world_size=len(shards))
+    if shards != expected:
+        raise FSDPPlanningError(
+            "shards must match the canonical partition of parameter_group_bytes"
+        )
+    nonempty_groups = {
+        name: size for name, size in parameter_group_bytes.items() if size
+    }
+    peaks = []
+    for shard in shards:
+        local_by_group = {name: 0 for name in nonempty_groups}
+        for part in shard.slices:
+            local_by_group[part.parameter_group] += part.length_bytes
+        group, size = max(
+            nonempty_groups.items(),
+            key=lambda item: (item[1] - local_by_group[item[0]], item[1]),
+        )
+        local = local_by_group[group]
+        peaks.append(
+            RankAllGatherPeak(
+                rank=shard.rank,
+                parameter_group=group,
+                local_bytes=local,
+                materialized_bytes=size,
+                transient_bytes=size - local,
+            )
+        )
+    return tuple(peaks)
 
 
 def sharded_training_state(

@@ -2,6 +2,7 @@ import pytest
 
 from ai_journey.fsdp_planning import (
     FSDPPlanningError,
+    all_gather_transient_peaks,
     decoder_parameter_shards,
     partition_parameter_groups,
     sharded_training_state,
@@ -39,6 +40,28 @@ def test_decoder_parameter_partition_uses_declared_dtype_width():
         - min(shard.payload_bytes for shard in shards)
         <= 1
     )
+
+
+def test_all_gather_peak_counts_only_missing_group_bytes():
+    groups = {"embedding": 5, "blocks": 8, "head": 4}
+    shards = partition_parameter_groups(groups, world_size=3)
+
+    peaks = all_gather_transient_peaks(groups, shards)
+
+    assert [peak.rank for peak in peaks] == [0, 1, 2]
+    assert [peak.parameter_group for peak in peaks] == ["blocks", "embedding", "blocks"]
+    assert [peak.local_bytes for peak in peaks] == [1, 0, 1]
+    assert [peak.materialized_bytes for peak in peaks] == [8, 5, 8]
+    assert [peak.transient_bytes for peak in peaks] == [7, 5, 7]
+
+
+def test_all_gather_peak_rejects_noncanonical_shards():
+    groups = {"model": 9}
+    shards = partition_parameter_groups(groups, world_size=2)
+    with pytest.raises(FSDPPlanningError, match="canonical"):
+        all_gather_transient_peaks(groups, tuple(reversed(shards)))
+    with pytest.raises(FSDPPlanningError, match="nonempty"):
+        all_gather_transient_peaks(groups, ())
 
 
 def test_parameter_partition_rejects_empty_and_ambiguous_inputs():
