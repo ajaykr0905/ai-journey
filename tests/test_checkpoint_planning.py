@@ -3,6 +3,7 @@ import pytest
 from ai_journey.checkpoint_planning import (
     CheckpointPlanningError,
     checkpoint_image,
+    checkpoint_write_estimate,
 )
 from ai_journey.resource_accounting import DecoderSpec
 
@@ -61,4 +62,44 @@ def test_checkpoint_image_rejects_ambiguous_or_negative_controls():
             optimizer_slots=-1,
             world_size=1,
             sharded=True,
+        )
+
+
+def test_checkpoint_write_estimate_respects_shared_bandwidth_floor():
+    model = DecoderSpec(32, 1, 8, 2, 1, 16)
+    image = checkpoint_image(
+        model,
+        parameter_dtype="float32",
+        optimizer_dtype="float32",
+        optimizer_slots=0,
+        world_size=2,
+        sharded=True,
+        metadata_bytes=100,
+    )
+    estimate = checkpoint_write_estimate(
+        image,
+        rank_bandwidth_bytes_per_second=200,
+        shared_bandwidth_bytes_per_second=100,
+        metadata_bandwidth_bytes_per_second=50,
+    )
+    assert estimate.shared_bandwidth_floor_seconds == model.parameter_count * 4 / 100
+    assert estimate.metadata_write_seconds == 2
+    assert estimate.total_seconds == estimate.shared_bandwidth_floor_seconds + 2
+
+
+def test_checkpoint_write_estimate_rejects_nonfinite_rates():
+    model = DecoderSpec(32, 1, 8, 2, 1, 16)
+    image = checkpoint_image(
+        model,
+        parameter_dtype="float32",
+        optimizer_dtype="float32",
+        optimizer_slots=0,
+        world_size=1,
+        sharded=False,
+    )
+    with pytest.raises(CheckpointPlanningError, match="finite"):
+        checkpoint_write_estimate(
+            image,
+            rank_bandwidth_bytes_per_second=float("inf"),
+            shared_bandwidth_bytes_per_second=100,
         )

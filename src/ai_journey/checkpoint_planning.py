@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 from .resource_accounting import DecoderSpec, bytes_per_element
 
@@ -34,6 +35,25 @@ class CheckpointImage:
     @property
     def total_bytes(self) -> int:
         return sum(file.payload_bytes for file in self.rank_files) + self.metadata_bytes
+
+
+@dataclass(frozen=True)
+class CheckpointWriteEstimate:
+    """Lower-bound write duration under per-rank and shared bandwidth limits."""
+
+    rank_write_seconds: tuple[float, ...]
+    slowest_rank_seconds: float
+    shared_bandwidth_floor_seconds: float
+    metadata_write_seconds: float
+    total_seconds: float
+
+
+def _positive_rate(value: float, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{name} must be a number")
+    if not math.isfinite(value) or value <= 0:
+        raise CheckpointPlanningError(f"{name} must be finite and positive")
+    return float(value)
 
 
 def checkpoint_image(
@@ -97,3 +117,41 @@ def checkpoint_image(
         for rank, components in enumerate(rank_components)
     )
     return CheckpointImage(sharded, rank_files, metadata_bytes)
+
+
+def checkpoint_write_estimate(
+    image: CheckpointImage,
+    *,
+    rank_bandwidth_bytes_per_second: float,
+    shared_bandwidth_bytes_per_second: float,
+    metadata_bandwidth_bytes_per_second: float | None = None,
+) -> CheckpointWriteEstimate:
+    """Estimate parallel checkpoint writes without claiming measured throughput."""
+
+    if not isinstance(image, CheckpointImage):
+        raise TypeError("image must be a CheckpointImage")
+    rank_rate = _positive_rate(
+        rank_bandwidth_bytes_per_second, "rank_bandwidth_bytes_per_second"
+    )
+    shared_rate = _positive_rate(
+        shared_bandwidth_bytes_per_second, "shared_bandwidth_bytes_per_second"
+    )
+    metadata_rate = (
+        rank_rate
+        if metadata_bandwidth_bytes_per_second is None
+        else _positive_rate(
+            metadata_bandwidth_bytes_per_second,
+            "metadata_bandwidth_bytes_per_second",
+        )
+    )
+    rank_seconds = tuple(file.payload_bytes / rank_rate for file in image.rank_files)
+    slowest = max(rank_seconds)
+    shared_floor = sum(file.payload_bytes for file in image.rank_files) / shared_rate
+    metadata_seconds = image.metadata_bytes / metadata_rate
+    return CheckpointWriteEstimate(
+        rank_write_seconds=rank_seconds,
+        slowest_rank_seconds=slowest,
+        shared_bandwidth_floor_seconds=shared_floor,
+        metadata_write_seconds=metadata_seconds,
+        total_seconds=max(slowest, shared_floor) + metadata_seconds,
+    )
