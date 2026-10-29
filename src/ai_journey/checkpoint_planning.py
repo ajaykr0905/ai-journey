@@ -76,6 +76,25 @@ class CheckpointRetention:
         return self.retained_images * interval_steps >= required_history_steps
 
 
+@dataclass(frozen=True)
+class RecoveryEstimate:
+    """Checkpoint load, process restart, and lost-work replay duration."""
+
+    checkpoint_load_seconds: float
+    restart_seconds: float
+    replay_seconds: float
+    total_seconds: float
+
+    def meets_rto(self, rto_seconds: float) -> bool:
+        """Return whether this analytical recovery fits an explicit RTO."""
+
+        if isinstance(rto_seconds, bool) or not isinstance(rto_seconds, (int, float)):
+            raise TypeError("rto_seconds must be a number")
+        if not math.isfinite(rto_seconds) or rto_seconds < 0:
+            raise CheckpointPlanningError("rto_seconds must be finite and nonnegative")
+        return self.total_seconds <= rto_seconds
+
+
 def _positive_rate(value: float, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"{name} must be a number")
@@ -206,4 +225,50 @@ def checkpoint_retention(
         retained_images=retained,
         consumed_bytes=consumed,
         remaining_bytes=storage_budget_bytes - consumed,
+    )
+
+
+def recovery_estimate(
+    image: CheckpointImage,
+    *,
+    rank_read_bandwidth_bytes_per_second: float,
+    shared_read_bandwidth_bytes_per_second: float,
+    lost_optimizer_steps: int,
+    seconds_per_optimizer_step: float,
+    restart_seconds: float = 0.0,
+) -> RecoveryEstimate:
+    """Estimate restore plus replay time from declared, non-measured rates."""
+
+    if not isinstance(image, CheckpointImage):
+        raise TypeError("image must be a CheckpointImage")
+    rank_rate = _positive_rate(
+        rank_read_bandwidth_bytes_per_second,
+        "rank_read_bandwidth_bytes_per_second",
+    )
+    shared_rate = _positive_rate(
+        shared_read_bandwidth_bytes_per_second,
+        "shared_read_bandwidth_bytes_per_second",
+    )
+    if type(lost_optimizer_steps) is not int:
+        raise TypeError("lost_optimizer_steps must be an integer")
+    if lost_optimizer_steps < 0:
+        raise CheckpointPlanningError("lost_optimizer_steps must be nonnegative")
+    for name, value in (
+        ("seconds_per_optimizer_step", seconds_per_optimizer_step),
+        ("restart_seconds", restart_seconds),
+    ):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(f"{name} must be a number")
+        if not math.isfinite(value) or value < 0:
+            raise CheckpointPlanningError(f"{name} must be finite and nonnegative")
+    slowest_rank = max(file.payload_bytes for file in image.rank_files) / rank_rate
+    shared_floor = sum(file.payload_bytes for file in image.rank_files) / shared_rate
+    load_seconds = max(slowest_rank, shared_floor) + image.metadata_bytes / rank_rate
+    replay_seconds = lost_optimizer_steps * float(seconds_per_optimizer_step)
+    total = load_seconds + float(restart_seconds) + replay_seconds
+    return RecoveryEstimate(
+        checkpoint_load_seconds=load_seconds,
+        restart_seconds=float(restart_seconds),
+        replay_seconds=replay_seconds,
+        total_seconds=total,
     )

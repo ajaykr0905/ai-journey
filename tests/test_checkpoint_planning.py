@@ -6,6 +6,7 @@ from ai_journey.checkpoint_planning import (
     checkpoint_image,
     checkpoint_retention,
     checkpoint_write_estimate,
+    recovery_estimate,
 )
 from ai_journey.resource_accounting import DecoderSpec
 
@@ -141,4 +142,48 @@ def test_checkpoint_retention_rejects_empty_images_and_negative_budgets():
         checkpoint_retention(
             CheckpointImage(sharded=False, rank_files=(), metadata_bytes=0),
             storage_budget_bytes=100,
+        )
+
+
+def test_recovery_estimate_combines_load_restart_and_replay():
+    model = DecoderSpec(32, 1, 8, 2, 1, 16)
+    image = checkpoint_image(
+        model,
+        parameter_dtype="float32",
+        optimizer_dtype="float32",
+        optimizer_slots=0,
+        world_size=2,
+        sharded=True,
+    )
+    estimate = recovery_estimate(
+        image,
+        rank_read_bandwidth_bytes_per_second=200,
+        shared_read_bandwidth_bytes_per_second=100,
+        lost_optimizer_steps=3,
+        seconds_per_optimizer_step=2.5,
+        restart_seconds=4,
+    )
+    assert estimate.checkpoint_load_seconds == image.total_bytes / 100
+    assert estimate.replay_seconds == 7.5
+    assert estimate.total_seconds == image.total_bytes / 100 + 11.5
+    assert estimate.meets_rto(estimate.total_seconds)
+    assert not estimate.meets_rto(estimate.total_seconds - 0.1)
+
+
+def test_recovery_estimate_rejects_negative_lost_work():
+    image = checkpoint_image(
+        DecoderSpec(32, 1, 8, 2, 1, 16),
+        parameter_dtype="float32",
+        optimizer_dtype="float32",
+        optimizer_slots=0,
+        world_size=1,
+        sharded=False,
+    )
+    with pytest.raises(CheckpointPlanningError, match="lost_optimizer_steps"):
+        recovery_estimate(
+            image,
+            rank_read_bandwidth_bytes_per_second=100,
+            shared_read_bandwidth_bytes_per_second=100,
+            lost_optimizer_steps=-1,
+            seconds_per_optimizer_step=1,
         )
