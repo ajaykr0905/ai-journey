@@ -4,7 +4,9 @@ from ai_journey.distributed_capacity import (
     ClusterTopology,
     DistributedCapacityError,
     LinkProfile,
+    ring_all_gather,
     ring_all_reduce,
+    ring_reduce_scatter,
 )
 
 
@@ -55,3 +57,22 @@ def test_ring_all_reduce_treats_one_rank_as_zero_wire_work():
     assert estimate.seconds == 0
     with pytest.raises(TypeError, match="payload_bytes"):
         ring_all_reduce(True, topology)
+
+
+def test_ring_reduce_scatter_and_all_gather_expose_one_phase_costs():
+    topology = ClusterTopology(4, 4, link(100.0, 0.01), link())
+
+    scatter = ring_reduce_scatter(10, topology)
+    gather = ring_all_gather(3, topology)
+
+    assert scatter.operation == "reduce_scatter"
+    assert gather.operation == "all_gather"
+    assert scatter.steps == gather.steps == 3
+    assert scatter.wire_bytes_per_rank == gather.wire_bytes_per_rank == 9
+    assert scatter.seconds == gather.seconds == pytest.approx(0.12)
+
+
+def test_one_rank_collective_phases_have_no_wire_cost():
+    topology = ClusterTopology(1, 1, link(), link())
+    assert ring_reduce_scatter(8, topology).seconds == 0
+    assert ring_all_gather(8, topology).wire_bytes_per_rank == 0

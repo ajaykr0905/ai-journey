@@ -134,3 +134,51 @@ def ring_all_reduce(
         seconds,
         "inter_node" if topology.crosses_nodes else "intra_node",
     )
+
+
+def _ring_phase_estimate(
+    operation: str,
+    payload_bytes: int,
+    topology: ClusterTopology,
+    *,
+    payload_is_shard: bool,
+) -> CollectiveEstimate:
+    payload = _positive_integer(payload_bytes, "payload_bytes")
+    if not isinstance(topology, ClusterTopology):
+        raise TypeError("topology must be a ClusterTopology")
+    if topology.world_size == 1:
+        return CollectiveEstimate(operation, payload, 1, 0, 0, 0.0, "local")
+    chunk = payload if payload_is_shard else math.ceil(payload / topology.world_size)
+    steps = topology.world_size - 1
+    wire_bytes = steps * chunk
+    link = topology.collective_link
+    seconds = (
+        wire_bytes / link.bandwidth_bytes_per_second + steps * link.latency_seconds
+    )
+    return CollectiveEstimate(
+        operation,
+        payload,
+        topology.world_size,
+        steps,
+        wire_bytes,
+        seconds,
+        "inter_node" if topology.crosses_nodes else "intra_node",
+    )
+
+
+def ring_reduce_scatter(
+    payload_bytes: int, topology: ClusterTopology
+) -> CollectiveEstimate:
+    """Estimate one ring reduce-scatter over a full unsharded payload."""
+
+    return _ring_phase_estimate(
+        "reduce_scatter", payload_bytes, topology, payload_is_shard=False
+    )
+
+
+def ring_all_gather(shard_bytes: int, topology: ClusterTopology) -> CollectiveEstimate:
+    """Estimate one ring all-gather from an equal per-rank shard."""
+
+    return _ring_phase_estimate(
+        "all_gather", shard_bytes, topology, payload_is_shard=True
+    )
