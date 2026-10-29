@@ -63,6 +63,16 @@ class RankAllGatherPeak:
     transient_bytes: int
 
 
+@dataclass(frozen=True)
+class RankForwardMaterialization:
+    """Forward-pass parameter materialization under one reshard policy."""
+
+    rank: int
+    reshard_after_forward: bool
+    peak_transient_bytes: int
+    retained_full_parameter_bytes: int
+
+
 def partition_parameter_groups(
     parameter_group_bytes: Mapping[str, int], *, world_size: int
 ) -> tuple[ParameterShard, ...]:
@@ -158,6 +168,34 @@ def all_gather_transient_peaks(
             )
         )
     return tuple(peaks)
+
+
+def forward_materialization(
+    parameter_group_bytes: Mapping[str, int],
+    shards: tuple[ParameterShard, ...],
+    *,
+    reshard_after_forward: bool,
+) -> tuple[RankForwardMaterialization, ...]:
+    """Compare immediate resharding with retaining full parameters for backward."""
+
+    if not isinstance(reshard_after_forward, bool):
+        raise TypeError("reshard_after_forward must be a boolean")
+    peaks = all_gather_transient_peaks(parameter_group_bytes, shards)
+    total = sum(parameter_group_bytes.values())
+    results = []
+    for shard, peak in zip(shards, peaks, strict=True):
+        retained = 0 if reshard_after_forward else total - shard.payload_bytes
+        results.append(
+            RankForwardMaterialization(
+                rank=shard.rank,
+                reshard_after_forward=reshard_after_forward,
+                peak_transient_bytes=(
+                    peak.transient_bytes if reshard_after_forward else retained
+                ),
+                retained_full_parameter_bytes=retained,
+            )
+        )
+    return tuple(results)
 
 
 def sharded_training_state(

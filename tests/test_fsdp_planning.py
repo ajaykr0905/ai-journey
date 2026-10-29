@@ -4,6 +4,7 @@ from ai_journey.fsdp_planning import (
     FSDPPlanningError,
     all_gather_transient_peaks,
     decoder_parameter_shards,
+    forward_materialization,
     partition_parameter_groups,
     sharded_training_state,
 )
@@ -62,6 +63,29 @@ def test_all_gather_peak_rejects_noncanonical_shards():
         all_gather_transient_peaks(groups, tuple(reversed(shards)))
     with pytest.raises(FSDPPlanningError, match="nonempty"):
         all_gather_transient_peaks(groups, ())
+
+
+def test_resharding_releases_full_parameters_after_each_forward_unit():
+    groups = {"embedding": 5, "blocks": 8, "head": 4}
+    shards = partition_parameter_groups(groups, world_size=3)
+    plans = forward_materialization(groups, shards, reshard_after_forward=True)
+    assert [plan.peak_transient_bytes for plan in plans] == [7, 5, 7]
+    assert all(plan.retained_full_parameter_bytes == 0 for plan in plans)
+
+
+def test_retaining_full_parameters_exposes_rank_specific_memory_cost():
+    groups = {"embedding": 5, "blocks": 8, "head": 4}
+    shards = partition_parameter_groups(groups, world_size=3)
+    plans = forward_materialization(groups, shards, reshard_after_forward=False)
+    assert [plan.peak_transient_bytes for plan in plans] == [11, 11, 12]
+    assert [plan.retained_full_parameter_bytes for plan in plans] == [11, 11, 12]
+
+
+def test_forward_materialization_requires_explicit_boolean_policy():
+    groups = {"model": 8}
+    shards = partition_parameter_groups(groups, world_size=2)
+    with pytest.raises(TypeError, match="boolean"):
+        forward_materialization(groups, shards, reshard_after_forward=1)
 
 
 def test_parameter_partition_rejects_empty_and_ambiguous_inputs():
