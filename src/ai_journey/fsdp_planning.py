@@ -30,6 +30,28 @@ class ParameterShard:
     slices: tuple[ShardSlice, ...]
 
 
+@dataclass(frozen=True)
+class RankTrainingState:
+    """Persistent sharded training-state bytes held by one rank."""
+
+    rank: int
+    parameters_bytes: int
+    gradients_bytes: int
+    optimizer_bytes: int
+    master_parameters_bytes: int
+
+    @property
+    def total_bytes(self) -> int:
+        """Return the complete persistent state footprint for this rank."""
+
+        return (
+            self.parameters_bytes
+            + self.gradients_bytes
+            + self.optimizer_bytes
+            + self.master_parameters_bytes
+        )
+
+
 def partition_parameter_groups(
     parameter_group_bytes: Mapping[str, int], *, world_size: int
 ) -> tuple[ParameterShard, ...]:
@@ -87,3 +109,42 @@ def decoder_parameter_shards(
     width = bytes_per_element(dtype)
     groups = {name: count * width for name, count in model.parameter_groups().items()}
     return partition_parameter_groups(groups, world_size=world_size)
+
+
+def sharded_training_state(
+    model: DecoderSpec,
+    *,
+    parameter_dtype: str,
+    gradient_dtype: str,
+    optimizer_dtype: str,
+    optimizer_slots: int,
+    world_size: int,
+    master_parameter_dtype: str | None = None,
+) -> tuple[RankTrainingState, ...]:
+    """Inventory persistent FSDP state without assuming measured allocation."""
+
+    if type(optimizer_slots) is not int:
+        raise TypeError("optimizer_slots must be an integer")
+    if optimizer_slots < 0:
+        raise FSDPPlanningError("optimizer_slots must be nonnegative")
+    parameter_width = bytes_per_element(parameter_dtype)
+    gradient_width = bytes_per_element(gradient_dtype)
+    optimizer_width = bytes_per_element(optimizer_dtype)
+    master_width = (
+        0
+        if master_parameter_dtype is None
+        else bytes_per_element(master_parameter_dtype)
+    )
+    count_shards = partition_parameter_groups(
+        model.parameter_groups(), world_size=world_size
+    )
+    return tuple(
+        RankTrainingState(
+            rank=shard.rank,
+            parameters_bytes=shard.payload_bytes * parameter_width,
+            gradients_bytes=shard.payload_bytes * gradient_width,
+            optimizer_bytes=shard.payload_bytes * optimizer_width * optimizer_slots,
+            master_parameters_bytes=shard.payload_bytes * master_width,
+        )
+        for shard in count_shards
+    )

@@ -4,6 +4,7 @@ from ai_journey.fsdp_planning import (
     FSDPPlanningError,
     decoder_parameter_shards,
     partition_parameter_groups,
+    sharded_training_state,
 )
 from ai_journey.resource_accounting import DecoderSpec
 
@@ -49,3 +50,51 @@ def test_parameter_partition_rejects_empty_and_ambiguous_inputs():
         partition_parameter_groups({"model": 1}, world_size=True)
     with pytest.raises(TypeError, match="sizes"):
         partition_parameter_groups({"model": True}, world_size=1)
+
+
+def test_sharded_training_state_accounts_for_each_declared_copy():
+    model = DecoderSpec(32, 2, 16, 4, 2, 32)
+    states = sharded_training_state(
+        model,
+        parameter_dtype="bfloat16",
+        gradient_dtype="float32",
+        optimizer_dtype="float32",
+        optimizer_slots=2,
+        master_parameter_dtype="float32",
+        world_size=3,
+    )
+
+    assert sum(state.parameters_bytes for state in states) == model.parameter_count * 2
+    assert sum(state.gradients_bytes for state in states) == model.parameter_count * 4
+    assert sum(state.optimizer_bytes for state in states) == model.parameter_count * 8
+    assert sum(state.master_parameters_bytes for state in states) == (
+        model.parameter_count * 4
+    )
+    assert sum(state.total_bytes for state in states) == model.parameter_count * 18
+
+
+def test_sharded_training_state_can_omit_master_parameters_and_optimizer_slots():
+    model = DecoderSpec(32, 1, 8, 2, 1, 16)
+    states = sharded_training_state(
+        model,
+        parameter_dtype="float32",
+        gradient_dtype="float32",
+        optimizer_dtype="float32",
+        optimizer_slots=0,
+        world_size=2,
+    )
+    assert all(state.optimizer_bytes == 0 for state in states)
+    assert all(state.master_parameters_bytes == 0 for state in states)
+
+
+def test_sharded_training_state_rejects_ambiguous_optimizer_slots():
+    model = DecoderSpec(32, 1, 8, 2, 1, 16)
+    with pytest.raises(TypeError, match="optimizer_slots"):
+        sharded_training_state(
+            model,
+            parameter_dtype="float32",
+            gradient_dtype="float32",
+            optimizer_dtype="float32",
+            optimizer_slots=True,
+            world_size=1,
+        )
