@@ -4,6 +4,7 @@ from ai_journey.checkpoint_planning import (
     CheckpointImage,
     CheckpointPlanningError,
     checkpoint_image,
+    checkpoint_interval_plan,
     checkpoint_retention,
     checkpoint_write_estimate,
     recovery_estimate,
@@ -186,4 +187,40 @@ def test_recovery_estimate_rejects_negative_lost_work():
             shared_read_bandwidth_bytes_per_second=100,
             lost_optimizer_steps=-1,
             seconds_per_optimizer_step=1,
+        )
+
+
+def test_checkpoint_interval_plan_satisfies_overhead_and_rto_bounds():
+    plan = checkpoint_interval_plan(
+        checkpoint_write_seconds=10,
+        seconds_per_optimizer_step=2,
+        fixed_recovery_seconds=20,
+        recovery_time_objective_seconds=100,
+        maximum_checkpoint_overhead_fraction=0.1,
+    )
+    assert plan.minimum_interval_steps == 45
+    assert plan.maximum_interval_steps == 40
+    assert not plan.feasible
+    assert plan.recommended_interval_steps is None
+
+    feasible = checkpoint_interval_plan(
+        checkpoint_write_seconds=4,
+        seconds_per_optimizer_step=2,
+        fixed_recovery_seconds=20,
+        recovery_time_objective_seconds=100,
+        maximum_checkpoint_overhead_fraction=0.1,
+    )
+    assert feasible.minimum_interval_steps == 18
+    assert feasible.maximum_interval_steps == 40
+    assert feasible.recommended_interval_steps == 40
+
+
+def test_checkpoint_interval_plan_rejects_fraction_boundaries():
+    with pytest.raises(CheckpointPlanningError, match="between zero and one"):
+        checkpoint_interval_plan(
+            checkpoint_write_seconds=1,
+            seconds_per_optimizer_step=1,
+            fixed_recovery_seconds=0,
+            recovery_time_objective_seconds=10,
+            maximum_checkpoint_overhead_fraction=1,
         )

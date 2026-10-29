@@ -95,6 +95,19 @@ class RecoveryEstimate:
         return self.total_seconds <= rto_seconds
 
 
+@dataclass(frozen=True)
+class CheckpointIntervalPlan:
+    """Checkpoint interval bounds imposed by overhead and recovery objectives."""
+
+    minimum_interval_steps: int
+    maximum_interval_steps: int
+    recommended_interval_steps: int | None
+
+    @property
+    def feasible(self) -> bool:
+        return self.recommended_interval_steps is not None
+
+
 def _positive_rate(value: float, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"{name} must be a number")
@@ -272,3 +285,47 @@ def recovery_estimate(
         replay_seconds=replay_seconds,
         total_seconds=total,
     )
+
+
+def checkpoint_interval_plan(
+    *,
+    checkpoint_write_seconds: float,
+    seconds_per_optimizer_step: float,
+    fixed_recovery_seconds: float,
+    recovery_time_objective_seconds: float,
+    maximum_checkpoint_overhead_fraction: float,
+) -> CheckpointIntervalPlan:
+    """Find an interval satisfying both checkpoint overhead and worst-case RTO."""
+
+    values = (
+        ("checkpoint_write_seconds", checkpoint_write_seconds),
+        ("seconds_per_optimizer_step", seconds_per_optimizer_step),
+        ("fixed_recovery_seconds", fixed_recovery_seconds),
+        ("recovery_time_objective_seconds", recovery_time_objective_seconds),
+        ("maximum_checkpoint_overhead_fraction", maximum_checkpoint_overhead_fraction),
+    )
+    for name, value in values:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(f"{name} must be a number")
+        if not math.isfinite(value) or value < 0:
+            raise CheckpointPlanningError(f"{name} must be finite and nonnegative")
+    if seconds_per_optimizer_step == 0:
+        raise CheckpointPlanningError("seconds_per_optimizer_step must be positive")
+    if not 0 < maximum_checkpoint_overhead_fraction < 1:
+        raise CheckpointPlanningError(
+            "maximum_checkpoint_overhead_fraction must be between zero and one"
+        )
+
+    overhead = float(maximum_checkpoint_overhead_fraction)
+    minimum = max(
+        1,
+        math.ceil(
+            checkpoint_write_seconds
+            * (1 - overhead)
+            / (overhead * seconds_per_optimizer_step)
+        ),
+    )
+    replay_budget = recovery_time_objective_seconds - fixed_recovery_seconds
+    maximum = max(0, math.floor(replay_budget / seconds_per_optimizer_step))
+    recommended = maximum if minimum <= maximum else None
+    return CheckpointIntervalPlan(minimum, maximum, recommended)
