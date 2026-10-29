@@ -440,6 +440,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 49 | 2026-10-23 | Pinned HellaSwag ingestion, completion-only scoring, calibration, uncertainty, sharding, and evidence replay |
 | 50 | 2026-10-24 | Source-backed BPE merge replay, bounded audits, Unicode controls, and document-safe streaming |
 | 51 | 2026-10-25 | Exact transformer parameter, FLOP, memory, sharding, runtime, and cost planning |
+| 55 | 2026-10-29 | Reproducible matmul and LayerNorm arithmetic-intensity and roofline analysis |
 
 ## License
 

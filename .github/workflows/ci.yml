@@ -412,6 +412,15 @@ jobs:
         run: |
           ai-journey-resource-plan --config config/day-51-resource-plan.json --output /tmp/ai-journey-artifacts/day-51-resource-plan.json
           ai-journey-resource-verify --report /tmp/ai-journey-artifacts/day-51-resource-plan.json
+      - name: Check analytical decoder roofline contracts
+        run: |
+          ruff check src/ai_journey/roofline*.py tests/test_roofline*.py
+          ruff format --check src/ai_journey/roofline*.py tests/test_roofline*.py
+          python -m pytest -q tests/test_roofline*.py
+      - name: Recompute and verify the pinned Day 55 roofline
+        run: |
+          ai-journey-roofline build --config config/day-55-roofline-plan.json --output /tmp/ai-journey-artifacts/day-55-roofline-report.json
+          ai-journey-roofline verify --report /tmp/ai-journey-artifacts/day-55-roofline-report.json
       - name: Check BPE source tests and pipeline formatting
         run: |
           ruff check src/ai_journey/bpe*.py src/ai_journey/token*.py src/ai_journey/parallel*.py src/ai_journey/export_verification.py src/ai_journey/day40_cli.py tests/test_bpe*.py tests/test_tokenizer*.py tests/test_parallel*.py tests/test_export_verification.py tests/test_run_day_40.py scripts/verify_bpe_lab.py
