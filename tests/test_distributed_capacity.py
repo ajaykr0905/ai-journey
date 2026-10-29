@@ -4,6 +4,7 @@ from ai_journey.distributed_capacity import (
     ClusterTopology,
     DistributedCapacityError,
     LinkProfile,
+    hierarchical_all_reduce,
     ring_all_gather,
     ring_all_reduce,
     ring_reduce_scatter,
@@ -76,3 +77,24 @@ def test_one_rank_collective_phases_have_no_wire_cost():
     topology = ClusterTopology(1, 1, link(), link())
     assert ring_reduce_scatter(8, topology).seconds == 0
     assert ring_all_gather(8, topology).wire_bytes_per_rank == 0
+
+
+def test_hierarchical_all_reduce_uses_local_shards_across_nodes():
+    topology = ClusterTopology(8, 4, link(100.0, 0.01), link(10.0, 0.1))
+    estimate = hierarchical_all_reduce(32, topology)
+
+    assert estimate.local_reduce_scatter.wire_bytes_per_rank == 24
+    assert estimate.cross_node_all_reduce.payload_bytes == 8
+    assert estimate.cross_node_all_reduce.wire_bytes_per_rank == 8
+    assert estimate.local_all_gather.wire_bytes_per_rank == 24
+    assert estimate.wire_bytes_per_rank == 56
+    assert estimate.seconds == pytest.approx(1.54)
+    assert estimate.seconds < ring_all_reduce(32, topology).seconds
+
+
+def test_hierarchical_all_reduce_degenerates_to_local_ring_on_one_node():
+    topology = ClusterTopology(4, 4, link(100.0, 0.01), link(10.0, 0.1))
+    hierarchical = hierarchical_all_reduce(32, topology)
+    flat = ring_all_reduce(32, topology)
+    assert hierarchical.seconds == flat.seconds
+    assert hierarchical.wire_bytes_per_rank == flat.wire_bytes_per_rank

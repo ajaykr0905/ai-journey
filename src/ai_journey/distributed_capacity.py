@@ -104,6 +104,18 @@ class CollectiveEstimate:
     link_scope: str
 
 
+@dataclass(frozen=True)
+class HierarchicalEstimate:
+    """Per-rank phases for a two-level all-reduce."""
+
+    payload_bytes: int
+    local_reduce_scatter: CollectiveEstimate
+    cross_node_all_reduce: CollectiveEstimate
+    local_all_gather: CollectiveEstimate
+    seconds: float
+    wire_bytes_per_rank: int
+
+
 def ring_all_reduce(
     payload_bytes: int, topology: ClusterTopology
 ) -> CollectiveEstimate:
@@ -181,4 +193,39 @@ def ring_all_gather(shard_bytes: int, topology: ClusterTopology) -> CollectiveEs
 
     return _ring_phase_estimate(
         "all_gather", shard_bytes, topology, payload_is_shard=True
+    )
+
+
+def hierarchical_all_reduce(
+    payload_bytes: int, topology: ClusterTopology
+) -> HierarchicalEstimate:
+    """Estimate local scatter, cross-node shard reduction, and local gather."""
+
+    payload = _positive_integer(payload_bytes, "payload_bytes")
+    if not isinstance(topology, ClusterTopology):
+        raise TypeError("topology must be a ClusterTopology")
+    local_topology = ClusterTopology(
+        topology.workers_per_node,
+        topology.workers_per_node,
+        topology.intra_node,
+        topology.intra_node,
+    )
+    local_scatter = ring_reduce_scatter(payload, local_topology)
+    shard_bytes = math.ceil(payload / topology.workers_per_node)
+    node_topology = ClusterTopology(
+        topology.node_count,
+        1,
+        topology.inter_node,
+        topology.inter_node,
+    )
+    cross_node = ring_all_reduce(shard_bytes, node_topology)
+    local_gather = ring_all_gather(shard_bytes, local_topology)
+    phases = (local_scatter, cross_node, local_gather)
+    return HierarchicalEstimate(
+        payload,
+        local_scatter,
+        cross_node,
+        local_gather,
+        math.fsum(phase.seconds for phase in phases),
+        sum(phase.wire_bytes_per_rank for phase in phases),
     )
