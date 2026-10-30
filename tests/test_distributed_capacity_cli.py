@@ -1,9 +1,11 @@
 from dataclasses import asdict
 import json
+from pathlib import Path
 
 import pytest
 
 from ai_journey.distributed_capacity_cli import main
+from ai_journey.distributed_capacity_io import load_distributed_capacity_report
 from ai_journey.distributed_capacity_report import DistributedCapacityReportError
 from test_distributed_capacity_report import _plan
 
@@ -39,3 +41,16 @@ def test_capacity_cli_rejects_duplicate_plan_fields(tmp_path):
                 str(tmp_path / "report.json"),
             ]
         )
+
+
+def test_pinned_day55_capacity_plan_builds_public_safe_analytical_evidence(tmp_path):
+    repository = Path(__file__).resolve().parents[1]
+    config = repository / "config" / "day-55-distributed-capacity.json"
+    output = tmp_path / "capacity.json"
+    assert main(["build", "--config", str(config), "--output", str(output)]) == 0
+    report = load_distributed_capacity_report(output)
+    assert report["topology"]["world_size"] == 16
+    assert report["topology"]["workers_per_node"] == 8
+    assert report["gradient_sync"]["algorithm"] == "hierarchical_ring"
+    assert report["checkpoint"]["image"]["sharded"] is True
+    assert report["measured"] is False
