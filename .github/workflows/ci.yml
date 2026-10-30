@@ -712,6 +712,7 @@ jobs:
       - name: Install CPU runtime and pinned verification tools
         run: |
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
           python -m pip install -e . --no-deps
           python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
       - name: Check analytical distributed capacity contracts
@@ -734,7 +735,7 @@ jobs:
           ai-journey-distributed-capacity build --config "$GITHUB_WORKSPACE/config/day-55-distributed-capacity.json" --output "$RUNNER_TEMP/capacity-evidence/report.json"
           ai-journey-distributed-capacity verify --report "$RUNNER_TEMP/capacity-evidence/report.json"
       - name: Retain analytical capacity evidence and installed package
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: distributed-capacity-evidence
