@@ -698,3 +698,48 @@ jobs:
         run: >-
           ai-journey-serving-benchmark
           --output /tmp/ai-journey-artifacts/serving-benchmark.json
+  distributed-capacity-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU runtime and pinned verification tools
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check analytical distributed capacity contracts
+        run: |
+          ruff check src/ai_journey/distributed_capacity*.py src/ai_journey/fsdp_planning.py src/ai_journey/checkpoint_planning.py tests/test_distributed_capacity*.py tests/test_fsdp_planning.py tests/test_checkpoint_planning.py
+          ruff format --check src/ai_journey/distributed_capacity*.py src/ai_journey/fsdp_planning.py src/ai_journey/checkpoint_planning.py tests/test_distributed_capacity*.py tests/test_fsdp_planning.py tests/test_checkpoint_planning.py
+          python -m compileall -q src tests
+          python -m pytest -q tests/test_distributed_capacity*.py tests/test_fsdp_planning.py tests/test_checkpoint_planning.py
+      - name: Build and install an isolated capacity-planning wheel
+        run: |
+          python -m build --outdir "$RUNNER_TEMP/capacity-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/capacity-installed" "$RUNNER_TEMP"/capacity-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/capacity-evidence"
+      - name: Build and independently verify installed analytical evidence
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/capacity-installed
+        run: |
+          export PATH="$RUNNER_TEMP/capacity-installed/bin:$PATH"
+          ai-journey-distributed-capacity build --config "$GITHUB_WORKSPACE/config/day-55-distributed-capacity.json" --output "$RUNNER_TEMP/capacity-evidence/report.json"
+          ai-journey-distributed-capacity verify --report "$RUNNER_TEMP/capacity-evidence/report.json"
+      - name: Retain analytical capacity evidence and installed package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: distributed-capacity-evidence
+          path: |
+            ${{ runner.temp }}/capacity-evidence/
+            ${{ runner.temp }}/capacity-dist/
+          if-no-files-found: error

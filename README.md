@@ -393,6 +393,28 @@ a new predeclared protocol before drawing research conclusions.
 Repository experiments require no credentials. Never commit `.env`, credentials, browser data,
 cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 
+## Plan distributed training capacity
+
+Build the pinned 16-rank analytical plan and then independently recompute every
+derived field and its SHA-256 integrity digest:
+
+```bash
+ai-journey-distributed-capacity build \
+  --config config/day-55-distributed-capacity.json \
+  --output artifacts/day-55-distributed-capacity.json
+ai-journey-distributed-capacity verify \
+  --report artifacts/day-55-distributed-capacity.json
+```
+
+The report inventories exact parameter shards, persistent parameter/gradient/
+optimizer state, forward all-gather peaks, gradient bucket communication, and
+full or sharded checkpoint capacity. Checkpoint write, retention, and recovery
+calculations use the rates declared in the config. They are planning estimates:
+the command does not launch ranks, allocate a GPU, execute a collective, access
+remote storage, or claim measured throughput. Change bandwidth, latency,
+topology, dtype, and storage values only when recording a new explicit scenario;
+do not reinterpret the pinned assumptions as observations of local hardware.
+
 ## Daily map
 
 | Day | Date | Focus |
@@ -440,7 +462,7 @@ cookies, or access tokens. See [`SECURITY.md`](SECURITY.md).
 | 49 | 2026-10-23 | Pinned HellaSwag ingestion, completion-only scoring, calibration, uncertainty, sharding, and evidence replay |
 | 50 | 2026-10-24 | Source-backed BPE merge replay, bounded audits, Unicode controls, and document-safe streaming |
 | 51 | 2026-10-25 | Exact transformer parameter, FLOP, memory, sharding, runtime, and cost planning |
-| 55 | 2026-10-29 | Reproducible matmul and LayerNorm arithmetic-intensity and roofline analysis |
+| 55 | 2026-10-29 | Reproducible roofline analysis and distributed capacity, sharding, and checkpoint planning |
 
 ## License
 
