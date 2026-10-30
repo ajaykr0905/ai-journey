@@ -116,7 +116,7 @@ def build_distributed_capacity_report(
     retention = checkpoint_retention(
         image, storage_budget_bytes=plan.checkpoint_storage_budget_bytes
     )
-    return {
+    report = {
         "schema_version": 1,
         "kind": "analytical_distributed_capacity",
         "measured": False,
@@ -151,6 +151,7 @@ def build_distributed_capacity_report(
             "Allocator fragmentation and kernel workspaces are excluded.",
         ],
     }
+    return json.loads(json.dumps(report, allow_nan=False))
 
 
 def _canonical_report_bytes(report: dict[str, object]) -> bytes:
