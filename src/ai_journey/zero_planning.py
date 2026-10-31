@@ -43,6 +43,17 @@ class RankZeroState:
         )
 
 
+@dataclass(frozen=True)
+class ZeroCollectiveStep:
+    """Logical tensor ownership before and after one ZeRO collective."""
+
+    phase: str
+    operation: str
+    tensor_family: str
+    input_bytes_by_rank: tuple[int, ...]
+    output_bytes_by_rank: tuple[int, ...]
+
+
 def zero_stage_state(
     model: DecoderSpec,
     *,
@@ -104,3 +115,72 @@ def zero_stage_state(
         )
         for shard in count_shards
     )
+
+
+def zero_collective_schedule(
+    model: DecoderSpec,
+    *,
+    stage: int,
+    world_size: int,
+    parameter_dtype: str,
+    gradient_dtype: str,
+) -> tuple[ZeroCollectiveStep, ...]:
+    """Describe logical collective transitions for one ZeRO optimizer step."""
+
+    if not isinstance(model, DecoderSpec):
+        raise TypeError("model must be a DecoderSpec")
+    if type(stage) is not int:
+        raise TypeError("stage must be an integer")
+    if stage not in _SHARDED_FAMILIES:
+        raise ZeroPlanningError("stage must be one of 0, 1, 2, or 3")
+
+    count_shards = partition_parameter_groups(
+        model.parameter_groups(), world_size=world_size
+    )
+    parameter_width = bytes_per_element(parameter_dtype)
+    gradient_width = bytes_per_element(gradient_dtype)
+    full_parameter_bytes = model.parameter_count * parameter_width
+    full_gradient_bytes = model.parameter_count * gradient_width
+    parameter_shards = tuple(
+        shard.payload_bytes * parameter_width for shard in count_shards
+    )
+    gradient_shards = tuple(
+        shard.payload_bytes * gradient_width for shard in count_shards
+    )
+    full_parameters = (full_parameter_bytes,) * world_size
+    full_gradients = (full_gradient_bytes,) * world_size
+
+    gradient_all_reduce = ZeroCollectiveStep(
+        "gradient_sync",
+        "all_reduce",
+        "gradients",
+        full_gradients,
+        full_gradients,
+    )
+    gradient_reduce_scatter = ZeroCollectiveStep(
+        "gradient_partition",
+        "reduce_scatter",
+        "gradients",
+        full_gradients,
+        gradient_shards,
+    )
+    parameter_sync = ZeroCollectiveStep(
+        "parameter_sync",
+        "all_gather",
+        "parameters",
+        parameter_shards,
+        full_parameters,
+    )
+    parameter_materialization = ZeroCollectiveStep(
+        "parameter_materialization",
+        "all_gather",
+        "parameters",
+        parameter_shards,
+        full_parameters,
+    )
+    return {
+        0: (gradient_all_reduce,),
+        1: (gradient_all_reduce, parameter_sync),
+        2: (gradient_reduce_scatter, parameter_sync),
+        3: (parameter_materialization, gradient_reduce_scatter),
+    }[stage]
