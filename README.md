@@ -1,7 +1,7 @@
 # AI Journey: Reproducible Transformer Training and Serving Lab
 
 This repository is a public-safe, executable record of an added setup day plus the
-selected verified code through Day 49 of a 90-day AI engineering learning plan. It combines
+selected verified code through Day 57 of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -24,6 +24,9 @@ then grow these exercises into production-quality training and inference project
 - Real CPU/Gloo process training, exact checkpoint recovery, controlled global-batch
   comparisons, held-out evaluation, cached inference, and loopback serving in the
   [distributed lab runbook](docs/distributed-cpu-lab.md)
+- Exact ZeRO 0–3 state ownership, stage-specific collective schedules, sealed
+  analytical comparisons, and executed CPU/Gloo collective equivalence in the
+  [ZeRO stage runbook](docs/zero-stage-comparison.md)
 - Checksum-pinned HellaSwag ingestion, completion-only likelihood scoring,
   calibration, uncertainty, exact sharding, and sealed paired comparisons in the
   [bounded evaluation runbook](docs/hellaswag-evaluation.md)
@@ -463,6 +466,7 @@ do not reinterpret the pinned assumptions as observations of local hardware.
 | 50 | 2026-10-24 | Source-backed BPE merge replay, bounded audits, Unicode controls, and document-safe streaming |
 | 51 | 2026-10-25 | Exact transformer parameter, FLOP, memory, sharding, runtime, and cost planning |
 | 55 | 2026-10-29 | Reproducible roofline analysis and distributed capacity, sharding, and checkpoint planning |
+| 57 | 2026-10-31 | Exact ZeRO stage planning and executed CPU/Gloo collective conformance |
 
 ## License
 

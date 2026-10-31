@@ -52,7 +52,7 @@ def test_runbook_records_replay_commands_result_and_scope_limits():
 
 def test_readme_exposes_day_49_without_claiming_completion():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "selected verified code through Day 49" in readme
+    assert "selected verified code through Day 57" in readme
     assert "[bounded evaluation runbook](docs/hellaswag-evaluation.md)" in readme
     assert "| 49 | 2026-10-23 |" in readme
     assert "completed Day 49" not in readme

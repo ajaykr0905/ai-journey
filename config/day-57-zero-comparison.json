@@ -1,0 +1,33 @@
+{
+  "activation_bytes": 1012924416,
+  "device_capacity_bytes": 85899345920,
+  "gradient_bucket_bytes": 26214400,
+  "gradient_dtype": "bfloat16",
+  "master_parameter_dtype": "float32",
+  "model": {
+    "attention_heads": 32,
+    "feed_forward_size": 11008,
+    "hidden_size": 4096,
+    "kv_heads": 32,
+    "layer_count": 32,
+    "tie_embeddings": false,
+    "use_bias": false,
+    "vocab_size": 32000
+  },
+  "optimizer_dtype": "float32",
+  "optimizer_slots": 2,
+  "parameter_dtype": "bfloat16",
+  "reserve_fraction": 0.1,
+  "topology": {
+    "inter_node": {
+      "bandwidth_bytes_per_second": 25000000000,
+      "latency_seconds": 0.00001
+    },
+    "intra_node": {
+      "bandwidth_bytes_per_second": 300000000000,
+      "latency_seconds": 0.000001
+    },
+    "workers_per_node": 8,
+    "world_size": 8
+  }
+}
