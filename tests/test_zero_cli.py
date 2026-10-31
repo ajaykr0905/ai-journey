@@ -1,0 +1,49 @@
+from dataclasses import asdict
+import json
+
+import pytest
+
+from ai_journey.zero_cli import main
+from ai_journey.zero_io import load_zero_comparison_report
+from ai_journey.zero_report import ZeroReportError
+from test_zero_report import _plan
+
+
+def test_zero_cli_builds_and_verifies_recomputable_evidence(tmp_path, capsys):
+    config = tmp_path / "plan.json"
+    output = tmp_path / "report.json"
+    config.write_text(json.dumps(asdict(_plan())), encoding="utf-8")
+
+    assert main(["build", "--config", str(config), "--output", str(output)]) == 0
+    build_output = capsys.readouterr().out
+    assert "measured=false" in build_output
+    assert "stages=4" in build_output
+    report = load_zero_comparison_report(output)
+    assert [stage["stage"] for stage in report["stages"]] == [0, 1, 2, 3]
+
+    assert main(["verify", "--report", str(output)]) == 0
+    assert "verified_zero=" in capsys.readouterr().out
+
+
+def test_zero_cli_rejects_config_output_alias(tmp_path):
+    config = tmp_path / "plan.json"
+    config.write_text(json.dumps(asdict(_plan())), encoding="utf-8")
+
+    with pytest.raises(ZeroReportError, match="must not alias"):
+        main(["build", "--config", str(config), "--output", str(config)])
+
+
+def test_zero_cli_rejects_duplicate_plan_fields(tmp_path):
+    config = tmp_path / "plan.json"
+    config.write_text('{"model":{},"model":{}}', encoding="utf-8")
+
+    with pytest.raises(ZeroReportError, match="duplicate"):
+        main(
+            [
+                "build",
+                "--config",
+                str(config),
+                "--output",
+                str(tmp_path / "report.json"),
+            ]
+        )
