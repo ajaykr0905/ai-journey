@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -12,6 +13,10 @@ from typing import Sequence
 
 import torch
 import torch.distributed as dist
+
+
+class ZeroProbeError(ValueError):
+    """Raised when executed collective evidence is inconsistent."""
 
 
 def _canonical_bytes(report: dict[str, object]) -> bytes:
@@ -22,6 +27,103 @@ def _canonical_bytes(report: dict[str, object]) -> bytes:
         ensure_ascii=False,
         allow_nan=False,
     ).encode("utf-8")
+
+
+def seal_zero_probe_report(report: dict[str, object]) -> dict[str, object]:
+    """Attach a canonical digest without mutating the input report."""
+
+    if not isinstance(report, dict):
+        raise TypeError("report must be a dictionary")
+    unsigned = {key: value for key, value in report.items() if key != "integrity"}
+    return {
+        **unsigned,
+        "integrity": {
+            "algorithm": "sha256",
+            "digest": hashlib.sha256(_canonical_bytes(unsigned)).hexdigest(),
+        },
+    }
+
+
+def _numeric_vector(value: object, name: str, length: int) -> list[float]:
+    if not isinstance(value, list) or len(value) != length:
+        raise ZeroProbeError(f"{name} has the wrong shape")
+    if any(
+        isinstance(item, bool)
+        or not isinstance(item, (int, float))
+        or not math.isfinite(item)
+        for item in value
+    ):
+        raise ZeroProbeError(f"{name} must contain finite numbers")
+    return [float(item) for item in value]
+
+
+def verify_zero_probe_report(report: dict[str, object]) -> dict[str, object]:
+    """Verify the seal and recompute collective equivalence from rank inputs."""
+
+    if not isinstance(report, dict):
+        raise TypeError("report must be a dictionary")
+    if report.get("schema_version") != 1:
+        raise ZeroProbeError("unsupported probe schema")
+    if report.get("kind") != "cpu_gloo_zero_collective_conformance":
+        raise ZeroProbeError("unexpected probe kind")
+    if report.get("executed") is not True:
+        raise ZeroProbeError("probe must record executed=true")
+    if report.get("performance_measured") is not False:
+        raise ZeroProbeError("probe must not claim performance measurements")
+    if report.get("backend") != "gloo" or report.get("device") != "cpu":
+        raise ZeroProbeError("probe must remain CPU/Gloo evidence")
+    try:
+        expected_integrity = seal_zero_probe_report(report)["integrity"]
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ZeroProbeError("probe report is not canonical") from error
+    if report.get("integrity") != expected_integrity:
+        raise ZeroProbeError("probe report integrity mismatch")
+
+    world_size = report.get("world_size")
+    chunk_elements = report.get("chunk_elements")
+    ranks = report.get("ranks")
+    if type(world_size) is not int or world_size <= 0:
+        raise ZeroProbeError("world_size must be positive")
+    if type(chunk_elements) is not int or chunk_elements <= 0:
+        raise ZeroProbeError("chunk_elements must be positive")
+    if not isinstance(ranks, list) or len(ranks) != world_size:
+        raise ZeroProbeError("rank evidence must cover the world exactly")
+    if not all(isinstance(item, dict) for item in ranks):
+        raise ZeroProbeError("rank evidence entries must be objects")
+    if [item.get("rank") for item in ranks] != list(range(world_size)):
+        raise ZeroProbeError("rank evidence must be ordered and complete")
+
+    vector_length = world_size * chunk_elements
+    inputs = [
+        _numeric_vector(item.get("input"), "rank input", vector_length)
+        for item in ranks
+    ]
+    recomputed = [
+        math.fsum(vector[index] for vector in inputs) for index in range(vector_length)
+    ]
+    expected = _numeric_vector(
+        report.get("expected_sum"), "expected_sum", vector_length
+    )
+    if recomputed != expected:
+        raise ZeroProbeError("expected sum does not match rank inputs")
+    all_reduce = [
+        _numeric_vector(item.get("all_reduce"), "all_reduce", vector_length)
+        for item in ranks
+    ]
+    all_gather = [
+        _numeric_vector(item.get("all_gather"), "all_gather", vector_length)
+        for item in ranks
+    ]
+    shards = [
+        _numeric_vector(item.get("reduce_scatter"), "reduce_scatter", chunk_elements)
+        for item in ranks
+    ]
+    if (
+        any(vector != expected for vector in (*all_reduce, *all_gather))
+        or [value for shard in shards for value in shard] != expected
+    ):
+        raise ZeroProbeError("collective outputs do not reconstruct the expected sum")
+    return report
 
 
 def _write_atomic(path: Path, report: dict[str, object]) -> None:
@@ -101,13 +203,8 @@ def run_probe(output: Path) -> dict[str, object] | None:
                     "No latency, bandwidth, utilization, memory, or cost was measured.",
                 ],
             }
-            report = {
-                **unsigned,
-                "integrity": {
-                    "algorithm": "sha256",
-                    "digest": hashlib.sha256(_canonical_bytes(unsigned)).hexdigest(),
-                },
-            }
+            report = seal_zero_probe_report(unsigned)
+            verify_zero_probe_report(report)
             _write_atomic(output, report)
             print(
                 f"zero_probe={report['integrity']['digest']} backend=gloo "

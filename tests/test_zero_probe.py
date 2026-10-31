@@ -5,6 +5,14 @@ import socket
 import subprocess
 import sys
 
+import pytest
+
+from ai_journey.zero_probe import (
+    ZeroProbeError,
+    seal_zero_probe_report,
+    verify_zero_probe_report,
+)
+
 
 def test_two_rank_gloo_probe_executes_equivalent_collectives(tmp_path: Path):
     repository = Path(__file__).resolve().parents[1]
@@ -39,6 +47,7 @@ def test_two_rank_gloo_probe_executes_equivalent_collectives(tmp_path: Path):
     )
 
     report = json.loads(output.read_text(encoding="utf-8"))
+    assert verify_zero_probe_report(report) is report
     assert report["kind"] == "cpu_gloo_zero_collective_conformance"
     assert report["executed"] is True
     assert report["performance_measured"] is False
@@ -49,3 +58,9 @@ def test_two_rank_gloo_probe_executes_equivalent_collectives(tmp_path: Path):
     assert all(rank["all_gather"] == report["expected_sum"] for rank in report["ranks"])
     assert "backend=gloo" in completed.stdout
     assert "performance_measured=false" in completed.stdout
+
+    tampered = json.loads(json.dumps(report))
+    tampered["ranks"][0]["all_gather"][0] = -1.0
+    tampered = seal_zero_probe_report(tampered)
+    with pytest.raises(ZeroProbeError, match="collective outputs"):
+        verify_zero_probe_report(tampered)
