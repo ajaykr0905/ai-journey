@@ -1,6 +1,7 @@
 from ai_journey.distributed_capacity import ClusterTopology, LinkProfile
 from ai_journey.resource_accounting import DecoderSpec
 from ai_journey.zero_planning import (
+    admit_zero_stage,
     estimate_zero_collectives,
     zero_collective_schedule,
     zero_stage_memory_peaks,
@@ -200,3 +201,38 @@ def test_zero_collective_estimates_expose_padding_and_wire_costs():
     assert parameter_sync.padded_payload_bytes == 11_430
     assert parameter_sync.padding_bytes == 6
     assert parameter_sync.wire_bytes_per_rank == 9_144
+
+
+def test_zero_stage_admission_reserves_capacity_before_deciding_fit():
+    model = _model()
+    common = {
+        "model": model,
+        "world_size": 3,
+        "parameter_dtype": "bfloat16",
+        "gradient_dtype": "float32",
+        "optimizer_dtype": "float32",
+        "optimizer_slots": 2,
+        "master_parameter_dtype": "float32",
+        "activation_bytes": 1_000,
+        "gradient_bucket_bytes": 4_096,
+    }
+    stage_zero = zero_stage_memory_peaks(stage=0, **common)
+    stage_three = zero_stage_memory_peaks(stage=3, **common)
+
+    rejected = admit_zero_stage(
+        stage_zero, device_capacity_bytes=100_000, reserve_fraction=0.1
+    )
+    admitted = admit_zero_stage(
+        stage_three, device_capacity_bytes=50_000, reserve_fraction=0.1
+    )
+
+    assert rejected.stage == 0
+    assert rejected.usable_bytes == 90_000
+    assert rejected.required_bytes == 103_816
+    assert rejected.headroom_bytes == -13_816
+    assert rejected.fits is False
+    assert admitted.stage == 3
+    assert admitted.usable_bytes == 45_000
+    assert admitted.required_bytes == 42_888
+    assert admitted.headroom_bytes == 2_112
+    assert admitted.fits is True

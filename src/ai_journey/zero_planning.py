@@ -90,6 +90,19 @@ class ZeroCollectiveEstimate:
     link_scope: str
 
 
+@dataclass(frozen=True)
+class ZeroStageAdmission:
+    """Capacity decision for one stage after reserving device memory."""
+
+    stage: int
+    capacity_bytes: int
+    reserved_bytes: int
+    usable_bytes: int
+    required_bytes: int
+    headroom_bytes: int
+    fits: bool
+
+
 def zero_stage_state(
     model: DecoderSpec,
     *,
@@ -339,3 +352,46 @@ def estimate_zero_collectives(
             )
         )
     return tuple(estimates)
+
+
+def admit_zero_stage(
+    peaks: tuple[RankZeroMemoryPeak, ...],
+    *,
+    device_capacity_bytes: int,
+    reserve_fraction: float,
+) -> ZeroStageAdmission:
+    """Apply an explicit memory reserve before deciding whether a stage fits."""
+
+    if not isinstance(peaks, tuple) or not peaks:
+        raise ZeroPlanningError("peaks must be a nonempty tuple")
+    if not all(isinstance(item, RankZeroMemoryPeak) for item in peaks):
+        raise TypeError("peaks must contain RankZeroMemoryPeak values")
+    if [item.rank for item in peaks] != list(range(len(peaks))):
+        raise ZeroPlanningError("peaks must cover ordered contiguous ranks")
+    stages = {item.stage for item in peaks}
+    if len(stages) != 1:
+        raise ZeroPlanningError("peaks must describe one ZeRO stage")
+    if type(device_capacity_bytes) is not int:
+        raise TypeError("device_capacity_bytes must be an integer")
+    if device_capacity_bytes <= 0:
+        raise ZeroPlanningError("device_capacity_bytes must be positive")
+    if (
+        isinstance(reserve_fraction, bool)
+        or not isinstance(reserve_fraction, (int, float))
+        or not math.isfinite(reserve_fraction)
+        or not 0 <= reserve_fraction < 1
+    ):
+        raise ZeroPlanningError("reserve_fraction must be finite and in [0, 1)")
+    reserved = math.ceil(device_capacity_bytes * reserve_fraction)
+    usable = device_capacity_bytes - reserved
+    required = max(item.peak_bytes for item in peaks)
+    headroom = usable - required
+    return ZeroStageAdmission(
+        stage=next(iter(stages)),
+        capacity_bytes=device_capacity_bytes,
+        reserved_bytes=reserved,
+        usable_bytes=usable,
+        required_bytes=required,
+        headroom_bytes=headroom,
+        fits=headroom >= 0,
+    )
