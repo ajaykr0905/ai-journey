@@ -1,5 +1,6 @@
 from dataclasses import asdict
 import json
+from pathlib import Path
 
 import pytest
 
@@ -47,3 +48,21 @@ def test_zero_cli_rejects_duplicate_plan_fields(tmp_path):
                 str(tmp_path / "report.json"),
             ]
         )
+
+
+def test_pinned_day57_plan_builds_public_safe_stage_comparison(tmp_path):
+    repository = Path(__file__).resolve().parents[1]
+    config = repository / "config" / "day-57-zero-comparison.json"
+    output = tmp_path / "zero-comparison.json"
+
+    assert main(["build", "--config", str(config), "--output", str(output)]) == 0
+    report = load_zero_comparison_report(output)
+
+    assert report["topology"]["world_size"] == 8
+    assert report["topology"]["workers_per_node"] == 8
+    assert report["measured"] is False
+    assert report["stages"][3]["max_peak_bytes"] < report["stages"][0]["max_peak_bytes"]
+    assert [item["operation"] for item in report["stages"][3]["collectives"]] == [
+        "all_gather",
+        "reduce_scatter",
+    ]
