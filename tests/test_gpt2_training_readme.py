@@ -10,5 +10,5 @@ def test_readme_exposes_training_controls_without_claiming_learner_completion():
     assert "[training controls guide](docs/gpt2-training-controls.md)" in readme
     assert "ai-journey-gpt2-train verify" in readme
     assert "ai-journey-gpt2-train replay" in readme
-    assert "selected verified code through Day 49" in readme
+    assert "selected verified code through Day 57" in readme
     assert "completed Day 47" not in readme
