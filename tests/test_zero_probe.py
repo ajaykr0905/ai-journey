@@ -9,12 +9,14 @@ import pytest
 
 from ai_journey.zero_probe import (
     ZeroProbeError,
+    load_zero_probe_report,
+    main,
     seal_zero_probe_report,
     verify_zero_probe_report,
 )
 
 
-def test_two_rank_gloo_probe_executes_equivalent_collectives(tmp_path: Path):
+def test_two_rank_gloo_probe_executes_equivalent_collectives(tmp_path: Path, capsys):
     repository = Path(__file__).resolve().parents[1]
     output = tmp_path / "zero-probe.json"
     environment = os.environ.copy()
@@ -64,3 +66,14 @@ def test_two_rank_gloo_probe_executes_equivalent_collectives(tmp_path: Path):
     tampered = seal_zero_probe_report(tampered)
     with pytest.raises(ZeroProbeError, match="collective outputs"):
         verify_zero_probe_report(tampered)
+
+    assert main(["--verify-report", str(output)]) == 0
+    assert "verified_zero_probe=" in capsys.readouterr().out
+
+
+def test_zero_probe_loader_rejects_duplicate_fields(tmp_path: Path):
+    report = tmp_path / "probe.json"
+    report.write_text('{"schema_version":1,"schema_version":1}', encoding="utf-8")
+
+    with pytest.raises(ZeroProbeError, match="duplicate"):
+        load_zero_probe_report(report)

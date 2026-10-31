@@ -19,6 +19,9 @@ class ZeroProbeError(ValueError):
     """Raised when executed collective evidence is inconsistent."""
 
 
+MAX_ZERO_PROBE_BYTES = 1024 * 1024
+
+
 def _canonical_bytes(report: dict[str, object]) -> bytes:
     return json.dumps(
         report,
@@ -126,8 +129,37 @@ def verify_zero_probe_report(report: dict[str, object]) -> dict[str, object]:
     return report
 
 
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ZeroProbeError("duplicate probe report field")
+        result[key] = value
+    return result
+
+
+def load_zero_probe_report(path: Path) -> dict[str, object]:
+    """Load bounded CPU/Gloo evidence and verify every collective result."""
+
+    if not isinstance(path, Path):
+        raise TypeError("probe report path must be pathlib.Path")
+    try:
+        with path.open("rb") as stream:
+            payload = stream.read(MAX_ZERO_PROBE_BYTES + 1)
+        if len(payload) > MAX_ZERO_PROBE_BYTES:
+            raise ZeroProbeError("probe report exceeds 1 MiB")
+        report = json.loads(payload.decode("utf-8"), object_pairs_hook=_unique_object)
+    except ZeroProbeError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as error:
+        raise ZeroProbeError("unable to read probe report") from error
+    return verify_zero_probe_report(report)
+
+
 def _write_atomic(path: Path, report: dict[str, object]) -> None:
     payload = (json.dumps(report, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    if len(payload) > MAX_ZERO_PROBE_BYTES:
+        raise ZeroProbeError("probe report exceeds 1 MiB")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -218,12 +250,22 @@ def run_probe(output: Path) -> dict[str, object] | None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
-    parser.add_argument("--output", type=Path, required=True)
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--output", type=Path)
+    target.add_argument("--verify-report", type=Path)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.verify_report is not None:
+        report = load_zero_probe_report(args.verify_report)
+        print(
+            f"verified_zero_probe={report['integrity']['digest']} "
+            f"backend={report['backend']} world_size={report['world_size']} "
+            "performance_measured=false"
+        )
+        return 0
     run_probe(args.output)
     return 0
 
