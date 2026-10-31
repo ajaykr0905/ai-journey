@@ -24,25 +24,28 @@ ai-journey-zero-compare verify \
 The plan uses the repository's 6,738,415,616-parameter decoder, eight declared
 data-parallel ranks, BF16 parameters and gradients, FP32 Adam moments and master
 parameters, 25 MiB gradient buckets, and 1,012,924,416 bytes of modeled saved
-activations and attention workspace. The topology bandwidth and latency values
-are assumptions. The code does not inspect the host or purchase hardware.
+activations and attention workspace. Capacity admission assumes an 80 GiB
+device with a 10% reserve, leaving 77,309,411,328 usable bytes. The topology
+bandwidth and latency values are assumptions. The code does not inspect the
+host or purchase hardware.
 
 The sealed report digest is
-`08969c7c017c01bb713f8acb825ea84c1d3eaea447004c1c50f341d352b3e743`.
+`e7ff705e7a8165241b8fe34bc7ea8ab5208b6dcccc75dbd6cf6b5d51ae7c0acc`.
 The four stage results are:
 
-| Stage | Sharded state | Modeled maximum rank peak | Modeled ring wire per rank |
-| ---: | --- | ---: | ---: |
-| 0 | None | 108,827,574,272 bytes | 23,584,454,656 bytes |
-| 1 | Optimizer and master parameters | 38,074,210,304 bytes | 35,376,681,984 bytes |
-| 2 | Gradients, optimizer, and master parameters | 26,308,197,376 bytes | 23,584,454,656 bytes |
-| 3 | Parameters, gradients, optimizer, and master parameters | 26,281,982,976 bytes | 23,584,454,656 bytes |
+| Stage | Sharded state | Modeled maximum rank peak | Modeled ring wire per rank | Fits reserved 80 GiB |
+| ---: | --- | ---: | ---: | --- |
+| 0 | None | 108,827,574,272 bytes | 23,584,454,656 bytes | No |
+| 1 | Optimizer and master parameters | 38,074,210,304 bytes | 35,376,681,984 bytes | Yes |
+| 2 | Gradients, optimizer, and master parameters | 26,308,197,376 bytes | 23,584,454,656 bytes | Yes |
+| 3 | Parameters, gradients, optimizer, and master parameters | 26,281,982,976 bytes | 23,584,454,656 bytes | Yes |
 
 Stage 1 has more modeled communication because the schedule includes a full
 gradient all-reduce and an all-gather of updated parameter shards. Stages 2 and
 3 use reduce-scatter for gradients. Stage 3 additionally all-gathers parameter
 shards for computation. These are logical flat-ring estimates, not measured
-latency or throughput.
+latency or throughput. The admission result is a deterministic plan check, not
+evidence that any listed stage ran on an 80 GiB accelerator.
 
 ## Execute the CPU collective check
 
@@ -73,6 +76,8 @@ ranks, and integrity drift.
 The analytical comparison has `measured: false`. The collective probe has
 `executed: true` and `performance_measured: false`. It is CPU/Gloo correctness
 evidence only: no NVIDIA GPU, NCCL, multi-node network, utilization, memory,
-latency, bandwidth, monetary cost, or production scale was measured. This work does not satisfy the Week 9 real multi-GPU gate. Ajay must still provide an approved
-2+ NVIDIA GPU environment and retain the commands, logs, hardware/software
-manifest, utilization, memory, cost, and limitations from that run.
+latency, bandwidth, monetary cost, or production scale was measured. This work
+does not satisfy the Week 9 real multi-GPU gate. Ajay must still provide an
+approved 2+ NVIDIA GPU environment and retain the commands, logs,
+hardware/software manifest, utilization, memory, cost, and limitations from
+that run.

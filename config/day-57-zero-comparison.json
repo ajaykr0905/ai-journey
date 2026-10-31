@@ -1,5 +1,6 @@
 {
   "activation_bytes": 1012924416,
+  "device_capacity_bytes": 85899345920,
   "gradient_bucket_bytes": 26214400,
   "gradient_dtype": "bfloat16",
   "master_parameter_dtype": "float32",
@@ -16,6 +17,7 @@
   "optimizer_dtype": "float32",
   "optimizer_slots": 2,
   "parameter_dtype": "bfloat16",
+  "reserve_fraction": 0.1,
   "topology": {
     "inter_node": {
       "bandwidth_bytes_per_second": 25000000000,

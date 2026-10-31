@@ -66,3 +66,9 @@ def test_pinned_day57_plan_builds_public_safe_stage_comparison(tmp_path):
         "all_gather",
         "reduce_scatter",
     ]
+    assert [stage["admission"]["fits"] for stage in report["stages"]] == [
+        False,
+        True,
+        True,
+        True,
+    ]

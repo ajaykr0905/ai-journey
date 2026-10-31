@@ -27,6 +27,8 @@ def _plan() -> ZeroComparisonPlan:
         master_parameter_dtype="float32",
         activation_bytes=1_000,
         gradient_bucket_bytes=4_096,
+        device_capacity_bytes=50_000,
+        reserve_fraction=0.1,
     )
 
 
@@ -44,6 +46,13 @@ def test_zero_report_compares_all_stages_from_one_declared_plan():
         35_272,
     ]
     assert all(stage["wire_bytes_per_rank"] > 0 for stage in report["stages"])
+    assert [stage["admission"]["fits"] for stage in report["stages"]] == [
+        False,
+        False,
+        True,
+        True,
+    ]
+    assert report["stages"][2]["admission"]["usable_bytes"] == 45_000
     assert report["limitations"][0].startswith("Analytical")
 
 

@@ -10,6 +10,7 @@ import math
 from .distributed_capacity import ClusterTopology, LinkProfile
 from .resource_accounting import DecoderSpec
 from .zero_planning import (
+    admit_zero_stage,
     estimate_zero_collectives,
     zero_stage_memory_peaks,
     zero_stage_state,
@@ -33,6 +34,8 @@ class ZeroComparisonPlan:
     master_parameter_dtype: str | None
     activation_bytes: int
     gradient_bucket_bytes: int
+    device_capacity_bytes: int
+    reserve_fraction: float
 
 
 def build_zero_comparison_report(plan: ZeroComparisonPlan) -> dict[str, object]:
@@ -71,6 +74,11 @@ def build_zero_comparison_report(plan: ZeroComparisonPlan) -> dict[str, object]:
             parameter_dtype=plan.parameter_dtype,
             gradient_dtype=plan.gradient_dtype,
         )
+        admission = admit_zero_stage(
+            memory,
+            device_capacity_bytes=plan.device_capacity_bytes,
+            reserve_fraction=plan.reserve_fraction,
+        )
         stages.append(
             {
                 "stage": stage,
@@ -80,6 +88,7 @@ def build_zero_comparison_report(plan: ZeroComparisonPlan) -> dict[str, object]:
                 ],
                 "rank_memory": [asdict(item) for item in memory],
                 "collectives": [asdict(item) for item in collectives],
+                "admission": asdict(admission),
                 "max_peak_bytes": max(item.peak_bytes for item in memory),
                 "wire_bytes_per_rank": sum(
                     item.wire_bytes_per_rank for item in collectives
