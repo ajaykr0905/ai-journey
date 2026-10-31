@@ -54,6 +54,20 @@ class ZeroCollectiveStep:
     output_bytes_by_rank: tuple[int, ...]
 
 
+@dataclass(frozen=True)
+class RankZeroMemoryPeak:
+    """Analytical persistent and non-overlapping transient memory for one rank."""
+
+    rank: int
+    stage: int
+    persistent_bytes: int
+    activation_bytes: int
+    parameter_materialization_bytes: int
+    gradient_partition_buffer_bytes: int
+    peak_bytes: int
+    dominant_transient: str
+
+
 def zero_stage_state(
     model: DecoderSpec,
     *,
@@ -184,3 +198,71 @@ def zero_collective_schedule(
         2: (gradient_reduce_scatter, parameter_sync),
         3: (parameter_materialization, gradient_reduce_scatter),
     }[stage]
+
+
+def zero_stage_memory_peaks(
+    model: DecoderSpec,
+    *,
+    stage: int,
+    world_size: int,
+    parameter_dtype: str,
+    gradient_dtype: str,
+    optimizer_dtype: str,
+    optimizer_slots: int,
+    activation_bytes: int,
+    gradient_bucket_bytes: int,
+    master_parameter_dtype: str | None = None,
+) -> tuple[RankZeroMemoryPeak, ...]:
+    """Estimate rank peaks when parameter and gradient transients do not overlap."""
+
+    if type(activation_bytes) is not int:
+        raise TypeError("activation_bytes must be an integer")
+    if activation_bytes < 0:
+        raise ZeroPlanningError("activation_bytes must be nonnegative")
+    if type(gradient_bucket_bytes) is not int:
+        raise TypeError("gradient_bucket_bytes must be an integer")
+    if gradient_bucket_bytes <= 0:
+        raise ZeroPlanningError("gradient_bucket_bytes must be positive")
+
+    states = zero_stage_state(
+        model,
+        stage=stage,
+        world_size=world_size,
+        parameter_dtype=parameter_dtype,
+        gradient_dtype=gradient_dtype,
+        optimizer_dtype=optimizer_dtype,
+        optimizer_slots=optimizer_slots,
+        master_parameter_dtype=master_parameter_dtype,
+    )
+    full_parameter_bytes = model.parameter_count * bytes_per_element(parameter_dtype)
+    full_gradient_bytes = model.parameter_count * bytes_per_element(gradient_dtype)
+    peaks = []
+    for state in states:
+        parameter_transient = (
+            full_parameter_bytes - state.parameters_bytes if stage == 3 else 0
+        )
+        gradient_transient = (
+            min(full_gradient_bytes - state.gradients_bytes, gradient_bucket_bytes)
+            if stage >= 2
+            else 0
+        )
+        transient = max(parameter_transient, gradient_transient)
+        if not transient:
+            dominant = "none"
+        elif parameter_transient >= gradient_transient:
+            dominant = "parameter_materialization"
+        else:
+            dominant = "gradient_partition"
+        peaks.append(
+            RankZeroMemoryPeak(
+                rank=state.rank,
+                stage=stage,
+                persistent_bytes=state.total_bytes,
+                activation_bytes=activation_bytes,
+                parameter_materialization_bytes=parameter_transient,
+                gradient_partition_buffer_bytes=gradient_transient,
+                peak_bytes=state.total_bytes + activation_bytes + transient,
+                dominant_transient=dominant,
+            )
+        )
+    return tuple(peaks)

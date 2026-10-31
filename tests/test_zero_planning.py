@@ -1,5 +1,9 @@
 from ai_journey.resource_accounting import DecoderSpec
-from ai_journey.zero_planning import zero_collective_schedule, zero_stage_state
+from ai_journey.zero_planning import (
+    zero_collective_schedule,
+    zero_stage_memory_peaks,
+    zero_stage_state,
+)
 
 
 def _model() -> DecoderSpec:
@@ -119,3 +123,48 @@ def test_zero_collective_schedule_preserves_uneven_logical_payloads():
     assert sum(gradient_partition.output_bytes_by_rank) == gradient_bytes
     assert sum(parameter_sync.input_bytes_by_rank) == parameter_bytes
     assert parameter_sync.output_bytes_by_rank == (parameter_bytes,) * 3
+
+
+def test_zero_memory_peaks_separate_persistent_and_transient_buffers():
+    model = _model()
+    peaks = zero_stage_memory_peaks(
+        model,
+        stage=3,
+        world_size=3,
+        parameter_dtype="bfloat16",
+        gradient_dtype="float32",
+        optimizer_dtype="float32",
+        optimizer_slots=2,
+        master_parameter_dtype="float32",
+        activation_bytes=1_000,
+        gradient_bucket_bytes=4_096,
+    )
+
+    assert len(peaks) == 3
+    assert peaks[0].persistent_bytes == 34_272
+    assert peaks[0].activation_bytes == 1_000
+    assert peaks[0].parameter_materialization_bytes == 7_616
+    assert peaks[0].gradient_partition_buffer_bytes == 4_096
+    assert peaks[0].peak_bytes == 42_888
+    assert peaks[0].dominant_transient == "parameter_materialization"
+
+
+def test_zero_stage_memory_reduces_peak_as_state_is_progressively_sharded():
+    model = _model()
+    stage_peaks = {
+        stage: zero_stage_memory_peaks(
+            model,
+            stage=stage,
+            world_size=3,
+            parameter_dtype="bfloat16",
+            gradient_dtype="float32",
+            optimizer_dtype="float32",
+            optimizer_slots=2,
+            master_parameter_dtype="float32",
+            activation_bytes=1_000,
+            gradient_bucket_bytes=4_096,
+        )[0].peak_bytes
+        for stage in range(4)
+    }
+
+    assert stage_peaks == {0: 103_816, 1: 58_120, 2: 46_984, 3: 42_888}
