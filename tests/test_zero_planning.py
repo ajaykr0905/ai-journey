@@ -1,5 +1,7 @@
+from ai_journey.distributed_capacity import ClusterTopology, LinkProfile
 from ai_journey.resource_accounting import DecoderSpec
 from ai_journey.zero_planning import (
+    estimate_zero_collectives,
     zero_collective_schedule,
     zero_stage_memory_peaks,
     zero_stage_state,
@@ -168,3 +170,33 @@ def test_zero_stage_memory_reduces_peak_as_state_is_progressively_sharded():
     }
 
     assert stage_peaks == {0: 103_816, 1: 58_120, 2: 46_984, 3: 42_888}
+
+
+def test_zero_collective_estimates_expose_padding_and_wire_costs():
+    topology = ClusterTopology(
+        world_size=5,
+        workers_per_node=5,
+        intra_node=LinkProfile(1_000, 0.1),
+        inter_node=LinkProfile(100, 1.0),
+    )
+    estimates = estimate_zero_collectives(
+        _model(),
+        stage=2,
+        topology=topology,
+        parameter_dtype="bfloat16",
+        gradient_dtype="float32",
+    )
+
+    gradient_partition, parameter_sync = estimates
+    assert gradient_partition.operation == "reduce_scatter"
+    assert gradient_partition.logical_payload_bytes == 22_848
+    assert gradient_partition.padded_payload_bytes == 22_850
+    assert gradient_partition.padding_bytes == 2
+    assert gradient_partition.wire_bytes_per_rank == 18_280
+    assert gradient_partition.link_scope == "intra_node"
+
+    assert parameter_sync.operation == "all_gather"
+    assert parameter_sync.logical_payload_bytes == 11_424
+    assert parameter_sync.padded_payload_bytes == 11_430
+    assert parameter_sync.padding_bytes == 6
+    assert parameter_sync.wire_bytes_per_rank == 9_144

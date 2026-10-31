@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
+from .distributed_capacity import (
+    ClusterTopology,
+    ring_all_gather,
+    ring_all_reduce,
+    ring_reduce_scatter,
+)
 from .fsdp_planning import partition_parameter_groups
 from .resource_accounting import DecoderSpec, bytes_per_element
 
@@ -66,6 +73,21 @@ class RankZeroMemoryPeak:
     gradient_partition_buffer_bytes: int
     peak_bytes: int
     dominant_transient: str
+
+
+@dataclass(frozen=True)
+class ZeroCollectiveEstimate:
+    """Ring cost for one logical ZeRO collective, including padding."""
+
+    phase: str
+    operation: str
+    tensor_family: str
+    logical_payload_bytes: int
+    padded_payload_bytes: int
+    padding_bytes: int
+    wire_bytes_per_rank: int
+    seconds: float
+    link_scope: str
 
 
 def zero_stage_state(
@@ -266,3 +288,54 @@ def zero_stage_memory_peaks(
             )
         )
     return tuple(peaks)
+
+
+def estimate_zero_collectives(
+    model: DecoderSpec,
+    *,
+    stage: int,
+    topology: ClusterTopology,
+    parameter_dtype: str,
+    gradient_dtype: str,
+) -> tuple[ZeroCollectiveEstimate, ...]:
+    """Estimate flat-ring wire work for a stage's logical collective schedule."""
+
+    if not isinstance(topology, ClusterTopology):
+        raise TypeError("topology must be a ClusterTopology")
+    schedule = zero_collective_schedule(
+        model,
+        stage=stage,
+        world_size=topology.world_size,
+        parameter_dtype=parameter_dtype,
+        gradient_dtype=gradient_dtype,
+    )
+    estimates = []
+    for step in schedule:
+        if step.operation == "all_gather":
+            shard_bytes = max(step.input_bytes_by_rank)
+            logical_payload = sum(step.input_bytes_by_rank)
+            padded_payload = shard_bytes * topology.world_size
+            ring = ring_all_gather(shard_bytes, topology)
+        else:
+            logical_payload = step.input_bytes_by_rank[0]
+            padded_payload = (
+                math.ceil(logical_payload / topology.world_size) * topology.world_size
+            )
+            if step.operation == "all_reduce":
+                ring = ring_all_reduce(logical_payload, topology)
+            else:
+                ring = ring_reduce_scatter(logical_payload, topology)
+        estimates.append(
+            ZeroCollectiveEstimate(
+                phase=step.phase,
+                operation=step.operation,
+                tensor_family=step.tensor_family,
+                logical_payload_bytes=logical_payload,
+                padded_payload_bytes=padded_payload,
+                padding_bytes=padded_payload - logical_payload,
+                wire_bytes_per_rank=ring.wire_bytes_per_rank,
+                seconds=ring.seconds,
+                link_scope=ring.link_scope,
+            )
+        )
+    return tuple(estimates)
