@@ -698,6 +698,55 @@ jobs:
         run: >-
           ai-journey-serving-benchmark
           --output /tmp/ai-journey-artifacts/serving-benchmark.json
+  hybrid-parallel-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      GLOO_SOCKET_IFNAME: lo
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU runtime and pinned verification tools
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e .
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check hybrid parallel contracts and installed workflow
+        run: |
+          ruff check src/ai_journey/hybrid_*.py src/ai_journey/*sharding.py src/ai_journey/pipeline_*.py src/ai_journey/parallel_communication.py src/ai_journey/activation_handoff.py tests/test_hybrid_*.py tests/test_*sharding.py tests/test_pipeline_*.py tests/test_parallel_communication.py tests/test_activation_handoff.py
+          ruff format --check src/ai_journey/hybrid_*.py src/ai_journey/*sharding.py src/ai_journey/pipeline_*.py src/ai_journey/parallel_communication.py src/ai_journey/activation_handoff.py tests/test_hybrid_*.py tests/test_*sharding.py tests/test_pipeline_*.py tests/test_parallel_communication.py tests/test_activation_handoff.py
+          python -m compileall -q src tests
+          python -m pytest -q tests/test_hybrid_*.py tests/test_*sharding.py tests/test_pipeline_*.py tests/test_parallel_communication.py tests/test_activation_handoff.py
+      - name: Build and install isolated hybrid parallel wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/hybrid-parallel-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/hybrid-parallel-installed" "$RUNNER_TEMP"/hybrid-parallel-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/hybrid-parallel-evidence"
+      - name: Generate and independently verify installed evidence
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/hybrid-parallel-installed
+        run: |
+          export PATH="$RUNNER_TEMP/hybrid-parallel-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/hybrid-parallel-installed/")'
+          ai-journey-hybrid-parallel --world-size 8 --data-parallel-size 1 --tensor-parallel-size 2 --pipeline-parallel-size 2 --sequence-parallel-size 2 --tensor-shape 2,3 --tensor-values 0,1,2,3,4,5 --token-ids 11,12,13,14,15 --layer-count 5 --schedule-policy 1f1b --microbatch-count 2 --element-size-bytes 4 --pipeline-payload-bytes 16 --source-rank 0 --destination-rank 2 --activation-shape 4 --activation-dtype float32 --payload-hex 000102030405060708090a0b0c0d0e0f --output "$RUNNER_TEMP/hybrid-parallel-evidence/report.json"
+          ai-journey-hybrid-parallel-verify --report "$RUNNER_TEMP/hybrid-parallel-evidence/report.json"
+      - name: Retain hybrid parallel evidence and installed package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hybrid-parallel-evidence
+          path: |
+            ${{ runner.temp }}/hybrid-parallel-evidence/
+            ${{ runner.temp }}/hybrid-parallel-dist/
+          if-no-files-found: warn
   distributed-capacity-contracts:
     runs-on: ubuntu-latest
     timeout-minutes: 10
