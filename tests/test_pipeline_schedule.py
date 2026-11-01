@@ -8,9 +8,255 @@ from ai_journey.hybrid_topology import HybridParallelTopology
 from ai_journey.pipeline_partition import partition_transformer_layers
 from ai_journey.pipeline_schedule import (
     PipelineSlot,
+    generate_1f1b_schedule,
     generate_gpipe_schedule,
     validate_pipeline_schedule,
 )
+
+
+def test_one_f_one_b_schedule_exposes_warmup_steady_and_cooldown_phases():
+    topology = HybridParallelTopology(2, 1, 1, 2, 1)
+    stage_plan = partition_transformer_layers(topology, layer_count=4)
+
+    schedule = generate_1f1b_schedule(stage_plan, microbatch_count=2)
+
+    assert schedule.to_mapping() == {
+        "policy": "1f1b",
+        "stage_count": 2,
+        "microbatch_count": 2,
+        "slots": [
+            {
+                "index": 0,
+                "operations": [
+                    {
+                        "identity": "forward:0:0",
+                        "stage_index": 0,
+                        "microbatch_index": 0,
+                        "direction": "forward",
+                        "phase": "warmup",
+                        "dependencies": [],
+                    }
+                ],
+            },
+            {
+                "index": 1,
+                "operations": [
+                    {
+                        "identity": "forward:0:1",
+                        "stage_index": 0,
+                        "microbatch_index": 1,
+                        "direction": "forward",
+                        "phase": "steady",
+                        "dependencies": [],
+                    },
+                    {
+                        "identity": "forward:1:0",
+                        "stage_index": 1,
+                        "microbatch_index": 0,
+                        "direction": "forward",
+                        "phase": "steady",
+                        "dependencies": ["forward:0:0"],
+                    },
+                ],
+            },
+            {
+                "index": 2,
+                "operations": [
+                    {
+                        "identity": "backward:1:0",
+                        "stage_index": 1,
+                        "microbatch_index": 0,
+                        "direction": "backward",
+                        "phase": "steady",
+                        "dependencies": ["forward:1:0"],
+                    }
+                ],
+            },
+            {
+                "index": 3,
+                "operations": [
+                    {
+                        "identity": "backward:0:0",
+                        "stage_index": 0,
+                        "microbatch_index": 0,
+                        "direction": "backward",
+                        "phase": "steady",
+                        "dependencies": ["forward:0:0", "backward:1:0"],
+                    },
+                    {
+                        "identity": "forward:1:1",
+                        "stage_index": 1,
+                        "microbatch_index": 1,
+                        "direction": "forward",
+                        "phase": "steady",
+                        "dependencies": ["forward:0:1"],
+                    },
+                ],
+            },
+            {
+                "index": 4,
+                "operations": [
+                    {
+                        "identity": "backward:1:1",
+                        "stage_index": 1,
+                        "microbatch_index": 1,
+                        "direction": "backward",
+                        "phase": "steady",
+                        "dependencies": ["forward:1:1"],
+                    }
+                ],
+            },
+            {
+                "index": 5,
+                "operations": [
+                    {
+                        "identity": "backward:0:1",
+                        "stage_index": 0,
+                        "microbatch_index": 1,
+                        "direction": "backward",
+                        "phase": "cooldown",
+                        "dependencies": ["forward:0:1", "backward:1:1"],
+                    }
+                ],
+            },
+        ],
+    }
+    validate_pipeline_schedule(schedule)
+
+
+def test_one_f_one_b_validation_rejects_a_phase_that_misstates_the_policy():
+    topology = HybridParallelTopology(2, 1, 1, 2, 1)
+    stage_plan = partition_transformer_layers(topology, layer_count=4)
+    schedule = generate_1f1b_schedule(stage_plan, microbatch_count=2)
+    operation = replace(schedule.slots[0].operations[0], phase="steady")
+    slot = replace(schedule.slots[0], operations=(operation,))
+
+    with pytest.raises(ValueError, match="phase does not match"):
+        validate_pipeline_schedule(replace(schedule, slots=(slot, *schedule.slots[1:])))
+
+
+def test_one_f_one_b_validation_rejects_nonalternating_stage_work():
+    topology = HybridParallelTopology(2, 1, 1, 2, 1)
+    stage_plan = partition_transformer_layers(topology, layer_count=4)
+    gpipe = generate_gpipe_schedule(stage_plan, microbatch_count=2)
+    phase_by_identity = {
+        operation.identity: operation.phase
+        for slot in generate_1f1b_schedule(stage_plan, microbatch_count=2).slots
+        for operation in slot.operations
+    }
+    relabeled_slots = tuple(
+        replace(
+            slot,
+            operations=tuple(
+                replace(operation, phase=phase_by_identity[operation.identity])
+                for operation in slot.operations
+            ),
+        )
+        for slot in gpipe.slots
+    )
+
+    with pytest.raises(ValueError, match="operation order does not match"):
+        validate_pipeline_schedule(replace(gpipe, policy="1f1b", slots=relabeled_slots))
+
+
+@pytest.mark.parametrize(
+    "stage_count,microbatch_count,expected_phases",
+    [
+        (1, 3, (("steady",) * 6,)),
+        (
+            3,
+            1,
+            (
+                ("warmup", "cooldown"),
+                ("warmup", "cooldown"),
+                ("steady", "steady"),
+            ),
+        ),
+        (
+            4,
+            2,
+            (
+                ("warmup", "warmup", "cooldown", "cooldown"),
+                ("warmup", "warmup", "cooldown", "cooldown"),
+                ("warmup", "steady", "steady", "cooldown"),
+                ("steady", "steady", "steady", "steady"),
+            ),
+        ),
+    ],
+)
+def test_one_f_one_b_phase_boundaries_cover_degenerate_and_uneven_pipelines(
+    stage_count, microbatch_count, expected_phases
+):
+    topology = HybridParallelTopology(stage_count, 1, 1, stage_count, 1)
+    stage_plan = partition_transformer_layers(topology, layer_count=stage_count)
+
+    schedule = generate_1f1b_schedule(stage_plan, microbatch_count=microbatch_count)
+    phases_by_stage = tuple(
+        tuple(
+            operation.phase
+            for slot in schedule.slots
+            for operation in slot.operations
+            if operation.stage_index == stage_index
+        )
+        for stage_index in range(stage_count)
+    )
+
+    assert phases_by_stage == expected_phases
+    validate_pipeline_schedule(schedule)
+
+
+def test_one_f_one_b_emits_every_required_operation_exactly_once():
+    topology = HybridParallelTopology(3, 1, 1, 3, 1)
+    stage_plan = partition_transformer_layers(topology, layer_count=6)
+
+    schedule = generate_1f1b_schedule(stage_plan, microbatch_count=5)
+    identities = tuple(
+        operation.identity for slot in schedule.slots for operation in slot.operations
+    )
+
+    assert len(identities) == 30
+    assert len(set(identities)) == 30
+    validate_pipeline_schedule(schedule)
+
+
+def test_one_f_one_b_reduces_the_longest_analytical_bubble_without_runtime_claims():
+    topology = HybridParallelTopology(4, 1, 1, 4, 1)
+    stage_plan = partition_transformer_layers(topology, layer_count=8)
+    gpipe = generate_gpipe_schedule(stage_plan, microbatch_count=5)
+    one_f_one_b = generate_1f1b_schedule(stage_plan, microbatch_count=5)
+
+    def longest_contiguous_bubble(schedule, stage_index):
+        longest = 0
+        current = 0
+        for slot in schedule.slots:
+            if any(
+                operation.stage_index == stage_index for operation in slot.operations
+            ):
+                current = 0
+            else:
+                current += 1
+                longest = max(longest, current)
+        return longest
+
+    assert tuple(
+        longest_contiguous_bubble(gpipe, stage_index) for stage_index in range(4)
+    ) == (6, 4, 2, 3)
+    assert tuple(
+        longest_contiguous_bubble(one_f_one_b, stage_index) for stage_index in range(4)
+    ) == (3, 2, 2, 3)
+    assert len(one_f_one_b.slots) == len(gpipe.slots)
+
+
+def test_one_f_one_b_generation_requires_an_admitted_plan_and_microbatches():
+    topology = HybridParallelTopology(1, 1, 1, 1, 1)
+    stage_plan = partition_transformer_layers(topology, layer_count=1)
+
+    with pytest.raises(TypeError, match="stage_plan must be a PipelinePartitionPlan"):
+        generate_1f1b_schedule(object(), microbatch_count=1)
+    with pytest.raises(TypeError, match="microbatch_count must be an integer"):
+        generate_1f1b_schedule(stage_plan, microbatch_count=True)
+    with pytest.raises(ValueError, match="microbatch_count must be positive"):
+        generate_1f1b_schedule(stage_plan, microbatch_count=0)
 
 
 def test_gpipe_schedule_exposes_canonical_forward_and_backward_slots():
