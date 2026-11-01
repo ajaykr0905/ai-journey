@@ -122,11 +122,52 @@ def validate_pipeline_schedule(schedule: PipelineSchedule) -> None:
                 raise ValueError(f"dependencies do not match for {operation.identity}")
             if schedule.policy == "gpipe" and operation.phase != operation.direction:
                 raise ValueError(f"phase does not match for {operation.identity}")
+            if schedule.policy == "1f1b":
+                warmup_count = min(
+                    schedule.stage_count - operation.stage_index - 1,
+                    schedule.microbatch_count,
+                )
+                steady_count = schedule.microbatch_count - warmup_count
+                expected_phase: PipelinePhase
+                if operation.direction == "forward":
+                    expected_phase = (
+                        "warmup"
+                        if operation.microbatch_index < warmup_count
+                        else "steady"
+                    )
+                else:
+                    expected_phase = (
+                        "steady"
+                        if operation.microbatch_index < steady_count
+                        else "cooldown"
+                    )
+                if operation.phase != expected_phase:
+                    raise ValueError(f"phase does not match for {operation.identity}")
             if not set(operation.dependencies).issubset(completed):
                 raise ValueError(
                     f"dependency must precede operation {operation.identity}"
                 )
         completed.update(operation.identity for operation in slot.operations)
+    if schedule.policy == "1f1b":
+        for stage_index in range(schedule.stage_count):
+            actual_order = tuple(
+                operation.identity
+                for slot in schedule.slots
+                for operation in slot.operations
+                if operation.stage_index == stage_index
+            )
+            expected_order = tuple(
+                operation.identity
+                for operation in _one_f_one_b_stage_operations(
+                    stage_index,
+                    schedule.stage_count,
+                    schedule.microbatch_count,
+                )
+            )
+            if actual_order != expected_order:
+                raise ValueError(
+                    f"1F1B operation order does not match for stage {stage_index}"
+                )
 
 
 def _operation(
@@ -134,6 +175,8 @@ def _operation(
     stage_index: int,
     microbatch_index: int,
     stage_count: int,
+    *,
+    phase: PipelinePhase | None = None,
 ) -> PipelineOperation:
     if direction == "forward":
         dependencies = (
@@ -141,17 +184,17 @@ def _operation(
             if stage_index == 0
             else (f"forward:{stage_index - 1}:{microbatch_index}",)
         )
-        phase: PipelinePhase = "forward"
+        default_phase: PipelinePhase = "forward"
     else:
         dependencies = (f"forward:{stage_index}:{microbatch_index}",)
         if stage_index < stage_count - 1:
             dependencies += (f"backward:{stage_index + 1}:{microbatch_index}",)
-        phase = "backward"
+        default_phase = "backward"
     return PipelineOperation(
         stage_index=stage_index,
         microbatch_index=microbatch_index,
         direction=direction,
-        phase=phase,
+        phase=default_phase if phase is None else phase,
         dependencies=dependencies,
     )
 
@@ -191,6 +234,94 @@ def generate_gpipe_schedule(
         slots.append(PipelineSlot(index=len(slots), operations=tuple(operations)))
     schedule = PipelineSchedule(
         policy="gpipe",
+        stage_count=stage_count,
+        microbatch_count=microbatch_count,
+        slots=tuple(slots),
+    )
+    validate_pipeline_schedule(schedule)
+    return schedule
+
+
+def _one_f_one_b_stage_operations(
+    stage_index: int, stage_count: int, microbatch_count: int
+) -> tuple[PipelineOperation, ...]:
+    warmup_count = min(stage_count - stage_index - 1, microbatch_count)
+    steady_count = microbatch_count - warmup_count
+    operations = [
+        _operation(
+            "forward",
+            stage_index,
+            microbatch_index,
+            stage_count,
+            phase="warmup",
+        )
+        for microbatch_index in range(warmup_count)
+    ]
+    for offset in range(steady_count):
+        operations.append(
+            _operation(
+                "forward",
+                stage_index,
+                warmup_count + offset,
+                stage_count,
+                phase="steady",
+            )
+        )
+        operations.append(
+            _operation(
+                "backward",
+                stage_index,
+                offset,
+                stage_count,
+                phase="steady",
+            )
+        )
+    operations.extend(
+        _operation(
+            "backward",
+            stage_index,
+            microbatch_index,
+            stage_count,
+            phase="cooldown",
+        )
+        for microbatch_index in range(steady_count, microbatch_count)
+    )
+    return tuple(operations)
+
+
+def generate_1f1b_schedule(
+    stage_plan: PipelinePartitionPlan, *, microbatch_count: int
+) -> PipelineSchedule:
+    """Generate a dependency-valid non-interleaved 1F1B schedule."""
+
+    if not isinstance(stage_plan, PipelinePartitionPlan):
+        raise TypeError("stage_plan must be a PipelinePartitionPlan")
+    if type(microbatch_count) is not int:
+        raise TypeError("microbatch_count must be an integer")
+    if microbatch_count <= 0:
+        raise ValueError("microbatch_count must be positive")
+    stage_count = len(stage_plan.stages)
+    pending = [
+        list(_one_f_one_b_stage_operations(stage, stage_count, microbatch_count))
+        for stage in range(stage_count)
+    ]
+    completed: set[str] = set()
+    slots: list[PipelineSlot] = []
+    while any(pending):
+        operations = tuple(
+            stage_operations[0]
+            for stage_operations in pending
+            if stage_operations
+            and set(stage_operations[0].dependencies).issubset(completed)
+        )
+        if not operations:
+            raise RuntimeError("1F1B schedule dependencies cannot make progress")
+        slots.append(PipelineSlot(index=len(slots), operations=operations))
+        for operation in operations:
+            pending[operation.stage_index].pop(0)
+            completed.add(operation.identity)
+    schedule = PipelineSchedule(
+        policy="1f1b",
         stage_count=stage_count,
         microbatch_count=microbatch_count,
         slots=tuple(slots),
