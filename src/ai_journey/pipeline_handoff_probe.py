@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 import json
@@ -29,6 +30,37 @@ from .pipeline_partition import PipelinePartitionPlan, partition_transformer_lay
 
 PROBE_SCHEMA = "ai-journey.pipeline-handoff-probe.v1"
 _WORLD_SIZE = 2
+_PROBE_FIELDS = {
+    "schema",
+    "executed",
+    "performance_measured",
+    "backend",
+    "device",
+    "world_size",
+    "outcome",
+    "contract",
+    "rank_outcomes",
+    "limitations",
+}
+_CONTRACT_FIELDS = {
+    "schema",
+    "source_rank",
+    "destination_rank",
+    "tensor_shape",
+    "dtype",
+    "payload_length",
+    "payload_sha256",
+    "handoff_sha256",
+}
+_DTYPE_BYTES = {"bfloat16": 2, "float16": 2, "float32": 4, "float64": 8}
+_LIMITATIONS = [
+    "CPU/Gloo transfer correctness only; no NVIDIA GPU or NCCL was used.",
+    "No latency, bandwidth, throughput, utilization, memory, or cost was measured.",
+]
+_SUCCESSFUL_RANK_OUTCOMES = [
+    {"probe_rank": 0, "role": "source", "outcome": "success"},
+    {"probe_rank": 1, "role": "destination", "outcome": "success"},
+]
 _FAILURE_MODES = {
     None,
     "malformed_payload",
@@ -59,6 +91,81 @@ class PipelineHandoffProbeResult:
     contract: ActivationHandoffContract
     rank_outcomes: tuple[dict[str, object], ...]
 
+    @classmethod
+    def admit_mapping(
+        cls,
+        value: object,
+        *,
+        topology: HybridParallelTopology,
+        layer_count: int,
+    ) -> dict[str, object]:
+        """Admit one strict recorded probe observation without authenticating it."""
+
+        if not isinstance(topology, HybridParallelTopology):
+            raise TypeError("topology must be a HybridParallelTopology")
+        partition_transformer_layers(topology, layer_count=layer_count)
+        if not isinstance(value, Mapping) or set(value) != _PROBE_FIELDS:
+            raise ValueError(
+                "probe observation fields do not match the canonical schema"
+            )
+        fixed = {
+            "schema": PROBE_SCHEMA,
+            "executed": True,
+            "performance_measured": False,
+            "backend": "gloo",
+            "device": "cpu",
+            "world_size": _WORLD_SIZE,
+            "outcome": "success",
+            "rank_outcomes": _SUCCESSFUL_RANK_OUTCOMES,
+            "limitations": _LIMITATIONS,
+        }
+        if any(value.get(key) != expected for key, expected in fixed.items()):
+            raise ValueError("probe observation escalates or contradicts its evidence")
+        contract = value["contract"]
+        if not isinstance(contract, Mapping) or set(contract) != _CONTRACT_FIELDS:
+            raise ValueError("probe contract fields do not match the canonical schema")
+        if contract["schema"] != "ai-journey.activation-handoff.v1":
+            raise ValueError("probe contract schema is unsupported")
+        source_rank = contract["source_rank"]
+        destination_rank = contract["destination_rank"]
+        if type(source_rank) is not int or type(destination_rank) is not int:
+            raise TypeError("probe contract ranks must be integers")
+        source = topology.coordinate_for_rank(source_rank)
+        destination = topology.coordinate_for_rank(destination_rank)
+        if destination.pipeline != source.pipeline + 1 or (
+            source.data,
+            source.tensor,
+            source.sequence,
+        ) != (destination.data, destination.tensor, destination.sequence):
+            raise ValueError("probe contract route is outside adjacent pipeline stages")
+        shape = contract["tensor_shape"]
+        dtype = contract["dtype"]
+        if (
+            not isinstance(shape, list)
+            or not shape
+            or len(shape) > 8
+            or any(type(size) is not int or size <= 0 for size in shape)
+            or dtype not in _DTYPE_BYTES
+        ):
+            raise ValueError("probe contract tensor metadata is invalid")
+        expected_length = math.prod(shape) * _DTYPE_BYTES[dtype]
+        if (
+            contract["payload_length"] != expected_length
+            or expected_length > 16 * 1024 * 1024
+        ):
+            raise ValueError("probe contract payload length is inconsistent")
+        for name in ("payload_sha256", "handoff_sha256"):
+            digest = contract[name]
+            if (
+                type(digest) is not str
+                or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)
+            ):
+                raise ValueError(f"probe {name} must be a lowercase SHA-256 digest")
+        return json.loads(
+            json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        )
+
     def to_mapping(self) -> dict[str, object]:
         """Return the public executed-conformance observation."""
 
@@ -72,10 +179,7 @@ class PipelineHandoffProbeResult:
             "outcome": "success",
             "contract": self.contract.to_mapping(),
             "rank_outcomes": [dict(item) for item in self.rank_outcomes],
-            "limitations": [
-                "CPU/Gloo transfer correctness only; no NVIDIA GPU or NCCL was used.",
-                "No latency, bandwidth, throughput, utilization, memory, or cost was measured.",
-            ],
+            "limitations": list(_LIMITATIONS),
         }
 
 

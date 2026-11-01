@@ -16,10 +16,6 @@ from .tensor_sharding import TensorShard, reconstruct_tensor
 
 
 MAX_ACCOUNTED_BYTES = (1 << 63) - 1
-TENSOR_COLLECTIVE = "ring_all_gather_equal_ceiling_chunks"
-SEQUENCE_TRANSFER = "direct_all_to_all_equal_ceiling_chunks"
-PIPELINE_HANDOFF = "point_to_point_cross_stage_dependencies"
-WIRE_SCOPE = "aggregate_across_participating_ranks"
 EVIDENCE_BOUNDARY = (
     "Analytical communication accounting from admitted plans and explicit wire "
     "assumptions; it does not execute collectives, measure bandwidth, or establish "
@@ -46,26 +42,14 @@ def _bounded_product(*values: int) -> int:
 
 @dataclass(frozen=True)
 class CommunicationAssumptions:
-    """Explicit byte widths and supported analytical wire algorithms."""
+    """Variable byte widths used by the fixed analytical accounting model."""
 
     element_size_bytes: int
     pipeline_payload_bytes: int
-    tensor_collective: str = TENSOR_COLLECTIVE
-    sequence_transfer: str = SEQUENCE_TRANSFER
-    pipeline_handoff: str = PIPELINE_HANDOFF
-    wire_scope: str = WIRE_SCOPE
 
     def __post_init__(self) -> None:
         _positive_integer(self.element_size_bytes, "element_size_bytes")
         _positive_integer(self.pipeline_payload_bytes, "pipeline_payload_bytes")
-        if self.tensor_collective != TENSOR_COLLECTIVE:
-            raise ValueError("unsupported tensor collective assumption")
-        if self.sequence_transfer != SEQUENCE_TRANSFER:
-            raise ValueError("unsupported sequence transfer assumption")
-        if self.pipeline_handoff != PIPELINE_HANDOFF:
-            raise ValueError("unsupported pipeline handoff assumption")
-        if self.wire_scope != WIRE_SCOPE:
-            raise ValueError("unsupported wire scope assumption")
 
     def to_mapping(self) -> dict[str, object]:
         """Return the canonical public assumption representation."""
@@ -73,10 +57,6 @@ class CommunicationAssumptions:
         return {
             "element_size_bytes": self.element_size_bytes,
             "pipeline_payload_bytes": self.pipeline_payload_bytes,
-            "tensor_collective": self.tensor_collective,
-            "sequence_transfer": self.sequence_transfer,
-            "pipeline_handoff": self.pipeline_handoff,
-            "wire_scope": self.wire_scope,
         }
 
 
@@ -86,9 +66,13 @@ class CommunicationVolume:
 
     dimension: str
     operation: str
+    lane_count: int
+    operations_per_lane: int
     operation_count: int
     payload_bytes_per_operation: int
+    logical_bytes_per_lane: int
     logical_bytes: int
+    wire_bytes_per_lane: int
     wire_bytes: int
 
     def to_mapping(self) -> dict[str, object]:
@@ -97,9 +81,13 @@ class CommunicationVolume:
         return {
             "dimension": self.dimension,
             "operation": self.operation,
+            "lane_count": self.lane_count,
+            "operations_per_lane": self.operations_per_lane,
             "operation_count": self.operation_count,
             "payload_bytes_per_operation": self.payload_bytes_per_operation,
+            "logical_bytes_per_lane": self.logical_bytes_per_lane,
             "logical_bytes": self.logical_bytes,
+            "wire_bytes_per_lane": self.wire_bytes_per_lane,
             "wire_bytes": self.wire_bytes,
         }
 
@@ -187,29 +175,49 @@ def account_parallel_communication(
         for slot in schedule.slots
         for operation in slot.operations
     )
-    pipeline_logical = _bounded_product(
+    pipeline_logical_per_lane = _bounded_product(
         handoff_count, assumptions.pipeline_payload_bytes
     )
+    tensor_lanes = len(topology.peer_groups("tensor"))
+    sequence_lanes = len(topology.peer_groups("sequence"))
+    pipeline_lanes = len(topology.peer_groups("pipeline"))
 
     return ParallelCommunicationAccounting(
         assumptions=assumptions,
         tensor_collective=CommunicationVolume(
-            "tensor", "ring_all_gather", 1, tensor_payload, tensor_logical, tensor_wire
+            dimension="tensor",
+            operation="ring_all_gather",
+            lane_count=tensor_lanes,
+            operations_per_lane=1,
+            operation_count=tensor_lanes,
+            payload_bytes_per_operation=tensor_payload,
+            logical_bytes_per_lane=tensor_logical,
+            logical_bytes=_bounded_product(tensor_logical, tensor_lanes),
+            wire_bytes_per_lane=tensor_wire,
+            wire_bytes=_bounded_product(tensor_wire, tensor_lanes),
         ),
         sequence_transfer=CommunicationVolume(
-            "sequence",
-            "all_to_all",
-            1,
-            sequence_payload,
-            sequence_logical,
-            sequence_wire,
+            dimension="sequence",
+            operation="all_to_all",
+            lane_count=sequence_lanes,
+            operations_per_lane=1,
+            operation_count=sequence_lanes,
+            payload_bytes_per_operation=sequence_payload,
+            logical_bytes_per_lane=sequence_logical,
+            logical_bytes=_bounded_product(sequence_logical, sequence_lanes),
+            wire_bytes_per_lane=sequence_wire,
+            wire_bytes=_bounded_product(sequence_wire, sequence_lanes),
         ),
         pipeline_handoff=CommunicationVolume(
-            "pipeline",
-            "point_to_point",
-            handoff_count,
-            assumptions.pipeline_payload_bytes,
-            pipeline_logical,
-            pipeline_logical,
+            dimension="pipeline",
+            operation="point_to_point",
+            lane_count=pipeline_lanes,
+            operations_per_lane=handoff_count,
+            operation_count=_bounded_product(handoff_count, pipeline_lanes),
+            payload_bytes_per_operation=assumptions.pipeline_payload_bytes,
+            logical_bytes_per_lane=pipeline_logical_per_lane,
+            logical_bytes=_bounded_product(pipeline_logical_per_lane, pipeline_lanes),
+            wire_bytes_per_lane=pipeline_logical_per_lane,
+            wire_bytes=_bounded_product(pipeline_logical_per_lane, pipeline_lanes),
         ),
     )

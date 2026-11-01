@@ -9,6 +9,7 @@ import pytest
 from ai_journey.activation_handoff import ActivationHandoffContract
 from ai_journey.hybrid_topology import HybridParallelTopology
 from ai_journey.pipeline_handoff_probe import (
+    PipelineHandoffProbeResult,
     PipelineHandoffTimeout,
     PipelineHandoffWorkerFailure,
     run_pipeline_handoff_probe,
@@ -60,6 +61,35 @@ def test_two_rank_gloo_probe_verifies_payload_metadata_and_one_outcome():
             "No latency, bandwidth, throughput, utilization, memory, or cost was measured.",
         ],
     }
+
+    admitted = PipelineHandoffProbeResult.admit_mapping(
+        result.to_mapping(), topology=topology, layer_count=partition.layer_count
+    )
+    assert admitted == result.to_mapping()
+
+
+def test_probe_mapping_admission_rejects_noncanonical_or_escalated_observations():
+    topology, partition, contract, _ = admitted_handoff()
+    mapping = PipelineHandoffProbeResult(
+        contract,
+        (
+            {"probe_rank": 0, "role": "source", "outcome": "success"},
+            {"probe_rank": 1, "role": "destination", "outcome": "success"},
+        ),
+    ).to_mapping()
+
+    mapping["unexpected"] = True
+    with pytest.raises(ValueError, match="canonical schema"):
+        PipelineHandoffProbeResult.admit_mapping(
+            mapping, topology=topology, layer_count=partition.layer_count
+        )
+
+    mapping.pop("unexpected")
+    mapping["performance_measured"] = True
+    with pytest.raises(ValueError, match="escalates or contradicts"):
+        PipelineHandoffProbeResult.admit_mapping(
+            mapping, topology=topology, layer_count=partition.layer_count
+        )
 
 
 def test_malformed_caller_payload_rejects_before_spawning(monkeypatch):

@@ -42,34 +42,42 @@ def test_accounting_separates_tensor_sequence_and_pipeline_volume():
         "assumptions": {
             "element_size_bytes": 4,
             "pipeline_payload_bytes": 32,
-            "tensor_collective": "ring_all_gather_equal_ceiling_chunks",
-            "sequence_transfer": "direct_all_to_all_equal_ceiling_chunks",
-            "pipeline_handoff": "point_to_point_cross_stage_dependencies",
-            "wire_scope": "aggregate_across_participating_ranks",
         },
         "tensor_collective": {
             "dimension": "tensor",
             "operation": "ring_all_gather",
-            "operation_count": 1,
+            "lane_count": 4,
+            "operations_per_lane": 1,
+            "operation_count": 4,
             "payload_bytes_per_operation": 24,
-            "logical_bytes": 20,
-            "wire_bytes": 24,
+            "logical_bytes_per_lane": 20,
+            "logical_bytes": 80,
+            "wire_bytes_per_lane": 24,
+            "wire_bytes": 96,
         },
         "sequence_transfer": {
             "dimension": "sequence",
             "operation": "all_to_all",
-            "operation_count": 1,
+            "lane_count": 4,
+            "operations_per_lane": 1,
+            "operation_count": 4,
             "payload_bytes_per_operation": 24,
-            "logical_bytes": 20,
-            "wire_bytes": 16,
+            "logical_bytes_per_lane": 20,
+            "logical_bytes": 80,
+            "wire_bytes_per_lane": 16,
+            "wire_bytes": 64,
         },
         "pipeline_handoff": {
             "dimension": "pipeline",
             "operation": "point_to_point",
-            "operation_count": 4,
+            "lane_count": 4,
+            "operations_per_lane": 4,
+            "operation_count": 16,
             "payload_bytes_per_operation": 32,
-            "logical_bytes": 128,
-            "wire_bytes": 128,
+            "logical_bytes_per_lane": 128,
+            "logical_bytes": 512,
+            "wire_bytes_per_lane": 128,
+            "wire_bytes": 512,
         },
         "evidence_boundary": (
             "Analytical communication accounting from admitted plans and explicit "
@@ -84,14 +92,9 @@ def test_accounting_separates_tensor_sequence_and_pipeline_volume():
     [
         ("element_size_bytes", -1, "element_size_bytes must be positive"),
         ("pipeline_payload_bytes", -1, "pipeline_payload_bytes must be positive"),
-        ("tensor_collective", "tree_all_gather", "unsupported tensor collective"),
-        ("sequence_transfer", "ring_exchange", "unsupported sequence transfer"),
-        ("pipeline_handoff", "broadcast", "unsupported pipeline handoff"),
     ],
 )
-def test_assumptions_reject_negative_sizes_and_unsupported_wire_models(
-    field, value, message
-):
+def test_assumptions_reject_negative_sizes(field, value, message):
     values = {"element_size_bytes": 4, "pipeline_payload_bytes": 32, field: value}
 
     with pytest.raises(ValueError, match=message):
@@ -158,6 +161,8 @@ def test_single_rank_dimensions_have_no_assumed_wire_traffic():
 
     assert accounting.tensor_collective.wire_bytes == 0
     assert accounting.sequence_transfer.wire_bytes == 0
+    assert accounting.tensor_collective.lane_count == 1
+    assert accounting.sequence_transfer.lane_count == 1
     assert accounting.pipeline_handoff.operation_count == 0
     assert accounting.pipeline_handoff.wire_bytes == 0
 

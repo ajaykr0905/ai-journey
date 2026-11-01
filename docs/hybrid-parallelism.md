@@ -38,12 +38,19 @@ ai-journey-hybrid-parallel-verify \
   --report hybrid-parallel-report.json
 ```
 
+The offline command verifies the SHA-256 seal and independently rebuilds every
+analytical field from the bounded primary inputs. The retained probe observation
+is self-reported evidence: the seal detects mutation and internal inconsistency,
+but does not independently authenticate that execution occurred. Reproduce the
+generation command when direct CPU/Gloo execution evidence is required.
+
 ## Evidence Boundary
 
 The topology, tensor and sequence shards, pipeline partition, schedule,
 Pipeline Bubble metrics, and communication totals are deterministic analytical
 evidence. The only executed distributed observation is one bounded local
-CPU/Gloo activation handoff.
+CPU/Gloo activation handoff performed by the generation command. A retained
+report records that observation; offline verification does not authenticate it.
 
 No NVIDIA GPU or NCCL is used. This is not performance, throughput, utilization, memory, cost, multi-node, or production-readiness evidence.
 It is also not evidence that Ajay watched a lecture or completed a manual exercise.
