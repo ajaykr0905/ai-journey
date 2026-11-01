@@ -87,6 +87,23 @@ def test_build_report_separates_replayable_analysis_from_executed_probe():
         == 16
     )
     assert report["analytical"]["communication"]["pipeline_handoff"]["lane_count"] == 4
+    assert report["analytical"]["communication"]["wire_model"] == {
+        "aggregation_scope": "aggregate_all_topology_lanes",
+        "tensor_collective": "ring_all_gather_equal_ceiling_shards",
+        "tensor_wire_formula": (
+            "lane_count * tensor_parallel_size * (tensor_parallel_size - 1) "
+            "* padded_shard_elements * element_size_bytes"
+        ),
+        "sequence_transfer": "direct_all_to_all_equal_ceiling_segments",
+        "sequence_wire_formula": (
+            "lane_count * sequence_parallel_size * (sequence_parallel_size - 1) "
+            "* ceil(shard_width / sequence_parallel_size) * element_size_bytes"
+        ),
+        "pipeline_handoff": "point_to_point_cross_stage_dependencies",
+        "pipeline_wire_formula": (
+            "lane_count * cross_stage_dependency_count * pipeline_payload_bytes"
+        ),
+    }
     assert report["executed_observations"]["pipeline_handoff"]["backend"] == "gloo"
     assert report["executed_observations"]["pipeline_handoff"]["device"] == "cpu"
     assert report["claims"] == {
