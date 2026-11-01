@@ -61,6 +61,40 @@ class CommunicationAssumptions:
 
 
 @dataclass(frozen=True)
+class CommunicationWireModel:
+    """Immutable formulas and aggregation scope applied by the accounting model."""
+
+    aggregation_scope: str = "aggregate_all_topology_lanes"
+    tensor_collective: str = "ring_all_gather_equal_ceiling_shards"
+    tensor_wire_formula: str = (
+        "lane_count * tensor_parallel_size * (tensor_parallel_size - 1) "
+        "* padded_shard_elements * element_size_bytes"
+    )
+    sequence_transfer: str = "direct_all_to_all_equal_ceiling_segments"
+    sequence_wire_formula: str = (
+        "lane_count * sequence_parallel_size * (sequence_parallel_size - 1) "
+        "* ceil(shard_width / sequence_parallel_size) * element_size_bytes"
+    )
+    pipeline_handoff: str = "point_to_point_cross_stage_dependencies"
+    pipeline_wire_formula: str = (
+        "lane_count * cross_stage_dependency_count * pipeline_payload_bytes"
+    )
+
+    def to_mapping(self) -> dict[str, str]:
+        """Return the fixed public descriptors used to derive wire totals."""
+
+        return {
+            "aggregation_scope": self.aggregation_scope,
+            "tensor_collective": self.tensor_collective,
+            "tensor_wire_formula": self.tensor_wire_formula,
+            "sequence_transfer": self.sequence_transfer,
+            "sequence_wire_formula": self.sequence_wire_formula,
+            "pipeline_handoff": self.pipeline_handoff,
+            "pipeline_wire_formula": self.pipeline_wire_formula,
+        }
+
+
+@dataclass(frozen=True)
 class CommunicationVolume:
     """One dimension's logical payload and assumed aggregate wire work."""
 
@@ -100,6 +134,7 @@ class ParallelCommunicationAccounting:
     tensor_collective: CommunicationVolume
     sequence_transfer: CommunicationVolume
     pipeline_handoff: CommunicationVolume
+    wire_model: CommunicationWireModel = CommunicationWireModel()
     evidence_boundary: str = EVIDENCE_BOUNDARY
 
     def to_mapping(self) -> dict[str, object]:
@@ -107,6 +142,7 @@ class ParallelCommunicationAccounting:
 
         return {
             "assumptions": self.assumptions.to_mapping(),
+            "wire_model": self.wire_model.to_mapping(),
             "tensor_collective": self.tensor_collective.to_mapping(),
             "sequence_transfer": self.sequence_transfer.to_mapping(),
             "pipeline_handoff": self.pipeline_handoff.to_mapping(),
