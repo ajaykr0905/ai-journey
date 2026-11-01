@@ -54,6 +54,8 @@ ai-journey-gpu-preflight = "ai_journey.gpu_preflight_cli:main"
 ai-journey-moe-experiment = "ai_journey.moe_cli:main"
 ai-journey-gqa-experiment = "ai_journey.gqa_cli:main"
 ai-journey-moe-ddp = "ai_journey.moe_ddp_cli:main"
+ai-journey-hybrid-parallel = "ai_journey.hybrid_parallel_cli:main"
+ai-journey-hybrid-parallel-verify = "ai_journey.hybrid_parallel_verify:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
