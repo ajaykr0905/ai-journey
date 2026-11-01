@@ -716,7 +716,7 @@ jobs:
       - name: Install CPU runtime and pinned verification tools
         run: |
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-          python -m pip install -e . --no-deps
+          python -m pip install -e .
           python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
       - name: Check hybrid parallel contracts and installed workflow
         run: |

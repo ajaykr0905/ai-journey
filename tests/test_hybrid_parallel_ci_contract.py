@@ -24,6 +24,16 @@ def test_ci_gates_isolated_hybrid_parallel_commands_and_retains_evidence():
         assert required in job
 
 
+def test_ci_installs_declared_runtime_dependencies_before_collection():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    job = workflow.split("  hybrid-parallel-cpu:\n", 1)[1].split(
+        "  distributed-capacity-contracts:\n", 1
+    )[0]
+
+    assert "python -m pip install -e .\n" in job
+    assert "python -m pip install -e . --no-deps" not in job
+
+
 def test_readiness_requires_complete_hybrid_parallel_workflow_surface():
     required = json.loads(
         (ROOT / "config" / "deployment_readiness.json").read_text(encoding="utf-8")
