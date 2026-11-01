@@ -2,7 +2,9 @@
 
 This ledger counts only independently reviewable source commits created after
 `0bb84ad3e0fa37b91bdb19ff050e8ac7977c634b`. Merge, setup, glossary, generated,
-and mechanical commits are excluded. The milestone parent is
+mechanical, and ledger-only bookkeeping commits are excluded. In particular,
+`Update hybrid parallelism program ledger` maintains this record and is not a
+qualifying source commit. The milestone parent is
 [#53](https://github.com/ajaykr0905/ai-journey/issues/53).
 
 All listed commits use `Ajay Kumar <206070437+ajaykr0905@users.noreply.github.com>`.
@@ -25,6 +27,8 @@ installed-wheel, readiness, and static-check status is recorded after the table.
 | 10 | [#61](https://github.com/ajaykr0905/ai-journey/issues/61) | `1187a7267461e455435f4d5c6fdbe097bf51a367` — Account for hybrid parallel communication volume | Separates tensor, sequence, and pipeline traffic with explicit modeled wire assumptions. | `src/ai_journey/parallel_communication.py`; `tests/test_parallel_communication.py` | `pytest -q tests/test_parallel_communication.py` | Analytical bytes; no bandwidth, latency, or collective execution claim. |
 | 11 | [#64](https://github.com/ajaykr0905/ai-journey/issues/64) | `22291d888cf920774efa1ee3eb5c74372e64df25` — Publish sealed hybrid parallelism evidence | Canonically seals bounded primary inputs and replayable analytical fields. | `src/ai_journey/hybrid_parallel_io.py`; `src/ai_journey/hybrid_parallel_report.py`; `tests/test_hybrid_parallel_io.py`; `tests/test_hybrid_parallel_report.py` | `pytest -q tests/test_hybrid_parallel_io.py tests/test_hybrid_parallel_report.py` | Seal proves integrity and internal consistency, not execution authenticity. |
 | 12 | [#65](https://github.com/ajaykr0905/ai-journey/issues/65) | `6ac850dcc48709d7161fb2cf54650cbcd548ff39` — Gate installed parallelism workflows in CI | Operates generation and offline verification from an isolated installed wheel. | `.github/workflows/ci.yml`; `config/deployment_readiness.json`; `docs/hybrid-parallelism.md`; `pyproject.toml`; `src/ai_journey/hybrid_parallel_cli.py`; `src/ai_journey/hybrid_parallel_verify.py`; `tests/test_hybrid_parallel_ci_contract.py`; `tests/test_hybrid_parallel_cli.py`; `tests/test_hybrid_parallel_docs.py`; `tests/test_hybrid_parallel_package.py` | `pytest -q tests/test_hybrid_parallel_cli.py tests/test_hybrid_parallel_package.py tests/test_hybrid_parallel_ci_contract.py tests/test_hybrid_parallel_docs.py` | Installed generation executes CPU/Gloo; offline verification does not rerun or authenticate it. |
+| 13 | [#53](https://github.com/ajaykr0905/ai-journey/issues/53) review repair | `844f39289542b76c6c720250156bf131e751a249` — Correct hybrid parallel evidence verification | Aggregates every replicated topology lane, centralizes strict probe admission, bounds replay before materialization, splits report responsibilities, and limits seals to integrity and internal-consistency claims. | `config/deployment_readiness.json`; `docs/ai-infrastructure-program-ledger.md`; `docs/hybrid-parallelism.md`; `src/ai_journey/hybrid_parallel_analysis.py`; `src/ai_journey/hybrid_parallel_report.py`; `src/ai_journey/hybrid_parallel_report_verification.py`; `src/ai_journey/hybrid_parallel_schema.py`; `src/ai_journey/hybrid_parallel_seal.py`; `src/ai_journey/hybrid_parallel_verify.py`; `src/ai_journey/parallel_communication.py`; `src/ai_journey/pipeline_handoff_probe.py`; `tests/test_hybrid_parallel_ci_contract.py`; `tests/test_hybrid_parallel_cli.py`; `tests/test_hybrid_parallel_docs.py`; `tests/test_hybrid_parallel_report.py`; `tests/test_parallel_communication.py`; `tests/test_pipeline_handoff_probe.py` | Full suite: `3,878 passed, 680 subtests passed`; post-merge affected suite: `42 passed`; Ruff, format, compileall, readiness, diff, and secret checks passed. | Analytical accounting and recorded CPU/Gloo evidence only; a seal cannot authenticate execution, hardware, performance, or production claims. |
+| 14 | [#53](https://github.com/ajaykr0905/ai-journey/issues/53) spec re-review | `8dcebd463f9d619a9b1939735fe4d9f589beb173` — State hybrid communication wire assumptions | Emits immutable output-side collective chunk models, exact wire formulas, and aggregate-all-topology-lanes scope without reintroducing fixed configurable input fields. | `src/ai_journey/parallel_communication.py`; `tests/test_hybrid_parallel_report.py`; `tests/test_parallel_communication.py` | TDD focused suite: `27 passed`; affected report/Gloo/installed-wheel suite: `42 passed`; Ruff, format, compileall, readiness, diff, and secret checks passed. | Formulas describe analytical modeled bytes only; they do not prove collective execution, bandwidth, latency, accelerator use, or performance. |
 
 ## Milestone verification and publication
 
@@ -36,8 +40,8 @@ installed-wheel, readiness, and static-check status is recorded after the table.
   inspection, and secret-sensitive review: recorded in the repair commit's final
   verification; publication CI remains pending.
 - Pull request and CI URLs: pending publication of the milestone integration branch.
-- Cumulative qualifying source commits: **12 / 70**.
-- Exact remaining program shortfall: **58 meaningful source commits**.
+- Cumulative qualifying source commits: **14 / 70**.
+- Exact remaining program shortfall: **56 meaningful source commits**.
 
 ## Evidence Boundaries
 

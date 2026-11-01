@@ -42,8 +42,12 @@ def test_program_ledger_records_every_source_commit_and_remaining_shortfall():
         "1187a7267461e455435f4d5c6fdbe097bf51a367",
         "22291d888cf920774efa1ee3eb5c74372e64df25",
         "6ac850dcc48709d7161fb2cf54650cbcd548ff39",
+        "844f39289542b76c6c720250156bf131e751a249",
+        "8dcebd463f9d619a9b1939735fe4d9f589beb173",
     ):
         assert source_sha in ledger
-    assert "12 / 70" in ledger
-    assert "58 meaningful source commits" in ledger
+    assert "14 / 70" in ledger
+    assert "56 meaningful source commits" in ledger
+    assert "ledger-only bookkeeping commits are excluded" in ledger
+    assert "Update hybrid parallelism program ledger" in ledger
     assert "does not independently authenticate execution" in ledger
