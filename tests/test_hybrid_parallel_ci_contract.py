@@ -30,6 +30,7 @@ def test_readiness_requires_complete_hybrid_parallel_workflow_surface():
     )["required_files"]
     expected = {
         "docs/hybrid-parallelism.md",
+        "docs/ai-infrastructure-program-ledger.md",
         "src/ai_journey/hybrid_topology.py",
         "src/ai_journey/tensor_sharding.py",
         "src/ai_journey/sequence_sharding.py",
@@ -40,6 +41,10 @@ def test_readiness_requires_complete_hybrid_parallel_workflow_surface():
         "src/ai_journey/activation_handoff.py",
         "src/ai_journey/pipeline_handoff_probe.py",
         "src/ai_journey/hybrid_parallel_report.py",
+        "src/ai_journey/hybrid_parallel_schema.py",
+        "src/ai_journey/hybrid_parallel_seal.py",
+        "src/ai_journey/hybrid_parallel_analysis.py",
+        "src/ai_journey/hybrid_parallel_report_verification.py",
         "src/ai_journey/hybrid_parallel_io.py",
         "src/ai_journey/hybrid_parallel_cli.py",
         "src/ai_journey/hybrid_parallel_verify.py",

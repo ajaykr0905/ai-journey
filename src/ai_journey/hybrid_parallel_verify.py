@@ -26,7 +26,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     print(
         f"verified_hybrid_parallel={report['integrity']['digest']} "
-        "executed=cpu_gloo performance=false"
+        "recorded=cpu_gloo execution_authenticity=unverified "
+        "seal=integrity_and_internal_consistency performance=false"
     )
     return 0
 

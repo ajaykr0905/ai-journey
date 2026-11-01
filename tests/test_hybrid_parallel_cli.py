@@ -69,7 +69,9 @@ def test_generate_executes_cpu_gloo_and_offline_verifier_replays_report(
     assert verify_main(["--report", str(output)]) == 0
     verified = capsys.readouterr().out
     assert "verified_hybrid_parallel=" in verified
-    assert "executed=cpu_gloo" in verified
+    assert "recorded=cpu_gloo" in verified
+    assert "execution_authenticity=unverified" in verified
+    assert "seal=integrity_and_internal_consistency" in verified
     assert "performance=false" in verified
     assert output.read_bytes() == before
 

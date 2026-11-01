@@ -84,13 +84,15 @@ def test_build_report_separates_replayable_analysis_from_executed_probe():
     assert report["analytical"]["pipeline_bubbles"]["policy"] == "1f1b"
     assert (
         report["analytical"]["communication"]["pipeline_handoff"]["operation_count"]
-        == 4
+        == 16
     )
+    assert report["analytical"]["communication"]["pipeline_handoff"]["lane_count"] == 4
     assert report["executed_observations"]["pipeline_handoff"]["backend"] == "gloo"
     assert report["executed_observations"]["pipeline_handoff"]["device"] == "cpu"
     assert report["claims"] == {
         "analytical_planning": True,
-        "cpu_gloo_transfer_conformance": True,
+        "cpu_gloo_execution_recorded": True,
+        "independent_execution_authenticity": False,
         "gpu_or_nvidia": False,
         "nccl": False,
         "performance": False,
@@ -101,6 +103,7 @@ def test_build_report_separates_replayable_analysis_from_executed_probe():
     assert all(
         term in boundary for term in ("NVIDIA", "NCCL", "performance", "production")
     )
+    assert "does not independently authenticate execution" in boundary
 
 
 @pytest.mark.parametrize(
@@ -166,3 +169,45 @@ def test_report_verification_rejects_schema_integrity_and_primary_input_drift():
     invalid_input = seal_hybrid_parallel_report(invalid_input)
     with pytest.raises(HybridParallelReportError, match="cannot be rebuilt"):
         verify_hybrid_parallel_report(invalid_input)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda inputs: inputs["topology"].update(
+                {
+                    "world_size": 1_000_000,
+                    "data_parallel_size": 1_000_000,
+                    "tensor_parallel_size": 1,
+                    "pipeline_parallel_size": 1,
+                    "sequence_parallel_size": 1,
+                }
+            ),
+            "world_size exceeds",
+        ),
+        (
+            lambda inputs: inputs["pipeline"].update({"layer_count": 1_000_000}),
+            "layer_count exceeds",
+        ),
+        (
+            lambda inputs: inputs["pipeline"].update({"microbatch_count": 1_000_000}),
+            "microbatch_count exceeds",
+        ),
+    ],
+)
+def test_report_verification_applies_caps_before_analytical_materialization(
+    mutate, message, monkeypatch
+):
+    report = sealed_report()
+    mutate(report["inputs"])
+    report = seal_hybrid_parallel_report(report)
+
+    def unexpected_materialization(*args, **kwargs):
+        raise AssertionError("untrusted oversized inputs must reject before expansion")
+
+    monkeypatch.setattr(
+        HybridParallelTopology, "coordinate_for_rank", unexpected_materialization
+    )
+    with pytest.raises(HybridParallelReportError, match=message):
+        verify_hybrid_parallel_report(report)
