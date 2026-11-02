@@ -56,6 +56,7 @@ ai-journey-gqa-experiment = "ai_journey.gqa_cli:main"
 ai-journey-moe-ddp = "ai_journey.moe_ddp_cli:main"
 ai-journey-hybrid-parallel = "ai_journey.hybrid_parallel_cli:main"
 ai-journey-hybrid-parallel-verify = "ai_journey.hybrid_parallel_verify:main"
+ai-journey-data-pipeline = "ai_journey.data_pipeline_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
