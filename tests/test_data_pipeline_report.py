@@ -42,6 +42,7 @@ def test_report_seals_source_partitions_token_counts_and_evidence_boundaries():
     seal = report.pop("report_sha256")
     assert seal == sha256(canonical_json_bytes(report)).hexdigest()
     assert report["source"]["metadata"]["revision"] == ENGLISH.revision
+    assert "Parallel Universal Dependencies" in report["source"]["attribution"]
     assert report["partitions"]["train"]["documents"] == 7
     assert report["partitions"]["validation"]["documents"] == 2
     assert report["tokenizer"]["report"]["total_tokens"] > 0

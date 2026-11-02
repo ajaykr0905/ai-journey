@@ -69,6 +69,7 @@ def build_pipeline_report(result: DataPipelineResult, source: SourceEvidence) ->
             "metadata": source.metadata,
             "source_url": source.source_url,
             "license_url": source.license_url,
+            "attribution": source.attribution,
         },
         "config": asdict(result.config),
         "counts": {

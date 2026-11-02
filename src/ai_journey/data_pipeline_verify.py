@@ -81,6 +81,16 @@ def verify_pipeline_artifacts(directory: Path) -> dict:
     sealed = {key: value for key, value in report.items() if key != "report_sha256"}
     if sha256(canonical_json_bytes(sealed)).hexdigest() != report["report_sha256"]:
         raise TokenizerError("dataset manifest seal mismatch")
+    source = report["source"]
+    if (
+        not isinstance(source, dict)
+        or set(source) != {"metadata", "source_url", "license_url", "attribution"}
+        or any(
+            not isinstance(source[name], str) or not source[name].strip()
+            for name in ("source_url", "license_url", "attribution")
+        )
+    ):
+        raise TokenizerError("dataset source evidence is invalid")
     partitions = report["partitions"]
     if not isinstance(partitions, dict) or set(partitions) != {"train", "validation"}:
         raise TokenizerError("dataset partitions are invalid")

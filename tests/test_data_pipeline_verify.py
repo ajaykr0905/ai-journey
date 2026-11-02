@@ -143,3 +143,16 @@ def test_verifier_rejects_resealed_invalid_shard_descriptor_types(
 
     with pytest.raises(TokenizerError, match="byte budget"):
         verify_pipeline_artifacts(output)
+
+
+def test_verifier_rejects_resealed_missing_public_attribution(tmp_path):
+    output = _publish(tmp_path)
+    manifest_path = output / "manifest.json"
+    report = json.loads(manifest_path.read_text())
+    report["source"]["attribution"] = ""
+    unsealed = {key: item for key, item in report.items() if key != "report_sha256"}
+    report["report_sha256"] = sha256(canonical_json_bytes(unsealed)).hexdigest()
+    manifest_path.write_bytes(canonical_json_bytes(report))
+
+    with pytest.raises(TokenizerError, match="source evidence"):
+        verify_pipeline_artifacts(output)

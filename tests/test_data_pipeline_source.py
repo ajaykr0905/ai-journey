@@ -4,7 +4,7 @@ from hashlib import sha256
 import pytest
 
 from ai_journey.bpe import TokenizerError
-from ai_journey.data_pipeline_source import load_pipeline_source
+from ai_journey.data_pipeline_source import SourceEvidence, load_pipeline_source
 from ai_journey.tokenizer_sources import ENGLISH
 
 
@@ -26,6 +26,8 @@ def test_source_adapter_binds_validated_bytes_license_and_document_provenance(tm
     assert evidence.metadata["sha256"] == source.sha256
     assert evidence.source_url == source.url
     assert evidence.license_url == source.license_url
+    assert "Parallel Universal Dependencies" in evidence.attribution
+    assert "contributor credits" in evidence.attribution
     assert [row.document_id for row in evidence.documents] == ["a", "b"]
     assert all(row.source == source.url for row in evidence.documents)
 
@@ -40,3 +42,8 @@ def test_source_adapter_rejects_changed_public_bytes(tmp_path):
 
     with pytest.raises(TokenizerError, match="snapshot identity"):
         load_pipeline_source(snapshot, source)
+
+
+def test_source_evidence_requires_public_attribution():
+    with pytest.raises(ValueError, match="attribution"):
+        SourceEvidence({}, "source", "license", (), "")

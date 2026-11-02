@@ -5,6 +5,8 @@ English Parallel Universal Dependencies test snapshot. The snapshot is
 CC-BY-SA-3.0 and is pinned by repository, revision, byte count, and SHA-256 in
 `src/ai_journey/tokenizer_sources.py`. The source annotations are not treated as
 training prose; only validated `sent_id` and `text` metadata enter the pipeline.
+Every manifest retains attribution to Parallel Universal Dependencies, CoNLL
+2017, DFKI, Google, the UD community, and the source contributor credits.
 
 ## Build and verify
 
