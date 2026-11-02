@@ -10,7 +10,10 @@ from ai_journey.data_pipeline import DataPipelineConfig, build_data_pipeline
 from ai_journey.data_pipeline_io import publish_pipeline_artifacts
 from ai_journey.data_pipeline_report import canonical_json_bytes
 from ai_journey.data_pipeline_source import SourceEvidence
-from ai_journey.data_pipeline_verify import verify_pipeline_artifacts
+from ai_journey.data_pipeline_verify import (
+    replay_pipeline_artifacts,
+    verify_pipeline_artifacts,
+)
 from ai_journey.data_quality import QualityPolicy
 from ai_journey.tokenizer_sources import ENGLISH
 
@@ -77,3 +80,28 @@ def test_verifier_rejects_unlisted_artifacts(tmp_path):
 
     with pytest.raises(TokenizerError, match="inventory"):
         verify_pipeline_artifacts(output)
+
+
+def test_replay_recomputes_token_counts_and_compression_from_shards(tmp_path):
+    output = _publish(tmp_path)
+
+    replay = replay_pipeline_artifacts(output)
+
+    assert replay["total_tokens"] > 0
+    assert replay["total_utf8_bytes"] > replay["total_tokens"]
+    assert replay["bytes_per_token"] == (
+        replay["total_utf8_bytes"] / replay["total_tokens"]
+    )
+
+
+def test_replay_rejects_resealed_token_observation_drift(tmp_path):
+    output = _publish(tmp_path)
+    manifest_path = output / "manifest.json"
+    report = json.loads(manifest_path.read_text())
+    report["tokenizer"]["report"]["total_tokens"] += 1
+    unsealed = {key: value for key, value in report.items() if key != "report_sha256"}
+    report["report_sha256"] = sha256(canonical_json_bytes(unsealed)).hexdigest()
+    manifest_path.write_bytes(canonical_json_bytes(report))
+
+    with pytest.raises(TokenizerError, match="does not replay"):
+        replay_pipeline_artifacts(output)

@@ -6,6 +6,8 @@ from pathlib import Path
 
 from .bpe import TokenizerError
 from .data_pipeline_report import canonical_json_bytes
+from .tokenizer_io import tokenizer_fingerprint, tokenizer_from_state
+from .tokenizer_metrics import compression_metrics
 
 
 def _unique_object(pairs):
@@ -149,3 +151,49 @@ def verify_pipeline_artifacts(directory: Path) -> dict:
     if actual_files != expected_files:
         raise TokenizerError("dataset artifact inventory mismatch")
     return report
+
+
+def _partition_texts(directory: Path, report: dict, name: str) -> tuple[str, ...]:
+    texts = []
+    source_url = report["source"]["source_url"]
+    for descriptor in report["partitions"][name]["shards"]:
+        payload = _read_bounded(
+            directory / descriptor["path"], descriptor["artifact_bytes"]
+        )
+        for line in payload.splitlines():
+            row = _load_json(line, label="shard row")
+            if row["source"] != source_url:
+                raise TokenizerError("dataset row source does not match manifest")
+            texts.append(row["text"])
+    return tuple(texts)
+
+
+def replay_pipeline_artifacts(directory: Path) -> dict:
+    """Recompute tokenizer observations from verified published shard text."""
+    report = verify_pipeline_artifacts(directory)
+    tokenizer_payload = report["tokenizer"]
+    if not isinstance(tokenizer_payload, dict) or set(tokenizer_payload) != {
+        "state",
+        "report",
+    }:
+        raise TokenizerError("dataset tokenizer evidence fields are invalid")
+    tokenizer = tokenizer_from_state(tokenizer_payload["state"])
+    train = compression_metrics(tokenizer, _partition_texts(directory, report, "train"))
+    validation = compression_metrics(
+        tokenizer, _partition_texts(directory, report, "validation")
+    )
+    total_tokens = train.tokens + validation.tokens
+    total_bytes = train.utf8_bytes + validation.utf8_bytes
+    actual = {
+        "vocabulary_size": tokenizer.vocab_size,
+        "tokenizer_sha256": tokenizer_fingerprint(tokenizer),
+        "train": train.as_dict(),
+        "validation": validation.as_dict(),
+        "total_tokens": total_tokens,
+        "total_utf8_bytes": total_bytes,
+        "bytes_per_token": total_bytes / total_tokens,
+        "token_reduction_fraction": 1 - total_tokens / total_bytes,
+    }
+    if actual != tokenizer_payload["report"]:
+        raise TokenizerError("dataset tokenization evidence does not replay")
+    return actual
