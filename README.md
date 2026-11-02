@@ -1,7 +1,7 @@
 # AI Journey: Reproducible Transformer Training and Serving Lab
 
 This repository is a public-safe, executable record of an added setup day plus the
-selected verified code through Day 57 of a 90-day AI engineering learning plan. It combines
+selected verified code through Day 59 of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -16,6 +16,11 @@ then grow these exercises into production-quality training and inference project
 
 ## What is included
 
+- A checksum-pinned public-data build with deterministic cleaning, explainable
+  quality rejection, deduplication, leakage-safe splits, balanced shards,
+  train-only BPE compression evidence, atomic publication, independent replay,
+  and installed CI acceptance in the
+  [Day 59 data pipeline guide](docs/day-59-data-pipeline.md)
 - Explicit LoRA adapters, gradient audits, dense inference export, and bounded
   JSON checkpoints in the [adapter operating guide](docs/lora-adapters.md)
 - Deterministic GPT-2-style gradient accumulation, AdamW grouping, warmup and

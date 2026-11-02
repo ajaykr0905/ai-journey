@@ -1,6 +1,6 @@
 # Progress and Evidence
 
-Last updated: 2026-10-18
+Last updated: 2026-11-02
 
 This file separates repository-verifiable work from activities that require the
 learner's own completion evidence.
@@ -50,6 +50,7 @@ learner's own completion evidence.
 | 43 | Validated chat/tool state, canonical injection-safe rendering, train-only codec, assistant-only masked SFT, exhaustive held-out assistant scoring, matched full/LoRA comparisons, uncertainty report, installed commands, and exact replay present | Primary and support lectures pending user confirmation | Learner lecture viewing, term-by-term notes, independent run, and personal explanation of SFT, conversation format, hallucination, and tool use pending |
 | 44 | Authored grounded preferences, group-isolated cross-validation, response-only DPO-style scoring, matched frozen/full/LoRA trials, negative-result reporting, installed commands, and exact replay present | Primary and support lectures pending user confirmation | Learner lecture viewing, independent run, training-stack diagram, and personal explanation of RL, RLHF, reasoning-model capabilities and failure modes pending |
 | 45 | Exact 124,439,808-parameter GPT-2 decoder, immutable public checkpoint identities, safe legacy import, complete tensor fingerprint, independent full-logit parity, installed command, tamper-evident evidence, and CI gate present | Primary and support lectures pending user confirmation | Learner lecture viewing, type-along, independent checkpoint load, architecture explanation, and personal interpretation pending |
+| 59 | Pinned English PUD ingestion, deterministic cleaning and quality decisions, exact deduplication, leakage-safe split, balanced shards, train-only BPE token and compression report, atomic publication, independent replay, installed CLI, CI acceptance, and operator guide present | No primary lecture scheduled; quantization support video pending user confirmation | Learner-run dataset build, inspection of the three rejected records, compression interpretation, and support-video reflection pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,
