@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "source_sha256": "63eb7eca373bd45912c01f15f1e445d5cdd41245f20da1669474728e484e096d",
+  "config_sha256": "2edd2306b7003f2e8d3db524e767c918da74f966d4e3ad17966ab88238bf790f",
+  "report_sha256": "78cf40b46f3f57db3a1ffd8275352d5f58b0d1e1d8be0a9d1d24440f51e8649d",
+  "tokenizer_sha256": "1099a3d62d46c6e15bde8254370c80e22f482eea30e77320850ae64dc3eafa61",
+  "input_documents": 1000,
+  "quality_rejected": 3,
+  "exact_duplicates": 0,
+  "train_documents": 897,
+  "validation_documents": 100,
+  "total_tokens": 69626,
+  "total_utf8_bytes": 110379
+}
