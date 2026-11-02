@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "quality": {
+    "min_characters": 20,
+    "max_characters": 4096,
+    "min_alphanumeric_fraction": 0.5,
+    "max_repeated_run": 8
+  },
+  "validation_count": 100,
+  "train_shards": 4,
+  "validation_shards": 1,
+  "seed": 59,
+  "vocabulary_size": 320,
+  "min_frequency": 2
+}
