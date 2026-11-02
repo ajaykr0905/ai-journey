@@ -82,6 +82,25 @@ def test_verifier_rejects_unlisted_artifacts(tmp_path):
         verify_pipeline_artifacts(output)
 
 
+def test_verifier_rejects_unlisted_directories(tmp_path):
+    output = _publish(tmp_path)
+    (output / "unexpected").mkdir()
+
+    with pytest.raises(TokenizerError, match="inventory"):
+        verify_pipeline_artifacts(output)
+
+
+def test_verifier_rejects_shard_symlinks_even_when_target_bytes_match(tmp_path):
+    output = _publish(tmp_path)
+    shard = output / "train-00000.jsonl"
+    external = tmp_path / "external.jsonl"
+    shard.replace(external)
+    shard.symlink_to(external)
+
+    with pytest.raises(TokenizerError, match="regular file"):
+        verify_pipeline_artifacts(output)
+
+
 def test_replay_recomputes_token_counts_and_compression_from_shards(tmp_path):
     output = _publish(tmp_path)
 

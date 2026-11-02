@@ -49,8 +49,13 @@ def verify_pipeline_artifacts(directory: Path) -> dict:
     """Verify report seal, safe inventory, shard hashes, rows, and coverage."""
     if not isinstance(directory, Path):
         raise TypeError("dataset directory must be pathlib.Path")
+    if not directory.is_dir() or directory.is_symlink():
+        raise TokenizerError("dataset artifact root must be a regular directory")
+    manifest_path = directory / "manifest.json"
+    if not manifest_path.is_file() or manifest_path.is_symlink():
+        raise TokenizerError("dataset manifest must be a regular file")
     report = _load_json(
-        _read_bounded(directory / "manifest.json", 4 * 1024 * 1024),
+        _read_bounded(manifest_path, 4 * 1024 * 1024),
         label="manifest",
     )
     expected = {
@@ -108,6 +113,9 @@ def verify_pipeline_artifacts(directory: Path) -> dict:
             ):
                 raise TokenizerError("dataset shard path is invalid")
             expected_files.add(name)
+            shard_path = directory / name
+            if not shard_path.is_file() or shard_path.is_symlink():
+                raise TokenizerError("dataset shard must be a regular file")
             artifact_bytes = descriptor["artifact_bytes"]
             if (
                 type(descriptor["documents"]) is not int
@@ -119,7 +127,7 @@ def verify_pipeline_artifacts(directory: Path) -> dict:
                 or not _is_sha256(descriptor["sha256"])
             ):
                 raise TokenizerError("dataset shard byte budget is invalid")
-            payload = _read_bounded(directory / name, artifact_bytes)
+            payload = _read_bounded(shard_path, artifact_bytes)
             if (
                 len(payload) != artifact_bytes
                 or sha256(payload).hexdigest() != descriptor["sha256"]
@@ -160,8 +168,12 @@ def verify_pipeline_artifacts(directory: Path) -> dict:
             document_count += len(rows)
         if document_count != partition["documents"]:
             raise TokenizerError("dataset partition document count mismatch")
-    actual_files = {path.name for path in directory.iterdir() if path.is_file()}
-    if actual_files != expected_files:
+    entries = tuple(directory.iterdir())
+    actual_files = {path.name for path in entries}
+    if (
+        any(not path.is_file() or path.is_symlink() for path in entries)
+        or actual_files != expected_files
+    ):
         raise TokenizerError("dataset artifact inventory mismatch")
     return report
 
