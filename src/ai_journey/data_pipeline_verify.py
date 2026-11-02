@@ -10,6 +10,14 @@ from .tokenizer_io import tokenizer_fingerprint, tokenizer_from_state
 from .tokenizer_metrics import compression_metrics
 
 
+def _is_sha256(value) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
 def _unique_object(pairs):
     result = {}
     for key, value in pairs:
@@ -62,8 +70,7 @@ def verify_pipeline_artifacts(directory: Path) -> dict:
         or set(report) != expected
         or type(report["schema_version"]) is not int
         or report["schema_version"] != 1
-        or not isinstance(report["report_sha256"], str)
-        or len(report["report_sha256"]) != 64
+        or not _is_sha256(report["report_sha256"])
     ):
         raise TokenizerError("dataset manifest fields are invalid")
     sealed = {key: value for key, value in report.items() if key != "report_sha256"}
@@ -77,6 +84,8 @@ def verify_pipeline_artifacts(directory: Path) -> dict:
     for partition_name, partition in partitions.items():
         if not isinstance(partition, dict) or set(partition) != {"documents", "shards"}:
             raise TokenizerError("dataset partition fields are invalid")
+        if type(partition["documents"]) is not int or partition["documents"] < 1:
+            raise TokenizerError("dataset partition document count is invalid")
         shards = partition["shards"]
         if not isinstance(shards, list) or not shards:
             raise TokenizerError("dataset partition requires nonempty shards")
@@ -101,8 +110,13 @@ def verify_pipeline_artifacts(directory: Path) -> dict:
             expected_files.add(name)
             artifact_bytes = descriptor["artifact_bytes"]
             if (
-                type(artifact_bytes) is not int
+                type(descriptor["documents"]) is not int
+                or descriptor["documents"] < 1
+                or type(descriptor["utf8_text_bytes"]) is not int
+                or descriptor["utf8_text_bytes"] < 1
+                or type(artifact_bytes) is not int
                 or not 1 <= artifact_bytes <= 16 * 1024 * 1024
+                or not _is_sha256(descriptor["sha256"])
             ):
                 raise TokenizerError("dataset shard byte budget is invalid")
             payload = _read_bounded(directory / name, artifact_bytes)
@@ -136,8 +150,7 @@ def verify_pipeline_artifacts(directory: Path) -> dict:
                     or not row["text"]
                     or not isinstance(row["source"], str)
                     or not row["source"]
-                    or not isinstance(row["source_sha256"], str)
-                    or len(row["source_sha256"]) != 64
+                    or not _is_sha256(row["source_sha256"])
                 ):
                     raise TokenizerError("dataset shard row values are invalid")
                 seen_ids.add(identity)
