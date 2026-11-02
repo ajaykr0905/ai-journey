@@ -796,3 +796,52 @@ jobs:
             ${{ runner.temp }}/capacity-evidence/
             ${{ runner.temp }}/capacity-dist/
           if-no-files-found: error
+  data-pipeline-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU runtime and pinned verification tools
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check deterministic data pipeline contracts
+        run: |
+          ruff check src/ai_journey/data_*.py src/ai_journey/tokenizer_io.py tests/test_data_*.py
+          ruff format --check src/ai_journey/data_*.py src/ai_journey/tokenizer_io.py tests/test_data_*.py
+          python -m compileall -q src tests
+          python -m pytest -q tests/test_data_*.py tests/test_bpe_io.py tests/test_tokenizer_metrics.py tests/test_tokenizer_sources.py tests/test_tokenizer_training.py
+      - name: Build and install an isolated data pipeline wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/data-pipeline-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/data-pipeline-installed" "$RUNNER_TEMP"/data-pipeline-dist/*.whl
+      - name: Fetch immutable public English PUD snapshot
+        run: |
+          curl --fail --location --retry 2 --max-time 60 https://raw.githubusercontent.com/UniversalDependencies/UD_English-PUD/6e328e8195c04a297c1e375d21fe663be1ce6178/en_pud-ud-test.conllu --output "$RUNNER_TEMP/en_pud-ud-test.conllu"
+      - name: Build verify and accept installed public dataset evidence
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/data-pipeline-installed
+        run: |
+          export PATH="$RUNNER_TEMP/data-pipeline-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/data-pipeline-installed/")'
+          ai-journey-data-pipeline build --snapshot "$RUNNER_TEMP/en_pud-ud-test.conllu" --config "$GITHUB_WORKSPACE/config/day-59-data-pipeline.json" --output "$RUNNER_TEMP/data-pipeline-evidence"
+          ai-journey-data-pipeline verify --dataset "$RUNNER_TEMP/data-pipeline-evidence"
+          ai-journey-data-pipeline accept --dataset "$RUNNER_TEMP/data-pipeline-evidence" --contract "$GITHUB_WORKSPACE/config/day-59-data-pipeline-acceptance.json" --config "$GITHUB_WORKSPACE/config/day-59-data-pipeline.json" --snapshot "$RUNNER_TEMP/en_pud-ud-test.conllu"
+      - name: Retain public dataset evidence and installed package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-pipeline-cpu-evidence
+          path: |
+            ${{ runner.temp }}/data-pipeline-evidence/
+            ${{ runner.temp }}/data-pipeline-dist/
+          if-no-files-found: error
