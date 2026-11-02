@@ -99,3 +99,38 @@ def test_cli_rejects_output_alias_before_reading_the_source(tmp_path, monkeypatc
         )
 
     assert called is False
+
+
+def test_cli_enforces_acceptance_contract_and_prints_observed_compression(
+    tmp_path, monkeypatch, capsys
+):
+    accepted = {"total_tokens": 40, "total_utf8_bytes": 100}
+    monkeypatch.setattr(
+        "ai_journey.data_pipeline_cli.verify_pipeline_acceptance",
+        lambda *_args: accepted,
+    )
+
+    assert (
+        main(
+            [
+                "accept",
+                "--dataset",
+                str(tmp_path / "dataset"),
+                "--contract",
+                str(tmp_path / "contract"),
+                "--config",
+                str(tmp_path / "config"),
+                "--snapshot",
+                str(tmp_path / "source"),
+            ]
+        )
+        == 0
+    )
+
+    summary = json.loads(capsys.readouterr().out)
+    assert summary == {
+        "bytes_per_token": 2.5,
+        "token_reduction_fraction": 0.6,
+        "total_tokens": 40,
+        "total_utf8_bytes": 100,
+    }
