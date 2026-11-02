@@ -64,6 +64,14 @@ def _restore(state):
     )
 
 
+def tokenizer_from_state(state):
+    """Restore a validated in-memory tokenizer state without file I/O."""
+    tokenizer = _restore(state)
+    if tokenizer_state(tokenizer) != state:
+        raise TokenizerError("tokenizer state is not canonical")
+    return tokenizer
+
+
 def save_tokenizer(path: Path, tokenizer) -> None:
     # Publication uses the shared durable writer; identity does not load models.
     from .serving_benchmark import _publish
@@ -105,7 +113,7 @@ def load_tokenizer(path: Path):
         raise TokenizerError("tokenizer checkpoint fields are invalid")
     if type(payload["schema_version"]) is not int or payload["schema_version"] != 1:
         raise TokenizerError("unsupported tokenizer checkpoint version")
-    tokenizer = _restore(payload["state"])
+    tokenizer = tokenizer_from_state(payload["state"])
     if tokenizer_fingerprint(tokenizer) != payload["sha256"]:
         raise TokenizerError("tokenizer checkpoint fingerprint mismatch")
     return tokenizer
