@@ -845,3 +845,47 @@ jobs:
             ${{ runner.temp }}/data-pipeline-evidence/
             ${{ runner.temp }}/data-pipeline-dist/
           if-no-files-found: error
+  scaling-plan-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install pinned verification tools
+        run: |
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check analytical scaling plan contracts
+        run: |
+          ruff check src/ai_journey/scaling_*.py tests/test_scaling_*.py
+          ruff format --check src/ai_journey/scaling_*.py tests/test_scaling_*.py
+          python -m compileall -q src tests
+          python -m pytest -q tests/test_scaling_*.py
+      - name: Build and install an isolated scaling planner wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/scaling-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/scaling-installed" "$RUNNER_TEMP"/scaling-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/scaling-evidence"
+      - name: Build and independently verify installed analytical evidence
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/scaling-installed
+        run: |
+          export PATH="$RUNNER_TEMP/scaling-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/scaling-installed/")'
+          ai-journey-scaling build --protocol "$GITHUB_WORKSPACE/config/day-60-scaling-plan.json" --output "$RUNNER_TEMP/scaling-evidence/report.json"
+          ai-journey-scaling verify --report "$RUNNER_TEMP/scaling-evidence/report.json"
+      - name: Retain analytical scaling evidence and installed package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scaling-plan-evidence
+          path: |
+            ${{ runner.temp }}/scaling-evidence/
+            ${{ runner.temp }}/scaling-dist/
+          if-no-files-found: error
