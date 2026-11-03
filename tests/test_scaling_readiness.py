@@ -13,6 +13,7 @@ def test_readiness_requires_every_operational_scaling_layer():
     )
     expected = {
         "config/day-60-scaling-plan.json",
+        "docs/scaling-law-planning.md",
         "src/ai_journey/scaling_laws.py",
         "src/ai_journey/scaling_budget.py",
         "src/ai_journey/scaling_schedule.py",
@@ -23,6 +24,7 @@ def test_readiness_requires_every_operational_scaling_layer():
         "src/ai_journey/scaling_io.py",
         "src/ai_journey/scaling_cli.py",
         "tests/test_scaling_ci_contract.py",
+        "tests/test_scaling_docs.py",
         "tests/test_scaling_readiness.py",
     }
 

@@ -1,6 +1,7 @@
 {
   "required_files": [
     "config/day-60-scaling-plan.json",
+    "docs/scaling-law-planning.md",
     "src/ai_journey/scaling_laws.py",
     "src/ai_journey/scaling_budget.py",
     "src/ai_journey/scaling_schedule.py",
@@ -22,6 +23,7 @@
     "tests/test_scaling_config.py",
     "tests/test_scaling_package.py",
     "tests/test_scaling_ci_contract.py",
+    "tests/test_scaling_docs.py",
     "tests/test_scaling_readiness.py",
     "config/day-59-data-pipeline.json",
     "config/day-59-data-pipeline-acceptance.json",

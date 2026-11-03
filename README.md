@@ -1,7 +1,7 @@
 # AI Journey: Reproducible Transformer Training and Serving Lab
 
 This repository is a public-safe, executable record of an added setup day plus the
-selected verified code through Day 59 of a 90-day AI engineering learning plan. It combines
+selected verified code through Day 60 of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -16,6 +16,10 @@ then grow these exercises into production-quality training and inference project
 
 ## What is included
 
+- A preregistered 100M-parameter scaling plan with exact token and 6ND compute
+  targets, optimizer-step alignment, corpus-reuse warnings, IsoFLOP allocation,
+  sealed replay, installed CI verification, and explicit non-execution boundaries
+  in the [scaling-law planning guide](docs/scaling-law-planning.md)
 - A checksum-pinned public-data build with deterministic cleaning, explainable
   quality rejection, deduplication, leakage-safe splits, balanced shards,
   train-only BPE compression evidence, atomic publication, independent replay,
@@ -472,6 +476,7 @@ do not reinterpret the pinned assumptions as observations of local hardware.
 | 51 | 2026-10-25 | Exact transformer parameter, FLOP, memory, sharding, runtime, and cost planning |
 | 55 | 2026-10-29 | Reproducible roofline analysis and distributed capacity, sharding, and checkpoint planning |
 | 57 | 2026-10-31 | Exact ZeRO stage planning and executed CPU/Gloo collective conformance |
+| 60 | 2026-11-03 | Analytical Chinchilla target, IsoFLOP allocation, corpus sufficiency, and sealed replay |
 
 ## License
 
