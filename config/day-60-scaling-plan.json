@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "name": "day-60-100m-chinchilla-plan",
+  "parameter_count": 100000000,
+  "tokens_per_parameter": "20",
+  "training_flops_per_parameter_token": "6",
+  "unique_train_tokens": 69626,
+  "batch": {
+    "sequence_length": 2048,
+    "micro_batch_size": 2,
+    "gradient_accumulation_steps": 4,
+    "data_parallel_size": 8
+  },
+  "maximum_overshoot_fraction": 0.0001,
+  "isoflop_parameter_counts": [50000000, 100000000, 200000000]
+}
