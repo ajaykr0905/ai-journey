@@ -40,7 +40,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "verified_scaling="
             f"{report['integrity']['digest']} "
             f"parameters={report['protocol']['parameter_count']} "
-            f"tokens={report['target']['tokens']} measured=false"
+            f"tokens={report['target']['tokens']} "
+            f"corpus_admitted={str(report['corpus_admission']['admitted']).lower()} "
+            "measured=false"
         )
         return 0
     if _paths_alias(args.protocol, args.output):
@@ -52,7 +54,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "scaling_report="
         f"{report['integrity']['digest']} "
         f"parameters={report['protocol']['parameter_count']} "
-        f"tokens={report['target']['tokens']} measured=false"
+        f"tokens={report['target']['tokens']} "
+        f"corpus_admitted={str(report['corpus_admission']['admitted']).lower()} "
+        "measured=false"
     )
     return 0
 

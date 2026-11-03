@@ -21,11 +21,13 @@ def test_scaling_cli_builds_and_verifies_a_sealed_report(tmp_path, capsys):
     assert report["integrity"]["digest"] in built
     assert "parameters=100000000" in built
     assert "tokens=2000000000" in built
+    assert "corpus_admitted=false" in built
     assert "measured=false" in built
 
     assert main(["verify", "--report", str(report_path)]) == 0
     verified = capsys.readouterr().out
     assert report["integrity"]["digest"] in verified
+    assert "corpus_admitted=false" in verified
 
 
 def test_scaling_cli_preserves_protocol_when_output_aliases_it(tmp_path):

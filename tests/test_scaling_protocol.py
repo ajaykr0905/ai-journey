@@ -30,6 +30,10 @@ def payload():
             "accelerator_count": 2,
             "hourly_cost_per_accelerator": "3.50",
         },
+        "corpus_policy": {
+            "maximum_epochs": "2",
+            "minimum_distinct_token_fraction": "0.5",
+        },
     }
 
 
@@ -87,4 +91,14 @@ def test_protocol_rejects_unknown_runtime_controls(tmp_path):
     path.write_text(json.dumps(data))
 
     with pytest.raises(ScalingLawError, match="runtime fields"):
+        load_scaling_protocol(path)
+
+
+def test_protocol_rejects_unknown_corpus_policy_controls(tmp_path):
+    data = payload()
+    data["corpus_policy"]["override"] = True
+    path = tmp_path / "corpus-policy.json"
+    path.write_text(json.dumps(data))
+
+    with pytest.raises(ScalingLawError, match="corpus policy fields"):
         load_scaling_protocol(path)

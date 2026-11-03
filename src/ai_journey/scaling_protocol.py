@@ -7,6 +7,7 @@ import json
 import math
 from pathlib import Path
 
+from .scaling_admission import CorpusAdmissionPolicy, assess_corpus_admission
 from .scaling_budget import build_isoflop_sweep
 from .scaling_corpus import plan_corpus_reuse
 from .scaling_laws import ComputeOptimalTarget, ScalingLawError, _positive_integer
@@ -40,6 +41,7 @@ class ScalingProtocol:
     maximum_overshoot_fraction: float
     isoflop_parameter_counts: tuple[int, ...]
     runtime: RuntimeAssumptions
+    corpus_policy: CorpusAdmissionPolicy
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
@@ -62,10 +64,11 @@ class ScalingProtocol:
             align_token_target(target.token_target, self.batch),
             maximum_fraction=self.maximum_overshoot_fraction,
         )
-        plan_corpus_reuse(
+        reuse = plan_corpus_reuse(
             target_tokens=target.token_target,
             unique_train_tokens=self.unique_train_tokens,
         )
+        assess_corpus_admission(reuse, self.corpus_policy)
         build_isoflop_sweep(
             compute_budget_flops=target.training_flops,
             parameter_counts=self.isoflop_parameter_counts,
@@ -99,6 +102,7 @@ def load_scaling_protocol(path: Path) -> ScalingProtocol:
             "maximum_overshoot_fraction",
             "isoflop_parameter_counts",
             "runtime",
+            "corpus_policy",
         }
         if not isinstance(data, dict) or set(data) != expected:
             raise ScalingLawError("scaling protocol fields are invalid")
@@ -122,6 +126,12 @@ def load_scaling_protocol(path: Path) -> ScalingProtocol:
             "hourly_cost_per_accelerator",
         }:
             raise ScalingLawError("scaling runtime fields are invalid")
+        corpus_policy = data["corpus_policy"]
+        if not isinstance(corpus_policy, dict) or set(corpus_policy) != {
+            "maximum_epochs",
+            "minimum_distinct_token_fraction",
+        }:
+            raise ScalingLawError("scaling corpus policy fields are invalid")
         return ScalingProtocol(
             name=data["name"],
             parameter_count=data["parameter_count"],
@@ -134,6 +144,7 @@ def load_scaling_protocol(path: Path) -> ScalingProtocol:
             maximum_overshoot_fraction=data["maximum_overshoot_fraction"],
             isoflop_parameter_counts=tuple(sizes),
             runtime=RuntimeAssumptions(**runtime),
+            corpus_policy=CorpusAdmissionPolicy(**corpus_policy),
         )
     except ScalingLawError:
         raise

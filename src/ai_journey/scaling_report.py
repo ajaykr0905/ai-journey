@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from decimal import Decimal
 
+from .scaling_admission import assess_corpus_admission
 from .scaling_budget import (
     build_isoflop_sweep,
     closest_compute_optimal_candidate,
@@ -51,6 +52,7 @@ def build_scaling_report(protocol: ScalingProtocol) -> dict[str, object]:
     )
     selected = closest_compute_optimal_candidate(candidates)
     runtime = estimate_runtime_and_cost(target.training_flops, protocol.runtime)
+    admission = assess_corpus_admission(corpus, protocol.corpus_policy)
     return _json_value(
         {
             "schema_version": 1,
@@ -68,6 +70,7 @@ def build_scaling_report(protocol: ScalingProtocol) -> dict[str, object]:
                 "maximum_overshoot_fraction": (protocol.maximum_overshoot_fraction),
                 "isoflop_parameter_counts": list(protocol.isoflop_parameter_counts),
                 "runtime": asdict(protocol.runtime),
+                "corpus_policy": asdict(protocol.corpus_policy),
             },
             "target": {
                 "tokens": target.token_target,
@@ -83,6 +86,7 @@ def build_scaling_report(protocol: ScalingProtocol) -> dict[str, object]:
             "isoflop_candidates": [asdict(row) for row in candidates],
             "selected_isoflop_parameter_count": selected.parameter_count,
             "runtime_estimate": asdict(runtime),
+            "corpus_admission": asdict(admission),
             "evidence_boundaries": {
                 "analytical_only": True,
                 "training_executed": False,

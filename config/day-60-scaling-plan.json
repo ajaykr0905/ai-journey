@@ -17,5 +17,9 @@
     "sustained_flops_per_second": "100000000000000",
     "accelerator_count": 2,
     "hourly_cost_per_accelerator": "3.50"
+  },
+  "corpus_policy": {
+    "maximum_epochs": "2",
+    "minimum_distinct_token_fraction": "0.5"
   }
 }

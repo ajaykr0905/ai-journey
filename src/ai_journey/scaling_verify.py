@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 
+from .scaling_admission import CorpusAdmissionPolicy
 from .scaling_laws import ScalingLawError
 from .scaling_protocol import ScalingProtocol
 from .scaling_report import build_scaling_report
@@ -56,6 +57,7 @@ def _protocol_from_report(report: dict[str, object]) -> ScalingProtocol:
             maximum_overshoot_fraction=raw["maximum_overshoot_fraction"],
             isoflop_parameter_counts=tuple(raw["isoflop_parameter_counts"]),
             runtime=RuntimeAssumptions(**raw["runtime"]),
+            corpus_policy=CorpusAdmissionPolicy(**raw["corpus_policy"]),
         )
     except (KeyError, TypeError, ScalingLawError) as error:
         raise ScalingLawError("invalid scaling report protocol") from error

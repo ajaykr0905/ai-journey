@@ -1,3 +1,4 @@
+from ai_journey.scaling_admission import CorpusAdmissionPolicy
 from ai_journey.scaling_protocol import ScalingProtocol
 from ai_journey.scaling_report import build_scaling_report
 from ai_journey.scaling_runtime import RuntimeAssumptions
@@ -15,6 +16,7 @@ def make_protocol():
         maximum_overshoot_fraction=0.0001,
         isoflop_parameter_counts=(50_000_000, 100_000_000, 200_000_000),
         runtime=RuntimeAssumptions("100000000000000", 2, "3.50"),
+        corpus_policy=CorpusAdmissionPolicy("2", "0.5"),
     )
 
 
@@ -39,6 +41,8 @@ def test_report_reconciles_target_schedule_corpus_and_isoflop_rows():
     ]
     assert report["runtime_estimate"]["seconds"] == "6000"
     assert report["runtime_estimate"]["monetary_cost"].startswith("11.666666666666")
+    assert report["corpus_admission"]["admitted"] is False
+    assert len(report["corpus_admission"]["reasons"]) == 2
 
 
 def test_report_serializes_decimal_fields_without_binary_float_drift():

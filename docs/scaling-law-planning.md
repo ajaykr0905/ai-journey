@@ -33,6 +33,12 @@ that tiny fixture would require 28,724 complete passes plus 62,776 tokens from a
 final pass. That extreme reuse is a warning, not a recommendation to train the
 model or a claim that this corpus is suitable for a 100M-parameter run.
 
+The checked-in corpus policy permits at most two epochs and requires at least
+half of the target tokens to be distinct. The Day 59 fixture violates both
+controls, so the sealed report records `corpus_admitted=false`. The command still
+builds the report so the blocked scenario remains inspectable; it does not turn
+the fixture into an authorized training input.
+
 The runtime block is also declared, not observed: two accelerators at 100 TFLOP/s
 sustained per accelerator and $3.50 per accelerator-hour. Those assumptions imply
 6,000 seconds, 3.333 recurring accelerator-hours, and $11.666 recurring cost.
