@@ -54,6 +54,13 @@ declared 20-token ratio. This planning comparison is not an empirical loss curve
 and does not establish that the Chinchilla convention transfers to
 this model, tokenizer, corpus, or hardware.
 
+The `scaling_fit` module can fit `y = coefficient × x^exponent` to at least three
+positive observations in log space. It reports the fitted coefficient, exponent,
+log-space R², observation count, and observed x-range. This simple fit has no
+irreducible-loss offset. Extrapolated predictions therefore remain hypotheses,
+especially outside the recorded x-range, and are not part of the pinned Day 60
+report because this repository has no qualifying measured sweep yet.
+
 ## Evidence and recovery contract
 
 The loader rejects unknown, duplicate, oversized, and invalid protocol fields.

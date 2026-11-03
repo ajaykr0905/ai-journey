@@ -23,3 +23,5 @@ def test_scaling_guide_states_analytical_and_learner_boundaries():
     assert "No GPU" in guide
     assert "Ajay must separately confirm" in guide
     assert "invalid input leaves an existing" in guide
+    assert "log-space R²" in guide
+    assert "no qualifying measured sweep" in guide
