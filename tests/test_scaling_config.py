@@ -19,6 +19,8 @@ def test_checked_in_day60_plan_sizes_the_100m_model_without_execution_claims():
     assert report["corpus"]["full_epochs"] == 28_724
     assert report["evidence_boundaries"]["training_executed"] is False
     assert report["evidence_boundaries"]["gpu_executed"] is False
+    assert report["runtime_estimate"]["seconds"] == "6000"
+    assert report["runtime_estimate"]["accelerator_hours"].startswith("3.333333333333")
 
 
 def test_checked_in_day60_isoflop_grid_contains_the_declared_optimum():

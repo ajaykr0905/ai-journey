@@ -25,6 +25,11 @@ def payload():
         },
         "maximum_overshoot_fraction": 0.0001,
         "isoflop_parameter_counts": [50_000_000, 100_000_000, 200_000_000],
+        "runtime": {
+            "sustained_flops_per_second": "100000000000000",
+            "accelerator_count": 2,
+            "hourly_cost_per_accelerator": "3.50",
+        },
     }
 
 
@@ -72,4 +77,14 @@ def test_protocol_rejects_excessive_or_unfunded_inputs(tmp_path):
     data["maximum_overshoot_fraction"] = 0
     path.write_text(json.dumps(data))
     with pytest.raises(ScalingLawError, match="overshoot"):
+        load_scaling_protocol(path)
+
+
+def test_protocol_rejects_unknown_runtime_controls(tmp_path):
+    data = payload()
+    data["runtime"]["measured"] = True
+    path = tmp_path / "runtime.json"
+    path.write_text(json.dumps(data))
+
+    with pytest.raises(ScalingLawError, match="runtime fields"):
         load_scaling_protocol(path)

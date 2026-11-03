@@ -33,6 +33,12 @@ that tiny fixture would require 28,724 complete passes plus 62,776 tokens from a
 final pass. That extreme reuse is a warning, not a recommendation to train the
 model or a claim that this corpus is suitable for a 100M-parameter run.
 
+The runtime block is also declared, not observed: two accelerators at 100 TFLOP/s
+sustained per accelerator and $3.50 per accelerator-hour. Those assumptions imply
+6,000 seconds, 3.333 recurring accelerator-hours, and $11.666 recurring cost.
+They are an arithmetic scenario for budgeting and must be replaced with quoted
+prices and measured sustained throughput before approving a real run.
+
 ## IsoFLOP interpretation
 
 The 1.2e18-FLOP budget is allocated to 50M, 100M, and 200M parameter candidates.

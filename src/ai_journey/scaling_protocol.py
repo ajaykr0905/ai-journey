@@ -10,6 +10,7 @@ from pathlib import Path
 from .scaling_budget import build_isoflop_sweep
 from .scaling_corpus import plan_corpus_reuse
 from .scaling_laws import ComputeOptimalTarget, ScalingLawError, _positive_integer
+from .scaling_runtime import RuntimeAssumptions, estimate_runtime_and_cost
 from .scaling_schedule import (
     TrainingBatchGeometry,
     align_token_target,
@@ -38,6 +39,7 @@ class ScalingProtocol:
     batch: TrainingBatchGeometry
     maximum_overshoot_fraction: float
     isoflop_parameter_counts: tuple[int, ...]
+    runtime: RuntimeAssumptions
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
@@ -72,6 +74,7 @@ class ScalingProtocol:
                 self.training_flops_per_parameter_token
             ),
         )
+        estimate_runtime_and_cost(target.training_flops, self.runtime)
 
 
 def load_scaling_protocol(path: Path) -> ScalingProtocol:
@@ -95,6 +98,7 @@ def load_scaling_protocol(path: Path) -> ScalingProtocol:
             "batch",
             "maximum_overshoot_fraction",
             "isoflop_parameter_counts",
+            "runtime",
         }
         if not isinstance(data, dict) or set(data) != expected:
             raise ScalingLawError("scaling protocol fields are invalid")
@@ -111,6 +115,13 @@ def load_scaling_protocol(path: Path) -> ScalingProtocol:
         sizes = data["isoflop_parameter_counts"]
         if not isinstance(sizes, list):
             raise ScalingLawError("isoflop_parameter_counts must be a list")
+        runtime = data["runtime"]
+        if not isinstance(runtime, dict) or set(runtime) != {
+            "sustained_flops_per_second",
+            "accelerator_count",
+            "hourly_cost_per_accelerator",
+        }:
+            raise ScalingLawError("scaling runtime fields are invalid")
         return ScalingProtocol(
             name=data["name"],
             parameter_count=data["parameter_count"],
@@ -122,6 +133,7 @@ def load_scaling_protocol(path: Path) -> ScalingProtocol:
             batch=TrainingBatchGeometry(**batch),
             maximum_overshoot_fraction=data["maximum_overshoot_fraction"],
             isoflop_parameter_counts=tuple(sizes),
+            runtime=RuntimeAssumptions(**runtime),
         )
     except ScalingLawError:
         raise

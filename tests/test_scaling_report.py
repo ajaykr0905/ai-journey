@@ -1,5 +1,6 @@
 from ai_journey.scaling_protocol import ScalingProtocol
 from ai_journey.scaling_report import build_scaling_report
+from ai_journey.scaling_runtime import RuntimeAssumptions
 from ai_journey.scaling_schedule import TrainingBatchGeometry
 
 
@@ -13,6 +14,7 @@ def make_protocol():
         batch=TrainingBatchGeometry(2_048, 2, 4, 8),
         maximum_overshoot_fraction=0.0001,
         isoflop_parameter_counts=(50_000_000, 100_000_000, 200_000_000),
+        runtime=RuntimeAssumptions("100000000000000", 2, "3.50"),
     )
 
 
@@ -35,6 +37,8 @@ def test_report_reconciles_target_schedule_corpus_and_isoflop_rows():
         100_000_000,
         200_000_000,
     ]
+    assert report["runtime_estimate"]["seconds"] == "6000"
+    assert report["runtime_estimate"]["monetary_cost"].startswith("11.666666666666")
 
 
 def test_report_serializes_decimal_fields_without_binary_float_drift():

@@ -23,7 +23,9 @@ def test_readiness_requires_every_operational_scaling_layer():
         "src/ai_journey/scaling_verify.py",
         "src/ai_journey/scaling_io.py",
         "src/ai_journey/scaling_cli.py",
+        "src/ai_journey/scaling_runtime.py",
         "tests/test_scaling_ci_contract.py",
+        "tests/test_scaling_runtime.py",
         "tests/test_scaling_docs.py",
         "tests/test_scaling_readiness.py",
     }
