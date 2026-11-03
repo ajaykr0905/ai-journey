@@ -59,6 +59,52 @@ class IsoFLOPCandidate:
     absolute_ratio_error: Decimal
 
 
+@dataclass(frozen=True)
+class ComputeOptimalCapacity:
+    parameter_count: int
+    token_count: int
+    training_flops: int
+    unused_flops: int
+
+
+def compute_optimal_capacity(
+    *,
+    compute_budget_flops: int,
+    tokens_per_parameter: int | float | str = "20",
+    training_flops_per_parameter_token: int | float | str = "6",
+) -> ComputeOptimalCapacity:
+    """Find the largest whole model at the declared token ratio within a budget."""
+
+    budget = _positive_integer(compute_budget_flops, "compute_budget_flops")
+    ratio = _positive_decimal(tokens_per_parameter, "tokens_per_parameter")
+    convention = _positive_decimal(
+        training_flops_per_parameter_token,
+        "training_flops_per_parameter_token",
+    )
+    parameters = int(
+        (Decimal(budget) / (ratio * convention))
+        .sqrt()
+        .to_integral_value(rounding=ROUND_FLOOR)
+    )
+    if parameters < 1:
+        raise ScalingLawError("compute budget cannot fund one parameter at the ratio")
+    while parameters:
+        target = ComputeOptimalTarget(
+            parameters,
+            tokens_per_parameter=tokens_per_parameter,
+            training_flops_per_parameter_token=training_flops_per_parameter_token,
+        )
+        if target.training_flops <= budget:
+            return ComputeOptimalCapacity(
+                parameter_count=parameters,
+                token_count=target.token_target,
+                training_flops=target.training_flops,
+                unused_flops=budget - target.training_flops,
+            )
+        parameters -= 1
+    raise ScalingLawError("compute budget cannot fund one parameter at the ratio")
+
+
 def build_isoflop_sweep(
     *,
     compute_budget_flops: int,

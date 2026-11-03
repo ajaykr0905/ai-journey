@@ -5,6 +5,7 @@ import pytest
 from ai_journey.scaling_budget import (
     build_isoflop_sweep,
     closest_compute_optimal_candidate,
+    compute_optimal_capacity,
     parameter_capacity,
     token_capacity,
 )
@@ -50,3 +51,22 @@ def test_candidate_selector_rejects_empty_or_untyped_inputs():
         closest_compute_optimal_candidate(())
     with pytest.raises(TypeError, match="IsoFLOP"):
         closest_compute_optimal_candidate((object(),))
+
+
+def test_joint_capacity_finds_the_largest_model_at_the_declared_ratio():
+    capacity = compute_optimal_capacity(
+        compute_budget_flops=120_000,
+        tokens_per_parameter="20",
+    )
+
+    assert capacity.parameter_count == 31
+    assert capacity.token_count == 620
+    assert capacity.training_flops == 115_320
+    assert capacity.unused_flops == 4_680
+    larger = 32 * (32 * 20) * 6
+    assert larger > 120_000
+
+
+def test_joint_capacity_rejects_a_budget_below_one_complete_ratio():
+    with pytest.raises(ScalingLawError, match="cannot fund"):
+        compute_optimal_capacity(compute_budget_flops=100, tokens_per_parameter="20")
