@@ -148,3 +148,15 @@ def validate_observations(
             )
         previous_received = observation.timing.received_ns
     return observations
+
+
+def require_unique_observation_ids(
+    observations: tuple[RequestObservation, ...],
+) -> tuple[RequestObservation, ...]:
+    """Reject duplicate terminal records for the same scheduled request."""
+
+    validate_observations(observations)
+    request_ids = [observation.request_id for observation in observations]
+    if len(request_ids) != len(set(request_ids)):
+        raise ServingObservationError("observation request IDs must be unique")
+    return observations

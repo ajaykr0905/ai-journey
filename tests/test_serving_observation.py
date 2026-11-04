@@ -5,6 +5,7 @@ from ai_journey.serving_observation import (
     RequestTiming,
     ServingObservationError,
     ServingOutcome,
+    require_unique_observation_ids,
     validate_observation_for_request,
     validate_observations,
 )
@@ -105,3 +106,14 @@ def test_observation_set_rejects_decreasing_receipt_times():
 
     with pytest.raises(ServingObservationError, match="ordered"):
         validate_observations((_observation("a"), earlier))
+
+
+def test_unique_observation_ids_accept_one_terminal_record_per_request():
+    observations = (_observation("a"), _observation("b"))
+
+    assert require_unique_observation_ids(observations) == observations
+
+
+def test_unique_observation_ids_reject_duplicate_terminal_records():
+    with pytest.raises(ServingObservationError, match="unique"):
+        require_unique_observation_ids((_observation("a"), _observation("a")))
