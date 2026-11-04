@@ -7,6 +7,7 @@ from ai_journey.serving_compare import (
     RegressionThresholds,
     ServingComparisonError,
     ServingSnapshot,
+    failures_within_threshold,
     goodput_within_threshold,
     throughput_within_threshold,
     ttft_within_threshold,
@@ -135,4 +136,13 @@ def test_goodput_comparison_uses_absolute_percentage_point_drop():
     )
     assert not goodput_within_threshold(
         _snapshot(), _snapshot(goodput=Fraction(889, 1000)), _thresholds()
+    )
+
+
+def test_failure_comparison_uses_absolute_percentage_point_increase():
+    assert failures_within_threshold(
+        _snapshot(), _snapshot(failure_rate=Fraction(2, 100)), _thresholds()
+    )
+    assert not failures_within_threshold(
+        _snapshot(), _snapshot(failure_rate=Fraction(21, 1000)), _thresholds()
     )

@@ -145,3 +145,19 @@ def goodput_within_threshold(
     if not isinstance(thresholds, RegressionThresholds):
         raise TypeError("thresholds must be RegressionThresholds")
     return candidate.goodput >= baseline.goodput - thresholds.max_goodput_drop
+
+
+def failures_within_threshold(
+    baseline: ServingSnapshot,
+    candidate: ServingSnapshot,
+    thresholds: RegressionThresholds,
+) -> bool:
+    """Return whether candidate failures stay inside the absolute tolerance."""
+
+    _require_comparable(baseline, candidate)
+    if not isinstance(thresholds, RegressionThresholds):
+        raise TypeError("thresholds must be RegressionThresholds")
+    return (
+        candidate.failure_rate
+        <= baseline.failure_rate + thresholds.max_failure_increase
+    )
