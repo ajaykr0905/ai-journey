@@ -40,6 +40,19 @@ class BatchStep:
     reserved_tokens: int
 
 
+def chunk_prefill(
+    request: InferenceRequest, *, max_chunk_tokens: int
+) -> tuple[int, ...]:
+    """Split one prompt into bounded prefill chunks without padding."""
+
+    if not isinstance(request, InferenceRequest):
+        raise TypeError("request must be InferenceRequest")
+    _positive_integer(max_chunk_tokens, "max_chunk_tokens")
+    full, remainder = divmod(request.prompt_tokens, max_chunk_tokens)
+    chunks = (max_chunk_tokens,) * full
+    return chunks + ((remainder,) if remainder else ())
+
+
 def simulate_continuous_batching(
     requests: tuple[InferenceRequest, ...],
     *,

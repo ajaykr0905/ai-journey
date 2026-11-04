@@ -1,6 +1,7 @@
 from ai_journey.inference_batching import (
     BatchStep,
     InferenceRequest,
+    chunk_prefill,
     simulate_continuous_batching,
 )
 
@@ -34,3 +35,16 @@ def test_waiting_request_is_admitted_after_resident_tokens_are_released():
     )
 
     assert [step.admitted for step in steps] == [("large",), (), ("next",)]
+
+
+def test_chunked_prefill_preserves_every_prompt_token_without_padding():
+    request = InferenceRequest("long", 0, 33, 4)
+
+    assert chunk_prefill(request, max_chunk_tokens=16) == (16, 16, 1)
+    assert sum(chunk_prefill(request, max_chunk_tokens=16)) == request.prompt_tokens
+
+
+def test_exact_prefill_chunk_does_not_add_an_empty_tail():
+    request = InferenceRequest("exact", 0, 32, 4)
+
+    assert chunk_prefill(request, max_chunk_tokens=16) == (16, 16)
