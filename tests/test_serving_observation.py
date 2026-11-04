@@ -1,6 +1,7 @@
 import pytest
 
 from ai_journey.serving_observation import (
+    RequestObservation,
     RequestTiming,
     ServingObservationError,
     ServingOutcome,
@@ -47,3 +48,29 @@ def test_request_timing_derives_queue_service_and_first_token_latency():
 
 def test_request_without_a_token_has_no_first_token_latency():
     assert RequestTiming(10, 20, None, 40).time_to_first_token_ns is None
+
+
+def _observation(request_id="request-1", outcome=ServingOutcome.SUCCESS):
+    return RequestObservation(
+        request_id=request_id,
+        outcome=outcome,
+        timing=RequestTiming(10, 20, 25, 40),
+        prompt_tokens=128,
+        generated_tokens=4 if outcome is ServingOutcome.SUCCESS else 0,
+        cache_hit=False,
+        retry_count=0,
+    )
+
+
+def test_request_observation_records_terminal_counters():
+    observation = _observation()
+
+    assert observation.generated_tokens == 4
+    assert observation.retry_count == 0
+
+
+def test_successful_observation_requires_generated_output():
+    values = vars(_observation()) | {"generated_tokens": 0}
+
+    with pytest.raises(ServingObservationError, match="generate"):
+        RequestObservation(**values)
