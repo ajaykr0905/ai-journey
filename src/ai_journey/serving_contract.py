@@ -54,6 +54,26 @@ class ModelIdentity:
 
 
 @dataclass(frozen=True)
+class HardwareManifest:
+    """Declare the actual accelerator topology available to a run."""
+
+    accelerator: str
+    device_count: int
+    memory_bytes_per_device: int
+    interconnect: str
+
+    def __post_init__(self) -> None:
+        for name in ("accelerator", "interconnect"):
+            _nonempty_text(getattr(self, name), name)
+        _positive_integer(self.device_count, "device_count")
+        _positive_integer(self.memory_bytes_per_device, "memory_bytes_per_device")
+
+    @property
+    def total_device_memory_bytes(self) -> int:
+        return self.device_count * self.memory_bytes_per_device
+
+
+@dataclass(frozen=True)
 class WorkloadShape:
     """Bound the request count, token demand, and client concurrency."""
 

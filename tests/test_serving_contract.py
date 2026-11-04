@@ -2,6 +2,7 @@ import pytest
 
 from ai_journey.serving_contract import (
     EngineIdentity,
+    HardwareManifest,
     ModelIdentity,
     ServingContractError,
     WorkloadShape,
@@ -70,3 +71,14 @@ def test_model_identity_pins_model_and_tokenizer_revisions():
 def test_model_identity_rejects_unbounded_parameter_counts():
     with pytest.raises(ServingContractError, match="positive"):
         ModelIdentity("org/model", "model-sha", "tokenizer-sha", 0)
+
+
+def test_hardware_manifest_computes_declared_total_device_memory():
+    manifest = HardwareManifest("NVIDIA H100", 2, 80 * 1024**3, "NVLink")
+
+    assert manifest.total_device_memory_bytes == 160 * 1024**3
+
+
+def test_hardware_manifest_rejects_zero_devices():
+    with pytest.raises(ServingContractError, match="device_count"):
+        HardwareManifest("CPU fixture", 0, 1024, "host memory")
