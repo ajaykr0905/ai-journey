@@ -11,6 +11,7 @@ from ai_journey.serving_analysis import (
     nearest_rank_percentile,
     output_throughput_per_second,
     retry_amplification,
+    successful_cache_hit_fraction,
     successful_ttft_summary,
 )
 from ai_journey.serving_observation import (
@@ -115,3 +116,18 @@ def test_retry_amplification_includes_initial_attempts():
     )
 
     assert retry_amplification(observations) == Fraction(2, 1)
+
+
+def test_cache_hit_fraction_excludes_failed_requests():
+    observations = (
+        _observation("a", cache_hit=True),
+        _observation("b", cache_hit=False),
+        _observation(
+            "c",
+            outcome=ServingOutcome.ERROR,
+            generated_tokens=0,
+            cache_hit=True,
+        ),
+    )
+
+    assert successful_cache_hit_fraction(observations) == Fraction(1, 2)

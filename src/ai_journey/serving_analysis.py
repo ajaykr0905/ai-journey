@@ -146,3 +146,19 @@ def retry_amplification(
         observation.retry_count for observation in observations
     )
     return Fraction(attempts, len(observations))
+
+
+def successful_cache_hit_fraction(
+    observations: tuple[RequestObservation, ...],
+) -> Fraction:
+    """Return cache hits among successful requests only."""
+
+    require_unique_observation_ids(observations)
+    successful = tuple(
+        observation
+        for observation in observations
+        if observation.outcome is ServingOutcome.SUCCESS
+    )
+    if not successful:
+        raise ServingAnalysisError("cache hit rate requires successful requests")
+    return Fraction(sum(item.cache_hit for item in successful), len(successful))
