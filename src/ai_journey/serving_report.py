@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from fractions import Fraction
+from hashlib import sha256
 
 from .serving_compare import ServingSnapshot
 from .serving_contract import ClaimBoundary
@@ -130,3 +131,23 @@ def canonical_serving_report_bytes(report: ServingEvidenceReport) -> bytes:
         ensure_ascii=False,
         allow_nan=False,
     ).encode("utf-8")
+
+
+@dataclass(frozen=True)
+class SealedServingReport:
+    """A serving report paired with its canonical content identity."""
+
+    report: ServingEvidenceReport
+    report_sha256: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.report, ServingEvidenceReport):
+            raise TypeError("report must be ServingEvidenceReport")
+        _require_sha256(self.report_sha256, "report_sha256")
+
+
+def seal_serving_report(report: ServingEvidenceReport) -> SealedServingReport:
+    """Seal one validated report with its canonical SHA-256 digest."""
+
+    digest = sha256(canonical_serving_report_bytes(report)).hexdigest()
+    return SealedServingReport(report=report, report_sha256=digest)

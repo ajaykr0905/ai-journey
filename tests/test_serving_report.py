@@ -7,9 +7,11 @@ from ai_journey.serving_compare import ComparisonKey, ServingSnapshot
 from ai_journey.serving_contract import ClaimBoundary
 from ai_journey.serving_report import (
     EvidenceReferences,
+    SealedServingReport,
     ServingEvidenceReport,
     ServingReportError,
     canonical_serving_report_bytes,
+    seal_serving_report,
     validate_reported_claims,
 )
 
@@ -108,3 +110,11 @@ def test_serving_report_serialization_preserves_exact_fractions():
     assert canonical_serving_report_bytes(_report()) == canonical_serving_report_bytes(
         _report()
     )
+
+
+def test_serving_report_seal_binds_canonical_content():
+    sealed = seal_serving_report(_report())
+
+    assert isinstance(sealed, SealedServingReport)
+    assert len(sealed.report_sha256) == 64
+    assert sealed == seal_serving_report(_report())
