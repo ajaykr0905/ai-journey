@@ -165,3 +165,32 @@ class WorkloadShape:
         return self.request_count * (
             self.prompt_tokens_per_request + self.output_tokens_per_request
         )
+
+
+@dataclass(frozen=True)
+class ServingRunContract:
+    """Aggregate every immutable input required to compare serving runs."""
+
+    protocol_version: int
+    workload: WorkloadShape
+    engine: EngineIdentity
+    model: ModelIdentity
+    hardware: HardwareManifest
+    software: SoftwareManifest
+    limits: RunLimits
+    claims: ClaimBoundary
+
+    def __post_init__(self) -> None:
+        _positive_integer(self.protocol_version, "protocol_version")
+        expected = {
+            "workload": WorkloadShape,
+            "engine": EngineIdentity,
+            "model": ModelIdentity,
+            "hardware": HardwareManifest,
+            "software": SoftwareManifest,
+            "limits": RunLimits,
+            "claims": ClaimBoundary,
+        }
+        for name, expected_type in expected.items():
+            if not isinstance(getattr(self, name), expected_type):
+                raise TypeError(f"{name} must be {expected_type.__name__}")

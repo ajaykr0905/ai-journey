@@ -7,6 +7,7 @@ from ai_journey.serving_contract import (
     ModelIdentity,
     RunLimits,
     ServingContractError,
+    ServingRunContract,
     SoftwareManifest,
     WorkloadShape,
 )
@@ -127,3 +128,31 @@ def test_claim_boundary_records_only_sorted_explicit_claims():
 def test_claim_boundary_rejects_unsupported_or_overstated_claims(kind, claims):
     with pytest.raises(ServingContractError):
         ClaimBoundary(kind, claims)
+
+
+def _run_contract():
+    return ServingRunContract(
+        protocol_version=1,
+        workload=WorkloadShape(8, 128, 32, 4),
+        engine=EngineIdentity("vllm", "0.12.0", "engine-sha"),
+        model=ModelIdentity("org/model", "model-sha", "tokenizer-sha", 7_000_000_000),
+        hardware=HardwareManifest("NVIDIA H100", 2, 80 * 1024**3, "NVLink"),
+        software=SoftwareManifest("Linux", "3.12", "torch 2.9", "CUDA 13"),
+        limits=RunLimits(300, 42),
+        claims=ClaimBoundary("measured_hardware", ("latency", "throughput")),
+    )
+
+
+def test_serving_run_contract_aggregates_all_immutable_inputs():
+    contract = _run_contract()
+
+    assert contract.protocol_version == 1
+    assert contract.workload.request_count == 8
+    assert contract.claims.execution_kind == "measured_hardware"
+
+
+def test_serving_run_contract_rejects_structurally_wrong_components():
+    values = vars(_run_contract()) | {"engine": "vllm"}
+
+    with pytest.raises(TypeError, match="EngineIdentity"):
+        ServingRunContract(**values)
