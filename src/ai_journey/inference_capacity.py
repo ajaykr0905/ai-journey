@@ -44,3 +44,35 @@ def maximum_resident_sequences(
         raise TypeError("layout must be KVCacheLayout")
     per_sequence = layout.total_bytes // layout.batch_size
     return budget.kv_bytes // per_sequence
+
+
+@dataclass(frozen=True)
+class CapacityDecision:
+    requested_tokens: int
+    requested_bytes: int
+    capacity_bytes: int
+    admitted: bool
+
+    @property
+    def remaining_bytes(self) -> int:
+        return self.capacity_bytes - self.requested_bytes if self.admitted else 0
+
+
+def admit_sequence_lengths(
+    budget: DeviceMemoryBudget,
+    layout: KVCacheLayout,
+    sequence_lengths: tuple[int, ...],
+) -> CapacityDecision:
+    """Admit a ragged live batch by its actual resident token count."""
+
+    if type(sequence_lengths) is not tuple or not sequence_lengths:
+        raise InferenceCapacityError("sequence_lengths must be a nonempty tuple")
+    for length in sequence_lengths:
+        _positive_integer(length, "sequence length")
+        if length > layout.context_tokens:
+            raise InferenceCapacityError("sequence length exceeds model context")
+    tokens = sum(sequence_lengths)
+    requested = tokens * layout.bytes_per_token_per_sequence
+    return CapacityDecision(
+        tokens, requested, budget.kv_bytes, requested <= budget.kv_bytes
+    )
