@@ -63,3 +63,16 @@ def grouped_query_cache_fraction(*, query_heads: int, kv_heads: int) -> Fraction
             "kv_heads must divide query_heads without exceeding it"
         )
     return Fraction(kv_heads, query_heads)
+
+
+def tensor_parallel_cache_bytes(layout: KVCacheLayout, world_size: int) -> int:
+    """Return per-rank KV bytes when cache heads are evenly tensor-sharded."""
+
+    if not isinstance(layout, KVCacheLayout):
+        raise TypeError("layout must be KVCacheLayout")
+    _positive_integer(world_size, "world_size")
+    if layout.kv_heads % world_size:
+        raise InferenceCapacityError(
+            "world_size must evenly shard the declared KV heads"
+        )
+    return layout.total_bytes // world_size

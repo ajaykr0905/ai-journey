@@ -6,6 +6,7 @@ from ai_journey.inference_kv import (
     InferenceCapacityError,
     KVCacheLayout,
     grouped_query_cache_fraction,
+    tensor_parallel_cache_bytes,
 )
 
 
@@ -33,6 +34,17 @@ def test_8_kv_head_gqa_reduces_the_7b_cache_to_64_gib():
 def test_grouped_query_cache_requires_an_exact_query_head_partition(kv_heads):
     with pytest.raises(InferenceCapacityError, match="divide"):
         grouped_query_cache_fraction(query_heads=32, kv_heads=kv_heads)
+
+
+def test_tensor_parallelism_evenly_shards_cache_heads_across_ranks():
+    layout = KVCacheLayout(32, 32, 128, 32_768, 16)
+
+    assert tensor_parallel_cache_bytes(layout, 8) == 32 * 1024**3
+
+
+def test_tensor_parallel_cache_rejects_fractional_head_ownership():
+    with pytest.raises(InferenceCapacityError, match="evenly"):
+        tensor_parallel_cache_bytes(KVCacheLayout(32, 8, 128, 1024, 1), 3)
 
 
 @pytest.mark.parametrize(
