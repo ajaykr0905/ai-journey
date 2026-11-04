@@ -5,6 +5,7 @@ from ai_journey.serving_observation import (
     RequestTiming,
     ServingObservationError,
     ServingOutcome,
+    canonical_observation_bytes,
     censored_observations,
     require_unique_observation_ids,
     validate_observation_for_request,
@@ -131,3 +132,10 @@ def test_censored_observations_preserve_every_non_success_outcome():
         "b",
         "c",
     ]
+
+
+def test_observation_serialization_is_canonical():
+    payload = canonical_observation_bytes((_observation("a"), _observation("b")))
+
+    assert payload.startswith(b'[{"cache_hit":false')
+    assert b'": ' not in payload

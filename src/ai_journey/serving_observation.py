@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from enum import Enum
 
 from .serving_trace import RequestSpec
@@ -173,3 +174,18 @@ def censored_observations(
         for observation in observations
         if observation.outcome is not ServingOutcome.SUCCESS
     )
+
+
+def canonical_observation_bytes(
+    observations: tuple[RequestObservation, ...],
+) -> bytes:
+    """Serialize ordered unique observations with stable JSON rules."""
+
+    require_unique_observation_ids(observations)
+    return json.dumps(
+        [asdict(observation) for observation in observations],
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
