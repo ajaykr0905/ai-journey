@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from fractions import Fraction
+from hashlib import sha256
 
 
 class ServingTraceError(ValueError):
@@ -198,3 +200,22 @@ def peak_arrivals_in_window(trace: tuple[RequestSpec, ...], window_ms: int) -> i
         active.append(request.arrival_ms)
         peak = max(peak, len(active))
     return peak
+
+
+def canonical_trace_bytes(trace: tuple[RequestSpec, ...]) -> bytes:
+    """Serialize an ordered trace without platform-dependent whitespace."""
+
+    validate_trace(trace)
+    return json.dumps(
+        [asdict(request) for request in trace],
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def serving_trace_digest(trace: tuple[RequestSpec, ...]) -> str:
+    """Return the stable identity of the exact scheduled request sequence."""
+
+    return sha256(canonical_trace_bytes(trace)).hexdigest()

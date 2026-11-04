@@ -7,9 +7,11 @@ from ai_journey.serving_trace import (
     ServingTraceError,
     arrival_rate_per_second,
     burst_trace,
+    canonical_trace_bytes,
     constant_rate_trace,
     offered_token_rate_per_second,
     peak_arrivals_in_window,
+    serving_trace_digest,
     slice_trace_window,
     split_warmup,
     validate_trace,
@@ -162,3 +164,12 @@ def test_peak_arrivals_counts_tied_bursts_inside_half_open_windows():
     )
 
     assert peak_arrivals_in_window(trace, 10) == 3
+
+
+def test_trace_digest_binds_order_schedule_and_token_demand():
+    trace = (_request("a", 0), _request("b", 10))
+    changed = (_request("a", 0), RequestSpec("b", 11, 128, 32, PROMPT_DIGEST))
+
+    assert canonical_trace_bytes(trace).startswith(b'[{"arrival_ms":0')
+    assert len(serving_trace_digest(trace)) == 64
+    assert serving_trace_digest(trace) != serving_trace_digest(changed)
