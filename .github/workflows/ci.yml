@@ -937,3 +937,38 @@ jobs:
             ${{ runner.temp }}/inference-evidence/
             ${{ runner.temp }}/inference-dist/
           if-no-files-found: error
+  serving-evidence-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install pinned verification tools
+        run: |
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check serving evidence contracts end to end
+        run: |
+          sources=(src/ai_journey/serving_analysis.py src/ai_journey/serving_compare.py src/ai_journey/serving_contract.py src/ai_journey/serving_evidence_cli.py src/ai_journey/serving_faults.py src/ai_journey/serving_observation.py src/ai_journey/serving_report.py src/ai_journey/serving_report_io.py src/ai_journey/serving_trace.py)
+          tests=(tests/test_serving_analysis.py tests/test_serving_compare.py tests/test_serving_contract.py tests/test_serving_evidence_cli.py tests/test_serving_evidence_integration.py tests/test_serving_faults.py tests/test_serving_observation.py tests/test_serving_report.py tests/test_serving_report_io.py tests/test_serving_trace.py)
+          ruff check "${sources[@]}" "${tests[@]}"
+          ruff format --check "${sources[@]}" "${tests[@]}"
+          python -m compileall -q "${sources[@]}" "${tests[@]}"
+          python -m pytest -q "${tests[@]}"
+      - name: Build and install isolated serving evidence wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/serving-evidence-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/serving-evidence-installed" "$RUNNER_TEMP"/serving-evidence-dist/*.whl
+      - name: Verify installed serving evidence command
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/serving-evidence-installed
+        run: |
+          export PATH="$RUNNER_TEMP/serving-evidence-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/serving-evidence-installed/")'
+          ai-journey-serving-evidence --help
