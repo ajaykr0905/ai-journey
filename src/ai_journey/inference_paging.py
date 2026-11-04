@@ -29,6 +29,41 @@ class PagedAdmission:
     admitted: bool
 
 
+@dataclass(frozen=True)
+class SharedPrefixAllocation:
+    logical_tokens: int
+    physical_tokens: int
+    saved_tokens: int
+    physical_bytes: int
+
+
+def plan_shared_prefix(
+    sequence_lengths: tuple[int, ...],
+    *,
+    shared_prefix_tokens: int,
+    bytes_per_token: int,
+) -> SharedPrefixAllocation:
+    """Charge one immutable prefix plus each request's private suffix."""
+
+    if type(sequence_lengths) is not tuple or not sequence_lengths:
+        raise InferenceCapacityError("sequence_lengths must be a nonempty tuple")
+    _positive_integer(shared_prefix_tokens, "shared_prefix_tokens")
+    _positive_integer(bytes_per_token, "bytes_per_token")
+    for length in sequence_lengths:
+        _positive_integer(length, "sequence length")
+        if length < shared_prefix_tokens:
+            raise InferenceCapacityError(
+                "shared prefix cannot exceed any sequence length"
+            )
+    logical = sum(sequence_lengths)
+    physical = shared_prefix_tokens + sum(
+        length - shared_prefix_tokens for length in sequence_lengths
+    )
+    return SharedPrefixAllocation(
+        logical, physical, logical - physical, physical * bytes_per_token
+    )
+
+
 def admit_paged_allocation(
     allocation: PagedAllocation, *, capacity_bytes: int
 ) -> PagedAdmission:

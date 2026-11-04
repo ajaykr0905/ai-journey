@@ -7,6 +7,7 @@ from ai_journey.inference_paging import (
     PagedAllocation,
     admit_paged_allocation,
     plan_paged_allocation,
+    plan_shared_prefix,
 )
 
 
@@ -48,3 +49,24 @@ def test_page_admission_charges_whole_blocks_instead_of_requested_tokens():
     assert not admit_paged_allocation(
         allocation, capacity_bytes=8 * 1024**2 - 1
     ).admitted
+
+
+def test_shared_prefix_is_charged_once_across_a_batch():
+    allocation = plan_shared_prefix(
+        (32_768,) * 16,
+        shared_prefix_tokens=8_192,
+        bytes_per_token=128 * 1024,
+    )
+
+    assert allocation.logical_tokens == 16 * 32_768
+    assert allocation.saved_tokens == 15 * 8_192
+    assert (
+        allocation.physical_tokens
+        == allocation.logical_tokens - allocation.saved_tokens
+    )
+    assert allocation.physical_bytes == allocation.physical_tokens * 128 * 1024
+
+
+def test_shared_prefix_rejects_a_shorter_sequence():
+    with pytest.raises(InferenceCapacityError, match="cannot exceed"):
+        plan_shared_prefix((8, 16), shared_prefix_tokens=9, bytes_per_token=1024)
