@@ -129,3 +129,22 @@ def validate_observation_for_request(
     if observation.generated_tokens > request.max_output_tokens:
         raise ServingObservationError("generated tokens exceed the scheduled maximum")
     return observation
+
+
+def validate_observations(
+    observations: tuple[RequestObservation, ...],
+) -> tuple[RequestObservation, ...]:
+    """Require a nonempty observation tuple ordered by receipt time."""
+
+    if not isinstance(observations, tuple) or not observations:
+        raise TypeError("observations must be a nonempty RequestObservation tuple")
+    previous_received = -1
+    for observation in observations:
+        if not isinstance(observation, RequestObservation):
+            raise TypeError("observation entries must be RequestObservation")
+        if observation.timing.received_ns < previous_received:
+            raise ServingObservationError(
+                "observations must be ordered by receipt time"
+            )
+        previous_received = observation.timing.received_ns
+    return observations

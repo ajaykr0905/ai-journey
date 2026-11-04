@@ -6,6 +6,7 @@ from ai_journey.serving_observation import (
     ServingObservationError,
     ServingOutcome,
     validate_observation_for_request,
+    validate_observations,
 )
 from ai_journey.serving_trace import RequestSpec
 
@@ -89,3 +90,18 @@ def test_observation_rejects_output_beyond_scheduled_maximum():
 
     with pytest.raises(ServingObservationError, match="maximum"):
         validate_observation_for_request(_observation(), request)
+
+
+def test_observation_set_accepts_tied_ordered_receipt_times():
+    observations = (_observation("a"), _observation("b"))
+
+    assert validate_observations(observations) == observations
+
+
+def test_observation_set_rejects_decreasing_receipt_times():
+    earlier = RequestObservation(
+        **(vars(_observation("b")) | {"timing": RequestTiming(0, 0, 1, 2)})
+    )
+
+    with pytest.raises(ServingObservationError, match="ordered"):
+        validate_observations((_observation("a"), earlier))
