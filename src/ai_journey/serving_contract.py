@@ -74,6 +74,25 @@ class HardwareManifest:
 
 
 @dataclass(frozen=True)
+class SoftwareManifest:
+    """Pin the operating system and execution stack versions."""
+
+    operating_system: str
+    python_version: str
+    framework_version: str
+    driver_version: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "operating_system",
+            "python_version",
+            "framework_version",
+            "driver_version",
+        ):
+            _nonempty_text(getattr(self, name), name)
+
+
+@dataclass(frozen=True)
 class WorkloadShape:
     """Bound the request count, token demand, and client concurrency."""
 

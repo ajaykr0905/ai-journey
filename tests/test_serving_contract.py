@@ -5,6 +5,7 @@ from ai_journey.serving_contract import (
     HardwareManifest,
     ModelIdentity,
     ServingContractError,
+    SoftwareManifest,
     WorkloadShape,
 )
 
@@ -82,3 +83,14 @@ def test_hardware_manifest_computes_declared_total_device_memory():
 def test_hardware_manifest_rejects_zero_devices():
     with pytest.raises(ServingContractError, match="device_count"):
         HardwareManifest("CPU fixture", 0, 1024, "host memory")
+
+
+def test_software_manifest_requires_explicit_stack_versions():
+    manifest = SoftwareManifest("Linux 6.8", "3.12.12", "torch 2.9.0", "CUDA 13.0")
+
+    assert manifest.framework_version == "torch 2.9.0"
+
+
+def test_software_manifest_rejects_blank_driver_identity():
+    with pytest.raises(ServingContractError, match="driver_version"):
+        SoftwareManifest("Linux", "3.12", "torch 2.9", "")
