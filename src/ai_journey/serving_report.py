@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .serving_contract import ClaimBoundary
+
 
 class ServingReportError(ValueError):
     """Raised when a serving report is incomplete or unverifiable."""
@@ -35,3 +37,24 @@ class EvidenceReferences:
             "recovery_sha256",
         ):
             _require_sha256(getattr(self, name), name)
+
+
+def validate_reported_claims(
+    boundary: ClaimBoundary, claims: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Require report claims to be canonical and explicitly authorized."""
+
+    if not isinstance(boundary, ClaimBoundary):
+        raise TypeError("boundary must be ClaimBoundary")
+    if (
+        not isinstance(claims, tuple)
+        or not claims
+        or any(not isinstance(claim, str) or not claim for claim in claims)
+    ):
+        raise TypeError("claims must be a nonempty text tuple")
+    if claims != tuple(sorted(set(claims))):
+        raise ServingReportError("claims must be sorted and unique")
+    unsupported = set(claims) - set(boundary.allowed_claims)
+    if unsupported:
+        raise ServingReportError("report contains claims outside its boundary")
+    return claims
