@@ -1,4 +1,9 @@
-from ai_journey.inference_work import PrefillWork, estimate_prefill_work
+from ai_journey.inference_work import (
+    DecodeStepWork,
+    PrefillWork,
+    estimate_decode_step_work,
+    estimate_prefill_work,
+)
 
 
 def test_prefill_work_separates_dense_projections_from_quadratic_attention():
@@ -25,3 +30,26 @@ def test_prefill_work_preserves_exact_integer_arithmetic():
         sequence_tokens=3,
         batch_size=2,
     ) == PrefillWork(projection_flops=120, attention_flops=1152)
+
+
+def test_cached_decode_attention_is_linear_in_the_resident_context():
+    first = estimate_decode_step_work(
+        parameter_count=10,
+        layers=2,
+        query_heads=2,
+        head_dim=4,
+        context_tokens=3,
+        batch_size=2,
+    )
+    second = estimate_decode_step_work(
+        parameter_count=10,
+        layers=2,
+        query_heads=2,
+        head_dim=4,
+        context_tokens=6,
+        batch_size=2,
+    )
+
+    assert first == DecodeStepWork(projection_flops=40, attention_flops=384)
+    assert second.projection_flops == first.projection_flops
+    assert second.attention_flops == 2 * first.attention_flops
