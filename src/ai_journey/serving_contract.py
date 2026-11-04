@@ -1,0 +1,46 @@
+"""Immutable contracts for reproducible serving measurements."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+class ServingContractError(ValueError):
+    """Raised when a serving run contract is ambiguous or unbounded."""
+
+
+def _positive_integer(value: int, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer")
+    if value <= 0:
+        raise ServingContractError(f"{name} must be positive")
+    return value
+
+
+@dataclass(frozen=True)
+class WorkloadShape:
+    """Bound the request count, token demand, and client concurrency."""
+
+    request_count: int
+    prompt_tokens_per_request: int
+    output_tokens_per_request: int
+    max_concurrency: int
+
+    def __post_init__(self) -> None:
+        for name in (
+            "request_count",
+            "prompt_tokens_per_request",
+            "output_tokens_per_request",
+            "max_concurrency",
+        ):
+            _positive_integer(getattr(self, name), name)
+        if self.max_concurrency > self.request_count:
+            raise ServingContractError("max_concurrency cannot exceed request_count")
+
+    @property
+    def total_requested_tokens(self) -> int:
+        """Return the bounded prompt-plus-output token demand."""
+
+        return self.request_count * (
+            self.prompt_tokens_per_request + self.output_tokens_per_request
+        )
