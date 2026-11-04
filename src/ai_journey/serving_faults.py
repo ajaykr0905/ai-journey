@@ -146,3 +146,10 @@ def fault_coverage_fraction(
         raise TypeError("required must be a nonempty unique FaultKind tuple")
     observed = {event.kind for event in events}
     return Fraction(sum(kind in observed for kind in required), len(required))
+
+
+def recovery_duration_ns(event: FaultEvent, observation: RecoveryObservation) -> int:
+    """Measure from fault start through the first successful post-fault request."""
+
+    validate_recovery_binding(event, observation)
+    return observation.first_success_ns - event.start_ns
