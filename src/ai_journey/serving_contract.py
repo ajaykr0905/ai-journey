@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 
 
 class ServingContractError(ValueError):
@@ -194,3 +195,17 @@ class ServingRunContract:
         for name, expected_type in expected.items():
             if not isinstance(getattr(self, name), expected_type):
                 raise TypeError(f"{name} must be {expected_type.__name__}")
+
+
+def canonical_contract_bytes(contract: ServingRunContract) -> bytes:
+    """Serialize a run contract with stable field and whitespace rules."""
+
+    if not isinstance(contract, ServingRunContract):
+        raise TypeError("contract must be ServingRunContract")
+    return json.dumps(
+        asdict(contract),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")

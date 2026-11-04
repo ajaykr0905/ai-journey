@@ -10,6 +10,7 @@ from ai_journey.serving_contract import (
     ServingRunContract,
     SoftwareManifest,
     WorkloadShape,
+    canonical_contract_bytes,
 )
 
 
@@ -156,3 +157,12 @@ def test_serving_run_contract_rejects_structurally_wrong_components():
 
     with pytest.raises(TypeError, match="EngineIdentity"):
         ServingRunContract(**values)
+
+
+def test_contract_serialization_is_canonical_and_stable():
+    payload = canonical_contract_bytes(_run_contract())
+
+    assert payload.startswith(b'{"claims":')
+    assert b'": ' not in payload
+    assert b', "' not in payload
+    assert canonical_contract_bytes(_run_contract()) == payload
