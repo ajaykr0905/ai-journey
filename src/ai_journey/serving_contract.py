@@ -17,6 +17,27 @@ def _positive_integer(value: int, name: str) -> int:
     return value
 
 
+def _nonempty_text(value: str, name: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be text")
+    if not value.strip() or value != value.strip():
+        raise ServingContractError(f"{name} must be nonempty canonical text")
+    return value
+
+
+@dataclass(frozen=True)
+class EngineIdentity:
+    """Pin the serving engine implementation under measurement."""
+
+    name: str
+    version: str
+    revision: str
+
+    def __post_init__(self) -> None:
+        for name in ("name", "version", "revision"):
+            _nonempty_text(getattr(self, name), name)
+
+
 @dataclass(frozen=True)
 class WorkloadShape:
     """Bound the request count, token demand, and client concurrency."""

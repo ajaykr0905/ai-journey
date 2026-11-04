@@ -1,6 +1,10 @@
 import pytest
 
-from ai_journey.serving_contract import ServingContractError, WorkloadShape
+from ai_journey.serving_contract import (
+    EngineIdentity,
+    ServingContractError,
+    WorkloadShape,
+)
 
 
 def test_workload_shape_bounds_total_token_demand():
@@ -36,3 +40,19 @@ def test_workload_shape_rejects_ambiguous_or_unbounded_controls(
 
     with pytest.raises(exception):
         WorkloadShape(**values)
+
+
+def test_engine_identity_pins_name_version_and_revision():
+    identity = EngineIdentity("vllm", "0.12.0", "abcdef1")
+
+    assert (identity.name, identity.version, identity.revision) == (
+        "vllm",
+        "0.12.0",
+        "abcdef1",
+    )
+
+
+@pytest.mark.parametrize("value", ["", " leading", "trailing "])
+def test_engine_identity_rejects_noncanonical_text(value):
+    with pytest.raises(ServingContractError, match="canonical"):
+        EngineIdentity("vllm", "0.12.0", value)
