@@ -70,3 +70,28 @@ class ServingSnapshot:
                 raise TypeError(f"{name} must be Fraction")
             if not 0 <= value <= 1:
                 raise ServingComparisonError(f"{name} must be in [0, 1]")
+
+
+@dataclass(frozen=True)
+class RegressionThresholds:
+    """Maximum exact degradation accepted for each serving metric."""
+
+    max_ttft_increase: Fraction
+    max_throughput_drop: Fraction
+    max_goodput_drop: Fraction
+    max_failure_increase: Fraction
+    max_memory_increase: Fraction
+
+    def __post_init__(self) -> None:
+        for name in (
+            "max_ttft_increase",
+            "max_throughput_drop",
+            "max_goodput_drop",
+            "max_failure_increase",
+            "max_memory_increase",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, Fraction):
+                raise TypeError(f"{name} must be Fraction")
+            if not 0 <= value <= 1:
+                raise ServingComparisonError(f"{name} must be in [0, 1]")

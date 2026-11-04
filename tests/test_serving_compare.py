@@ -4,6 +4,7 @@ import pytest
 
 from ai_journey.serving_compare import (
     ComparisonKey,
+    RegressionThresholds,
     ServingComparisonError,
     ServingSnapshot,
 )
@@ -52,4 +53,21 @@ def test_snapshot_rejects_unbounded_rates(goodput, failure_rate):
     with pytest.raises(ServingComparisonError, match=r"in \[0, 1\]"):
         ServingSnapshot(
             _key(), "candidate", 100, Fraction(10), goodput, failure_rate, 64
+        )
+
+
+def test_regression_thresholds_require_exact_bounded_fractions():
+    thresholds = RegressionThresholds(
+        Fraction(1, 10),
+        Fraction(1, 20),
+        Fraction(1, 100),
+        Fraction(1, 100),
+        Fraction(1, 10),
+    )
+
+    assert thresholds.max_throughput_drop == Fraction(1, 20)
+
+    with pytest.raises(ServingComparisonError, match="max_memory_increase"):
+        RegressionThresholds(
+            Fraction(0), Fraction(0), Fraction(0), Fraction(0), Fraction(2)
         )
