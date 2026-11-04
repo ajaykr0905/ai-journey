@@ -1,6 +1,6 @@
 import pytest
 
-from ai_journey.serving_trace import RequestSpec, ServingTraceError
+from ai_journey.serving_trace import RequestSpec, ServingTraceError, validate_trace
 
 PROMPT_DIGEST = "a" * 64
 
@@ -35,3 +35,25 @@ def test_request_spec_rejects_ambiguous_or_invalid_fields(field, value):
 
     with pytest.raises((ServingTraceError, TypeError)):
         RequestSpec(**values)
+
+
+def _request(request_id, arrival_ms):
+    return RequestSpec(request_id, arrival_ms, 128, 32, PROMPT_DIGEST)
+
+
+def test_trace_validation_accepts_tied_arrivals_with_unique_ids():
+    trace = (_request("a", 0), _request("b", 0), _request("c", 10))
+
+    assert validate_trace(trace) == trace
+
+
+@pytest.mark.parametrize(
+    "trace,match",
+    [
+        ((_request("a", 1), _request("b", 0)), "ordered"),
+        ((_request("a", 0), _request("a", 1)), "unique"),
+    ],
+)
+def test_trace_validation_rejects_order_and_identity_ambiguity(trace, match):
+    with pytest.raises(ServingTraceError, match=match):
+        validate_trace(trace)

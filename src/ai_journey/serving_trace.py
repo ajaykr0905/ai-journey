@@ -50,3 +50,22 @@ class RequestSpec:
             )
         ):
             raise ServingTraceError("prompt_sha256 must be a lowercase SHA-256 digest")
+
+
+def validate_trace(trace: tuple[RequestSpec, ...]) -> tuple[RequestSpec, ...]:
+    """Require a nonempty, arrival-ordered trace with unique request IDs."""
+
+    if not isinstance(trace, tuple) or not trace:
+        raise TypeError("trace must be a nonempty RequestSpec tuple")
+    request_ids: set[str] = set()
+    previous_arrival = -1
+    for request in trace:
+        if not isinstance(request, RequestSpec):
+            raise TypeError("trace entries must be RequestSpec")
+        if request.request_id in request_ids:
+            raise ServingTraceError("request IDs must be unique")
+        if request.arrival_ms < previous_arrival:
+            raise ServingTraceError("trace arrivals must be ordered")
+        request_ids.add(request.request_id)
+        previous_arrival = request.arrival_ms
+    return trace
