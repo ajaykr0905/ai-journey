@@ -3,6 +3,7 @@ import pytest
 from ai_journey.serving_trace import (
     RequestSpec,
     ServingTraceError,
+    burst_trace,
     constant_rate_trace,
     validate_trace,
 )
@@ -79,3 +80,17 @@ def test_constant_rate_trace_has_exact_intervals_and_stable_ids():
         "request-000003",
     ]
     assert [request.arrival_ms for request in trace] == [0, 25, 50]
+
+
+def test_burst_trace_preserves_tied_arrivals_and_burst_spacing():
+    trace = burst_trace(
+        burst_count=2,
+        requests_per_burst=3,
+        inter_burst_ms=100,
+        prompt_tokens=16,
+        max_output_tokens=8,
+        prompt_sha256=PROMPT_DIGEST,
+    )
+
+    assert [request.arrival_ms for request in trace] == [0, 0, 0, 100, 100, 100]
+    assert len({request.request_id for request in trace}) == 6

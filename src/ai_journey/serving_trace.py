@@ -94,3 +94,31 @@ def constant_rate_trace(
         for index in range(request_count)
     )
     return validate_trace(trace)
+
+
+def burst_trace(
+    *,
+    burst_count: int,
+    requests_per_burst: int,
+    inter_burst_ms: int,
+    prompt_tokens: int,
+    max_output_tokens: int,
+    prompt_sha256: str,
+) -> tuple[RequestSpec, ...]:
+    """Generate tied arrivals separated by a fixed inter-burst interval."""
+
+    _positive_integer(burst_count, "burst_count")
+    _positive_integer(requests_per_burst, "requests_per_burst")
+    _positive_integer(inter_burst_ms, "inter_burst_ms")
+    trace = tuple(
+        RequestSpec(
+            request_id=f"burst-{burst + 1:04d}-{member + 1:04d}",
+            arrival_ms=burst * inter_burst_ms,
+            prompt_tokens=prompt_tokens,
+            max_output_tokens=max_output_tokens,
+            prompt_sha256=prompt_sha256,
+        )
+        for burst in range(burst_count)
+        for member in range(requests_per_burst)
+    )
+    return validate_trace(trace)
