@@ -1,6 +1,16 @@
 import pytest
 
-from ai_journey.serving_analysis import ServingAnalysisError, nearest_rank_percentile
+from ai_journey.serving_analysis import (
+    LatencySummary,
+    ServingAnalysisError,
+    nearest_rank_percentile,
+    successful_ttft_summary,
+)
+from ai_journey.serving_observation import (
+    RequestObservation,
+    RequestTiming,
+    ServingOutcome,
+)
 
 
 def test_nearest_rank_percentile_is_deterministic_for_small_samples():
@@ -15,3 +25,41 @@ def test_nearest_rank_percentile_is_deterministic_for_small_samples():
 def test_nearest_rank_percentile_rejects_undefined_inputs(values, percentile):
     with pytest.raises((ServingAnalysisError, TypeError)):
         nearest_rank_percentile(values, percentile)
+
+
+def _observation(
+    request_id,
+    *,
+    received_ns=0,
+    started_ns=10,
+    first_token_ns=20,
+    completed_ns=100,
+    outcome=ServingOutcome.SUCCESS,
+    generated_tokens=4,
+    cache_hit=False,
+    retry_count=0,
+):
+    return RequestObservation(
+        request_id=request_id,
+        outcome=outcome,
+        timing=RequestTiming(received_ns, started_ns, first_token_ns, completed_ns),
+        prompt_tokens=16,
+        generated_tokens=generated_tokens,
+        cache_hit=cache_hit,
+        retry_count=retry_count,
+    )
+
+
+def test_successful_ttft_summary_excludes_censored_requests():
+    observations = (
+        _observation("a", first_token_ns=10),
+        _observation("b", first_token_ns=20),
+        _observation(
+            "c",
+            first_token_ns=None,
+            outcome=ServingOutcome.TIMEOUT,
+            generated_tokens=0,
+        ),
+    )
+
+    assert successful_ttft_summary(observations) == LatencySummary(10, 20, 20)

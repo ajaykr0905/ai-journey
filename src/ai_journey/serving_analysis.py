@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+from .serving_observation import (
+    RequestObservation,
+    ServingOutcome,
+    require_unique_observation_ids,
+)
+
 
 class ServingAnalysisError(ValueError):
     """Raised when serving metrics would be undefined or misleading."""
@@ -26,3 +34,33 @@ def nearest_rank_percentile(values: tuple[int, ...], percentile: int) -> int:
     ordered = sorted(values)
     rank = (percentile * len(ordered) + 99) // 100
     return ordered[rank - 1]
+
+
+@dataclass(frozen=True)
+class LatencySummary:
+    """Nearest-rank first-token latency percentiles in nanoseconds."""
+
+    p50_ns: int
+    p95_ns: int
+    p99_ns: int
+
+
+def successful_ttft_summary(
+    observations: tuple[RequestObservation, ...],
+) -> LatencySummary:
+    """Summarize successful requests that emitted a first token."""
+
+    require_unique_observation_ids(observations)
+    values = tuple(
+        observation.timing.time_to_first_token_ns
+        for observation in observations
+        if observation.outcome is ServingOutcome.SUCCESS
+        and observation.timing.time_to_first_token_ns is not None
+    )
+    if not values:
+        raise ServingAnalysisError("no successful first-token latency samples")
+    return LatencySummary(
+        p50_ns=nearest_rank_percentile(values, 50),
+        p95_ns=nearest_rank_percentile(values, 95),
+        p99_ns=nearest_rank_percentile(values, 99),
+    )
