@@ -132,3 +132,18 @@ def arrival_rate_per_second(trace: tuple[RequestSpec, ...]) -> Fraction:
     if len(trace) < 2 or trace[-1].arrival_ms == trace[0].arrival_ms:
         raise ServingTraceError("arrival rate requires a positive trace span")
     return Fraction((len(trace) - 1) * 1000, trace[-1].arrival_ms - trace[0].arrival_ms)
+
+
+def offered_token_rate_per_second(
+    trace: tuple[RequestSpec, ...], duration_ms: int
+) -> Fraction:
+    """Return prompt-plus-requested-output tokens offered per second."""
+
+    validate_trace(trace)
+    _positive_integer(duration_ms, "duration_ms")
+    if duration_ms <= trace[-1].arrival_ms:
+        raise ServingTraceError("duration_ms must extend beyond the final arrival")
+    offered_tokens = sum(
+        request.prompt_tokens + request.max_output_tokens for request in trace
+    )
+    return Fraction(offered_tokens * 1000, duration_ms)

@@ -8,6 +8,7 @@ from ai_journey.serving_trace import (
     arrival_rate_per_second,
     burst_trace,
     constant_rate_trace,
+    offered_token_rate_per_second,
     validate_trace,
 )
 
@@ -110,3 +111,14 @@ def test_arrival_rate_uses_exact_fractional_arithmetic():
 def test_arrival_rate_rejects_a_zero_duration_burst():
     with pytest.raises(ServingTraceError, match="positive trace span"):
         arrival_rate_per_second((_request("a", 0), _request("b", 0)))
+
+
+def test_offered_token_rate_includes_prompt_and_requested_output():
+    trace = (_request("a", 0), _request("b", 500))
+
+    assert offered_token_rate_per_second(trace, 1000) == Fraction(320, 1)
+
+
+def test_offered_token_rate_requires_an_observation_tail():
+    with pytest.raises(ServingTraceError, match="beyond"):
+        offered_token_rate_per_second((_request("a", 10),), 10)
