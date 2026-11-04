@@ -10,6 +10,7 @@ from ai_journey.serving_faults import (
     fault_coverage_fraction,
     require_nonoverlapping_targets,
     validate_fault_schedule,
+    validate_recovery_binding,
 )
 
 
@@ -76,3 +77,17 @@ def test_recovery_observation_requires_monotonic_milestones():
 
     with pytest.raises(ServingFaultError, match="monotonic"):
         RecoveryObservation("fault-1", 120, 110, 130)
+
+
+def test_recovery_binding_rejects_readiness_before_fault_end():
+    event = _fault("fault-1", 100, 20)
+
+    assert (
+        validate_recovery_binding(
+            event, RecoveryObservation("fault-1", 105, 120, 130)
+        ).ready_ns
+        == 120
+    )
+
+    with pytest.raises(ServingFaultError, match="fault end"):
+        validate_recovery_binding(event, RecoveryObservation("fault-1", 105, 119, 130))

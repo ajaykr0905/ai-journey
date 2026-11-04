@@ -80,6 +80,24 @@ class RecoveryObservation:
             raise ServingFaultError("recovery timestamps must be monotonic")
 
 
+def validate_recovery_binding(
+    event: FaultEvent, observation: RecoveryObservation
+) -> RecoveryObservation:
+    """Require recovery milestones to belong to and follow the scheduled fault."""
+
+    if not isinstance(event, FaultEvent) or not isinstance(
+        observation, RecoveryObservation
+    ):
+        raise TypeError("event and observation have invalid types")
+    if event.fault_id != observation.fault_id:
+        raise ServingFaultError("recovery fault ID does not match schedule")
+    if observation.detected_ns < event.start_ns:
+        raise ServingFaultError("recovery detection predates the fault")
+    if observation.ready_ns < event.end_ns:
+        raise ServingFaultError("readiness cannot precede the fault end")
+    return observation
+
+
 def validate_fault_schedule(events: tuple[FaultEvent, ...]) -> tuple[FaultEvent, ...]:
     """Require a nonempty, start-ordered schedule with unique fault IDs."""
 
