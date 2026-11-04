@@ -8,6 +8,7 @@ from ai_journey.serving_observation import (
     canonical_observation_bytes,
     censored_observations,
     require_unique_observation_ids,
+    serving_observation_digest,
     validate_observation_for_request,
     validate_observations,
 )
@@ -139,3 +140,11 @@ def test_observation_serialization_is_canonical():
 
     assert payload.startswith(b'[{"cache_hit":false')
     assert b'": ' not in payload
+
+
+def test_observation_digest_changes_with_terminal_outcome():
+    success = (_observation("a"),)
+    timeout = (_observation("a", ServingOutcome.TIMEOUT),)
+
+    assert len(serving_observation_digest(success)) == 64
+    assert serving_observation_digest(success) != serving_observation_digest(timeout)

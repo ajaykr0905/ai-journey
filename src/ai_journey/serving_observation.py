@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from enum import Enum
+from hashlib import sha256
 
 from .serving_trace import RequestSpec
 
@@ -189,3 +190,11 @@ def canonical_observation_bytes(
         ensure_ascii=False,
         allow_nan=False,
     ).encode("utf-8")
+
+
+def serving_observation_digest(
+    observations: tuple[RequestObservation, ...],
+) -> str:
+    """Return the stable identity of measured request lifecycle evidence."""
+
+    return sha256(canonical_observation_bytes(observations)).hexdigest()
