@@ -159,3 +159,26 @@ def split_warmup(
     if warmup_requests >= len(trace):
         raise ServingTraceError("warmup must leave at least one measured request")
     return trace[:warmup_requests], trace[warmup_requests:]
+
+
+def slice_trace_window(
+    trace: tuple[RequestSpec, ...], *, start_ms: int, end_ms: int
+) -> tuple[RequestSpec, ...]:
+    """Select requests in one half-open absolute arrival window."""
+
+    validate_trace(trace)
+    if (
+        isinstance(start_ms, bool)
+        or not isinstance(start_ms, int)
+        or start_ms < 0
+        or isinstance(end_ms, bool)
+        or not isinstance(end_ms, int)
+        or end_ms <= start_ms
+    ):
+        raise ServingTraceError("trace window must be nonnegative and increasing")
+    selected = tuple(
+        request for request in trace if start_ms <= request.arrival_ms < end_ms
+    )
+    if not selected:
+        raise ServingTraceError("trace window contains no requests")
+    return selected

@@ -9,6 +9,7 @@ from ai_journey.serving_trace import (
     burst_trace,
     constant_rate_trace,
     offered_token_rate_per_second,
+    slice_trace_window,
     split_warmup,
     validate_trace,
 )
@@ -137,3 +138,18 @@ def test_warmup_split_preserves_order_and_all_requests():
 def test_warmup_split_cannot_consume_the_measured_sample():
     with pytest.raises(ServingTraceError, match="leave"):
         split_warmup((_request("a", 0),), 1)
+
+
+def test_trace_window_uses_half_open_absolute_boundaries():
+    trace = tuple(
+        _request(str(index), arrival) for index, arrival in enumerate((0, 10, 20))
+    )
+
+    selected = slice_trace_window(trace, start_ms=10, end_ms=20)
+
+    assert [request.arrival_ms for request in selected] == [10]
+
+
+def test_trace_window_rejects_empty_selection():
+    with pytest.raises(ServingTraceError, match="no requests"):
+        slice_trace_window((_request("a", 0),), start_ms=10, end_ms=20)
