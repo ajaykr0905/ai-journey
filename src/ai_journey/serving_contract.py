@@ -93,6 +93,23 @@ class SoftwareManifest:
 
 
 @dataclass(frozen=True)
+class RunLimits:
+    """Bound wall-clock execution and deterministic trace generation."""
+
+    max_duration_seconds: int
+    random_seed: int
+
+    def __post_init__(self) -> None:
+        _positive_integer(self.max_duration_seconds, "max_duration_seconds")
+        if (
+            isinstance(self.random_seed, bool)
+            or not isinstance(self.random_seed, int)
+            or self.random_seed < 0
+        ):
+            raise ServingContractError("random_seed must be a nonnegative integer")
+
+
+@dataclass(frozen=True)
 class WorkloadShape:
     """Bound the request count, token demand, and client concurrency."""
 

@@ -4,6 +4,7 @@ from ai_journey.serving_contract import (
     EngineIdentity,
     HardwareManifest,
     ModelIdentity,
+    RunLimits,
     ServingContractError,
     SoftwareManifest,
     WorkloadShape,
@@ -94,3 +95,15 @@ def test_software_manifest_requires_explicit_stack_versions():
 def test_software_manifest_rejects_blank_driver_identity():
     with pytest.raises(ServingContractError, match="driver_version"):
         SoftwareManifest("Linux", "3.12", "torch 2.9", "")
+
+
+def test_run_limits_pin_duration_and_deterministic_seed():
+    limits = RunLimits(max_duration_seconds=300, random_seed=42)
+
+    assert limits == RunLimits(300, 42)
+
+
+@pytest.mark.parametrize("duration,seed", [(0, 1), (1, -1), (1, True)])
+def test_run_limits_reject_unbounded_or_ambiguous_controls(duration, seed):
+    with pytest.raises((ServingContractError, TypeError)):
+        RunLimits(duration, seed)
