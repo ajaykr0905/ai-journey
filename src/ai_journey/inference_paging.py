@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 
 from .inference_kv import InferenceCapacityError, _positive_integer
 
@@ -15,6 +16,30 @@ class PagedAllocation:
     allocated_tokens: int
     internal_waste_tokens: int
     allocated_bytes: int
+
+    @property
+    def internal_waste_fraction(self) -> Fraction:
+        return Fraction(self.internal_waste_tokens, self.allocated_tokens)
+
+
+@dataclass(frozen=True)
+class PagedAdmission:
+    allocation: PagedAllocation
+    capacity_bytes: int
+    admitted: bool
+
+
+def admit_paged_allocation(
+    allocation: PagedAllocation, *, capacity_bytes: int
+) -> PagedAdmission:
+    """Admit an allocation only when whole pages fit the byte budget."""
+
+    if not isinstance(allocation, PagedAllocation):
+        raise TypeError("allocation must be PagedAllocation")
+    _positive_integer(capacity_bytes, "capacity_bytes")
+    return PagedAdmission(
+        allocation, capacity_bytes, allocation.allocated_bytes <= capacity_bytes
+    )
 
 
 def plan_paged_allocation(

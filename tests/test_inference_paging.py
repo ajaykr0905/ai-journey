@@ -1,7 +1,13 @@
+from fractions import Fraction
+
 import pytest
 
 from ai_journey.inference_kv import InferenceCapacityError
-from ai_journey.inference_paging import PagedAllocation, plan_paged_allocation
+from ai_journey.inference_paging import (
+    PagedAllocation,
+    admit_paged_allocation,
+    plan_paged_allocation,
+)
 
 
 def test_paged_allocation_exposes_per_sequence_internal_fragmentation():
@@ -17,6 +23,7 @@ def test_paged_allocation_exposes_per_sequence_internal_fragmentation():
         internal_waste_tokens=30,
         allocated_bytes=8 * 1024**2,
     )
+    assert allocation.internal_waste_fraction == Fraction(15, 32)
 
 
 def test_full_pages_have_no_internal_fragmentation():
@@ -30,3 +37,14 @@ def test_full_pages_have_no_internal_fragmentation():
 def test_page_planner_requires_an_explicit_nonempty_tuple(lengths):
     with pytest.raises(InferenceCapacityError, match="nonempty tuple"):
         plan_paged_allocation(lengths, block_tokens=16, bytes_per_token=1024)
+
+
+def test_page_admission_charges_whole_blocks_instead_of_requested_tokens():
+    allocation = plan_paged_allocation(
+        (1, 16, 17), block_tokens=16, bytes_per_token=128 * 1024
+    )
+
+    assert admit_paged_allocation(allocation, capacity_bytes=8 * 1024**2).admitted
+    assert not admit_paged_allocation(
+        allocation, capacity_bytes=8 * 1024**2 - 1
+    ).admitted
