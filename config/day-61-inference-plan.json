@@ -1,0 +1,37 @@
+{
+  "name": "day-61-7b-inference",
+  "parameter_count": 7000000000,
+  "layers": 32,
+  "query_heads": 32,
+  "kv_heads": 8,
+  "head_dim": 128,
+  "context_tokens": 32768,
+  "request_lengths": [
+    32768,
+    32768,
+    32768,
+    32768,
+    32768,
+    32768,
+    32768,
+    32768,
+    32768,
+    32768,
+    32768,
+    32768,
+    32768,
+    32768,
+    32768,
+    32768
+  ],
+  "bytes_per_element": 2,
+  "total_device_bytes": 85899345920,
+  "model_bytes": 15032385536,
+  "runtime_reserve_bytes": 6442450944,
+  "block_tokens": 16,
+  "speculative": {
+    "draft_tokens": 4,
+    "acceptance_numerator": 4,
+    "acceptance_denominator": 5
+  }
+}
