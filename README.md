@@ -20,6 +20,10 @@ then grow these exercises into production-quality training and inference project
   targets, optimizer-step alignment, corpus-reuse warnings, IsoFLOP allocation,
   sealed replay, installed CI verification, and explicit non-execution boundaries
   in the [scaling-law planning guide](docs/scaling-law-planning.md)
+- An exact 7B/32k/batch-16 KV-cache and inference-capacity plan, including GQA,
+  paged allocation, prefill/decode work, continuous batching, speculative
+  decoding, and sealed verification, documented in the
+  [inference capacity guide](docs/inference-capacity-planning.md)
 - A checksum-pinned public-data build with deterministic cleaning, explainable
   quality rejection, deduplication, leakage-safe splits, balanced shards,
   train-only BPE compression evidence, atomic publication, independent replay,
