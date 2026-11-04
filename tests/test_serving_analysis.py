@@ -1,9 +1,12 @@
+from fractions import Fraction
+
 import pytest
 
 from ai_journey.serving_analysis import (
     LatencySummary,
     ServingAnalysisError,
     nearest_rank_percentile,
+    output_throughput_per_second,
     successful_ttft_summary,
 )
 from ai_journey.serving_observation import (
@@ -63,3 +66,20 @@ def test_successful_ttft_summary_excludes_censored_requests():
     )
 
     assert successful_ttft_summary(observations) == LatencySummary(10, 20, 20)
+
+
+def test_output_throughput_uses_successful_tokens_and_full_wall_interval():
+    observations = (
+        _observation("a", completed_ns=1_000_000_000, generated_tokens=4),
+        _observation(
+            "b",
+            received_ns=500_000_000,
+            started_ns=500_000_010,
+            first_token_ns=None,
+            completed_ns=1_000_000_000,
+            outcome=ServingOutcome.ERROR,
+            generated_tokens=0,
+        ),
+    )
+
+    assert output_throughput_per_second(observations) == Fraction(4, 1)

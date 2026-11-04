@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 
 from .serving_observation import (
     RequestObservation,
@@ -64,3 +65,22 @@ def successful_ttft_summary(
         p95_ns=nearest_rank_percentile(values, 95),
         p99_ns=nearest_rank_percentile(values, 99),
     )
+
+
+def output_throughput_per_second(
+    observations: tuple[RequestObservation, ...],
+) -> Fraction:
+    """Return successful generated tokens over the full observed wall interval."""
+
+    require_unique_observation_ids(observations)
+    duration_ns = max(
+        observation.timing.completed_ns for observation in observations
+    ) - min(observation.timing.received_ns for observation in observations)
+    if duration_ns <= 0:
+        raise ServingAnalysisError("throughput requires a positive observation span")
+    generated = sum(
+        observation.generated_tokens
+        for observation in observations
+        if observation.outcome is ServingOutcome.SUCCESS
+    )
+    return Fraction(generated * 1_000_000_000, duration_ns)
