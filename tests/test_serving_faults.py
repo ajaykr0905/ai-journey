@@ -5,6 +5,7 @@ import pytest
 from ai_journey.serving_faults import (
     FaultEvent,
     FaultKind,
+    RecoveryObservation,
     ServingFaultError,
     fault_coverage_fraction,
     require_nonoverlapping_targets,
@@ -66,3 +67,12 @@ def test_fault_coverage_reports_missing_required_classes():
     required = (FaultKind.PROCESS_KILL, FaultKind.ENGINE_RESTART)
 
     assert fault_coverage_fraction(events, required) == Fraction(1, 2)
+
+
+def test_recovery_observation_requires_monotonic_milestones():
+    observation = RecoveryObservation("fault-1", 110, 120, 130)
+
+    assert observation.first_success_ns == 130
+
+    with pytest.raises(ServingFaultError, match="monotonic"):
+        RecoveryObservation("fault-1", 120, 110, 130)

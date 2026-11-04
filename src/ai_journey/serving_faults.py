@@ -54,6 +54,32 @@ class FaultEvent:
         return self.start_ns + self.duration_ns
 
 
+@dataclass(frozen=True)
+class RecoveryObservation:
+    """Record detection, readiness, and first post-fault success."""
+
+    fault_id: str
+    detected_ns: int
+    ready_ns: int
+    first_success_ns: int
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.fault_id, str)
+            or not self.fault_id
+            or self.fault_id != self.fault_id.strip()
+        ):
+            raise ServingFaultError("fault_id must be canonical nonempty text")
+        values = (self.detected_ns, self.ready_ns, self.first_success_ns)
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in values
+        ):
+            raise ServingFaultError("recovery timestamps must be nonnegative integers")
+        if not self.detected_ns <= self.ready_ns <= self.first_success_ns:
+            raise ServingFaultError("recovery timestamps must be monotonic")
+
+
 def validate_fault_schedule(events: tuple[FaultEvent, ...]) -> tuple[FaultEvent, ...]:
     """Require a nonempty, start-ordered schedule with unique fault IDs."""
 
