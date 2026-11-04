@@ -132,3 +132,16 @@ def throughput_within_threshold(
         raise TypeError("thresholds must be RegressionThresholds")
     floor = baseline.output_tokens_per_second * (1 - thresholds.max_throughput_drop)
     return candidate.output_tokens_per_second >= floor
+
+
+def goodput_within_threshold(
+    baseline: ServingSnapshot,
+    candidate: ServingSnapshot,
+    thresholds: RegressionThresholds,
+) -> bool:
+    """Return whether candidate goodput stays inside the absolute tolerance."""
+
+    _require_comparable(baseline, candidate)
+    if not isinstance(thresholds, RegressionThresholds):
+        raise TypeError("thresholds must be RegressionThresholds")
+    return candidate.goodput >= baseline.goodput - thresholds.max_goodput_drop
