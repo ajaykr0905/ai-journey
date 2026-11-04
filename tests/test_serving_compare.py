@@ -7,6 +7,7 @@ from ai_journey.serving_compare import (
     RegressionThresholds,
     ServingComparisonError,
     ServingSnapshot,
+    ttft_within_threshold,
 )
 
 
@@ -34,6 +35,20 @@ def test_comparison_key_rejects_noncanonical_digests():
 
 def _key() -> ComparisonKey:
     return ComparisonKey(1, _digest("a"), _digest("b"), _digest("c"))
+
+
+def _snapshot(label="engine", **overrides) -> ServingSnapshot:
+    values = {
+        "key": _key(),
+        "engine_label": label,
+        "p95_ttft_ns": 100,
+        "output_tokens_per_second": Fraction(100),
+        "goodput": Fraction(9, 10),
+        "failure_rate": Fraction(1, 100),
+        "peak_memory_bytes": 100,
+    }
+    values.update(overrides)
+    return ServingSnapshot(**values)
 
 
 def test_snapshot_preserves_exact_serving_metrics():
@@ -71,3 +86,29 @@ def test_regression_thresholds_require_exact_bounded_fractions():
         RegressionThresholds(
             Fraction(0), Fraction(0), Fraction(0), Fraction(0), Fraction(2)
         )
+
+
+def _thresholds(**overrides) -> RegressionThresholds:
+    values = {
+        "max_ttft_increase": Fraction(1, 10),
+        "max_throughput_drop": Fraction(1, 10),
+        "max_goodput_drop": Fraction(1, 100),
+        "max_failure_increase": Fraction(1, 100),
+        "max_memory_increase": Fraction(1, 10),
+    }
+    values.update(overrides)
+    return RegressionThresholds(**values)
+
+
+def test_ttft_comparison_uses_exact_relative_limit():
+    assert ttft_within_threshold(_snapshot(), _snapshot(p95_ttft_ns=110), _thresholds())
+    assert not ttft_within_threshold(
+        _snapshot(), _snapshot(p95_ttft_ns=111), _thresholds()
+    )
+
+
+def test_ttft_comparison_rejects_mismatched_experiment_identity():
+    other_key = ComparisonKey(2, _digest("a"), _digest("b"), _digest("c"))
+
+    with pytest.raises(ServingComparisonError, match="different comparison keys"):
+        ttft_within_threshold(_snapshot(), _snapshot(key=other_key), _thresholds())

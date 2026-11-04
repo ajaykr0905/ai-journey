@@ -95,3 +95,26 @@ class RegressionThresholds:
                 raise TypeError(f"{name} must be Fraction")
             if not 0 <= value <= 1:
                 raise ServingComparisonError(f"{name} must be in [0, 1]")
+
+
+def _require_comparable(baseline: ServingSnapshot, candidate: ServingSnapshot) -> None:
+    if not isinstance(baseline, ServingSnapshot) or not isinstance(
+        candidate, ServingSnapshot
+    ):
+        raise TypeError("baseline and candidate must be ServingSnapshot")
+    if baseline.key != candidate.key:
+        raise ServingComparisonError("serving snapshots have different comparison keys")
+
+
+def ttft_within_threshold(
+    baseline: ServingSnapshot,
+    candidate: ServingSnapshot,
+    thresholds: RegressionThresholds,
+) -> bool:
+    """Return whether candidate p95 TTFT stays inside relative tolerance."""
+
+    _require_comparable(baseline, candidate)
+    if not isinstance(thresholds, RegressionThresholds):
+        raise TypeError("thresholds must be RegressionThresholds")
+    limit = Fraction(baseline.p95_ttft_ns) * (1 + thresholds.max_ttft_increase)
+    return candidate.p95_ttft_ns <= limit
