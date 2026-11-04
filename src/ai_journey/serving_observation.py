@@ -160,3 +160,16 @@ def require_unique_observation_ids(
     if len(request_ids) != len(set(request_ids)):
         raise ServingObservationError("observation request IDs must be unique")
     return observations
+
+
+def censored_observations(
+    observations: tuple[RequestObservation, ...],
+) -> tuple[RequestObservation, ...]:
+    """Return requests lacking an ordinary successful terminal observation."""
+
+    require_unique_observation_ids(observations)
+    return tuple(
+        observation
+        for observation in observations
+        if observation.outcome is not ServingOutcome.SUCCESS
+    )

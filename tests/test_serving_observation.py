@@ -5,6 +5,7 @@ from ai_journey.serving_observation import (
     RequestTiming,
     ServingObservationError,
     ServingOutcome,
+    censored_observations,
     require_unique_observation_ids,
     validate_observation_for_request,
     validate_observations,
@@ -117,3 +118,16 @@ def test_unique_observation_ids_accept_one_terminal_record_per_request():
 def test_unique_observation_ids_reject_duplicate_terminal_records():
     with pytest.raises(ServingObservationError, match="unique"):
         require_unique_observation_ids((_observation("a"), _observation("a")))
+
+
+def test_censored_observations_preserve_every_non_success_outcome():
+    observations = (
+        _observation("a"),
+        _observation("b", ServingOutcome.TIMEOUT),
+        _observation("c", ServingOutcome.OVERLOADED),
+    )
+
+    assert [item.request_id for item in censored_observations(observations)] == [
+        "b",
+        "c",
+    ]
