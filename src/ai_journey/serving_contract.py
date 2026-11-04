@@ -39,6 +39,21 @@ class EngineIdentity:
 
 
 @dataclass(frozen=True)
+class ModelIdentity:
+    """Pin model, tokenizer, and immutable revision identifiers."""
+
+    repository: str
+    revision: str
+    tokenizer_revision: str
+    parameter_count: int
+
+    def __post_init__(self) -> None:
+        for name in ("repository", "revision", "tokenizer_revision"):
+            _nonempty_text(getattr(self, name), name)
+        _positive_integer(self.parameter_count, "parameter_count")
+
+
+@dataclass(frozen=True)
 class WorkloadShape:
     """Bound the request count, token demand, and client concurrency."""
 

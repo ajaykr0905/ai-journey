@@ -2,6 +2,7 @@ import pytest
 
 from ai_journey.serving_contract import (
     EngineIdentity,
+    ModelIdentity,
     ServingContractError,
     WorkloadShape,
 )
@@ -56,3 +57,16 @@ def test_engine_identity_pins_name_version_and_revision():
 def test_engine_identity_rejects_noncanonical_text(value):
     with pytest.raises(ServingContractError, match="canonical"):
         EngineIdentity("vllm", "0.12.0", value)
+
+
+def test_model_identity_pins_model_and_tokenizer_revisions():
+    identity = ModelIdentity("org/model", "model-sha", "tokenizer-sha", 7_000_000_000)
+
+    assert identity.parameter_count == 7_000_000_000
+    assert identity.revision == "model-sha"
+    assert identity.tokenizer_revision == "tokenizer-sha"
+
+
+def test_model_identity_rejects_unbounded_parameter_counts():
+    with pytest.raises(ServingContractError, match="positive"):
+        ModelIdentity("org/model", "model-sha", "tokenizer-sha", 0)
