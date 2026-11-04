@@ -161,3 +161,17 @@ def failures_within_threshold(
         candidate.failure_rate
         <= baseline.failure_rate + thresholds.max_failure_increase
     )
+
+
+def memory_within_threshold(
+    baseline: ServingSnapshot,
+    candidate: ServingSnapshot,
+    thresholds: RegressionThresholds,
+) -> bool:
+    """Return whether candidate peak memory stays inside relative tolerance."""
+
+    _require_comparable(baseline, candidate)
+    if not isinstance(thresholds, RegressionThresholds):
+        raise TypeError("thresholds must be RegressionThresholds")
+    limit = Fraction(baseline.peak_memory_bytes) * (1 + thresholds.max_memory_increase)
+    return candidate.peak_memory_bytes <= limit

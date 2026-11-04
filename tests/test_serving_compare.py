@@ -9,6 +9,7 @@ from ai_journey.serving_compare import (
     ServingSnapshot,
     failures_within_threshold,
     goodput_within_threshold,
+    memory_within_threshold,
     throughput_within_threshold,
     ttft_within_threshold,
 )
@@ -145,4 +146,13 @@ def test_failure_comparison_uses_absolute_percentage_point_increase():
     )
     assert not failures_within_threshold(
         _snapshot(), _snapshot(failure_rate=Fraction(21, 1000)), _thresholds()
+    )
+
+
+def test_memory_comparison_uses_exact_relative_limit():
+    assert memory_within_threshold(
+        _snapshot(), _snapshot(peak_memory_bytes=110), _thresholds()
+    )
+    assert not memory_within_threshold(
+        _snapshot(), _snapshot(peak_memory_bytes=111), _thresholds()
     )
