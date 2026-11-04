@@ -1,6 +1,11 @@
 import pytest
 
-from ai_journey.serving_trace import RequestSpec, ServingTraceError, validate_trace
+from ai_journey.serving_trace import (
+    RequestSpec,
+    ServingTraceError,
+    constant_rate_trace,
+    validate_trace,
+)
 
 PROMPT_DIGEST = "a" * 64
 
@@ -57,3 +62,20 @@ def test_trace_validation_accepts_tied_arrivals_with_unique_ids():
 def test_trace_validation_rejects_order_and_identity_ambiguity(trace, match):
     with pytest.raises(ServingTraceError, match=match):
         validate_trace(trace)
+
+
+def test_constant_rate_trace_has_exact_intervals_and_stable_ids():
+    trace = constant_rate_trace(
+        request_count=3,
+        interval_ms=25,
+        prompt_tokens=128,
+        max_output_tokens=32,
+        prompt_sha256=PROMPT_DIGEST,
+    )
+
+    assert [request.request_id for request in trace] == [
+        "request-000001",
+        "request-000002",
+        "request-000003",
+    ]
+    assert [request.arrival_ms for request in trace] == [0, 25, 50]

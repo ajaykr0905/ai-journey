@@ -69,3 +69,28 @@ def validate_trace(trace: tuple[RequestSpec, ...]) -> tuple[RequestSpec, ...]:
         request_ids.add(request.request_id)
         previous_arrival = request.arrival_ms
     return trace
+
+
+def constant_rate_trace(
+    *,
+    request_count: int,
+    interval_ms: int,
+    prompt_tokens: int,
+    max_output_tokens: int,
+    prompt_sha256: str,
+) -> tuple[RequestSpec, ...]:
+    """Generate an exact fixed-interval arrival trace."""
+
+    _positive_integer(request_count, "request_count")
+    _positive_integer(interval_ms, "interval_ms")
+    trace = tuple(
+        RequestSpec(
+            request_id=f"request-{index + 1:06d}",
+            arrival_ms=index * interval_ms,
+            prompt_tokens=prompt_tokens,
+            max_output_tokens=max_output_tokens,
+            prompt_sha256=prompt_sha256,
+        )
+        for index in range(request_count)
+    )
+    return validate_trace(trace)
