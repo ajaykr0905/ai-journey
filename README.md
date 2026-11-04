@@ -16,6 +16,10 @@ then grow these exercises into production-quality training and inference project
 
 ## What is included
 
+- A content-private serving experiment protocol with immutable workload contracts,
+  deterministic traces, exact request and recovery metrics, regression gates, and
+  tamper-evident reports in the
+  [serving reliability guide](docs/serving-reliability.md)
 - A preregistered 100M-parameter scaling plan with exact token and 6ND compute
   targets, optimizer-step alignment, corpus-reuse warnings, IsoFLOP allocation,
   sealed replay, installed CI verification, and explicit non-execution boundaries
