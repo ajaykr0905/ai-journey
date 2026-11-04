@@ -121,3 +121,16 @@ def goodput_fraction(
             and end_to_end <= target.max_end_to_end_ns
         )
     return Fraction(passing, len(observations))
+
+
+def failure_fraction(
+    observations: tuple[RequestObservation, ...],
+) -> Fraction:
+    """Return the exact share of non-success terminal outcomes."""
+
+    require_unique_observation_ids(observations)
+    failed = sum(
+        observation.outcome is not ServingOutcome.SUCCESS
+        for observation in observations
+    )
+    return Fraction(failed, len(observations))

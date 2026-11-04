@@ -6,6 +6,7 @@ from ai_journey.serving_analysis import (
     GoodputTarget,
     LatencySummary,
     ServingAnalysisError,
+    failure_fraction,
     goodput_fraction,
     nearest_rank_percentile,
     output_throughput_per_second,
@@ -94,3 +95,13 @@ def test_goodput_requires_success_inside_both_latency_targets():
     )
 
     assert goodput_fraction(observations, GoodputTarget(50, 100)) == Fraction(1, 2)
+
+
+def test_failure_fraction_counts_every_censored_terminal_outcome():
+    observations = (
+        _observation("a"),
+        _observation("b", outcome=ServingOutcome.TIMEOUT, generated_tokens=0),
+        _observation("c", outcome=ServingOutcome.OVERLOADED, generated_tokens=0),
+    )
+
+    assert failure_fraction(observations) == Fraction(2, 3)
