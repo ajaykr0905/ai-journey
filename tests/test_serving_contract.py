@@ -11,6 +11,7 @@ from ai_journey.serving_contract import (
     SoftwareManifest,
     WorkloadShape,
     canonical_contract_bytes,
+    serving_contract_digest,
 )
 
 
@@ -166,3 +167,13 @@ def test_contract_serialization_is_canonical_and_stable():
     assert b'": ' not in payload
     assert b', "' not in payload
     assert canonical_contract_bytes(_run_contract()) == payload
+
+
+def test_contract_digest_changes_when_any_workload_input_changes():
+    original = _run_contract()
+    changed = ServingRunContract(
+        **(vars(original) | {"workload": WorkloadShape(8, 128, 64, 4)})
+    )
+
+    assert len(serving_contract_digest(original)) == 64
+    assert serving_contract_digest(original) != serving_contract_digest(changed)

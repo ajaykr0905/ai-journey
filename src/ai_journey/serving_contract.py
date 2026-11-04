@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from hashlib import sha256
 
 
 class ServingContractError(ValueError):
@@ -209,3 +210,9 @@ def canonical_contract_bytes(contract: ServingRunContract) -> bytes:
         ensure_ascii=False,
         allow_nan=False,
     ).encode("utf-8")
+
+
+def serving_contract_digest(contract: ServingRunContract) -> str:
+    """Return the SHA-256 identity of every immutable run input."""
+
+    return sha256(canonical_contract_bytes(contract)).hexdigest()
