@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 
-from .inference_kv import _positive_integer
+from .inference_kv import KVCacheLayout, _positive_integer
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,36 @@ class DecodeStepWork:
     @property
     def total_flops(self) -> int:
         return self.projection_flops + self.attention_flops
+
+
+@dataclass(frozen=True)
+class DecodeMemoryTraffic:
+    weight_bytes: int
+    kv_read_bytes: int
+
+    @property
+    def total_bytes(self) -> int:
+        return self.weight_bytes + self.kv_read_bytes
+
+    def arithmetic_intensity(self, work: DecodeStepWork) -> Fraction:
+        if not isinstance(work, DecodeStepWork):
+            raise TypeError("work must be DecodeStepWork")
+        return Fraction(work.total_flops, self.total_bytes)
+
+
+def estimate_decode_memory_traffic(
+    *, parameter_count: int, weight_bytes_per_parameter: int, cache: KVCacheLayout
+) -> DecodeMemoryTraffic:
+    """Estimate compulsory weight and resident KV reads for one decode step."""
+
+    _positive_integer(parameter_count, "parameter_count")
+    _positive_integer(weight_bytes_per_parameter, "weight_bytes_per_parameter")
+    if not isinstance(cache, KVCacheLayout):
+        raise TypeError("cache must be KVCacheLayout")
+    return DecodeMemoryTraffic(
+        weight_bytes=parameter_count * weight_bytes_per_parameter,
+        kv_read_bytes=cache.total_bytes,
+    )
 
 
 def estimate_decode_step_work(
