@@ -35,3 +35,15 @@ def test_request_timing_accepts_a_monotonic_lifecycle():
 def test_request_timing_rejects_nonmonotonic_or_negative_clocks(values):
     with pytest.raises(ServingObservationError):
         RequestTiming(*values)
+
+
+def test_request_timing_derives_queue_service_and_first_token_latency():
+    timing = RequestTiming(10, 20, 25, 40)
+
+    assert timing.queue_time_ns == 10
+    assert timing.service_time_ns == 20
+    assert timing.time_to_first_token_ns == 15
+
+
+def test_request_without_a_token_has_no_first_token_latency():
+    assert RequestTiming(10, 20, None, 40).time_to_first_token_ns is None

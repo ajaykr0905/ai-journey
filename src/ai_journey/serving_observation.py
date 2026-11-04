@@ -48,3 +48,17 @@ class RequestTiming:
             raise ServingObservationError(
                 "first-token timestamp must be within service"
             )
+
+    @property
+    def queue_time_ns(self) -> int:
+        return self.started_ns - self.received_ns
+
+    @property
+    def service_time_ns(self) -> int:
+        return self.completed_ns - self.started_ns
+
+    @property
+    def time_to_first_token_ns(self) -> int | None:
+        if self.first_token_ns is None:
+            return None
+        return self.first_token_ns - self.received_ns
