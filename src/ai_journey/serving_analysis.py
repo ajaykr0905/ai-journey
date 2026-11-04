@@ -162,3 +162,21 @@ def successful_cache_hit_fraction(
     if not successful:
         raise ServingAnalysisError("cache hit rate requires successful requests")
     return Fraction(sum(item.cache_hit for item in successful), len(successful))
+
+
+def speculative_acceptance_fraction(
+    *, accepted_tokens: int, drafted_tokens: int
+) -> Fraction:
+    """Return accepted draft tokens as an exact bounded fraction."""
+
+    for value, name in (
+        (accepted_tokens, "accepted_tokens"),
+        (drafted_tokens, "drafted_tokens"),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ServingAnalysisError(f"{name} must be nonnegative")
+    if drafted_tokens == 0:
+        raise ServingAnalysisError("drafted_tokens must be positive")
+    if accepted_tokens > drafted_tokens:
+        raise ServingAnalysisError("accepted_tokens cannot exceed drafted_tokens")
+    return Fraction(accepted_tokens, drafted_tokens)

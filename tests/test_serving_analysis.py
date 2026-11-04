@@ -11,6 +11,7 @@ from ai_journey.serving_analysis import (
     nearest_rank_percentile,
     output_throughput_per_second,
     retry_amplification,
+    speculative_acceptance_fraction,
     successful_cache_hit_fraction,
     successful_ttft_summary,
 )
@@ -131,3 +132,12 @@ def test_cache_hit_fraction_excludes_failed_requests():
     )
 
     assert successful_cache_hit_fraction(observations) == Fraction(1, 2)
+
+
+def test_speculative_acceptance_is_exact_and_bounded():
+    assert speculative_acceptance_fraction(
+        accepted_tokens=8, drafted_tokens=10
+    ) == Fraction(4, 5)
+
+    with pytest.raises(ServingAnalysisError, match="exceed"):
+        speculative_acceptance_fraction(accepted_tokens=11, drafted_tokens=10)
