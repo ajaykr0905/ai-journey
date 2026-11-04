@@ -40,6 +40,22 @@ class BatchStep:
     reserved_tokens: int
 
 
+@dataclass(frozen=True)
+class RequestTiming:
+    request_id: str
+    arrival_tick: int
+    admitted_tick: int
+    completed_tick: int
+
+    @property
+    def queue_ticks(self) -> int:
+        return self.admitted_tick - self.arrival_tick
+
+    @property
+    def service_ticks(self) -> int:
+        return self.completed_tick - self.admitted_tick + 1
+
+
 def chunk_prefill(
     request: InferenceRequest, *, max_chunk_tokens: int
 ) -> tuple[int, ...]:
@@ -103,3 +119,24 @@ def simulate_continuous_batching(
         )
         tick += 1
     return tuple(steps)
+
+
+def summarize_batch_timing(
+    requests: tuple[InferenceRequest, ...], steps: tuple[BatchStep, ...]
+) -> tuple[RequestTiming, ...]:
+    """Derive per-request queue and service ticks from a complete schedule."""
+
+    arrivals = {request.request_id: request.arrival_tick for request in requests}
+    admitted: dict[str, int] = {}
+    completed: dict[str, int] = {}
+    for step in steps:
+        for request_id in step.admitted:
+            admitted[request_id] = step.tick
+        for request_id in step.completed:
+            completed[request_id] = step.tick
+    if set(arrivals) != set(admitted) or set(arrivals) != set(completed):
+        raise InferenceCapacityError("schedule is incomplete for the declared requests")
+    return tuple(
+        RequestTiming(request_id, arrival, admitted[request_id], completed[request_id])
+        for request_id, arrival in arrivals.items()
+    )

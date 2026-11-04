@@ -1,8 +1,10 @@
 from ai_journey.inference_batching import (
     BatchStep,
     InferenceRequest,
+    RequestTiming,
     chunk_prefill,
     simulate_continuous_batching,
+    summarize_batch_timing,
 )
 
 
@@ -48,3 +50,20 @@ def test_exact_prefill_chunk_does_not_add_an_empty_tail():
     request = InferenceRequest("exact", 0, 32, 4)
 
     assert chunk_prefill(request, max_chunk_tokens=16) == (16, 16)
+
+
+def test_batch_timing_separates_queue_delay_from_service_ticks():
+    requests = (
+        InferenceRequest("large", 0, 8, 2),
+        InferenceRequest("next", 0, 4, 1),
+    )
+    steps = simulate_continuous_batching(
+        requests, max_batch_size=2, max_resident_tokens=10
+    )
+
+    assert summarize_batch_timing(requests, steps) == (
+        RequestTiming("large", 0, 0, 1),
+        RequestTiming("next", 0, 2, 2),
+    )
+    assert summarize_batch_timing(requests, steps)[1].queue_ticks == 2
+    assert summarize_batch_timing(requests, steps)[0].service_ticks == 2
