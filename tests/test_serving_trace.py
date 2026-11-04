@@ -1,8 +1,11 @@
+from fractions import Fraction
+
 import pytest
 
 from ai_journey.serving_trace import (
     RequestSpec,
     ServingTraceError,
+    arrival_rate_per_second,
     burst_trace,
     constant_rate_trace,
     validate_trace,
@@ -94,3 +97,16 @@ def test_burst_trace_preserves_tied_arrivals_and_burst_spacing():
 
     assert [request.arrival_ms for request in trace] == [0, 0, 0, 100, 100, 100]
     assert len({request.request_id for request in trace}) == 6
+
+
+def test_arrival_rate_uses_exact_fractional_arithmetic():
+    trace = tuple(
+        _request(str(index), arrival) for index, arrival in enumerate((0, 30, 60))
+    )
+
+    assert arrival_rate_per_second(trace) == Fraction(100, 3)
+
+
+def test_arrival_rate_rejects_a_zero_duration_burst():
+    with pytest.raises(ServingTraceError, match="positive trace span"):
+        arrival_rate_per_second((_request("a", 0), _request("b", 0)))

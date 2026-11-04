@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 
 
 class ServingTraceError(ValueError):
@@ -122,3 +123,12 @@ def burst_trace(
         for member in range(requests_per_burst)
     )
     return validate_trace(trace)
+
+
+def arrival_rate_per_second(trace: tuple[RequestSpec, ...]) -> Fraction:
+    """Return the exact inter-arrival rate between first and last requests."""
+
+    validate_trace(trace)
+    if len(trace) < 2 or trace[-1].arrival_ms == trace[0].arrival_ms:
+        raise ServingTraceError("arrival rate requires a positive trace span")
+    return Fraction((len(trace) - 1) * 1000, trace[-1].arrival_ms - trace[0].arrival_ms)
