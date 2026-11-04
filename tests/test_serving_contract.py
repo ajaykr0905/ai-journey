@@ -1,6 +1,7 @@
 import pytest
 
 from ai_journey.serving_contract import (
+    ClaimBoundary,
     EngineIdentity,
     HardwareManifest,
     ModelIdentity,
@@ -107,3 +108,22 @@ def test_run_limits_pin_duration_and_deterministic_seed():
 def test_run_limits_reject_unbounded_or_ambiguous_controls(duration, seed):
     with pytest.raises((ServingContractError, TypeError)):
         RunLimits(duration, seed)
+
+
+def test_claim_boundary_records_only_sorted_explicit_claims():
+    boundary = ClaimBoundary("cpu_fixture", ("functional", "restart"))
+
+    assert boundary.allowed_claims == ("functional", "restart")
+
+
+@pytest.mark.parametrize(
+    "kind,claims",
+    [
+        ("unknown", ("functional",)),
+        ("cpu_fixture", ("restart", "functional")),
+        ("measured_hardware", ("production",)),
+    ],
+)
+def test_claim_boundary_rejects_unsupported_or_overstated_claims(kind, claims):
+    with pytest.raises(ServingContractError):
+        ClaimBoundary(kind, claims)

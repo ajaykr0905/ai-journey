@@ -110,6 +110,35 @@ class RunLimits:
 
 
 @dataclass(frozen=True)
+class ClaimBoundary:
+    """Enumerate claims supported by one declared execution kind."""
+
+    execution_kind: str
+    allowed_claims: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if self.execution_kind not in {
+            "analytical",
+            "cpu_fixture",
+            "measured_hardware",
+        }:
+            raise ServingContractError("execution_kind is unsupported")
+        if (
+            not isinstance(self.allowed_claims, tuple)
+            or not self.allowed_claims
+            or any(not isinstance(claim, str) for claim in self.allowed_claims)
+        ):
+            raise TypeError("allowed_claims must be a nonempty text tuple")
+        canonical = tuple(sorted(set(self.allowed_claims)))
+        if canonical != self.allowed_claims or any(
+            _nonempty_text(claim, "claim") != claim for claim in self.allowed_claims
+        ):
+            raise ServingContractError("allowed_claims must be sorted and unique")
+        if "production" in self.allowed_claims:
+            raise ServingContractError("bounded lab evidence cannot claim production")
+
+
+@dataclass(frozen=True)
 class WorkloadShape:
     """Bound the request count, token demand, and client concurrency."""
 
