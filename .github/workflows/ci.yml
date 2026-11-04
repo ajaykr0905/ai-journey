@@ -891,3 +891,49 @@ jobs:
             ${{ runner.temp }}/scaling-evidence/
             ${{ runner.temp }}/scaling-dist/
           if-no-files-found: error
+  inference-plan-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install pinned verification tools
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check analytical inference plan contracts
+        run: |
+          ruff check src/ai_journey/inference_*.py tests/test_inference_*.py
+          ruff format --check src/ai_journey/inference_*.py tests/test_inference_*.py
+          python -m compileall -q src tests
+          python -m pytest -q tests/test_inference_*.py
+      - name: Build and install an isolated inference planner wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/inference-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/inference-installed" "$RUNNER_TEMP"/inference-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/inference-evidence"
+      - name: Build and independently verify installed inference evidence
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/inference-installed
+        run: |
+          export PATH="$RUNNER_TEMP/inference-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/inference-installed/")'
+          ai-journey-inference build --protocol "$GITHUB_WORKSPACE/config/day-61-inference-plan.json" --output "$RUNNER_TEMP/inference-evidence/report.json"
+          ai-journey-inference verify --report "$RUNNER_TEMP/inference-evidence/report.json"
+      - name: Retain analytical inference evidence and installed package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inference-plan-evidence
+          path: |
+            ${{ runner.temp }}/inference-evidence/
+            ${{ runner.temp }}/inference-dist/
+          if-no-files-found: error
