@@ -4,9 +4,11 @@ import pytest
 
 from ai_journey.serving_compare import (
     ComparisonKey,
+    ComparisonResult,
     RegressionThresholds,
     ServingComparisonError,
     ServingSnapshot,
+    compare_snapshots,
     failures_within_threshold,
     goodput_within_threshold,
     memory_within_threshold,
@@ -156,3 +158,30 @@ def test_memory_comparison_uses_exact_relative_limit():
     assert not memory_within_threshold(
         _snapshot(), _snapshot(peak_memory_bytes=111), _thresholds()
     )
+
+
+def test_comparison_result_reports_all_regressions_in_stable_order():
+    result = compare_snapshots(
+        _snapshot("baseline"),
+        _snapshot(
+            "candidate",
+            p95_ttft_ns=111,
+            output_tokens_per_second=Fraction(80),
+            failure_rate=Fraction(1, 10),
+        ),
+        _thresholds(),
+    )
+
+    assert result == ComparisonResult(
+        key=_key(),
+        baseline_engine="baseline",
+        candidate_engine="candidate",
+        regressions=("p95_ttft", "output_throughput", "failure_rate"),
+    )
+    assert not result.passed
+
+
+def test_comparison_result_passes_when_all_gates_pass():
+    assert compare_snapshots(
+        _snapshot("baseline"), _snapshot("candidate"), _thresholds()
+    ).passed

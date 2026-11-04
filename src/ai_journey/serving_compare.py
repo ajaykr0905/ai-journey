@@ -175,3 +175,44 @@ def memory_within_threshold(
         raise TypeError("thresholds must be RegressionThresholds")
     limit = Fraction(baseline.peak_memory_bytes) * (1 + thresholds.max_memory_increase)
     return candidate.peak_memory_bytes <= limit
+
+
+@dataclass(frozen=True)
+class ComparisonResult:
+    """Named regressions found in one baseline/candidate comparison."""
+
+    key: ComparisonKey
+    baseline_engine: str
+    candidate_engine: str
+    regressions: tuple[str, ...]
+
+    @property
+    def passed(self) -> bool:
+        """Return whether every configured regression gate passed."""
+
+        return not self.regressions
+
+
+def compare_snapshots(
+    baseline: ServingSnapshot,
+    candidate: ServingSnapshot,
+    thresholds: RegressionThresholds,
+) -> ComparisonResult:
+    """Evaluate all serving regression gates in a stable order."""
+
+    checks = (
+        ("p95_ttft", ttft_within_threshold),
+        ("output_throughput", throughput_within_threshold),
+        ("goodput", goodput_within_threshold),
+        ("failure_rate", failures_within_threshold),
+        ("peak_memory", memory_within_threshold),
+    )
+    regressions = tuple(
+        name for name, check in checks if not check(baseline, candidate, thresholds)
+    )
+    return ComparisonResult(
+        key=baseline.key,
+        baseline_engine=baseline.engine_label,
+        candidate_engine=candidate.engine_label,
+        regressions=regressions,
+    )
