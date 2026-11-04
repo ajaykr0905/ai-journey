@@ -8,6 +8,7 @@ from ai_journey.serving_faults import (
     RecoveryObservation,
     ServingFaultError,
     fault_coverage_fraction,
+    fault_recovery_digest,
     recovery_duration_ns,
     recovery_slo_fraction,
     require_nonoverlapping_targets,
@@ -112,3 +113,12 @@ def test_recovery_slo_fraction_requires_complete_matching_evidence():
     assert recovery_slo_fraction(events, recoveries, max_recovery_ns=50) == Fraction(
         1, 2
     )
+
+
+def test_fault_recovery_digest_binds_schedule_and_recovery_milestones():
+    events = (_fault("a", 0, 10),)
+    first = (RecoveryObservation("a", 5, 10, 20),)
+    slower = (RecoveryObservation("a", 5, 10, 21),)
+
+    assert len(fault_recovery_digest(events, first)) == 64
+    assert fault_recovery_digest(events, first) != fault_recovery_digest(events, slower)

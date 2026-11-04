@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from enum import Enum
 from fractions import Fraction
+from hashlib import sha256
 
 
 class ServingFaultError(ValueError):
@@ -180,3 +182,29 @@ def recovery_slo_fraction(
         for event in events
     )
     return Fraction(passing, len(events))
+
+
+def fault_recovery_digest(
+    events: tuple[FaultEvent, ...],
+    observations: tuple[RecoveryObservation, ...],
+) -> str:
+    """Seal the exact fault schedule and its matching recovery milestones."""
+
+    require_nonoverlapping_targets(events)
+    by_id = {observation.fault_id: observation for observation in observations}
+    if len(by_id) != len(observations) or set(by_id) != {
+        event.fault_id for event in events
+    }:
+        raise ServingFaultError("recovery observations must match scheduled faults")
+    payload = {
+        "events": [asdict(event) for event in events],
+        "recoveries": [asdict(by_id[event.fault_id]) for event in events],
+    }
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return sha256(canonical).hexdigest()
