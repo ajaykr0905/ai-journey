@@ -5,7 +5,9 @@ from ai_journey.serving_observation import (
     RequestTiming,
     ServingObservationError,
     ServingOutcome,
+    validate_observation_for_request,
 )
+from ai_journey.serving_trace import RequestSpec
 
 
 def test_serving_outcomes_have_a_fixed_low_cardinality_vocabulary():
@@ -74,3 +76,16 @@ def test_successful_observation_requires_generated_output():
 
     with pytest.raises(ServingObservationError, match="generate"):
         RequestObservation(**values)
+
+
+def test_observation_binds_to_trace_identity_and_token_bounds():
+    request = RequestSpec("request-1", 0, 128, 8, "a" * 64)
+
+    assert validate_observation_for_request(_observation(), request) == _observation()
+
+
+def test_observation_rejects_output_beyond_scheduled_maximum():
+    request = RequestSpec("request-1", 0, 128, 2, "a" * 64)
+
+    with pytest.raises(ServingObservationError, match="maximum"):
+        validate_observation_for_request(_observation(), request)

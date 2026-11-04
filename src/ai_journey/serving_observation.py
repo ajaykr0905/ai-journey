@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from .serving_trace import RequestSpec
+
 
 class ServingObservationError(ValueError):
     """Raised when measured request evidence is ambiguous or inconsistent."""
@@ -109,3 +111,21 @@ class RequestObservation:
             or self.retry_count < 0
         ):
             raise ServingObservationError("retry_count must be nonnegative")
+
+
+def validate_observation_for_request(
+    observation: RequestObservation, request: RequestSpec
+) -> RequestObservation:
+    """Reject measurements that do not belong to the scheduled request."""
+
+    if not isinstance(observation, RequestObservation):
+        raise TypeError("observation must be RequestObservation")
+    if not isinstance(request, RequestSpec):
+        raise TypeError("request must be RequestSpec")
+    if observation.request_id != request.request_id:
+        raise ServingObservationError("observation request ID does not match trace")
+    if observation.prompt_tokens != request.prompt_tokens:
+        raise ServingObservationError("observed prompt tokens do not match trace")
+    if observation.generated_tokens > request.max_output_tokens:
+        raise ServingObservationError("generated tokens exceed the scheduled maximum")
+    return observation
