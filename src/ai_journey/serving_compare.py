@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from fractions import Fraction
 
@@ -216,3 +218,29 @@ def compare_snapshots(
         candidate_engine=candidate.engine_label,
         regressions=regressions,
     )
+
+
+def canonical_comparison_bytes(result: ComparisonResult) -> bytes:
+    """Serialize a comparison decision with stable keys and separators."""
+
+    if not isinstance(result, ComparisonResult):
+        raise TypeError("result must be ComparisonResult")
+    payload = {
+        "baseline_engine": result.baseline_engine,
+        "candidate_engine": result.candidate_engine,
+        "key": {
+            "model_sha256": result.key.model_sha256,
+            "protocol_version": result.key.protocol_version,
+            "trace_sha256": result.key.trace_sha256,
+            "workload_sha256": result.key.workload_sha256,
+        },
+        "passed": result.passed,
+        "regressions": list(result.regressions),
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+
+
+def serving_comparison_digest(result: ComparisonResult) -> str:
+    """Return the SHA-256 digest of one canonical comparison decision."""
+
+    return hashlib.sha256(canonical_comparison_bytes(result)).hexdigest()

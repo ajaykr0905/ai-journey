@@ -1,3 +1,4 @@
+import json
 from fractions import Fraction
 
 import pytest
@@ -8,10 +9,12 @@ from ai_journey.serving_compare import (
     RegressionThresholds,
     ServingComparisonError,
     ServingSnapshot,
+    canonical_comparison_bytes,
     compare_snapshots,
     failures_within_threshold,
     goodput_within_threshold,
     memory_within_threshold,
+    serving_comparison_digest,
     throughput_within_threshold,
     ttft_within_threshold,
 )
@@ -185,3 +188,14 @@ def test_comparison_result_passes_when_all_gates_pass():
     assert compare_snapshots(
         _snapshot("baseline"), _snapshot("candidate"), _thresholds()
     ).passed
+
+
+def test_comparison_decision_has_canonical_digest():
+    result = compare_snapshots(
+        _snapshot("baseline"), _snapshot("candidate"), _thresholds()
+    )
+    payload = json.loads(canonical_comparison_bytes(result))
+
+    assert payload["passed"] is True
+    assert len(serving_comparison_digest(result)) == 64
+    assert serving_comparison_digest(result) == serving_comparison_digest(result)
