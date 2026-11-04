@@ -46,6 +46,22 @@ class LatencySummary:
     p99_ns: int
 
 
+@dataclass(frozen=True)
+class GoodputTarget:
+    """Bound first-token and end-to-end latency for useful completions."""
+
+    max_ttft_ns: int
+    max_end_to_end_ns: int
+
+    def __post_init__(self) -> None:
+        for name in ("max_ttft_ns", "max_end_to_end_ns"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ServingAnalysisError(f"{name} must be positive")
+        if self.max_ttft_ns > self.max_end_to_end_ns:
+            raise ServingAnalysisError("TTFT target cannot exceed end-to-end target")
+
+
 def successful_ttft_summary(
     observations: tuple[RequestObservation, ...],
 ) -> LatencySummary:
@@ -84,3 +100,24 @@ def output_throughput_per_second(
         if observation.outcome is ServingOutcome.SUCCESS
     )
     return Fraction(generated * 1_000_000_000, duration_ns)
+
+
+def goodput_fraction(
+    observations: tuple[RequestObservation, ...], target: GoodputTarget
+) -> Fraction:
+    """Return the exact share of requests completing inside both SLOs."""
+
+    require_unique_observation_ids(observations)
+    if not isinstance(target, GoodputTarget):
+        raise TypeError("target must be GoodputTarget")
+    passing = 0
+    for observation in observations:
+        ttft = observation.timing.time_to_first_token_ns
+        end_to_end = observation.timing.completed_ns - observation.timing.received_ns
+        passing += int(
+            observation.outcome is ServingOutcome.SUCCESS
+            and ttft is not None
+            and ttft <= target.max_ttft_ns
+            and end_to_end <= target.max_end_to_end_ns
+        )
+    return Fraction(passing, len(observations))

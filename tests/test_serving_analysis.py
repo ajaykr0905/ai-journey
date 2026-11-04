@@ -3,8 +3,10 @@ from fractions import Fraction
 import pytest
 
 from ai_journey.serving_analysis import (
+    GoodputTarget,
     LatencySummary,
     ServingAnalysisError,
+    goodput_fraction,
     nearest_rank_percentile,
     output_throughput_per_second,
     successful_ttft_summary,
@@ -83,3 +85,12 @@ def test_output_throughput_uses_successful_tokens_and_full_wall_interval():
     )
 
     assert output_throughput_per_second(observations) == Fraction(4, 1)
+
+
+def test_goodput_requires_success_inside_both_latency_targets():
+    observations = (
+        _observation("a", first_token_ns=20, completed_ns=80),
+        _observation("b", first_token_ns=60, completed_ns=80),
+    )
+
+    assert goodput_fraction(observations, GoodputTarget(50, 100)) == Fraction(1, 2)
