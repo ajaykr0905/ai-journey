@@ -51,3 +51,22 @@ class FaultEvent:
     @property
     def end_ns(self) -> int:
         return self.start_ns + self.duration_ns
+
+
+def validate_fault_schedule(events: tuple[FaultEvent, ...]) -> tuple[FaultEvent, ...]:
+    """Require a nonempty, start-ordered schedule with unique fault IDs."""
+
+    if not isinstance(events, tuple) or not events:
+        raise TypeError("events must be a nonempty FaultEvent tuple")
+    fault_ids: set[str] = set()
+    previous_start = -1
+    for event in events:
+        if not isinstance(event, FaultEvent):
+            raise TypeError("fault schedule entries must be FaultEvent")
+        if event.fault_id in fault_ids:
+            raise ServingFaultError("fault IDs must be unique")
+        if event.start_ns < previous_start:
+            raise ServingFaultError("fault schedule must be ordered")
+        fault_ids.add(event.fault_id)
+        previous_start = event.start_ns
+    return events

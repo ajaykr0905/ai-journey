@@ -1,6 +1,11 @@
 import pytest
 
-from ai_journey.serving_faults import FaultEvent, FaultKind, ServingFaultError
+from ai_journey.serving_faults import (
+    FaultEvent,
+    FaultKind,
+    ServingFaultError,
+    validate_fault_schedule,
+)
 
 
 def test_fault_kinds_use_a_fixed_low_cardinality_vocabulary():
@@ -26,3 +31,18 @@ def test_fault_event_has_an_explicit_bounded_interval():
 def test_fault_event_rejects_zero_duration():
     with pytest.raises(ServingFaultError, match="duration"):
         FaultEvent("fault-1", FaultKind.PROCESS_KILL, "worker-0", 100, 0)
+
+
+def _fault(fault_id, start_ns, duration_ns=10, target="worker-0"):
+    return FaultEvent(fault_id, FaultKind.PROCESS_KILL, target, start_ns, duration_ns)
+
+
+def test_fault_schedule_accepts_tied_starts_with_unique_ids():
+    schedule = (_fault("a", 0), _fault("b", 0, target="worker-1"))
+
+    assert validate_fault_schedule(schedule) == schedule
+
+
+def test_fault_schedule_rejects_duplicate_ids():
+    with pytest.raises(ServingFaultError, match="unique"):
+        validate_fault_schedule((_fault("a", 0), _fault("a", 10)))
