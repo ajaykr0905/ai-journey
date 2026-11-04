@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 
 
 class InferenceCapacityError(ValueError):
@@ -50,3 +51,15 @@ class KVCacheLayout:
         """Return the dense cache allocation at the declared batch/context."""
 
         return self.bytes_per_token_per_sequence * self.context_tokens * self.batch_size
+
+
+def grouped_query_cache_fraction(*, query_heads: int, kv_heads: int) -> Fraction:
+    """Return GQA/MQA cache bytes as an exact fraction of MHA cache bytes."""
+
+    _positive_integer(query_heads, "query_heads")
+    _positive_integer(kv_heads, "kv_heads")
+    if kv_heads > query_heads or query_heads % kv_heads:
+        raise InferenceCapacityError(
+            "kv_heads must divide query_heads without exceeding it"
+        )
+    return Fraction(kv_heads, query_heads)
