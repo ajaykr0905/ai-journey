@@ -134,3 +134,15 @@ def failure_fraction(
         for observation in observations
     )
     return Fraction(failed, len(observations))
+
+
+def retry_amplification(
+    observations: tuple[RequestObservation, ...],
+) -> Fraction:
+    """Return total attempts divided by unique scheduled requests."""
+
+    require_unique_observation_ids(observations)
+    attempts = len(observations) + sum(
+        observation.retry_count for observation in observations
+    )
+    return Fraction(attempts, len(observations))

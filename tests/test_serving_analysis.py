@@ -10,6 +10,7 @@ from ai_journey.serving_analysis import (
     goodput_fraction,
     nearest_rank_percentile,
     output_throughput_per_second,
+    retry_amplification,
     successful_ttft_summary,
 )
 from ai_journey.serving_observation import (
@@ -105,3 +106,12 @@ def test_failure_fraction_counts_every_censored_terminal_outcome():
     )
 
     assert failure_fraction(observations) == Fraction(2, 3)
+
+
+def test_retry_amplification_includes_initial_attempts():
+    observations = (
+        _observation("a", retry_count=0),
+        _observation("b", retry_count=2),
+    )
+
+    assert retry_amplification(observations) == Fraction(2, 1)
