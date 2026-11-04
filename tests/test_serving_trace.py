@@ -9,6 +9,7 @@ from ai_journey.serving_trace import (
     burst_trace,
     constant_rate_trace,
     offered_token_rate_per_second,
+    peak_arrivals_in_window,
     slice_trace_window,
     split_warmup,
     validate_trace,
@@ -153,3 +154,11 @@ def test_trace_window_uses_half_open_absolute_boundaries():
 def test_trace_window_rejects_empty_selection():
     with pytest.raises(ServingTraceError, match="no requests"):
         slice_trace_window((_request("a", 0),), start_ms=10, end_ms=20)
+
+
+def test_peak_arrivals_counts_tied_bursts_inside_half_open_windows():
+    trace = tuple(
+        _request(str(index), arrival) for index, arrival in enumerate((0, 0, 9, 10, 19))
+    )
+
+    assert peak_arrivals_in_window(trace, 10) == 3

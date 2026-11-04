@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from fractions import Fraction
 
@@ -182,3 +183,18 @@ def slice_trace_window(
     if not selected:
         raise ServingTraceError("trace window contains no requests")
     return selected
+
+
+def peak_arrivals_in_window(trace: tuple[RequestSpec, ...], window_ms: int) -> int:
+    """Return the largest request count in any half-open time window."""
+
+    validate_trace(trace)
+    _positive_integer(window_ms, "window_ms")
+    active: deque[int] = deque()
+    peak = 0
+    for request in trace:
+        while active and active[0] <= request.arrival_ms - window_ms:
+            active.popleft()
+        active.append(request.arrival_ms)
+        peak = max(peak, len(active))
+    return peak
