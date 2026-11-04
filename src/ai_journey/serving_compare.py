@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 
 
 class ServingComparisonError(ValueError):
@@ -36,3 +37,36 @@ class ComparisonKey:
             raise ServingComparisonError("protocol_version must be positive")
         for name in ("workload_sha256", "model_sha256", "trace_sha256"):
             _require_sha256(getattr(self, name), name)
+
+
+@dataclass(frozen=True)
+class ServingSnapshot:
+    """Exact metrics and identity for one bounded serving run."""
+
+    key: ComparisonKey
+    engine_label: str
+    p95_ttft_ns: int
+    output_tokens_per_second: Fraction
+    goodput: Fraction
+    failure_rate: Fraction
+    peak_memory_bytes: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.key, ComparisonKey):
+            raise TypeError("key must be ComparisonKey")
+        if not isinstance(self.engine_label, str) or not self.engine_label.strip():
+            raise ServingComparisonError("engine_label must be nonempty")
+        for name in ("p95_ttft_ns", "peak_memory_bytes"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ServingComparisonError(f"{name} must be positive")
+        if not isinstance(self.output_tokens_per_second, Fraction):
+            raise TypeError("output_tokens_per_second must be Fraction")
+        if self.output_tokens_per_second <= 0:
+            raise ServingComparisonError("output_tokens_per_second must be positive")
+        for name in ("goodput", "failure_rate"):
+            value = getattr(self, name)
+            if not isinstance(value, Fraction):
+                raise TypeError(f"{name} must be Fraction")
+            if not 0 <= value <= 1:
+                raise ServingComparisonError(f"{name} must be in [0, 1]")
