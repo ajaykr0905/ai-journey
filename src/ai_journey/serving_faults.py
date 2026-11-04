@@ -153,3 +153,30 @@ def recovery_duration_ns(event: FaultEvent, observation: RecoveryObservation) ->
 
     validate_recovery_binding(event, observation)
     return observation.first_success_ns - event.start_ns
+
+
+def recovery_slo_fraction(
+    events: tuple[FaultEvent, ...],
+    observations: tuple[RecoveryObservation, ...],
+    *,
+    max_recovery_ns: int,
+) -> Fraction:
+    """Return the exact share of scheduled faults recovering inside the SLO."""
+
+    require_nonoverlapping_targets(events)
+    if (
+        isinstance(max_recovery_ns, bool)
+        or not isinstance(max_recovery_ns, int)
+        or max_recovery_ns <= 0
+    ):
+        raise ServingFaultError("max_recovery_ns must be positive")
+    by_id = {observation.fault_id: observation for observation in observations}
+    if len(by_id) != len(observations) or set(by_id) != {
+        event.fault_id for event in events
+    }:
+        raise ServingFaultError("recovery observations must match scheduled faults")
+    passing = sum(
+        recovery_duration_ns(event, by_id[event.fault_id]) <= max_recovery_ns
+        for event in events
+    )
+    return Fraction(passing, len(events))
