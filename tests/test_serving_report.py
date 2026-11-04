@@ -12,7 +12,9 @@ from ai_journey.serving_report import (
     ServingReportError,
     canonical_serving_report_bytes,
     seal_serving_report,
+    sealed_report_payload,
     validate_reported_claims,
+    verify_serving_document,
 )
 
 
@@ -118,3 +120,25 @@ def test_serving_report_seal_binds_canonical_content():
     assert isinstance(sealed, SealedServingReport)
     assert len(sealed.report_sha256) == 64
     assert sealed == seal_serving_report(_report())
+
+
+def test_serialized_serving_document_round_trips_through_strict_verification():
+    payload = sealed_report_payload(seal_serving_report(_report()))
+
+    assert verify_serving_document(payload).report == _report()
+
+
+def test_serialized_serving_document_rejects_tampering():
+    payload = sealed_report_payload(seal_serving_report(_report()))
+    payload["report"]["snapshot"]["p95_ttft_ns"] = 101
+
+    with pytest.raises(ServingReportError, match="digest mismatch"):
+        verify_serving_document(payload)
+
+
+def test_serialized_serving_document_rejects_unknown_fields():
+    payload = sealed_report_payload(seal_serving_report(_report()))
+    payload["untrusted"] = True
+
+    with pytest.raises(ServingReportError, match="unexpected fields"):
+        verify_serving_document(payload)

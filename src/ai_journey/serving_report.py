@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from fractions import Fraction
 from hashlib import sha256
 
-from .serving_compare import ServingSnapshot
+from .serving_compare import ComparisonKey, ServingSnapshot
 from .serving_contract import ClaimBoundary
 
 
@@ -151,3 +151,109 @@ def seal_serving_report(report: ServingEvidenceReport) -> SealedServingReport:
 
     digest = sha256(canonical_serving_report_bytes(report)).hexdigest()
     return SealedServingReport(report=report, report_sha256=digest)
+
+
+def sealed_report_payload(sealed: SealedServingReport) -> dict[str, object]:
+    """Return a JSON-compatible report and its detached digest."""
+
+    if not isinstance(sealed, SealedServingReport):
+        raise TypeError("sealed must be SealedServingReport")
+    return {
+        "report": serving_report_payload(sealed.report),
+        "report_sha256": sealed.report_sha256,
+    }
+
+
+def _require_keys(payload: dict, expected: set[str], name: str) -> None:
+    if not isinstance(payload, dict) or set(payload) != expected:
+        raise ServingReportError(f"{name} has unexpected fields")
+
+
+def _parse_fraction(payload: dict, name: str) -> Fraction:
+    _require_keys(payload, {"denominator", "numerator"}, name)
+    numerator = payload["numerator"]
+    denominator = payload["denominator"]
+    if any(
+        isinstance(value, bool) or not isinstance(value, int)
+        for value in (numerator, denominator)
+    ):
+        raise ServingReportError(f"{name} must contain integers")
+    if denominator <= 0:
+        raise ServingReportError(f"{name} denominator must be positive")
+    return Fraction(numerator, denominator)
+
+
+def parse_serving_report(payload: dict) -> ServingEvidenceReport:
+    """Parse a strict JSON report payload back into validated domain types."""
+
+    _require_keys(
+        payload,
+        {
+            "boundary",
+            "claims",
+            "comparison_sha256",
+            "references",
+            "report_version",
+            "snapshot",
+        },
+        "report",
+    )
+    references = payload["references"]
+    boundary = payload["boundary"]
+    snapshot = payload["snapshot"]
+    _require_keys(
+        references,
+        {"contract_sha256", "observations_sha256", "recovery_sha256", "trace_sha256"},
+        "references",
+    )
+    _require_keys(boundary, {"allowed_claims", "execution_kind"}, "boundary")
+    _require_keys(
+        snapshot,
+        {
+            "engine_label",
+            "failure_rate",
+            "goodput",
+            "key",
+            "output_tokens_per_second",
+            "p95_ttft_ns",
+            "peak_memory_bytes",
+        },
+        "snapshot",
+    )
+    key = snapshot["key"]
+    _require_keys(
+        key,
+        {"model_sha256", "protocol_version", "trace_sha256", "workload_sha256"},
+        "comparison key",
+    )
+    return ServingEvidenceReport(
+        report_version=payload["report_version"],
+        references=EvidenceReferences(**references),
+        boundary=ClaimBoundary(
+            boundary["execution_kind"], tuple(boundary["allowed_claims"])
+        ),
+        claims=tuple(payload["claims"]),
+        snapshot=ServingSnapshot(
+            key=ComparisonKey(**key),
+            engine_label=snapshot["engine_label"],
+            p95_ttft_ns=snapshot["p95_ttft_ns"],
+            output_tokens_per_second=_parse_fraction(
+                snapshot["output_tokens_per_second"], "output_tokens_per_second"
+            ),
+            goodput=_parse_fraction(snapshot["goodput"], "goodput"),
+            failure_rate=_parse_fraction(snapshot["failure_rate"], "failure_rate"),
+            peak_memory_bytes=snapshot["peak_memory_bytes"],
+        ),
+        comparison_sha256=payload["comparison_sha256"],
+    )
+
+
+def verify_serving_document(payload: dict) -> SealedServingReport:
+    """Parse a sealed document and reject any report content mutation."""
+
+    _require_keys(payload, {"report", "report_sha256"}, "sealed report")
+    report = parse_serving_report(payload["report"])
+    sealed = SealedServingReport(report, payload["report_sha256"])
+    if seal_serving_report(report).report_sha256 != sealed.report_sha256:
+        raise ServingReportError("serving report digest mismatch")
+    return sealed
