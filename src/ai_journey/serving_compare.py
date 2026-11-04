@@ -118,3 +118,17 @@ def ttft_within_threshold(
         raise TypeError("thresholds must be RegressionThresholds")
     limit = Fraction(baseline.p95_ttft_ns) * (1 + thresholds.max_ttft_increase)
     return candidate.p95_ttft_ns <= limit
+
+
+def throughput_within_threshold(
+    baseline: ServingSnapshot,
+    candidate: ServingSnapshot,
+    thresholds: RegressionThresholds,
+) -> bool:
+    """Return whether candidate throughput stays above the relative floor."""
+
+    _require_comparable(baseline, candidate)
+    if not isinstance(thresholds, RegressionThresholds):
+        raise TypeError("thresholds must be RegressionThresholds")
+    floor = baseline.output_tokens_per_second * (1 - thresholds.max_throughput_drop)
+    return candidate.output_tokens_per_second >= floor

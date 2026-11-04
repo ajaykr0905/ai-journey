@@ -7,6 +7,7 @@ from ai_journey.serving_compare import (
     RegressionThresholds,
     ServingComparisonError,
     ServingSnapshot,
+    throughput_within_threshold,
     ttft_within_threshold,
 )
 
@@ -112,3 +113,16 @@ def test_ttft_comparison_rejects_mismatched_experiment_identity():
 
     with pytest.raises(ServingComparisonError, match="different comparison keys"):
         ttft_within_threshold(_snapshot(), _snapshot(key=other_key), _thresholds())
+
+
+def test_throughput_comparison_uses_exact_relative_floor():
+    assert throughput_within_threshold(
+        _snapshot(),
+        _snapshot(output_tokens_per_second=Fraction(90)),
+        _thresholds(),
+    )
+    assert not throughput_within_threshold(
+        _snapshot(),
+        _snapshot(output_tokens_per_second=Fraction(899, 10)),
+        _thresholds(),
+    )
