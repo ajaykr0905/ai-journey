@@ -1,9 +1,12 @@
+from fractions import Fraction
+
 import pytest
 
 from ai_journey.serving_faults import (
     FaultEvent,
     FaultKind,
     ServingFaultError,
+    fault_coverage_fraction,
     require_nonoverlapping_targets,
     validate_fault_schedule,
 )
@@ -56,3 +59,10 @@ def test_fault_overlap_is_checked_per_target():
 
     with pytest.raises(ServingFaultError, match="overlap"):
         require_nonoverlapping_targets((_fault("a", 0, 10), _fault("b", 5, 10)))
+
+
+def test_fault_coverage_reports_missing_required_classes():
+    events = (_fault("a", 0),)
+    required = (FaultKind.PROCESS_KILL, FaultKind.ENGINE_RESTART)
+
+    assert fault_coverage_fraction(events, required) == Fraction(1, 2)

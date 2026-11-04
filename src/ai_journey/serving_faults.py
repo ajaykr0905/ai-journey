@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from fractions import Fraction
 
 
 class ServingFaultError(ValueError):
@@ -84,3 +85,20 @@ def require_nonoverlapping_targets(
             raise ServingFaultError("faults on one target must not overlap")
         target_end[event.target] = event.end_ns
     return events
+
+
+def fault_coverage_fraction(
+    events: tuple[FaultEvent, ...], required: tuple[FaultKind, ...]
+) -> Fraction:
+    """Return the exact share of required fault classes exercised."""
+
+    require_nonoverlapping_targets(events)
+    if (
+        not isinstance(required, tuple)
+        or not required
+        or any(not isinstance(kind, FaultKind) for kind in required)
+        or len(required) != len(set(required))
+    ):
+        raise TypeError("required must be a nonempty unique FaultKind tuple")
+    observed = {event.kind for event in events}
+    return Fraction(sum(kind in observed for kind in required), len(required))
