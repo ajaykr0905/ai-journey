@@ -6,6 +6,7 @@ from ai_journey.serving_analysis import (
     GoodputTarget,
     LatencySummary,
     ServingAnalysisError,
+    batch_packing_efficiency,
     failure_fraction,
     goodput_fraction,
     nearest_rank_percentile,
@@ -141,3 +142,12 @@ def test_speculative_acceptance_is_exact_and_bounded():
 
     with pytest.raises(ServingAnalysisError, match="exceed"):
         speculative_acceptance_fraction(accepted_tokens=11, drafted_tokens=10)
+
+
+def test_batch_packing_efficiency_exposes_padding_waste():
+    assert batch_packing_efficiency(
+        useful_tokens=96, allocated_token_slots=128
+    ) == Fraction(3, 4)
+
+    with pytest.raises(ServingAnalysisError, match="exceed"):
+        batch_packing_efficiency(useful_tokens=129, allocated_token_slots=128)

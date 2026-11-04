@@ -180,3 +180,19 @@ def speculative_acceptance_fraction(
     if accepted_tokens > drafted_tokens:
         raise ServingAnalysisError("accepted_tokens cannot exceed drafted_tokens")
     return Fraction(accepted_tokens, drafted_tokens)
+
+
+def batch_packing_efficiency(
+    *, useful_tokens: int, allocated_token_slots: int
+) -> Fraction:
+    """Return useful tokens divided by allocated batch token slots."""
+
+    for value, name in (
+        (useful_tokens, "useful_tokens"),
+        (allocated_token_slots, "allocated_token_slots"),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ServingAnalysisError(f"{name} must be positive")
+    if useful_tokens > allocated_token_slots:
+        raise ServingAnalysisError("useful tokens cannot exceed allocated slots")
+    return Fraction(useful_tokens, allocated_token_slots)
