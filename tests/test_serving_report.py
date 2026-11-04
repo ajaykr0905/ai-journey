@@ -1,3 +1,4 @@
+import json
 from fractions import Fraction
 
 import pytest
@@ -8,6 +9,7 @@ from ai_journey.serving_report import (
     EvidenceReferences,
     ServingEvidenceReport,
     ServingReportError,
+    canonical_serving_report_bytes,
     validate_reported_claims,
 )
 
@@ -86,3 +88,23 @@ def test_serving_report_rejects_invalid_comparison_digest():
             _snapshot(),
             "missing",
         )
+
+
+def _report() -> ServingEvidenceReport:
+    return ServingEvidenceReport(
+        1,
+        _references(),
+        ClaimBoundary("cpu_fixture", ("schema_validation",)),
+        ("schema_validation",),
+        _snapshot(),
+        _digest("9"),
+    )
+
+
+def test_serving_report_serialization_preserves_exact_fractions():
+    payload = json.loads(canonical_serving_report_bytes(_report()))
+
+    assert payload["snapshot"]["goodput"] == {"denominator": 10, "numerator": 9}
+    assert canonical_serving_report_bytes(_report()) == canonical_serving_report_bytes(
+        _report()
+    )

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
+from fractions import Fraction
 
 from .serving_compare import ServingSnapshot
 from .serving_contract import ClaimBoundary
@@ -86,3 +88,45 @@ class ServingEvidenceReport:
         validate_reported_claims(self.boundary, self.claims)
         if self.comparison_sha256 is not None:
             _require_sha256(self.comparison_sha256, "comparison_sha256")
+
+
+def _fraction_payload(value: Fraction) -> dict[str, int]:
+    return {"denominator": value.denominator, "numerator": value.numerator}
+
+
+def serving_report_payload(report: ServingEvidenceReport) -> dict[str, object]:
+    """Return the JSON-compatible semantic payload for a serving report."""
+
+    if not isinstance(report, ServingEvidenceReport):
+        raise TypeError("report must be ServingEvidenceReport")
+    snapshot = report.snapshot
+    return {
+        "boundary": asdict(report.boundary),
+        "claims": list(report.claims),
+        "comparison_sha256": report.comparison_sha256,
+        "references": asdict(report.references),
+        "report_version": report.report_version,
+        "snapshot": {
+            "engine_label": snapshot.engine_label,
+            "failure_rate": _fraction_payload(snapshot.failure_rate),
+            "goodput": _fraction_payload(snapshot.goodput),
+            "key": asdict(snapshot.key),
+            "output_tokens_per_second": _fraction_payload(
+                snapshot.output_tokens_per_second
+            ),
+            "p95_ttft_ns": snapshot.p95_ttft_ns,
+            "peak_memory_bytes": snapshot.peak_memory_bytes,
+        },
+    }
+
+
+def canonical_serving_report_bytes(report: ServingEvidenceReport) -> bytes:
+    """Serialize one report with stable keys, fractions, and whitespace."""
+
+    return json.dumps(
+        serving_report_payload(report),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
