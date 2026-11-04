@@ -9,6 +9,7 @@ from ai_journey.serving_trace import (
     burst_trace,
     constant_rate_trace,
     offered_token_rate_per_second,
+    split_warmup,
     validate_trace,
 )
 
@@ -122,3 +123,17 @@ def test_offered_token_rate_includes_prompt_and_requested_output():
 def test_offered_token_rate_requires_an_observation_tail():
     with pytest.raises(ServingTraceError, match="beyond"):
         offered_token_rate_per_second((_request("a", 10),), 10)
+
+
+def test_warmup_split_preserves_order_and_all_requests():
+    trace = tuple(_request(str(index), index * 10) for index in range(4))
+
+    warmup, measured = split_warmup(trace, 2)
+
+    assert warmup + measured == trace
+    assert [request.request_id for request in measured] == ["2", "3"]
+
+
+def test_warmup_split_cannot_consume_the_measured_sample():
+    with pytest.raises(ServingTraceError, match="leave"):
+        split_warmup((_request("a", 0),), 1)

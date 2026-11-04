@@ -147,3 +147,15 @@ def offered_token_rate_per_second(
         request.prompt_tokens + request.max_output_tokens for request in trace
     )
     return Fraction(offered_tokens * 1000, duration_ms)
+
+
+def split_warmup(
+    trace: tuple[RequestSpec, ...], warmup_requests: int
+) -> tuple[tuple[RequestSpec, ...], tuple[RequestSpec, ...]]:
+    """Split an ordered trace without allowing warmup to consume all samples."""
+
+    validate_trace(trace)
+    _positive_integer(warmup_requests, "warmup_requests")
+    if warmup_requests >= len(trace):
+        raise ServingTraceError("warmup must leave at least one measured request")
+    return trace[:warmup_requests], trace[warmup_requests:]
