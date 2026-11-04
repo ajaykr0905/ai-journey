@@ -4,6 +4,7 @@ from ai_journey.serving_faults import (
     FaultEvent,
     FaultKind,
     ServingFaultError,
+    require_nonoverlapping_targets,
     validate_fault_schedule,
 )
 
@@ -46,3 +47,12 @@ def test_fault_schedule_accepts_tied_starts_with_unique_ids():
 def test_fault_schedule_rejects_duplicate_ids():
     with pytest.raises(ServingFaultError, match="unique"):
         validate_fault_schedule((_fault("a", 0), _fault("a", 10)))
+
+
+def test_fault_overlap_is_checked_per_target():
+    schedule = (_fault("a", 0, 10), _fault("b", 5, 10, target="worker-1"))
+
+    assert require_nonoverlapping_targets(schedule) == schedule
+
+    with pytest.raises(ServingFaultError, match="overlap"):
+        require_nonoverlapping_targets((_fault("a", 0, 10), _fault("b", 5, 10)))

@@ -70,3 +70,17 @@ def validate_fault_schedule(events: tuple[FaultEvent, ...]) -> tuple[FaultEvent,
         fault_ids.add(event.fault_id)
         previous_start = event.start_ns
     return events
+
+
+def require_nonoverlapping_targets(
+    events: tuple[FaultEvent, ...],
+) -> tuple[FaultEvent, ...]:
+    """Reject ambiguous overlapping fault intervals on the same target."""
+
+    validate_fault_schedule(events)
+    target_end: dict[str, int] = {}
+    for event in events:
+        if event.start_ns < target_end.get(event.target, 0):
+            raise ServingFaultError("faults on one target must not overlap")
+        target_end[event.target] = event.end_ns
+    return events
