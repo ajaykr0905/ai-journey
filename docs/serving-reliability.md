@@ -82,3 +82,37 @@ The CI gate runs real local Gloo workers, modern cached/full-forward parity,
 HTTP error/overload/shutdown checks and concurrent metrics tests. Results are
 CPU fixture evidence only: no production, GPU-throughput or distributed-scale
 serving claim follows from them.
+
+## Seal and verify serving experiment evidence
+
+The serving experiment modules separate declared inputs from observations and
+derived claims. `serving_contract` pins the workload, engine, model, hardware,
+software, run limit and claim boundary. `serving_trace` creates content-private
+request schedules. `serving_observation` and `serving_faults` retain terminal
+outcomes and recovery milestones on monotonic nanosecond clocks. The analysis
+and comparison modules use exact integer or rational arithmetic, so regression
+decisions do not depend on binary floating-point rounding.
+
+Build reports through `ServingEvidenceReport`, then call `seal_serving_report`
+and `write_sealed_report`. A report links the SHA-256 identities of its contract,
+trace, observations and recovery evidence. Claims must be a sorted subset of the
+contract boundary. Baseline and candidate snapshots are comparable only when
+their protocol, workload, model and trace identities match.
+
+Verify a persisted report without executing a model:
+
+```bash
+ai-journey-serving-evidence artifacts/serving-evidence.json
+```
+
+Success prints a compact JSON receipt containing the engine label, execution
+kind, report digest and `verified: true`. Verification rejects unknown fields,
+noncanonical digests, malformed exact fractions, content mutation, oversized
+input and symbolic links. Writes use a same-directory temporary file, flush it,
+and atomically replace the destination only after serialization completes.
+
+The seal proves content identity, not authorship. A CPU fixture may support
+schema, determinism or failure-path claims explicitly listed in its contract;
+it is not measured GPU throughput, distributed-scale reliability, model quality
+or production readiness. Retain the raw evidence addressed by all four source
+digests so another reviewer can recompute the report.
