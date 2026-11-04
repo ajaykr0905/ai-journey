@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .serving_compare import ServingSnapshot
 from .serving_contract import ClaimBoundary
 
 
@@ -58,3 +59,30 @@ def validate_reported_claims(
     if unsupported:
         raise ServingReportError("report contains claims outside its boundary")
     return claims
+
+
+@dataclass(frozen=True)
+class ServingEvidenceReport:
+    """A claim-bounded serving snapshot linked to immutable raw evidence."""
+
+    report_version: int
+    references: EvidenceReferences
+    boundary: ClaimBoundary
+    claims: tuple[str, ...]
+    snapshot: ServingSnapshot
+    comparison_sha256: str | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.report_version, bool)
+            or not isinstance(self.report_version, int)
+            or self.report_version <= 0
+        ):
+            raise ServingReportError("report_version must be positive")
+        if not isinstance(self.references, EvidenceReferences):
+            raise TypeError("references must be EvidenceReferences")
+        if not isinstance(self.snapshot, ServingSnapshot):
+            raise TypeError("snapshot must be ServingSnapshot")
+        validate_reported_claims(self.boundary, self.claims)
+        if self.comparison_sha256 is not None:
+            _require_sha256(self.comparison_sha256, "comparison_sha256")
