@@ -196,3 +196,19 @@ def batch_packing_efficiency(
     if useful_tokens > allocated_token_slots:
         raise ServingAnalysisError("useful tokens cannot exceed allocated slots")
     return Fraction(useful_tokens, allocated_token_slots)
+
+
+def memory_headroom_bytes(*, capacity_bytes: int, peak_used_bytes: int) -> int:
+    """Return remaining declared capacity at the observed memory peak."""
+
+    for value, name in (
+        (capacity_bytes, "capacity_bytes"),
+        (peak_used_bytes, "peak_used_bytes"),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ServingAnalysisError(f"{name} must be nonnegative")
+    if capacity_bytes == 0:
+        raise ServingAnalysisError("capacity_bytes must be positive")
+    if peak_used_bytes > capacity_bytes:
+        raise ServingAnalysisError("peak memory exceeds declared capacity")
+    return capacity_bytes - peak_used_bytes

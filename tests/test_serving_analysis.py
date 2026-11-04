@@ -9,6 +9,7 @@ from ai_journey.serving_analysis import (
     batch_packing_efficiency,
     failure_fraction,
     goodput_fraction,
+    memory_headroom_bytes,
     nearest_rank_percentile,
     output_throughput_per_second,
     retry_amplification,
@@ -151,3 +152,10 @@ def test_batch_packing_efficiency_exposes_padding_waste():
 
     with pytest.raises(ServingAnalysisError, match="exceed"):
         batch_packing_efficiency(useful_tokens=129, allocated_token_slots=128)
+
+
+def test_memory_headroom_rejects_oversubscription():
+    assert memory_headroom_bytes(capacity_bytes=80, peak_used_bytes=64) == 16
+
+    with pytest.raises(ServingAnalysisError, match="exceeds"):
+        memory_headroom_bytes(capacity_bytes=80, peak_used_bytes=81)
