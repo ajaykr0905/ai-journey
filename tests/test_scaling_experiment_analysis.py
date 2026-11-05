@@ -2,7 +2,11 @@ import pytest
 
 from ai_journey.scaling_experiment_analysis import (
     AggregatedPoint,
+    ExtrapolationScope,
+    HoldoutEvaluation,
+    ScalingAcceptancePolicy,
     aggregate_replicates,
+    assess_scaling_acceptance,
     classify_extrapolation,
     evaluate_holdout,
     evaluate_fit_residuals,
@@ -191,3 +195,33 @@ def test_holdout_evaluation_rejects_empty_holdouts():
 
     with pytest.raises(ScalingLawError, match="nonempty"):
         evaluate_holdout(fit, residuals, ())
+
+
+def test_acceptance_applies_fit_holdout_coverage_and_distance_gates():
+    points = tuple(
+        aggregate_point(parameters, 10, loss=10 * (parameters * 60) ** -0.1)
+        for parameters in (10, 20, 40)
+    )
+    fit = fit_compute_loss(points)
+    policy = ScalingAcceptancePolicy(0.99, 0.1, 1.0, 4.0)
+    holdout = HoldoutEvaluation(0.05, 1.0, 2)
+
+    accepted = assess_scaling_acceptance(
+        fit, holdout, ExtrapolationScope(4_800, 2.0, "bounded_extrapolation"), policy
+    )
+    rejected = assess_scaling_acceptance(
+        fit,
+        holdout,
+        ExtrapolationScope(12_000, 5.0, "speculative_extrapolation"),
+        policy,
+    )
+
+    assert accepted.admitted is True
+    assert accepted.reasons == ()
+    assert rejected.admitted is False
+    assert "extrapolation distance" in rejected.reasons[0]
+
+
+def test_acceptance_policy_rejects_invalid_thresholds():
+    with pytest.raises(ScalingLawError, match="between 0 and 1"):
+        ScalingAcceptancePolicy(1.1, 0.1, 1.0, 4.0)

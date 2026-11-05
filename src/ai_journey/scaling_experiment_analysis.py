@@ -58,6 +58,43 @@ class HoldoutEvaluation:
     holdout_count: int
 
 
+@dataclass(frozen=True)
+class ScalingAcceptancePolicy:
+    minimum_log_r_squared: float
+    maximum_holdout_mape: float
+    minimum_band_coverage: float
+    maximum_extrapolation_factor: float
+
+    def __post_init__(self) -> None:
+        for value, name in (
+            (self.minimum_log_r_squared, "minimum_log_r_squared"),
+            (self.maximum_holdout_mape, "maximum_holdout_mape"),
+            (self.minimum_band_coverage, "minimum_band_coverage"),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or not 0 <= value <= 1
+            ):
+                raise ScalingLawError(f"{name} must be finite and between 0 and 1")
+        if (
+            isinstance(self.maximum_extrapolation_factor, bool)
+            or not isinstance(self.maximum_extrapolation_factor, (int, float))
+            or not math.isfinite(self.maximum_extrapolation_factor)
+            or self.maximum_extrapolation_factor < 1
+        ):
+            raise ScalingLawError(
+                "maximum_extrapolation_factor must be finite and at least 1"
+            )
+
+
+@dataclass(frozen=True)
+class ScalingAcceptance:
+    admitted: bool
+    reasons: tuple[str, ...]
+
+
 def aggregate_replicates(
     observations: tuple[ScalingObservation, ...],
 ) -> tuple[AggregatedPoint, ...]:
@@ -250,3 +287,29 @@ def evaluate_holdout(
         within_residual_band_fraction=within / len(holdout),
         holdout_count=len(holdout),
     )
+
+
+def assess_scaling_acceptance(
+    fit: PowerLawFit,
+    holdout: HoldoutEvaluation,
+    scope: ExtrapolationScope,
+    policy: ScalingAcceptancePolicy,
+) -> ScalingAcceptance:
+    """Apply preregistered quality gates before presenting an extrapolation."""
+
+    if not isinstance(holdout, HoldoutEvaluation):
+        raise TypeError("holdout must be HoldoutEvaluation")
+    if not isinstance(scope, ExtrapolationScope):
+        raise TypeError("scope must be ExtrapolationScope")
+    if not isinstance(policy, ScalingAcceptancePolicy):
+        raise TypeError("policy must be ScalingAcceptancePolicy")
+    reasons = []
+    if fit.r_squared_log_space < policy.minimum_log_r_squared:
+        reasons.append("log-space fit quality is below the declared minimum")
+    if holdout.mean_absolute_percentage_error > policy.maximum_holdout_mape:
+        reasons.append("holdout percentage error exceeds the declared maximum")
+    if holdout.within_residual_band_fraction < policy.minimum_band_coverage:
+        reasons.append("holdout residual-band coverage is below the declared minimum")
+    if scope.factor_beyond_observed_maximum > policy.maximum_extrapolation_factor:
+        reasons.append("target compute exceeds the declared extrapolation distance")
+    return ScalingAcceptance(admitted=not reasons, reasons=tuple(reasons))
