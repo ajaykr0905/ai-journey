@@ -2,6 +2,7 @@ import pytest
 
 from ai_journey.scaling_laws import ScalingLawError
 from ai_journey.scaling_schedule import (
+    TokenSchedule,
     TrainingBatchGeometry,
     align_token_target,
     validate_overshoot,
@@ -40,6 +41,29 @@ def test_overshoot_policy_rejects_material_batch_rounding():
     with pytest.raises(ScalingLawError, match="overshoot"):
         validate_overshoot(schedule, maximum_fraction=0.5)
     assert validate_overshoot(schedule, maximum_fraction=0.6) is schedule
+
+
+@pytest.mark.parametrize(
+    "changes,message",
+    [
+        ({"optimizer_steps": 2}, "scheduled_tokens"),
+        ({"scheduled_tokens": 16}, "scheduled_tokens"),
+        ({"overshoot_tokens": 1}, "overshoot_tokens"),
+        ({"overshoot_tokens": -1}, "non-negative"),
+    ],
+)
+def test_token_schedule_rejects_inconsistent_direct_construction(changes, message):
+    values = {
+        "target_tokens": 8,
+        "optimizer_steps": 1,
+        "scheduled_tokens": 8,
+        "overshoot_tokens": 0,
+        "geometry": TrainingBatchGeometry(8, 1, 1, 1),
+    }
+    values.update(changes)
+
+    with pytest.raises(ScalingLawError, match=message):
+        TokenSchedule(**values)
 
 
 @pytest.mark.parametrize("value", [-0.1, 1, float("nan"), True])

@@ -41,6 +41,29 @@ class TokenSchedule:
     overshoot_tokens: int
     geometry: TrainingBatchGeometry
 
+    def __post_init__(self) -> None:
+        for name in (
+            "target_tokens",
+            "optimizer_steps",
+            "scheduled_tokens",
+        ):
+            _positive_integer(getattr(self, name), name)
+        if (
+            isinstance(self.overshoot_tokens, bool)
+            or not isinstance(self.overshoot_tokens, int)
+            or self.overshoot_tokens < 0
+        ):
+            raise ScalingLawError("overshoot_tokens must be a non-negative integer")
+        if not isinstance(self.geometry, TrainingBatchGeometry):
+            raise TypeError("geometry must be TrainingBatchGeometry")
+        expected_scheduled = (
+            self.optimizer_steps * self.geometry.tokens_per_optimizer_step
+        )
+        if self.scheduled_tokens != expected_scheduled:
+            raise ScalingLawError("scheduled_tokens do not match optimizer geometry")
+        if self.scheduled_tokens - self.target_tokens != self.overshoot_tokens:
+            raise ScalingLawError("overshoot_tokens do not match scheduled target")
+
     @property
     def exact(self) -> bool:
         return self.overshoot_tokens == 0
