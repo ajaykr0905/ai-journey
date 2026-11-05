@@ -3,6 +3,7 @@ import pytest
 from ai_journey.scaling_experiment_protocol import (
     ExperimentPoint,
     ScalingExperimentProtocol,
+    build_experiment_grid,
 )
 from ai_journey.scaling_laws import ScalingLawError
 
@@ -65,3 +66,28 @@ def test_protocol_rejects_ambiguous_axes(field, value, message):
 
     with pytest.raises(ScalingLawError, match=message):
         ScalingExperimentProtocol(**values)
+
+
+def test_grid_expands_every_declared_coordinate_in_stable_order():
+    protocol = ScalingExperimentProtocol(
+        name="sweep",
+        parameter_counts=(10, 20),
+        train_token_counts=(100, 200),
+        seeds=(1, 2),
+    )
+
+    grid = build_experiment_grid(protocol)
+
+    assert len(grid) == 8
+    assert grid[:3] == (
+        ExperimentPoint(10, 100, 1),
+        ExperimentPoint(10, 100, 2),
+        ExperimentPoint(10, 200, 1),
+    )
+    assert grid[-1] == ExperimentPoint(20, 200, 2)
+    assert len(set(grid)) == len(grid)
+
+
+def test_grid_rejects_non_protocol_inputs():
+    with pytest.raises(TypeError, match="ScalingExperimentProtocol"):
+        build_experiment_grid(object())

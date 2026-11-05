@@ -60,3 +60,18 @@ class ScalingExperimentProtocol:
             self.seeds
         ):
             raise ScalingLawError("seeds must be strictly increasing")
+
+
+def build_experiment_grid(
+    protocol: ScalingExperimentProtocol,
+) -> tuple[ExperimentPoint, ...]:
+    """Expand every declared coordinate in stable model/token/seed order."""
+
+    if not isinstance(protocol, ScalingExperimentProtocol):
+        raise TypeError("protocol must be ScalingExperimentProtocol")
+    return tuple(
+        ExperimentPoint(parameter_count, train_tokens, seed)
+        for parameter_count in protocol.parameter_counts
+        for train_tokens in protocol.train_token_counts
+        for seed in protocol.seeds
+    )
