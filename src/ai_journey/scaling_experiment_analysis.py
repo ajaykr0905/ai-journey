@@ -51,6 +51,13 @@ class ResidualPredictionBand:
     log_error_multiplier: float
 
 
+@dataclass(frozen=True)
+class HoldoutEvaluation:
+    mean_absolute_percentage_error: float
+    within_residual_band_fraction: float
+    holdout_count: int
+
+
 def aggregate_replicates(
     observations: tuple[ScalingObservation, ...],
 ) -> tuple[AggregatedPoint, ...]:
@@ -217,4 +224,29 @@ def residual_prediction_band(
         lower=estimate / spread,
         upper=estimate * spread,
         log_error_multiplier=float(log_error_multiplier),
+    )
+
+
+def evaluate_holdout(
+    fit: PowerLawFit,
+    residuals: FitResiduals,
+    holdout: tuple[AggregatedPoint, ...],
+) -> HoldoutEvaluation:
+    """Evaluate predeclared holdout error without refitting on held-out rows."""
+
+    if not isinstance(holdout, tuple) or not holdout:
+        raise ScalingLawError("holdout must be a nonempty tuple")
+    errors = []
+    within = 0
+    for row in holdout:
+        compute = float(row.parameter_count * row.train_tokens * 6)
+        band = residual_prediction_band(fit, residuals, compute)
+        errors.append(
+            abs(row.mean_validation_loss - band.estimate) / row.mean_validation_loss
+        )
+        within += band.lower <= row.mean_validation_loss <= band.upper
+    return HoldoutEvaluation(
+        mean_absolute_percentage_error=statistics.fmean(errors),
+        within_residual_band_fraction=within / len(holdout),
+        holdout_count=len(holdout),
     )

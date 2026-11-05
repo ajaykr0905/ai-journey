@@ -4,6 +4,7 @@ from ai_journey.scaling_experiment_analysis import (
     AggregatedPoint,
     aggregate_replicates,
     classify_extrapolation,
+    evaluate_holdout,
     evaluate_fit_residuals,
     fit_compute_loss,
     largest_model_holdout,
@@ -164,3 +165,29 @@ def test_residual_prediction_band_rejects_invalid_multipliers():
 
     with pytest.raises(ScalingLawError, match="multiplier"):
         residual_prediction_band(fit, residuals, 4_800, log_error_multiplier=0)
+
+
+def test_holdout_evaluation_scores_unseen_largest_model_rows():
+    points = tuple(
+        aggregate_point(parameters, tokens, loss=10 * (parameters * tokens * 6) ** -0.1)
+        for parameters in (10, 20, 40)
+        for tokens in (10, 20)
+    )
+    split = largest_model_holdout(points)
+    fit = fit_compute_loss(split.training)
+    residuals = evaluate_fit_residuals(split.training, fit)
+
+    result = evaluate_holdout(fit, residuals, split.holdout)
+
+    assert result.mean_absolute_percentage_error == pytest.approx(0.0, abs=1e-12)
+    assert result.within_residual_band_fraction == 1.0
+    assert result.holdout_count == 2
+
+
+def test_holdout_evaluation_rejects_empty_holdouts():
+    points = tuple(aggregate_point(parameters, 10) for parameters in (10, 20, 40))
+    fit = fit_compute_loss(points)
+    residuals = evaluate_fit_residuals(points, fit)
+
+    with pytest.raises(ScalingLawError, match="nonempty"):
+        evaluate_holdout(fit, residuals, ())
