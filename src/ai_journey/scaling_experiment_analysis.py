@@ -18,6 +18,12 @@ class AggregatedPoint:
     replicate_count: int
 
 
+@dataclass(frozen=True)
+class FitSplit:
+    training: tuple[AggregatedPoint, ...]
+    holdout: tuple[AggregatedPoint, ...]
+
+
 def aggregate_replicates(
     observations: tuple[ScalingObservation, ...],
 ) -> tuple[AggregatedPoint, ...]:
@@ -43,3 +49,33 @@ def aggregate_replicates(
         )
         for key, losses in sorted(groups.items())
     )
+
+
+def largest_model_holdout(points: tuple[AggregatedPoint, ...]) -> FitSplit:
+    """Hold out the largest model independently at each token budget."""
+
+    if not isinstance(points, tuple) or not points:
+        raise ScalingLawError("points must be a nonempty tuple")
+    if any(not isinstance(item, AggregatedPoint) for item in points):
+        raise TypeError("points must contain AggregatedPoint values")
+    if len({(item.parameter_count, item.train_tokens) for item in points}) != len(
+        points
+    ):
+        raise ScalingLawError("points must have unique coordinates")
+    largest_by_tokens = {
+        tokens: max(
+            item.parameter_count for item in points if item.train_tokens == tokens
+        )
+        for tokens in {item.train_tokens for item in points}
+    }
+    holdout = tuple(
+        sorted(
+            item
+            for item in points
+            if item.parameter_count == largest_by_tokens[item.train_tokens]
+        )
+    )
+    training = tuple(sorted(set(points) - set(holdout)))
+    if len(training) < 3:
+        raise ScalingLawError("holdout split requires at least three training points")
+    return FitSplit(training=training, holdout=holdout)

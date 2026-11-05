@@ -1,6 +1,10 @@
 import pytest
 
-from ai_journey.scaling_experiment_analysis import aggregate_replicates
+from ai_journey.scaling_experiment_analysis import (
+    AggregatedPoint,
+    aggregate_replicates,
+    largest_model_holdout,
+)
 from ai_journey.scaling_experiment_observation import ScalingObservation
 from ai_journey.scaling_experiment_protocol import ExperimentPoint
 from ai_journey.scaling_laws import ScalingLawError
@@ -40,3 +44,31 @@ def test_replicate_aggregation_preserves_each_model_token_coordinate():
 def test_replicate_aggregation_rejects_single_seed_coordinates():
     with pytest.raises(ScalingLawError, match="at least two"):
         aggregate_replicates((observation(10, 100, 0, 2.0),))
+
+
+def aggregate_point(parameters, tokens, loss=2.0):
+    return AggregatedPoint(parameters, tokens, loss, 0.1, 2)
+
+
+def test_holdout_reserves_largest_model_at_each_token_budget():
+    points = tuple(
+        aggregate_point(parameters, tokens)
+        for parameters in (10, 20, 40)
+        for tokens in (100, 200)
+    )
+
+    split = largest_model_holdout(points)
+
+    assert [(row.parameter_count, row.train_tokens) for row in split.holdout] == [
+        (40, 100),
+        (40, 200),
+    ]
+    assert len(split.training) == 4
+    assert not set(split.training) & set(split.holdout)
+
+
+def test_holdout_rejects_splits_too_small_for_power_law_fitting():
+    points = (aggregate_point(10, 100), aggregate_point(20, 100))
+
+    with pytest.raises(ScalingLawError, match="three training"):
+        largest_model_holdout(points)
