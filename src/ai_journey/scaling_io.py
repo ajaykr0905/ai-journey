@@ -59,6 +59,8 @@ def load_scaling_report(path: Path) -> dict[str, object]:
     if not isinstance(path, Path):
         raise TypeError("scaling report path must be pathlib.Path")
     try:
+        if path.is_symlink() or not path.is_file():
+            raise ScalingLawError("scaling report must be a regular file")
         with path.open("rb") as stream:
             payload = stream.read(MAX_SCALING_REPORT_BYTES + 1)
         if len(payload) > MAX_SCALING_REPORT_BYTES:

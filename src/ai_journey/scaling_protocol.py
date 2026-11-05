@@ -86,6 +86,8 @@ def load_scaling_protocol(path: Path) -> ScalingProtocol:
     if not isinstance(path, Path):
         raise TypeError("protocol path must be pathlib.Path")
     try:
+        if path.is_symlink() or not path.is_file():
+            raise ScalingLawError("scaling protocol must be a regular file")
         with path.open("rb") as stream:
             payload = stream.read(MAX_SCALING_PROTOCOL_BYTES + 1)
         if len(payload) > MAX_SCALING_PROTOCOL_BYTES:

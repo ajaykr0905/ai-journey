@@ -55,3 +55,15 @@ def test_invalid_save_preserves_existing_report_path(tmp_path):
         save_scaling_report(path, report)
 
     assert path.read_bytes() == b"protected\n"
+
+
+def test_scaling_report_loader_rejects_symlinked_and_nonfile_inputs(tmp_path):
+    target = tmp_path / "scaling.json"
+    save_scaling_report(target, sealed_report())
+    link = tmp_path / "scaling-link.json"
+    link.symlink_to(target)
+
+    with pytest.raises(ScalingLawError, match="regular file"):
+        load_scaling_report(link)
+    with pytest.raises(ScalingLawError, match="regular file"):
+        load_scaling_report(tmp_path)

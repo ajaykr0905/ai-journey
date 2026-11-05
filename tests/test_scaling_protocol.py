@@ -102,3 +102,15 @@ def test_protocol_rejects_unknown_corpus_policy_controls(tmp_path):
 
     with pytest.raises(ScalingLawError, match="corpus policy fields"):
         load_scaling_protocol(path)
+
+
+def test_protocol_rejects_symlinked_and_nonfile_inputs(tmp_path):
+    target = tmp_path / "protocol.json"
+    target.write_text(json.dumps(payload()))
+    link = tmp_path / "protocol-link.json"
+    link.symlink_to(target)
+
+    with pytest.raises(ScalingLawError, match="regular file"):
+        load_scaling_protocol(link)
+    with pytest.raises(ScalingLawError, match="regular file"):
+        load_scaling_protocol(tmp_path)
