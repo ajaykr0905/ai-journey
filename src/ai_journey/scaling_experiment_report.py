@@ -22,6 +22,9 @@ from .scaling_experiment_observation import (
     validate_observation_set,
 )
 from .scaling_experiment_protocol import ScalingExperimentProtocol
+from .scaling_laws import ScalingLawError
+
+EVIDENCE_KINDS = frozenset({"measured_observations", "deterministic_reference_fixture"})
 
 
 def build_experiment_report(
@@ -29,11 +32,14 @@ def build_experiment_report(
     inputs: ExperimentInputs,
     observations: tuple[ScalingObservation, ...],
     *,
+    evidence_kind: str,
     target_compute: float,
     policy: ScalingAcceptancePolicy,
 ) -> dict[str, object]:
     """Recompute every analytical field from identity-verified observations."""
 
+    if evidence_kind not in EVIDENCE_KINDS:
+        raise ScalingLawError("unsupported scaling experiment evidence kind")
     ordered = validate_observation_set(protocol, inputs, observations)
     aggregates = aggregate_replicates(ordered)
     split = largest_model_holdout(aggregates)
@@ -47,6 +53,7 @@ def build_experiment_report(
     return {
         "schema_version": 1,
         "kind": "bounded_scaling_experiment",
+        "evidence_kind": evidence_kind,
         "protocol": asdict(protocol),
         "inputs": asdict(inputs),
         "observations": [
@@ -74,6 +81,7 @@ def build_experiment_report(
         "acceptance": asdict(acceptance),
         "evidence_boundaries": {
             "observations_supplied": True,
+            "observations_measured": evidence_kind == "measured_observations",
             "execution_authenticated": False,
             "gpu_execution_proven": False,
             "large_scale_proven": False,

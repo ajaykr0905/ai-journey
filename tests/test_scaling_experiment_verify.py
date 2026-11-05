@@ -17,6 +17,7 @@ def report():
         protocol(),
         inputs(),
         observations(),
+        evidence_kind="deterministic_reference_fixture",
         target_compute=48_000,
         policy=ScalingAcceptancePolicy(0.99, 0.01, 1.0, 4.0),
     )

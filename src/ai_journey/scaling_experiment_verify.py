@@ -59,6 +59,7 @@ def _rebuild(report: dict[str, object]) -> dict[str, object]:
         protocol,
         inputs,
         observations,
+        evidence_kind=report["evidence_kind"],
         target_compute=report["target"]["compute"],
         policy=policy,
     )

@@ -13,6 +13,7 @@ def protocol_payload():
         "protocol": source["protocol"],
         "inputs": source["inputs"],
         "observations": source["observations"],
+        "evidence_kind": "deterministic_reference_fixture",
         "target_compute": source["target"]["compute"],
         "policy": source["policy"],
     }

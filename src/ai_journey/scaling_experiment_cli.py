@@ -57,6 +57,7 @@ def _load_protocol(path: Path):
             protocol,
             inputs,
             observations,
+            data["evidence_kind"],
             data["target_compute"],
             ScalingAcceptancePolicy(**data["policy"]),
         )
@@ -105,14 +106,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if _aliases(args.protocol, args.output):
         raise ScalingLawError("experiment output must not alias its protocol")
-    protocol, inputs, observations, target_compute, policy = _load_protocol(
-        args.protocol
+    protocol, inputs, observations, evidence_kind, target_compute, policy = (
+        _load_protocol(args.protocol)
     )
     report = seal_experiment_report(
         build_experiment_report(
             protocol,
             inputs,
             observations,
+            evidence_kind=evidence_kind,
             target_compute=target_compute,
             policy=policy,
         )
