@@ -3,6 +3,7 @@ import pytest
 from ai_journey.scaling_experiment_analysis import (
     AggregatedPoint,
     aggregate_replicates,
+    evaluate_fit_residuals,
     fit_compute_loss,
     largest_model_holdout,
 )
@@ -92,3 +93,27 @@ def test_compute_loss_fit_uses_exact_analytical_compute_coordinates():
 def test_compute_loss_fit_rejects_insufficient_training_points():
     with pytest.raises(ScalingLawError, match="at least three"):
         fit_compute_loss((aggregate_point(10, 10), aggregate_point(20, 10)))
+
+
+def test_fit_residuals_report_zero_for_an_exact_power_law():
+    points = tuple(
+        aggregate_point(parameters, 10, loss=10 * (parameters * 10 * 6) ** -0.1)
+        for parameters in (10, 20, 40, 80)
+    )
+    fit = fit_compute_loss(points)
+
+    residuals = evaluate_fit_residuals(points, fit)
+
+    assert residuals.mean_absolute_error == pytest.approx(0.0, abs=1e-12)
+    assert residuals.mean_absolute_percentage_error == pytest.approx(0.0, abs=1e-12)
+    assert residuals.root_mean_squared_log_error == pytest.approx(0.0, abs=1e-12)
+    assert residuals.observation_count == 4
+
+
+def test_fit_residuals_reject_empty_inputs():
+    points = tuple(
+        aggregate_point(parameters, 10, loss=2.0) for parameters in (10, 20, 40)
+    )
+
+    with pytest.raises(ScalingLawError, match="nonempty"):
+        evaluate_fit_residuals((), fit_compute_loss(points))

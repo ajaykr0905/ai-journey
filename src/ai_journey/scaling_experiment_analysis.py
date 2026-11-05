@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import statistics
 
 from .scaling_experiment_budget import point_training_flops
@@ -25,6 +26,14 @@ class AggregatedPoint:
 class FitSplit:
     training: tuple[AggregatedPoint, ...]
     holdout: tuple[AggregatedPoint, ...]
+
+
+@dataclass(frozen=True)
+class FitResiduals:
+    mean_absolute_error: float
+    mean_absolute_percentage_error: float
+    root_mean_squared_log_error: float
+    observation_count: int
 
 
 def aggregate_replicates(
@@ -104,3 +113,33 @@ def fit_compute_loss(
     )
     losses = tuple(row.mean_validation_loss for row in training)
     return fit_power_law(compute, losses)
+
+
+def evaluate_fit_residuals(
+    points: tuple[AggregatedPoint, ...], fit: PowerLawFit
+) -> FitResiduals:
+    """Report absolute, relative, and log-space error on supplied points."""
+
+    if not isinstance(points, tuple) or not points:
+        raise ScalingLawError("points must be a nonempty tuple")
+    if not isinstance(fit, PowerLawFit):
+        raise TypeError("fit must be PowerLawFit")
+    actual = tuple(row.mean_validation_loss for row in points)
+    predicted = tuple(
+        fit.predict(float(row.parameter_count * row.train_tokens * 6)) for row in points
+    )
+    absolute = tuple(
+        abs(left - right) for left, right in zip(actual, predicted, strict=True)
+    )
+    log_squared = tuple(
+        (math.log(left) - math.log(right)) ** 2
+        for left, right in zip(actual, predicted, strict=True)
+    )
+    return FitResiduals(
+        mean_absolute_error=statistics.fmean(absolute),
+        mean_absolute_percentage_error=statistics.fmean(
+            error / value for error, value in zip(absolute, actual, strict=True)
+        ),
+        root_mean_squared_log_error=math.sqrt(statistics.fmean(log_squared)),
+        observation_count=len(points),
+    )
