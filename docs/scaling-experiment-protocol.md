@@ -61,4 +61,3 @@ interpretation, and any real experiment logs. A future measured sweep needs an
 appropriate public corpus, executable training configuration, hardware and
 software manifest, cost approval, losses, utilization, memory, failures, and
 limitations. The reference fixture is not a substitute for that evidence.
-

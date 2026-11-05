@@ -32,7 +32,7 @@ def test_repository_entry_points_expose_day59_without_claiming_learning_completi
     readme = (ROOT / "README.md").read_text()
     progress = (ROOT / "PROGRESS.md").read_text()
 
-    assert "selected verified code through Day 60" in readme
+    assert "selected verified code through Day 62" in readme
     assert "[Day 59 data pipeline guide](docs/day-59-data-pipeline.md)" in readme
     assert "| 59 | Pinned English PUD ingestion" in progress
     assert "quantization support video pending user confirmation" in progress
