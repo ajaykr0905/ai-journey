@@ -882,6 +882,8 @@ jobs:
           python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/scaling-installed/")'
           ai-journey-scaling build --protocol "$GITHUB_WORKSPACE/config/day-60-scaling-plan.json" --output "$RUNNER_TEMP/scaling-evidence/report.json"
           ai-journey-scaling verify --report "$RUNNER_TEMP/scaling-evidence/report.json"
+          ai-journey-scaling-experiment build --protocol "$GITHUB_WORKSPACE/config/day-62-scaling-experiment-fixture.json" --output "$RUNNER_TEMP/scaling-evidence/experiment-report.json"
+          ai-journey-scaling-experiment verify --report "$RUNNER_TEMP/scaling-evidence/experiment-report.json"
       - name: Retain analytical scaling evidence and installed package
         if: success()
         uses: actions/upload-artifact@v4

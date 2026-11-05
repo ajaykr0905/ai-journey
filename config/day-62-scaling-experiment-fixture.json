@@ -1,0 +1,37 @@
+{
+  "evidence_kind": "deterministic_reference_fixture",
+  "inputs": {
+    "code_revision": "8b322e424334a9fcbd32611afaaf643f6745b389",
+    "source_sha256": "63eb7eca373bd45912c01f15f1e445d5cdd41245f20da1669474728e484e096d",
+    "source_url": "https://raw.githubusercontent.com/UniversalDependencies/UD_English-PUD/6e328e8195c04a297c1e375d21fe663be1ce6178/en_pud-ud-test.conllu",
+    "tokenizer_sha256": "1099a3d62d46c6e15bde8254370c80e22f482eea30e77320850ae64dc3eafa61"
+  },
+  "observations": [
+    {"elapsed_seconds": 1.0, "optimizer_steps": 10, "point": {"parameter_count": 100000, "seed": 17, "train_tokens": 1000000}, "run_id": "79a9c4d3750b8622bcb047f4eccd83735dc4a98f4f018ee6c207a79a07518fde", "trained_tokens": 1000000, "validation_loss": 0.6640256795567925},
+    {"elapsed_seconds": 1.0, "optimizer_steps": 10, "point": {"parameter_count": 100000, "seed": 29, "train_tokens": 1000000}, "run_id": "f8273c4b7e9062fed242faf10c8bb289404f268ecc7395237484d2711e847b15", "trained_tokens": 1000000, "validation_loss": 0.6640256795567925},
+    {"elapsed_seconds": 1.0, "optimizer_steps": 10, "point": {"parameter_count": 100000, "seed": 17, "train_tokens": 2000000}, "run_id": "2c96c43e717ffde495dcb24e4c31cca59dded5a9cf80f6f16738c4598ff4e6ae", "trained_tokens": 2000000, "validation_loss": 0.6195578662541356},
+    {"elapsed_seconds": 1.0, "optimizer_steps": 10, "point": {"parameter_count": 100000, "seed": 29, "train_tokens": 2000000}, "run_id": "6b5e2e3c0bf0de3d93e943a4c490f532a058e6d735903d8a433100d8143ddf71", "trained_tokens": 2000000, "validation_loss": 0.6195578662541356},
+    {"elapsed_seconds": 1.0, "optimizer_steps": 10, "point": {"parameter_count": 200000, "seed": 17, "train_tokens": 1000000}, "run_id": "eb97fe0c4a2d92068ddf4ae0ecea2e7916bdba2855f09d277ffdaa30fd9c0450", "trained_tokens": 1000000, "validation_loss": 0.6195578662541356},
+    {"elapsed_seconds": 1.0, "optimizer_steps": 10, "point": {"parameter_count": 200000, "seed": 29, "train_tokens": 1000000}, "run_id": "b6f66f970dad1fddf167e24200dab61d1179299cbb9892714989dcc1ee6b6f74", "trained_tokens": 1000000, "validation_loss": 0.6195578662541356},
+    {"elapsed_seconds": 1.0, "optimizer_steps": 10, "point": {"parameter_count": 200000, "seed": 17, "train_tokens": 2000000}, "run_id": "952540723c078cbe42f0deafec68a0088fd028dbd2d18cdda5a1da39bb27cbf3", "trained_tokens": 2000000, "validation_loss": 0.5780679293812573},
+    {"elapsed_seconds": 1.0, "optimizer_steps": 10, "point": {"parameter_count": 200000, "seed": 29, "train_tokens": 2000000}, "run_id": "e8458b0237f6b36023fb3186a6423ae024b94f2a145dd9b7afadf5f415ce84e3", "trained_tokens": 2000000, "validation_loss": 0.5780679293812573},
+    {"elapsed_seconds": 1.0, "optimizer_steps": 10, "point": {"parameter_count": 400000, "seed": 17, "train_tokens": 1000000}, "run_id": "38142922e8a8d9e90384ee0c18607fe7bfe993690a7f39206244f767bdbcd38a", "trained_tokens": 1000000, "validation_loss": 0.5780679293812573},
+    {"elapsed_seconds": 1.0, "optimizer_steps": 10, "point": {"parameter_count": 400000, "seed": 29, "train_tokens": 1000000}, "run_id": "52333edb2d1add6eec8c6798b65a0673bf3d69b98a2698f49f3055dfa60411fe", "trained_tokens": 1000000, "validation_loss": 0.5780679293812573},
+    {"elapsed_seconds": 1.0, "optimizer_steps": 10, "point": {"parameter_count": 400000, "seed": 17, "train_tokens": 2000000}, "run_id": "b07ba603917a32e7978cc780e639aa1e1f3ccba89b7f8d74490f5365c9b76074", "trained_tokens": 2000000, "validation_loss": 0.5393564494620825},
+    {"elapsed_seconds": 1.0, "optimizer_steps": 10, "point": {"parameter_count": 400000, "seed": 29, "train_tokens": 2000000}, "run_id": "dd928018dca771e40fe380e19ec056810bc9de449d993d274fb3488f7f11e322", "trained_tokens": 2000000, "validation_loss": 0.5393564494620825}
+  ],
+  "policy": {
+    "maximum_extrapolation_factor": 4.0,
+    "maximum_holdout_mape": 0.01,
+    "minimum_band_coverage": 1.0,
+    "minimum_log_r_squared": 0.99
+  },
+  "protocol": {
+    "name": "day-62-bounded-scaling-reference",
+    "parameter_counts": [100000, 200000, 400000],
+    "seeds": [17, 29],
+    "train_token_counts": [1000000, 2000000]
+  },
+  "schema_version": 1,
+  "target_compute": 4800000000000.0
+}
