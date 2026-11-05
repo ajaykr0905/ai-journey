@@ -7,6 +7,7 @@ from ai_journey.scaling_experiment_analysis import (
     evaluate_fit_residuals,
     fit_compute_loss,
     largest_model_holdout,
+    residual_prediction_band,
 )
 from ai_journey.scaling_experiment_observation import ScalingObservation
 from ai_journey.scaling_experiment_protocol import ExperimentPoint
@@ -139,3 +140,27 @@ def test_extrapolation_scope_rejects_nonfinite_targets():
 
     with pytest.raises(ScalingLawError, match="target_compute"):
         classify_extrapolation(fit_compute_loss(points), float("inf"))
+
+
+def test_residual_prediction_band_expands_symmetrically_in_log_space():
+    points = tuple(
+        aggregate_point(parameters, 10, loss=10 * (parameters * 60) ** -0.1)
+        for parameters in (10, 20, 40)
+    )
+    fit = fit_compute_loss(points)
+    residuals = evaluate_fit_residuals(points, fit)
+
+    band = residual_prediction_band(fit, residuals, 4_800)
+
+    assert band.lower == pytest.approx(band.estimate)
+    assert band.upper == pytest.approx(band.estimate)
+    assert band.log_error_multiplier == 1.96
+
+
+def test_residual_prediction_band_rejects_invalid_multipliers():
+    points = tuple(aggregate_point(parameters, 10) for parameters in (10, 20, 40))
+    fit = fit_compute_loss(points)
+    residuals = evaluate_fit_residuals(points, fit)
+
+    with pytest.raises(ScalingLawError, match="multiplier"):
+        residual_prediction_band(fit, residuals, 4_800, log_error_multiplier=0)

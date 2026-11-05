@@ -43,6 +43,14 @@ class ExtrapolationScope:
     classification: str
 
 
+@dataclass(frozen=True)
+class ResidualPredictionBand:
+    estimate: float
+    lower: float
+    upper: float
+    log_error_multiplier: float
+
+
 def aggregate_replicates(
     observations: tuple[ScalingObservation, ...],
 ) -> tuple[AggregatedPoint, ...]:
@@ -179,3 +187,34 @@ def classify_extrapolation(
         else "speculative_extrapolation"
     )
     return ExtrapolationScope(float(target_compute), factor, classification)
+
+
+def residual_prediction_band(
+    fit: PowerLawFit,
+    residuals: FitResiduals,
+    target_compute: float,
+    *,
+    log_error_multiplier: float = 1.96,
+) -> ResidualPredictionBand:
+    """Build a descriptive log-residual band, not a confidence interval."""
+
+    scope = classify_extrapolation(fit, target_compute)
+    if not isinstance(residuals, FitResiduals):
+        raise TypeError("residuals must be FitResiduals")
+    if (
+        isinstance(log_error_multiplier, bool)
+        or not isinstance(log_error_multiplier, (int, float))
+        or not math.isfinite(log_error_multiplier)
+        or log_error_multiplier <= 0
+    ):
+        raise ScalingLawError("log_error_multiplier must be positive and finite")
+    estimate = fit.predict(scope.target_compute)
+    spread = math.exp(
+        float(log_error_multiplier) * residuals.root_mean_squared_log_error
+    )
+    return ResidualPredictionBand(
+        estimate=estimate,
+        lower=estimate / spread,
+        upper=estimate * spread,
+        log_error_multiplier=float(log_error_multiplier),
+    )
