@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
+from .scaling_experiment_identity import ExperimentInputs, run_identity
 from .scaling_experiment_protocol import ExperimentPoint
 from .scaling_laws import ScalingLawError, _positive_integer
 
@@ -45,3 +46,16 @@ class ScalingObservation:
             or self.elapsed_seconds <= 0
         ):
             raise ScalingLawError("elapsed_seconds must be positive and finite")
+
+
+def verify_observation_identity(
+    observation: ScalingObservation, inputs: ExperimentInputs
+) -> ScalingObservation:
+    """Reject an observation whose run digest does not bind its inputs."""
+
+    if not isinstance(observation, ScalingObservation):
+        raise TypeError("observation must be ScalingObservation")
+    expected = run_identity(observation.point, inputs)
+    if observation.run_id != expected:
+        raise ScalingLawError("observation run identity does not match its inputs")
+    return observation
