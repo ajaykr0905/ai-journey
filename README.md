@@ -1,7 +1,7 @@
 # AI Journey: Reproducible Transformer Training and Serving Lab
 
 This repository is a public-safe, executable record of an added setup day plus the
-selected verified code through Day 60 of a 90-day AI engineering learning plan. It combines
+selected verified code through Day 62 of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -16,6 +16,10 @@ then grow these exercises into production-quality training and inference project
 
 ## What is included
 
+- A bounded scaling experiment protocol with immutable run identities, complete
+  replicate grids, held-out-model evaluation, honest extrapolation gates,
+  tamper-evident reports, and an explicitly non-measured reference fixture in the
+  [Day 62 scaling experiment guide](docs/scaling-experiment-protocol.md)
 - A content-private serving experiment protocol with immutable workload contracts,
   deterministic traces, exact request and recovery metrics, regression gates, and
   tamper-evident reports in the
@@ -485,6 +489,7 @@ do not reinterpret the pinned assumptions as observations of local hardware.
 | 55 | 2026-10-29 | Reproducible roofline analysis and distributed capacity, sharding, and checkpoint planning |
 | 57 | 2026-10-31 | Exact ZeRO stage planning and executed CPU/Gloo collective conformance |
 | 60 | 2026-11-03 | Analytical Chinchilla target, IsoFLOP allocation, corpus sufficiency, and sealed replay |
+| 62 | 2026-11-05 | Bounded scaling sweep protocol, held-out extrapolation gates, and sealed reference replay |
 
 ## License
 
