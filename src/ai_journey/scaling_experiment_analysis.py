@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import statistics
 
+from .scaling_experiment_budget import point_training_flops
 from .scaling_experiment_observation import ScalingObservation
+from .scaling_experiment_protocol import ExperimentPoint
+from .scaling_fit import PowerLawFit, fit_power_law
 from .scaling_laws import ScalingLawError
 
 
@@ -79,3 +82,25 @@ def largest_model_holdout(points: tuple[AggregatedPoint, ...]) -> FitSplit:
     if len(training) < 3:
         raise ScalingLawError("holdout split requires at least three training points")
     return FitSplit(training=training, holdout=holdout)
+
+
+def fit_compute_loss(
+    training: tuple[AggregatedPoint, ...],
+    *,
+    flops_per_parameter_token: int = 6,
+) -> PowerLawFit:
+    """Fit mean validation loss against declared analytical training compute."""
+
+    if not isinstance(training, tuple) or len(training) < 3:
+        raise ScalingLawError("training must contain at least three points")
+    compute = tuple(
+        float(
+            point_training_flops(
+                ExperimentPoint(row.parameter_count, row.train_tokens, 0),
+                flops_per_parameter_token=flops_per_parameter_token,
+            )
+        )
+        for row in training
+    )
+    losses = tuple(row.mean_validation_loss for row in training)
+    return fit_power_law(compute, losses)

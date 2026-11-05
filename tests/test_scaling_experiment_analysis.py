@@ -3,6 +3,7 @@ import pytest
 from ai_journey.scaling_experiment_analysis import (
     AggregatedPoint,
     aggregate_replicates,
+    fit_compute_loss,
     largest_model_holdout,
 )
 from ai_journey.scaling_experiment_observation import ScalingObservation
@@ -72,3 +73,22 @@ def test_holdout_rejects_splits_too_small_for_power_law_fitting():
 
     with pytest.raises(ScalingLawError, match="three training"):
         largest_model_holdout(points)
+
+
+def test_compute_loss_fit_uses_exact_analytical_compute_coordinates():
+    compute = (600.0, 1_200.0, 2_400.0, 4_800.0)
+    points = tuple(
+        aggregate_point(parameters, 10, loss=10 * flops**-0.1)
+        for parameters, flops in zip((10, 20, 40, 80), compute, strict=True)
+    )
+
+    fit = fit_compute_loss(points)
+
+    assert fit.exponent == pytest.approx(-0.1)
+    assert fit.coefficient == pytest.approx(10.0)
+    assert fit.r_squared_log_space == pytest.approx(1.0)
+
+
+def test_compute_loss_fit_rejects_insufficient_training_points():
+    with pytest.raises(ScalingLawError, match="at least three"):
+        fit_compute_loss((aggregate_point(10, 10), aggregate_point(20, 10)))
