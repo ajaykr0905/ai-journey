@@ -16,6 +16,16 @@ def test_power_law_fit_recovers_an_exact_observed_curve():
     assert fit.maximum_x == 8
 
 
+def test_power_law_fit_supports_explicit_interpolation_without_extrapolation():
+    fit = fit_power_law((1, 2, 4, 8), (8, 4, 2, 1))
+
+    assert fit.predict_within_observed_range(1) == pytest.approx(8)
+    assert fit.predict_within_observed_range(3) == pytest.approx(8 / 3)
+    assert fit.predict_within_observed_range(8) == pytest.approx(1)
+    with pytest.raises(ScalingLawError, match="outside the observed fit range"):
+        fit.predict_within_observed_range(16)
+
+
 def test_power_law_fit_reports_imperfect_log_space_residuals():
     fit = fit_power_law((1, 2, 4), (8, 5, 2))
 

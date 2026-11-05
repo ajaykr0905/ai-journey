@@ -22,18 +22,31 @@ class PowerLawFit:
     minimum_x: float
     maximum_x: float
 
-    def predict(self, x: float) -> float:
+    @staticmethod
+    def _validated_coordinate(x: float) -> float:
         if isinstance(x, bool) or not isinstance(x, (int, float)):
             raise TypeError("x must be numeric")
         if not math.isfinite(x) or x <= 0:
             raise ScalingLawError("x must be positive and finite")
+        return float(x)
+
+    def predict(self, x: float) -> float:
+        coordinate = self._validated_coordinate(x)
         try:
-            prediction = self.coefficient * float(x) ** self.exponent
+            prediction = self.coefficient * coordinate**self.exponent
         except OverflowError:
             raise ScalingLawError("prediction must be positive and finite") from None
         if not math.isfinite(prediction) or prediction <= 0:
             raise ScalingLawError("prediction must be positive and finite")
         return prediction
+
+    def predict_within_observed_range(self, x: float) -> float:
+        """Predict only where the fitted observations bound the coordinate."""
+
+        coordinate = self._validated_coordinate(x)
+        if not self.minimum_x <= coordinate <= self.maximum_x:
+            raise ScalingLawError("x is outside the observed fit range")
+        return self.predict(coordinate)
 
 
 def _positive_observations(values, name: str) -> tuple[float, ...]:
