@@ -6,7 +6,11 @@ from dataclasses import dataclass
 import math
 
 from .scaling_experiment_identity import ExperimentInputs, run_identity
-from .scaling_experiment_protocol import ExperimentPoint
+from .scaling_experiment_protocol import (
+    ExperimentPoint,
+    ScalingExperimentProtocol,
+    build_experiment_grid,
+)
 from .scaling_laws import ScalingLawError, _positive_integer
 
 
@@ -59,3 +63,27 @@ def verify_observation_identity(
     if observation.run_id != expected:
         raise ScalingLawError("observation run identity does not match its inputs")
     return observation
+
+
+def validate_observation_set(
+    protocol: ScalingExperimentProtocol,
+    inputs: ExperimentInputs,
+    observations: tuple[ScalingObservation, ...],
+) -> tuple[ScalingObservation, ...]:
+    """Require exactly one identity-verified observation for every grid point."""
+
+    if not isinstance(observations, tuple):
+        raise TypeError("observations must be a tuple")
+    if any(not isinstance(item, ScalingObservation) for item in observations):
+        raise TypeError("observations must contain ScalingObservation values")
+    expected = build_experiment_grid(protocol)
+    actual_points = tuple(item.point for item in observations)
+    if len(set(actual_points)) != len(actual_points):
+        raise ScalingLawError("observations contain duplicate experiment points")
+    if set(actual_points) != set(expected):
+        raise ScalingLawError("observations do not cover the complete experiment grid")
+    by_point = {item.point: item for item in observations}
+    ordered = tuple(by_point[point] for point in expected)
+    for item in ordered:
+        verify_observation_identity(item, inputs)
+    return ordered
