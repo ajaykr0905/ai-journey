@@ -3,6 +3,7 @@ import pytest
 from ai_journey.scaling_experiment_analysis import (
     AggregatedPoint,
     aggregate_replicates,
+    classify_extrapolation,
     evaluate_fit_residuals,
     fit_compute_loss,
     largest_model_holdout,
@@ -117,3 +118,24 @@ def test_fit_residuals_reject_empty_inputs():
 
     with pytest.raises(ScalingLawError, match="nonempty"):
         evaluate_fit_residuals((), fit_compute_loss(points))
+
+
+def test_extrapolation_scope_distinguishes_interpolation_and_speculation():
+    points = tuple(
+        aggregate_point(parameters, 10, loss=10 * (parameters * 60) ** -0.1)
+        for parameters in (10, 20, 40)
+    )
+    fit = fit_compute_loss(points)
+
+    assert classify_extrapolation(fit, 2_400).classification == "interpolation"
+    assert classify_extrapolation(fit, 9_600).classification == "bounded_extrapolation"
+    scope = classify_extrapolation(fit, 12_001)
+    assert scope.classification == "speculative_extrapolation"
+    assert scope.factor_beyond_observed_maximum > 5
+
+
+def test_extrapolation_scope_rejects_nonfinite_targets():
+    points = tuple(aggregate_point(parameters, 10) for parameters in (10, 20, 40))
+
+    with pytest.raises(ScalingLawError, match="target_compute"):
+        classify_extrapolation(fit_compute_loss(points), float("inf"))

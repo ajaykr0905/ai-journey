@@ -36,6 +36,13 @@ class FitResiduals:
     observation_count: int
 
 
+@dataclass(frozen=True)
+class ExtrapolationScope:
+    target_compute: float
+    factor_beyond_observed_maximum: float
+    classification: str
+
+
 def aggregate_replicates(
     observations: tuple[ScalingObservation, ...],
 ) -> tuple[AggregatedPoint, ...]:
@@ -143,3 +150,32 @@ def evaluate_fit_residuals(
         root_mean_squared_log_error=math.sqrt(statistics.fmean(log_squared)),
         observation_count=len(points),
     )
+
+
+def classify_extrapolation(
+    fit: PowerLawFit, target_compute: float, *, bounded_factor: float = 4.0
+) -> ExtrapolationScope:
+    """Classify predictions by distance beyond the observed compute range."""
+
+    if not isinstance(fit, PowerLawFit):
+        raise TypeError("fit must be PowerLawFit")
+    for value, name in (
+        (target_compute, "target_compute"),
+        (bounded_factor, "bounded_factor"),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise ScalingLawError(f"{name} must be positive and finite")
+    factor = float(target_compute) / fit.maximum_x
+    classification = (
+        "interpolation"
+        if factor <= 1
+        else "bounded_extrapolation"
+        if factor <= bounded_factor
+        else "speculative_extrapolation"
+    )
+    return ExtrapolationScope(float(target_compute), factor, classification)
