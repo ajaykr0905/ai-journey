@@ -42,3 +42,17 @@ def test_power_law_prediction_rejects_extrapolation_coordinates_that_are_invalid
 
     with pytest.raises(ScalingLawError, match="positive and finite"):
         fit.predict(0)
+
+
+@pytest.mark.parametrize(
+    "ys",
+    [
+        (1.0, 1e100, 1e200),
+        (1.0, 1e-100, 1e-200),
+    ],
+)
+def test_power_law_prediction_rejects_overflow_and_underflow(ys):
+    fit = fit_power_law((1, 2, 4), ys)
+
+    with pytest.raises(ScalingLawError, match="prediction must be positive and finite"):
+        fit.predict(1e308)

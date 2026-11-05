@@ -27,7 +27,13 @@ class PowerLawFit:
             raise TypeError("x must be numeric")
         if not math.isfinite(x) or x <= 0:
             raise ScalingLawError("x must be positive and finite")
-        return self.coefficient * float(x) ** self.exponent
+        try:
+            prediction = self.coefficient * float(x) ** self.exponent
+        except OverflowError:
+            raise ScalingLawError("prediction must be positive and finite") from None
+        if not math.isfinite(prediction) or prediction <= 0:
+            raise ScalingLawError("prediction must be positive and finite")
+        return prediction
 
 
 def _positive_observations(values, name: str) -> tuple[float, ...]:
