@@ -10,6 +10,7 @@ from ai_journey.lambada import LambadaSource, examples_from_dataset_server
 from ai_journey.lambada import encode_example, generate_target, protocol_mapping
 from ai_journey.lambada import score_example, score_target
 from ai_journey.lambada import select_examples
+from ai_journey.lambada import summarize_scores
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 
@@ -279,3 +280,48 @@ def test_scored_example_contains_identities_and_metrics_without_raw_text():
     assert result["likelihood"]["target_bytes"] == 6
     assert result["generation"]["generated_bytes"] == 6
     assert "text" not in str(result)
+
+
+def scored_result(row, *, loss_sum, target_bytes, exact, prefix):
+    return {
+        "row_index": row,
+        "example_sha256": f"{row:064x}",
+        "prompt_sha256": f"{row + 1:064x}",
+        "target_sha256": f"{row + 2:064x}",
+        "likelihood": {
+            "target_bytes": target_bytes,
+            "loss_sum": loss_sum,
+            "mean_nll": loss_sum / target_bytes,
+            "bits_per_byte": loss_sum / target_bytes / 0.6931471805599453,
+        },
+        "generation": {
+            "prediction_sha256": f"{row + 3:064x}",
+            "generated_bytes": target_bytes,
+            "exact_match": exact,
+            "matching_prefix_bytes": prefix,
+        },
+    }
+
+
+def test_summary_weights_likelihood_by_target_bytes_and_counts_exact_matches():
+    result = summarize_scores(
+        [
+            scored_result(1, loss_sum=2.0, target_bytes=2, exact=True, prefix=2),
+            scored_result(2, loss_sum=6.0, target_bytes=3, exact=False, prefix=1),
+        ]
+    )
+    assert result["examples"] == 2
+    assert result["target_bytes"] == 5
+    assert result["mean_nll"] == pytest.approx(1.6)
+    assert result["exact_match_accuracy"] == 0.5
+    assert result["matching_prefix_ratio"] == 0.6
+
+
+def test_summary_rejects_duplicate_or_malformed_scores():
+    row = scored_result(1, loss_sum=2.0, target_bytes=2, exact=True, prefix=2)
+    with pytest.raises(LambadaError, match="unique"):
+        summarize_scores([row, row])
+    changed = copy.deepcopy(row)
+    changed["generation"]["matching_prefix_bytes"] = 3
+    with pytest.raises(LambadaError, match="invalid"):
+        summarize_scores([changed])

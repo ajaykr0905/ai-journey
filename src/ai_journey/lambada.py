@@ -402,3 +402,47 @@ def score_example(
         "likelihood": score_target(model, item),
         "generation": generate_target(model, item),
     }
+
+
+def summarize_scores(results) -> dict:
+    """Aggregate byte-weighted likelihood and exact last-word accuracy."""
+    results = tuple(results)
+    if not results or any(not isinstance(result, dict) for result in results):
+        raise LambadaError("summary requires scored LAMBADA rows")
+    rows = [result.get("row_index") for result in results]
+    if any(isinstance(row, bool) or not isinstance(row, int) for row in rows) or len(
+        set(rows)
+    ) != len(rows):
+        raise LambadaError("summary rows must be unique integers")
+    try:
+        target_bytes = sum(result["likelihood"]["target_bytes"] for result in results)
+        loss_sum = math.fsum(result["likelihood"]["loss_sum"] for result in results)
+        exact_matches = sum(result["generation"]["exact_match"] for result in results)
+        prefix_bytes = sum(
+            result["generation"]["matching_prefix_bytes"] for result in results
+        )
+    except (KeyError, TypeError) as error:
+        raise LambadaError("summary rows do not match the score contract") from error
+    if (
+        isinstance(target_bytes, bool)
+        or not isinstance(target_bytes, int)
+        or target_bytes <= 0
+        or not math.isfinite(loss_sum)
+        or loss_sum < 0
+        or not 0 <= exact_matches <= len(results)
+        or not 0 <= prefix_bytes <= target_bytes
+    ):
+        raise LambadaError("summary totals are invalid")
+    mean_nll = loss_sum / target_bytes
+    return {
+        "examples": len(results),
+        "target_bytes": target_bytes,
+        "loss_sum": loss_sum,
+        "mean_nll": mean_nll,
+        "bits_per_byte": mean_nll / math.log(2),
+        "exact_matches": exact_matches,
+        "exact_match_accuracy": exact_matches / len(results),
+        "matching_prefix_bytes": prefix_bytes,
+        "matching_prefix_ratio": prefix_bytes / target_bytes,
+        "records": list(results),
+    }
