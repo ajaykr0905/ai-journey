@@ -486,3 +486,57 @@ def summarize_scores(
         "matching_prefix_ratio": prefix_bytes / target_bytes,
         "records": list(results),
     }
+
+
+def audit_contamination(
+    training_source: bytes,
+    examples,
+    *,
+    context_suffix_bytes: int = 128,
+) -> dict:
+    """Detect exact passage and long-context overlap with the training source."""
+    if not isinstance(training_source, bytes):
+        raise TypeError("training source must be bytes")
+    if not 0 < len(training_source) <= 16 * 1024 * 1024:
+        raise LambadaError("training source exceeds the audit budget")
+    if (
+        isinstance(context_suffix_bytes, bool)
+        or not isinstance(context_suffix_bytes, int)
+        or not 32 <= context_suffix_bytes <= 4096
+    ):
+        raise LambadaError("contamination suffix is outside the audit budget")
+    examples = tuple(examples)
+    if (
+        not examples
+        or len(examples) > 1000
+        or any(not isinstance(example, LambadaExample) for example in examples)
+        or len({example.row_index for example in examples}) != len(examples)
+    ):
+        raise LambadaError("contamination audit requires unique bounded examples")
+    full_matches = []
+    context_matches = []
+    for example in examples:
+        item = encode_example(
+            example,
+            max_context_bytes=32 * 1024,
+            max_target_bytes=256,
+        )
+        if example.text.encode("utf-8") in training_source:
+            full_matches.append(example.row_index)
+        if (
+            len(item.prompt) >= context_suffix_bytes
+            and item.prompt[-context_suffix_bytes:] in training_source
+        ):
+            context_matches.append(example.row_index)
+    contaminated = sorted(set(full_matches) | set(context_matches))
+    return {
+        "method": "exact_bytes",
+        "training_sha256": sha256(training_source).hexdigest(),
+        "training_bytes": len(training_source),
+        "examples": len(examples),
+        "context_suffix_bytes": context_suffix_bytes,
+        "full_text_match_rows": full_matches,
+        "context_suffix_match_rows": context_matches,
+        "contaminated_rows": contaminated,
+        "passed": not contaminated,
+    }

@@ -7,7 +7,7 @@ import torch
 
 from ai_journey.lambada import LambadaError, LambadaExample, LambadaProtocol
 from ai_journey.lambada import LambadaSource, examples_from_dataset_server
-from ai_journey.lambada import bootstrap_exact_match
+from ai_journey.lambada import audit_contamination, bootstrap_exact_match
 from ai_journey.lambada import encode_example, generate_target, protocol_mapping
 from ai_journey.lambada import score_example, score_target
 from ai_journey.lambada import select_examples
@@ -349,3 +349,31 @@ def test_exact_match_bootstrap_rejects_invalid_controls_and_outcomes():
     changed["generation"]["exact_match"] = 1
     with pytest.raises(LambadaError, match="boolean"):
         bootstrap_exact_match([changed])
+
+
+def test_contamination_audit_detects_full_and_long_context_overlap():
+    long_context = "A" * 160
+    clean = LambadaExample(1, f"{long_context} final")
+    contaminated = LambadaExample(2, f"{long_context} copied")
+    source = f"training text\n{contaminated.text}\n".encode()
+    report = audit_contamination(source, [clean, contaminated])
+    assert report["full_text_match_rows"] == [2]
+    assert report["context_suffix_match_rows"] == [1, 2]
+    assert report["contaminated_rows"] == [1, 2]
+    assert report["passed"] is False
+    assert report["training_sha256"] == sha256(source).hexdigest()
+
+
+def test_contamination_audit_passes_distinct_training_data():
+    examples = [LambadaExample(1, f"{'A' * 160} final")]
+    report = audit_contamination(b"independently written training data", examples)
+    assert report["contaminated_rows"] == []
+    assert report["passed"] is True
+
+
+def test_contamination_audit_enforces_input_budgets_and_identities():
+    example = LambadaExample(1, f"{'A' * 160} final")
+    with pytest.raises(LambadaError, match="budget"):
+        audit_contamination(b"source", [example], context_suffix_bytes=31)
+    with pytest.raises(LambadaError, match="unique"):
+        audit_contamination(b"source", [example, example])
