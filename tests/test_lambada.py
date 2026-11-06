@@ -9,7 +9,8 @@ from ai_journey.lambada import LambadaError, LambadaExample, LambadaProtocol
 from ai_journey.lambada import LambadaSource, examples_from_dataset_server
 from ai_journey.lambada import audit_contamination, bootstrap_exact_match
 from ai_journey.lambada import encode_example, generate_target, protocol_mapping
-from ai_journey.lambada import score_example, score_target
+from ai_journey.lambada import examples_digest, run_evaluation, score_example
+from ai_journey.lambada import score_target
 from ai_journey.lambada import select_examples
 from ai_journey.lambada import summarize_scores
 from ai_journey.gpt2_config import GPT2Config
@@ -140,10 +141,10 @@ def test_dataset_response_rejects_invalid_json_and_oversized_inputs():
         examples_from_dataset_server(b"x" * (2 * 1024 * 1024 + 1))
 
 
-def protocol_payload():
+def protocol_payload(sample=b"bounded public response"):
     return {
         "schema_version": 1,
-        "source": source_payload(),
+        "source": source_payload(sample),
         "start": 7,
         "count": 2,
         "bootstrap_samples": 2000,
@@ -377,3 +378,35 @@ def test_contamination_audit_enforces_input_budgets_and_identities():
         audit_contamination(b"source", [example], context_suffix_bytes=31)
     with pytest.raises(LambadaError, match="unique"):
         audit_contamination(b"source", [example, example])
+
+
+def test_examples_digest_binds_row_order_and_content():
+    examples = [LambadaExample(1, "context first"), LambadaExample(2, "context second")]
+    assert examples_digest(examples) != examples_digest(reversed(examples))
+    assert len(examples_digest(examples)) == 64
+
+
+def test_run_evaluation_binds_model_data_metrics_and_contamination():
+    payload = server_payload()
+    response = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    protocol = LambadaProtocol.from_mapping(protocol_payload(response))
+    model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double()
+    report = run_evaluation(
+        model,
+        response,
+        b"independently written public training data",
+        protocol,
+    )
+    assert report["protocol_sha256"] == protocol.fingerprint
+    assert report["sample_sha256"] == sha256(response).hexdigest()
+    assert report["evaluation"]["examples"] == 2
+    assert report["contamination"]["passed"] is True
+    assert report["model_dtype"] == "torch.float64"
+
+
+def test_run_evaluation_rejects_unverified_sample_bytes():
+    response = json.dumps(server_payload()).encode()
+    protocol = LambadaProtocol.from_mapping(protocol_payload(b"different"))
+    model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double()
+    with pytest.raises(LambadaError, match="snapshot"):
+        run_evaluation(model, response, b"training", protocol)

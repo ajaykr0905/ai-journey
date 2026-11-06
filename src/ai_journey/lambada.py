@@ -255,6 +255,19 @@ def select_examples(
     return selected
 
 
+def examples_digest(examples) -> str:
+    examples = tuple(examples)
+    if not examples or any(not isinstance(item, LambadaExample) for item in examples):
+        raise LambadaError("digest requires validated LAMBADA examples")
+    payload = [
+        {"row_index": item.row_index, "example_sha256": item.digest}
+        for item in examples
+    ]
+    return sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
 @dataclass(frozen=True)
 class LambadaItem:
     """A source example split into context bytes and one final-word target."""
@@ -539,4 +552,72 @@ def audit_contamination(
         "context_suffix_match_rows": context_matches,
         "contaminated_rows": contaminated,
         "passed": not contaminated,
+    }
+
+
+def run_evaluation(
+    model,
+    response: bytes,
+    training_source: bytes,
+    protocol: LambadaProtocol,
+) -> dict:
+    """Evaluate one pinned LAMBADA slice with explicit contamination evidence."""
+    import torch
+
+    from .decoder_variant_model import DecoderVariantModel
+    from .gpt2_model import GPT2LanguageModel
+    from .gpt2_training import gpt2_model_fingerprint
+    from .training_models import (
+        base_model_config,
+        expected_training_parameters,
+        model_config_mapping,
+    )
+
+    if not isinstance(model, (GPT2LanguageModel, DecoderVariantModel)):
+        raise TypeError("model must be GPT2LanguageModel or DecoderVariantModel")
+    if not isinstance(protocol, LambadaProtocol):
+        raise TypeError("protocol must be LambadaProtocol")
+    if base_model_config(model).vocab_size != 256:
+        raise LambadaError("byte evaluation requires vocab_size 256")
+    if expected_training_parameters(model.config) > 1_000_000:
+        raise LambadaError("evaluation model exceeds the CPU parameter budget")
+    if any(parameter.device.type != "cpu" for parameter in model.parameters()):
+        raise LambadaError("bounded evaluation requires CPU model parameters")
+    dtypes = {str(parameter.dtype) for parameter in model.parameters()}
+    if len(dtypes) != 1 or not dtypes <= {"torch.float32", "torch.float64"}:
+        raise LambadaError("evaluation requires uniform float32 or float64 parameters")
+    protocol.source.verify_sample(response)
+    examples = select_examples(
+        examples_from_dataset_server(response),
+        start=protocol.start,
+        count=protocol.count,
+    )
+    contamination = audit_contamination(training_source, examples)
+    records = [
+        score_example(
+            model,
+            example,
+            max_context_bytes=protocol.max_context_bytes,
+            max_target_bytes=protocol.max_target_bytes,
+        )
+        for example in examples
+    ]
+    evaluation = summarize_scores(
+        records,
+        bootstrap_samples=protocol.bootstrap_samples,
+        bootstrap_seed=protocol.bootstrap_seed,
+    )
+    return {
+        "schema_version": 1,
+        "protocol_sha256": protocol.fingerprint,
+        "sample_sha256": sha256(response).hexdigest(),
+        "examples_sha256": examples_digest(examples),
+        "training_sha256": sha256(training_source).hexdigest(),
+        "model_config": model_config_mapping(model.config),
+        "model_sha256": gpt2_model_fingerprint(model),
+        "parameter_count": expected_training_parameters(model.config),
+        "model_dtype": next(iter(dtypes)),
+        "torch_threads": torch.get_num_threads(),
+        "contamination": contamination,
+        "evaluation": evaluation,
     }
