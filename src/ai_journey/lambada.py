@@ -6,12 +6,21 @@ from dataclasses import dataclass
 from hashlib import sha256
 import json
 import math
+import platform
 import random
 import re
 
 
 class LambadaError(ValueError):
     """Raised when LAMBADA inputs or evidence violate their contract."""
+
+
+LAMBADA_LIMITATIONS = [
+    "A bounded test slice is not the official 5,153-example benchmark score.",
+    "Byte-level exact match is not directly comparable to token-level GPT-2 results.",
+    "Exact-byte overlap checks do not detect paraphrased or translated contamination.",
+    "Automated execution does not prove lecture viewing or learner understanding.",
+]
 
 
 @dataclass(frozen=True)
@@ -621,3 +630,127 @@ def run_evaluation(
         "contamination": contamination,
         "evaluation": evaluation,
     }
+
+
+def _payload_digest(payload: dict) -> str:
+    return sha256(
+        json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+    ).hexdigest()
+
+
+def evaluation_runtime(report: dict) -> dict:
+    import torch
+
+    return {
+        "device": "cpu",
+        "torch": str(torch.__version__),
+        "python": platform.python_version(),
+        "operating_system": platform.system(),
+        "machine": platform.machine(),
+        "model_dtype": report["model_dtype"],
+        "torch_threads": report["torch_threads"],
+    }
+
+
+def seal_evidence(report: dict, protocol: LambadaProtocol) -> dict:
+    """Seal one measured run with its protocol, runtime and claim boundary."""
+    if (
+        not isinstance(report, dict)
+        or not isinstance(protocol, LambadaProtocol)
+        or report.get("protocol_sha256") != protocol.fingerprint
+    ):
+        raise LambadaError("LAMBADA report does not match the protocol")
+    canonical_report = json.loads(json.dumps(report, allow_nan=False))
+    claim_status = (
+        "bounded_result"
+        if canonical_report["contamination"]["passed"]
+        else "contamination_detected"
+    )
+    payload = {
+        "schema_version": 1,
+        "benchmark": "lambada_openai_last_word",
+        "protocol": protocol_mapping(protocol),
+        "run": canonical_report,
+        "runtime": evaluation_runtime(canonical_report),
+        "claim_status": claim_status,
+        "limitations": LAMBADA_LIMITATIONS.copy(),
+    }
+    payload["evidence_sha256"] = _payload_digest(payload)
+    return verify_evidence(payload)
+
+
+def verify_evidence(payload: dict) -> dict:
+    """Reject modified evidence and metrics inconsistent with scored rows."""
+    fields = {
+        "schema_version",
+        "benchmark",
+        "protocol",
+        "run",
+        "runtime",
+        "claim_status",
+        "limitations",
+        "evidence_sha256",
+    }
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != fields
+        or payload["schema_version"] != 1
+        or payload["benchmark"] != "lambada_openai_last_word"
+    ):
+        raise LambadaError("LAMBADA evidence schema does not match")
+    unsigned = {
+        key: value for key, value in payload.items() if key != "evidence_sha256"
+    }
+    if _payload_digest(unsigned) != payload["evidence_sha256"]:
+        raise LambadaError("LAMBADA evidence digest does not match")
+    protocol = LambadaProtocol.from_mapping(payload["protocol"])
+    run = payload["run"]
+    contamination = run.get("contamination") if isinstance(run, dict) else None
+    evaluation = run.get("evaluation") if isinstance(run, dict) else None
+    runtime = payload["runtime"]
+    if (
+        not isinstance(run, dict)
+        or not isinstance(contamination, dict)
+        or run.get("protocol_sha256") != protocol.fingerprint
+        or run.get("sample_sha256") != protocol.source.sample_sha256
+        or run.get("training_sha256") != contamination.get("training_sha256")
+        or not isinstance(evaluation, dict)
+        or evaluation.get("examples") != protocol.count
+        or not isinstance(runtime, dict)
+        or set(runtime)
+        != {
+            "device",
+            "torch",
+            "python",
+            "operating_system",
+            "machine",
+            "model_dtype",
+            "torch_threads",
+        }
+        or runtime.get("device") != "cpu"
+        or runtime.get("model_dtype") != run.get("model_dtype")
+        or runtime.get("torch_threads") != run.get("torch_threads")
+        or payload["limitations"] != LAMBADA_LIMITATIONS
+    ):
+        raise LambadaError("LAMBADA evidence constraints do not match")
+    contaminated = sorted(
+        set(contamination.get("full_text_match_rows", []))
+        | set(contamination.get("context_suffix_match_rows", []))
+    )
+    expected_status = "bounded_result" if not contaminated else "contamination_detected"
+    if (
+        contamination.get("contaminated_rows") != contaminated
+        or contamination.get("passed") is not (not contaminated)
+        or payload["claim_status"] != expected_status
+    ):
+        raise LambadaError("contamination claim is inconsistent")
+    expected_evaluation = summarize_scores(
+        evaluation.get("records", []),
+        bootstrap_samples=protocol.bootstrap_samples,
+        bootstrap_seed=protocol.bootstrap_seed,
+    )
+    if evaluation != expected_evaluation:
+        raise LambadaError("LAMBADA metrics do not match scored rows")
+    return payload

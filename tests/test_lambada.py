@@ -10,7 +10,7 @@ from ai_journey.lambada import LambadaSource, examples_from_dataset_server
 from ai_journey.lambada import audit_contamination, bootstrap_exact_match
 from ai_journey.lambada import encode_example, generate_target, protocol_mapping
 from ai_journey.lambada import examples_digest, run_evaluation, score_example
-from ai_journey.lambada import score_target
+from ai_journey.lambada import seal_evidence, score_target, verify_evidence
 from ai_journey.lambada import select_examples
 from ai_journey.lambada import summarize_scores
 from ai_journey.gpt2_config import GPT2Config
@@ -410,3 +410,36 @@ def test_run_evaluation_rejects_unverified_sample_bytes():
     model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double()
     with pytest.raises(LambadaError, match="snapshot"):
         run_evaluation(model, response, b"training", protocol)
+
+
+def evidence_fixture():
+    response = json.dumps(
+        server_payload(), sort_keys=True, separators=(",", ":")
+    ).encode()
+    protocol = LambadaProtocol.from_mapping(protocol_payload(response))
+    model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double()
+    report = run_evaluation(model, response, b"distinct training source", protocol)
+    return seal_evidence(report, protocol)
+
+
+def test_evidence_seals_runtime_scope_and_semantic_metrics():
+    evidence = evidence_fixture()
+    assert verify_evidence(evidence) == evidence
+    assert evidence["claim_status"] == "bounded_result"
+    assert evidence["runtime"]["device"] == "cpu"
+    assert evidence["run"]["evaluation"]["examples"] == 2
+
+
+def test_evidence_rejects_digest_and_semantic_tampering():
+    evidence = evidence_fixture()
+    changed = copy.deepcopy(evidence)
+    changed["run"]["evaluation"]["exact_match_accuracy"] = 1.0
+    with pytest.raises(LambadaError, match="digest"):
+        verify_evidence(changed)
+    from ai_journey.lambada import _payload_digest
+
+    changed["evidence_sha256"] = _payload_digest(
+        {key: value for key, value in changed.items() if key != "evidence_sha256"}
+    )
+    with pytest.raises(LambadaError, match="metrics"):
+        verify_evidence(changed)
