@@ -15,6 +15,8 @@ from .hellaswag_io import (
     validate_evaluation_output,
 )
 
+_load_model = load_evaluation_model
+
 
 def _read_json(path: Path, *, maximum: int) -> dict:
     return parse_evaluation_json(
@@ -85,7 +87,7 @@ def main(argv=None) -> int:
             HellaSwagProtocol.from_mapping(evidence["protocol"]).source.verify_sample(
                 response
             )
-            model = load_evaluation_model(
+            model = _load_model(
                 arguments.source,
                 arguments.spec,
                 arguments.checkpoint,
@@ -110,7 +112,7 @@ def main(argv=None) -> int:
                 maximum=2 * 1024 * 1024,
                 name="dataset response",
             )
-            model = load_evaluation_model(
+            model = _load_model(
                 arguments.source,
                 arguments.spec,
                 arguments.checkpoint,
