@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 import json
 import math
+import random
 import re
 
 
@@ -404,7 +405,43 @@ def score_example(
     }
 
 
-def summarize_scores(results) -> dict:
+def bootstrap_exact_match(results, *, samples: int = 2000, seed: int = 63) -> dict:
+    """Compute a deterministic percentile interval for last-word accuracy."""
+    results = tuple(results)
+    try:
+        outcomes = [result["generation"]["exact_match"] for result in results]
+    except (KeyError, TypeError) as error:
+        raise LambadaError("bootstrap requires scored LAMBADA rows") from error
+    if not outcomes or any(type(outcome) is not bool for outcome in outcomes):
+        raise LambadaError("bootstrap requires boolean exact-match outcomes")
+    if (
+        isinstance(samples, bool)
+        or not isinstance(samples, int)
+        or not 100 <= samples <= 10_000
+        or isinstance(seed, bool)
+        or not isinstance(seed, int)
+        or not 0 <= seed < 2**32
+    ):
+        raise LambadaError("bootstrap controls exceed the evaluation budget")
+    generator = random.Random(seed)
+    values = [int(outcome) for outcome in outcomes]
+    estimates = sorted(
+        math.fsum(generator.choice(values) for _ in values) / len(values)
+        for _ in range(samples)
+    )
+    return {
+        "method": "nonparametric_percentile",
+        "confidence": 0.95,
+        "samples": samples,
+        "seed": seed,
+        "lower": estimates[math.floor(0.025 * (samples - 1))],
+        "upper": estimates[math.ceil(0.975 * (samples - 1))],
+    }
+
+
+def summarize_scores(
+    results, *, bootstrap_samples: int = 2000, bootstrap_seed: int = 63
+) -> dict:
     """Aggregate byte-weighted likelihood and exact last-word accuracy."""
     results = tuple(results)
     if not results or any(not isinstance(result, dict) for result in results):
@@ -442,6 +479,9 @@ def summarize_scores(results) -> dict:
         "bits_per_byte": mean_nll / math.log(2),
         "exact_matches": exact_matches,
         "exact_match_accuracy": exact_matches / len(results),
+        "exact_match_interval": bootstrap_exact_match(
+            results, samples=bootstrap_samples, seed=bootstrap_seed
+        ),
         "matching_prefix_bytes": prefix_bytes,
         "matching_prefix_ratio": prefix_bytes / target_bytes,
         "records": list(results),

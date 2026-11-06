@@ -7,6 +7,7 @@ import torch
 
 from ai_journey.lambada import LambadaError, LambadaExample, LambadaProtocol
 from ai_journey.lambada import LambadaSource, examples_from_dataset_server
+from ai_journey.lambada import bootstrap_exact_match
 from ai_journey.lambada import encode_example, generate_target, protocol_mapping
 from ai_journey.lambada import score_example, score_target
 from ai_journey.lambada import select_examples
@@ -325,3 +326,26 @@ def test_summary_rejects_duplicate_or_malformed_scores():
     changed["generation"]["matching_prefix_bytes"] = 3
     with pytest.raises(LambadaError, match="invalid"):
         summarize_scores([changed])
+
+
+def test_exact_match_bootstrap_is_deterministic_and_bounded():
+    rows = [
+        scored_result(1, loss_sum=1.0, target_bytes=1, exact=True, prefix=1),
+        scored_result(2, loss_sum=1.0, target_bytes=1, exact=False, prefix=0),
+    ]
+    first = bootstrap_exact_match(rows, samples=200, seed=9)
+    assert first == bootstrap_exact_match(rows, samples=200, seed=9)
+    assert first["lower"] == 0
+    assert first["upper"] == 1
+    perfect = bootstrap_exact_match([rows[0]], samples=100)
+    assert perfect["lower"] == perfect["upper"] == 1
+
+
+def test_exact_match_bootstrap_rejects_invalid_controls_and_outcomes():
+    row = scored_result(1, loss_sum=1.0, target_bytes=1, exact=True, prefix=1)
+    with pytest.raises(LambadaError, match="budget"):
+        bootstrap_exact_match([row], samples=99)
+    changed = copy.deepcopy(row)
+    changed["generation"]["exact_match"] = 1
+    with pytest.raises(LambadaError, match="boolean"):
+        bootstrap_exact_match([changed])
