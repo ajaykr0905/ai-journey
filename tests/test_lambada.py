@@ -3,10 +3,14 @@ from hashlib import sha256
 import json
 
 import pytest
+import torch
 
 from ai_journey.lambada import LambadaError, LambadaExample, LambadaProtocol
 from ai_journey.lambada import LambadaSource, examples_from_dataset_server
-from ai_journey.lambada import encode_example, protocol_mapping, select_examples
+from ai_journey.lambada import encode_example, protocol_mapping, score_target
+from ai_journey.lambada import select_examples
+from ai_journey.gpt2_config import GPT2Config
+from ai_journey.gpt2_model import GPT2LanguageModel
 
 
 def source_payload(sample=b"bounded public response"):
@@ -218,3 +222,22 @@ def test_example_encoding_enforces_context_and_target_budgets():
         encode_example(example, max_target_bytes=4)
     with pytest.raises(LambadaError, match="budget"):
         encode_example(example, max_target_bytes=True)
+
+
+def test_target_scoring_is_finite_and_preserves_model_and_rng_state():
+    model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double().train()
+    item = encode_example(LambadaExample(0, "public-safe context target"))
+    torch.manual_seed(123)
+    state = torch.get_rng_state().clone()
+    result = score_target(model, item)
+    assert result["target_bytes"] == len(b"target")
+    assert result["loss_sum"] > 0
+    assert result["bits_per_byte"] > 0
+    assert model.training is True
+    assert torch.equal(torch.get_rng_state(), state)
+
+
+def test_target_scoring_rejects_non_items():
+    model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double()
+    with pytest.raises(TypeError, match="LambadaItem"):
+        score_target(model, object())

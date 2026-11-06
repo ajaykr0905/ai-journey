@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import math
 import re
 
 
@@ -290,3 +291,45 @@ def encode_example(
     if len(prompt) > max_context_bytes or len(target) > max_target_bytes:
         raise LambadaError("encoded example exceeds the text budget")
     return LambadaItem(example.row_index, example.digest, prompt, target)
+
+
+def score_target(model, item: LambadaItem) -> dict:
+    """Measure final-word likelihood without leaking target bytes into context."""
+    import torch
+
+    from .ddp_evaluation import token_nll
+    from .training_models import base_model_config
+
+    if not isinstance(item, LambadaItem):
+        raise TypeError("item must be LambadaItem")
+    modes = [(module, module.training) for module in model.modules()]
+    rng = torch.get_rng_state().clone()
+    losses = []
+    context = list(item.prompt)
+    try:
+        model.eval()
+        with torch.inference_mode():
+            for target in item.target:
+                inputs = torch.tensor(
+                    [context[-base_model_config(model).context_length :]],
+                    dtype=torch.long,
+                )
+                logits = model(inputs)[:, -1:, :]
+                loss = token_nll(logits, torch.tensor([[target]])).item()
+                if not math.isfinite(loss) or loss < 0:
+                    raise LambadaError(
+                        "target likelihood must be finite and nonnegative"
+                    )
+                losses.append(loss)
+                context.append(target)
+    finally:
+        torch.set_rng_state(rng)
+        for module, mode in modes:
+            module.training = mode
+    loss_sum = math.fsum(losses)
+    return {
+        "target_bytes": len(item.target),
+        "loss_sum": loss_sum,
+        "mean_nll": loss_sum / len(item.target),
+        "bits_per_byte": loss_sum / len(item.target) / math.log(2),
+    }
