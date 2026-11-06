@@ -101,6 +101,85 @@ class LambadaExample:
         ).hexdigest()
 
 
+@dataclass(frozen=True)
+class LambadaProtocol:
+    """Complete controls for one bounded last-word evaluation."""
+
+    source: LambadaSource
+    start: int
+    count: int
+    bootstrap_samples: int
+    bootstrap_seed: int
+    max_context_bytes: int
+    max_target_bytes: int
+
+    @classmethod
+    def from_mapping(cls, payload: dict) -> "LambadaProtocol":
+        fields = {
+            "schema_version",
+            "source",
+            "start",
+            "count",
+            "bootstrap_samples",
+            "bootstrap_seed",
+            "max_context_bytes",
+            "max_target_bytes",
+        }
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != fields
+            or type(payload["schema_version"]) is not int
+            or payload["schema_version"] != 1
+        ):
+            raise LambadaError("LAMBADA protocol schema does not match")
+        source = LambadaSource.from_mapping(payload["source"])
+        controls = {
+            field: payload[field] for field in fields - {"schema_version", "source"}
+        }
+        limits = {
+            "start": (0, source.test_rows - 1),
+            "count": (1, 1000),
+            "bootstrap_samples": (100, 10_000),
+            "bootstrap_seed": (0, 2**32 - 1),
+            "max_context_bytes": (1, 32 * 1024),
+            "max_target_bytes": (1, 256),
+        }
+        for name, (minimum, maximum) in limits.items():
+            value = controls[name]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not minimum <= value <= maximum
+            ):
+                raise LambadaError(f"protocol {name} is outside its budget")
+        if controls["start"] + controls["count"] > source.test_rows:
+            raise LambadaError("protocol slice exceeds the test set")
+        return cls(source=source, **controls)
+
+    @property
+    def fingerprint(self) -> str:
+        return sha256(
+            json.dumps(
+                protocol_mapping(self), sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+
+
+def protocol_mapping(protocol: LambadaProtocol) -> dict:
+    if not isinstance(protocol, LambadaProtocol):
+        raise TypeError("protocol must be LambadaProtocol")
+    return {
+        "schema_version": 1,
+        "source": protocol.source.__dict__,
+        "start": protocol.start,
+        "count": protocol.count,
+        "bootstrap_samples": protocol.bootstrap_samples,
+        "bootstrap_seed": protocol.bootstrap_seed,
+        "max_context_bytes": protocol.max_context_bytes,
+        "max_target_bytes": protocol.max_target_bytes,
+    }
+
+
 def examples_from_dataset_server(source: bytes) -> tuple[LambadaExample, ...]:
     """Parse a bounded Hugging Face dataset-server first-rows response."""
     if not isinstance(source, bytes):
@@ -143,3 +222,31 @@ def examples_from_dataset_server(source: bytes) -> tuple[LambadaExample, ...]:
     ) != len(examples):
         raise LambadaError("dataset response contains duplicate examples")
     return tuple(examples)
+
+
+def select_examples(
+    examples, *, start: int = 0, count: int = 100
+) -> tuple[LambadaExample, ...]:
+    """Select an exact contiguous test slice independent of response order."""
+    for name, value, minimum, maximum in (
+        ("start", start, 0, 5152),
+        ("count", count, 1, 1000),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not minimum <= value <= maximum
+        ):
+            raise LambadaError(f"{name} is outside the evaluation budget")
+    examples = tuple(examples)
+    if not examples or any(not isinstance(item, LambadaExample) for item in examples):
+        raise LambadaError("selection requires validated LAMBADA examples")
+    selected = tuple(
+        sorted(
+            (item for item in examples if start <= item.row_index < start + count),
+            key=lambda item: item.row_index,
+        )
+    )
+    if [item.row_index for item in selected] != list(range(start, start + count)):
+        raise LambadaError("dataset response does not cover the requested slice")
+    return selected

@@ -4,8 +4,9 @@ import json
 
 import pytest
 
-from ai_journey.lambada import LambadaError, LambadaExample, LambadaSource
-from ai_journey.lambada import examples_from_dataset_server
+from ai_journey.lambada import LambadaError, LambadaExample, LambadaProtocol
+from ai_journey.lambada import LambadaSource, examples_from_dataset_server
+from ai_journey.lambada import protocol_mapping, select_examples
 
 
 def source_payload(sample=b"bounded public response"):
@@ -130,3 +131,64 @@ def test_dataset_response_rejects_invalid_json_and_oversized_inputs():
         examples_from_dataset_server(b"not-json")
     with pytest.raises(LambadaError, match="budget"):
         examples_from_dataset_server(b"x" * (2 * 1024 * 1024 + 1))
+
+
+def protocol_payload():
+    return {
+        "schema_version": 1,
+        "source": source_payload(),
+        "start": 7,
+        "count": 2,
+        "bootstrap_samples": 2000,
+        "bootstrap_seed": 63,
+        "max_context_bytes": 4096,
+        "max_target_bytes": 64,
+    }
+
+
+def test_protocol_round_trips_and_has_stable_fingerprint():
+    protocol = LambadaProtocol.from_mapping(protocol_payload())
+    assert protocol_mapping(protocol) == protocol_payload()
+    assert (
+        protocol.fingerprint
+        == LambadaProtocol.from_mapping(protocol_payload()).fingerprint
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("start", -1),
+        ("count", 1001),
+        ("bootstrap_samples", 99),
+        ("bootstrap_seed", True),
+        ("max_context_bytes", 0),
+        ("max_target_bytes", 257),
+    ],
+)
+def test_protocol_rejects_controls_outside_budgets(field, value):
+    payload = protocol_payload()
+    payload[field] = value
+    with pytest.raises(LambadaError, match="budget"):
+        LambadaProtocol.from_mapping(payload)
+
+
+def test_protocol_rejects_slice_past_test_rows():
+    payload = protocol_payload()
+    payload.update(start=5152, count=2)
+    with pytest.raises(LambadaError, match="exceeds"):
+        LambadaProtocol.from_mapping(payload)
+
+
+def test_selection_returns_exact_ordered_slice():
+    examples = examples_from_dataset_server(json.dumps(server_payload()).encode())
+    selected = select_examples(reversed(examples), start=7, count=2)
+    assert [item.row_index for item in selected] == [7, 8]
+
+
+def test_selection_rejects_missing_or_invalid_rows():
+    examples = examples_from_dataset_server(json.dumps(server_payload()).encode())
+    with pytest.raises(LambadaError, match="cover"):
+        select_examples(examples, start=6, count=2)
+    with pytest.raises(LambadaError, match="validated"):
+        select_examples([object()], start=7, count=1)
