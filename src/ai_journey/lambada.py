@@ -333,3 +333,49 @@ def score_target(model, item: LambadaItem) -> dict:
         "mean_nll": loss_sum / len(item.target),
         "bits_per_byte": loss_sum / len(item.target) / math.log(2),
     }
+
+
+def generate_target(model, item: LambadaItem) -> dict:
+    """Greedily generate exactly the target byte length from context only."""
+    import torch
+
+    from .training_models import base_model_config
+
+    if not isinstance(item, LambadaItem):
+        raise TypeError("item must be LambadaItem")
+    modes = [(module, module.training) for module in model.modules()]
+    rng = torch.get_rng_state().clone()
+    context = list(item.prompt)
+    generated = bytearray()
+    try:
+        model.eval()
+        with torch.inference_mode():
+            for _ in item.target:
+                inputs = torch.tensor(
+                    [context[-base_model_config(model).context_length :]],
+                    dtype=torch.long,
+                )
+                logits = model(inputs)[:, -1, :]
+                if logits.shape != (1, 256) or not torch.isfinite(logits).all():
+                    raise LambadaError(
+                        "generation logits must cover finite byte scores"
+                    )
+                predicted = int(torch.argmax(logits, dim=-1).item())
+                generated.append(predicted)
+                context.append(predicted)
+    finally:
+        torch.set_rng_state(rng)
+        for module, mode in modes:
+            module.training = mode
+    prediction = bytes(generated)
+    prefix = 0
+    for expected, actual in zip(item.target, prediction):
+        if expected != actual:
+            break
+        prefix += 1
+    return {
+        "prediction_sha256": sha256(prediction).hexdigest(),
+        "generated_bytes": len(prediction),
+        "exact_match": prediction == item.target,
+        "matching_prefix_bytes": prefix,
+    }

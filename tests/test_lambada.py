@@ -7,7 +7,8 @@ import torch
 
 from ai_journey.lambada import LambadaError, LambadaExample, LambadaProtocol
 from ai_journey.lambada import LambadaSource, examples_from_dataset_server
-from ai_journey.lambada import encode_example, protocol_mapping, score_target
+from ai_journey.lambada import encode_example, generate_target, protocol_mapping
+from ai_journey.lambada import score_target
 from ai_journey.lambada import select_examples
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
@@ -241,3 +242,27 @@ def test_target_scoring_rejects_non_items():
     model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double()
     with pytest.raises(TypeError, match="LambadaItem"):
         score_target(model, object())
+
+
+def test_greedy_generation_is_content_private_and_preserves_state():
+    model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double().train()
+    for parameter in model.parameters():
+        parameter.data.zero_()
+    item = encode_example(LambadaExample(0, "public-safe context target"))
+    torch.manual_seed(321)
+    state = torch.get_rng_state().clone()
+    result = generate_target(model, item)
+    assert result == {
+        "prediction_sha256": sha256(b"\x00" * len(b"target")).hexdigest(),
+        "generated_bytes": len(b"target"),
+        "exact_match": False,
+        "matching_prefix_bytes": 0,
+    }
+    assert model.training is True
+    assert torch.equal(torch.get_rng_state(), state)
+
+
+def test_greedy_generation_rejects_non_items():
+    model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double()
+    with pytest.raises(TypeError, match="LambadaItem"):
+        generate_target(model, object())
