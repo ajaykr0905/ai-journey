@@ -2,15 +2,20 @@ import copy
 
 from ai_journey.ddp_evaluation import Document
 from ai_journey.evaluation_suite import (
+    EvaluationResult,
+    EvaluationSuiteError,
+    build_evaluation_suite,
     evaluate_heldout_likelihood,
     result_from_hellaswag,
     result_from_lambada,
+    verify_evaluation_suite,
 )
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
 from ai_journey.lambada import _payload_digest
 from test_hellaswag_evidence import evidence_fixture as hellaswag_fixture
 from test_lambada import evidence_fixture as lambada_fixture
+import pytest
 
 
 def test_heldout_adapter_binds_model_documents_and_lower_is_better_metric():
@@ -46,3 +51,66 @@ def test_lambada_adapter_propagates_contamination_ineligibility():
         {key: value for key, value in evidence.items() if key != "evidence_sha256"}
     )
     assert result_from_lambada(evidence).eligible is False
+
+
+def suite_results(*, eligible=True, model="a" * 64):
+    return [
+        EvaluationResult(
+            "heldout_likelihood",
+            model,
+            "1" * 64,
+            "bits_per_byte",
+            7.9,
+            False,
+            200,
+            True,
+            "bounded held-out split",
+        ),
+        EvaluationResult(
+            "hellaswag_validation",
+            model,
+            "2" * 64,
+            "accuracy",
+            0.25,
+            True,
+            100,
+            True,
+            "bounded validation slice",
+        ),
+        EvaluationResult(
+            "lambada_last_word",
+            model,
+            "3" * 64,
+            "exact_match_accuracy",
+            0.0,
+            True,
+            100,
+            eligible,
+            "bounded test slice",
+        ),
+    ]
+
+
+def test_suite_seals_three_axes_for_one_model():
+    suite = build_evaluation_suite(reversed(suite_results()))
+    assert verify_evaluation_suite(suite) == suite
+    assert suite["claim_status"] == "complete_bounded_three_axis"
+    assert [item["name"] for item in suite["evaluations"]] == [
+        "heldout_likelihood",
+        "hellaswag_validation",
+        "lambada_last_word",
+    ]
+
+
+def test_suite_blocks_claim_when_an_evaluation_is_ineligible():
+    suite = build_evaluation_suite(suite_results(eligible=False))
+    assert suite["claim_status"] == "blocked_ineligible_evaluation"
+
+
+def test_suite_rejects_missing_axes_and_mixed_models():
+    with pytest.raises(EvaluationSuiteError, match="three"):
+        build_evaluation_suite(suite_results()[:2])
+    mixed = suite_results()
+    mixed[-1] = EvaluationResult(**{**mixed[-1].to_mapping(), "model_sha256": "b" * 64})
+    with pytest.raises(EvaluationSuiteError, match="model"):
+        build_evaluation_suite(mixed)

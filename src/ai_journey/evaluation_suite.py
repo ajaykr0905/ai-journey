@@ -15,6 +15,13 @@ class EvaluationSuiteError(ValueError):
     """Raised when evaluation suite inputs are incomplete or inconsistent."""
 
 
+SUITE_LIMITATIONS = [
+    "The suite reports three bounded evaluations and is not a general capability score.",
+    "Scores are comparable only when model identity and each dataset contract match.",
+    "CPU execution does not establish GPU, distributed, or production performance.",
+]
+
+
 @dataclass(frozen=True)
 class EvaluationResult:
     """One normalized primary metric with its model and data identities."""
@@ -125,3 +132,94 @@ def result_from_lambada(evidence: dict) -> EvaluationResult:
         eligible=run["contamination"]["passed"],
         limitation=evidence["limitations"][0],
     )
+
+
+def _suite_digest(payload: dict) -> str:
+    return sha256(
+        json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+    ).hexdigest()
+
+
+def build_evaluation_suite(results) -> dict:
+    """Seal one model's held-out, HellaSwag and LAMBADA results together."""
+    results = tuple(results)
+    expected = {
+        "heldout_likelihood",
+        "hellaswag_validation",
+        "lambada_last_word",
+    }
+    if (
+        len(results) != 3
+        or any(not isinstance(result, EvaluationResult) for result in results)
+        or {result.name for result in results} != expected
+    ):
+        raise EvaluationSuiteError("suite requires exactly three named evaluations")
+    models = {result.model_sha256 for result in results}
+    if len(models) != 1:
+        raise EvaluationSuiteError("suite evaluations must share one model identity")
+    ordered = sorted(results, key=lambda result: result.name)
+    complete = all(result.eligible for result in ordered)
+    payload = {
+        "schema_version": 1,
+        "model_sha256": next(iter(models)),
+        "evaluations": [result.to_mapping() for result in ordered],
+        "claim_status": (
+            "complete_bounded_three_axis"
+            if complete
+            else "blocked_ineligible_evaluation"
+        ),
+        "limitations": SUITE_LIMITATIONS.copy(),
+    }
+    payload["evidence_sha256"] = _suite_digest(payload)
+    return verify_evaluation_suite(payload)
+
+
+def verify_evaluation_suite(payload: dict) -> dict:
+    """Verify suite integrity, completeness, model identity and claim status."""
+    fields = {
+        "schema_version",
+        "model_sha256",
+        "evaluations",
+        "claim_status",
+        "limitations",
+        "evidence_sha256",
+    }
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != fields
+        or payload["schema_version"] != 1
+        or payload["limitations"] != SUITE_LIMITATIONS
+    ):
+        raise EvaluationSuiteError("evaluation suite schema does not match")
+    unsigned = {
+        key: value for key, value in payload.items() if key != "evidence_sha256"
+    }
+    if _suite_digest(unsigned) != payload["evidence_sha256"]:
+        raise EvaluationSuiteError("evaluation suite digest does not match")
+    if not isinstance(payload["evaluations"], list):
+        raise EvaluationSuiteError("evaluation suite results must be a list")
+    try:
+        results = [EvaluationResult(**result) for result in payload["evaluations"]]
+    except (TypeError, EvaluationSuiteError) as error:
+        raise EvaluationSuiteError("evaluation suite results are invalid") from error
+    expected = {
+        "heldout_likelihood",
+        "hellaswag_validation",
+        "lambada_last_word",
+    }
+    if (
+        len(results) != 3
+        or {result.name for result in results} != expected
+        or [result.name for result in results] != sorted(expected)
+        or {result.model_sha256 for result in results} != {payload["model_sha256"]}
+    ):
+        raise EvaluationSuiteError("evaluation suite coverage does not match")
+    complete = all(result.eligible for result in results)
+    expected_status = (
+        "complete_bounded_three_axis" if complete else "blocked_ineligible_evaluation"
+    )
+    if payload["claim_status"] != expected_status:
+        raise EvaluationSuiteError("evaluation suite claim status is inconsistent")
+    return payload
