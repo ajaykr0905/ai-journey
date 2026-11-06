@@ -18,6 +18,7 @@ def load_evaluation_model(
     checkpoint: Path | None,
     *,
     checkpoint_format: str = "distributed",
+    include_source: bool = False,
 ):
     """Load one bounded model only after binding it to its training source."""
     spec = load_training_spec(spec_path)
@@ -30,14 +31,19 @@ def load_evaluation_model(
         raise ValueError("evaluation model exceeds the CPU parameter budget")
     if checkpoint is not None:
         if checkpoint_format == "local":
-            return load_training_model_checkpoint(
+            model = load_training_model_checkpoint(
                 checkpoint, spec=spec, source=source_bytes, max_parameters=1_000_000
             )
-        if checkpoint_format != "distributed":
-            raise ValueError("unsupported evaluation checkpoint format")
-        return load_serving_model(checkpoint, spec, source_bytes)
-    with torch.random.fork_rng(devices=[]):
-        torch.manual_seed(spec.training.seed)
-        return (
-            build_training_model(spec.model, max_parameters=1_000_000).double().eval()
-        )
+        else:
+            if checkpoint_format != "distributed":
+                raise ValueError("unsupported evaluation checkpoint format")
+            model = load_serving_model(checkpoint, spec, source_bytes)
+    else:
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(spec.training.seed)
+            model = (
+                build_training_model(spec.model, max_parameters=1_000_000)
+                .double()
+                .eval()
+            )
+    return (model, source_bytes) if include_source else model
