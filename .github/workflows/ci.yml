@@ -361,6 +361,13 @@ jobs:
           ruff check src/ai_journey/hellaswag*.py tests/test_hellaswag*.py
           ruff format --check src/ai_journey/hellaswag*.py tests/test_hellaswag*.py
           python -m pytest -q tests/test_hellaswag*.py
+      - name: Check three-axis evaluation contracts
+        run: |
+          sources=(src/ai_journey/evaluation_model.py src/ai_journey/evaluation_suite*.py src/ai_journey/lambada*.py)
+          tests=(tests/test_evaluation*.py tests/test_lambada*.py)
+          ruff check "${sources[@]}" "${tests[@]}"
+          ruff format --check "${sources[@]}" "${tests[@]}"
+          python -m pytest -q "${tests[@]}"
       - name: Reproduce the pinned HellaSwag validation slice
         env:
           OMP_NUM_THREADS: "1"
@@ -369,6 +376,16 @@ jobs:
           curl --fail --location --retry 2 --max-time 60 'https://datasets-server.huggingface.co/first-rows?dataset=Rowan%2Fhellaswag&config=default&split=validation' --output /tmp/hellaswag-first-rows.json
           ai-journey-hellaswag evaluate --dataset-response /tmp/hellaswag-first-rows.json --protocol config/hellaswag-validation.json --source data/day-19-demo-names.txt --spec config/ddp-lab.json --output /tmp/hellaswag-evidence.json
           ai-journey-hellaswag verify --report /tmp/hellaswag-evidence.json
+      - name: Reproduce LAMBADA and verify the three-axis suite
+        env:
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+        run: |
+          curl --fail --location --retry 2 --max-time 60 'https://datasets-server.huggingface.co/first-rows?dataset=EleutherAI%2Flambada_openai&config=default&split=test' --output /tmp/lambada-first-rows.json
+          ai-journey-lambada evaluate --dataset-response /tmp/lambada-first-rows.json --protocol config/lambada-test.json --source data/day-19-demo-names.txt --spec config/ddp-lab.json --output /tmp/lambada-evidence.json
+          ai-journey-lambada verify --report /tmp/lambada-evidence.json
+          ai-journey-evaluation-suite build --source data/day-19-demo-names.txt --spec config/ddp-lab.json --heldout-data data/day-21-indian-cities.txt --hellaswag-report /tmp/hellaswag-evidence.json --lambada-report /tmp/lambada-evidence.json --output /tmp/evaluation-suite.json
+          ai-journey-evaluation-suite verify --report /tmp/evaluation-suite.json
       - name: Check low-rank adapter source and numerical oracles
         run: |
           ruff check src/ai_journey/lora*.py tests/test_lora*.py

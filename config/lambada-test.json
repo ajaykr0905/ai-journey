@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "source": {
+    "repository": "EleutherAI/lambada_openai",
+    "revision": "900124bf3b8235c6daf21033af9948b3f07346c4",
+    "dataset_server_url": "https://datasets-server.huggingface.co/first-rows?dataset=EleutherAI%2Flambada_openai&config=default&split=test",
+    "sample_sha256": "b304b6afffcc2d23ba8b6a67d16df47c60f7511f8ea2ef60016d331b3a485e15",
+    "sample_bytes": 38909,
+    "test_rows": 5153,
+    "source_file_sha256": "4aa8d02cd17c719165fc8a7887fddd641f43fcafa4b1c806ca8abc31fabdb226",
+    "license": "MIT"
+  },
+  "start": 0,
+  "count": 100,
+  "bootstrap_samples": 2000,
+  "bootstrap_seed": 63,
+  "max_context_bytes": 4096,
+  "max_target_bytes": 64
+}
