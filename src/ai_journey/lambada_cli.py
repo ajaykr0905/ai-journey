@@ -10,7 +10,8 @@ from .hellaswag_io import (
     read_evaluation_bytes,
     validate_evaluation_output,
 )
-from .lambada import LambadaProtocol, run_evaluation, seal_evidence
+from .lambada import LambadaProtocol, compare_evaluations
+from .lambada import run_evaluation, seal_evidence
 from .lambada_evidence import read_evidence, write_evidence
 
 
@@ -29,8 +30,30 @@ def main(argv=None) -> int:
     evaluate.add_argument("--output", type=Path, required=True)
     verify = commands.add_parser("verify")
     verify.add_argument("--report", type=Path, required=True)
+    compare = commands.add_parser("compare")
+    compare.add_argument("--baseline", type=Path, required=True)
+    compare.add_argument("--candidate", type=Path, required=True)
     arguments = parser.parse_args(argv)
     try:
+        if arguments.command == "compare":
+            baseline = read_evidence(arguments.baseline)
+            candidate = read_evidence(arguments.candidate)
+            left, right = baseline["run"], candidate["run"]
+            if any(
+                left[field] != right[field]
+                for field in ("protocol_sha256", "sample_sha256", "examples_sha256")
+            ):
+                raise ValueError("comparison evidence does not cover identical rows")
+            comparison = {
+                "baseline_evidence_sha256": baseline["evidence_sha256"],
+                "candidate_evidence_sha256": candidate["evidence_sha256"],
+                "baseline_model_sha256": left["model_sha256"],
+                "candidate_model_sha256": right["model_sha256"],
+                "protocol_sha256": left["protocol_sha256"],
+                "metrics": compare_evaluations(left["evaluation"], right["evaluation"]),
+            }
+            print(json.dumps(comparison, sort_keys=True, allow_nan=False))
+            return 0
         if arguments.command == "verify":
             evidence = read_evidence(arguments.report)
         else:

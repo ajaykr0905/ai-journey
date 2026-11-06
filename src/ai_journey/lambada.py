@@ -754,3 +754,58 @@ def verify_evidence(payload: dict) -> dict:
     if evaluation != expected_evaluation:
         raise LambadaError("LAMBADA metrics do not match scored rows")
     return payload
+
+
+def compare_evaluations(baseline: dict, candidate: dict) -> dict:
+    """Compare paired last-word outcomes on identical benchmark rows."""
+    if not isinstance(baseline, dict) or not isinstance(candidate, dict):
+        raise TypeError("evaluations must be dictionaries")
+    before = baseline.get("records")
+    after = candidate.get("records")
+    if not isinstance(before, (list, tuple)) or not isinstance(after, (list, tuple)):
+        raise LambadaError("paired evaluations require scored rows")
+    before_by_row = {row.get("row_index"): row for row in before}
+    after_by_row = {row.get("row_index"): row for row in after}
+    if len(before_by_row) != len(before) or set(before_by_row) != set(after_by_row):
+        raise LambadaError("paired evaluations must cover identical unique rows")
+    pairs = []
+    for row_index in sorted(before_by_row):
+        left, right = before_by_row[row_index], after_by_row[row_index]
+        if any(
+            left.get(field) != right.get(field)
+            for field in ("example_sha256", "prompt_sha256", "target_sha256")
+        ):
+            raise LambadaError("paired evaluation identities do not match")
+        pairs.append(
+            (
+                left["generation"]["exact_match"],
+                right["generation"]["exact_match"],
+            )
+        )
+    baseline_only = sum(left and not right for left, right in pairs)
+    candidate_only = sum(not left and right for left, right in pairs)
+    discordant = baseline_only + candidate_only
+    if discordant == 0:
+        p_value = 1.0
+    else:
+        tail = (
+            sum(
+                math.comb(discordant, index)
+                for index in range(min(baseline_only, candidate_only) + 1)
+            )
+            / 2**discordant
+        )
+        p_value = min(1.0, 2 * tail)
+    return {
+        "examples": len(pairs),
+        "both_exact": sum(left and right for left, right in pairs),
+        "baseline_only": baseline_only,
+        "candidate_only": candidate_only,
+        "both_wrong": sum(not left and not right for left, right in pairs),
+        "exact_match_accuracy_delta": candidate["exact_match_accuracy"]
+        - baseline["exact_match_accuracy"],
+        "mean_nll_delta": candidate["mean_nll"] - baseline["mean_nll"],
+        "matching_prefix_ratio_delta": candidate["matching_prefix_ratio"]
+        - baseline["matching_prefix_ratio"],
+        "mcnemar_exact_p_value": p_value,
+    }

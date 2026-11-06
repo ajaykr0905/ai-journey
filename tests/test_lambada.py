@@ -8,6 +8,7 @@ import torch
 from ai_journey.lambada import LambadaError, LambadaExample, LambadaProtocol
 from ai_journey.lambada import LambadaSource, examples_from_dataset_server
 from ai_journey.lambada import audit_contamination, bootstrap_exact_match
+from ai_journey.lambada import compare_evaluations
 from ai_journey.lambada import encode_example, generate_target, protocol_mapping
 from ai_journey.lambada import examples_digest, run_evaluation, score_example
 from ai_journey.lambada import seal_evidence, score_target, verify_evidence
@@ -443,3 +444,36 @@ def test_evidence_rejects_digest_and_semantic_tampering():
     )
     with pytest.raises(LambadaError, match="metrics"):
         verify_evidence(changed)
+
+
+def test_paired_comparison_reports_exact_match_and_likelihood_deltas():
+    baseline = summarize_scores(
+        [
+            scored_result(1, loss_sum=2.0, target_bytes=2, exact=True, prefix=2),
+            scored_result(2, loss_sum=2.0, target_bytes=2, exact=False, prefix=0),
+        ],
+        bootstrap_samples=100,
+    )
+    candidate_rows = copy.deepcopy(baseline["records"])
+    candidate_rows[0]["generation"]["exact_match"] = False
+    candidate_rows[0]["generation"]["matching_prefix_bytes"] = 1
+    candidate_rows[1]["generation"]["exact_match"] = True
+    candidate_rows[1]["generation"]["matching_prefix_bytes"] = 2
+    candidate = summarize_scores(candidate_rows, bootstrap_samples=100)
+    comparison = compare_evaluations(baseline, candidate)
+    assert comparison["baseline_only"] == 1
+    assert comparison["candidate_only"] == 1
+    assert comparison["exact_match_accuracy_delta"] == 0
+    assert comparison["matching_prefix_ratio_delta"] == pytest.approx(0.25)
+    assert comparison["mcnemar_exact_p_value"] == 1
+
+
+def test_paired_comparison_rejects_changed_example_identities():
+    baseline = summarize_scores(
+        [scored_result(1, loss_sum=1.0, target_bytes=1, exact=True, prefix=1)],
+        bootstrap_samples=100,
+    )
+    candidate = copy.deepcopy(baseline)
+    candidate["records"][0]["target_sha256"] = "f" * 64
+    with pytest.raises(LambadaError, match="identities"):
+        compare_evaluations(baseline, candidate)

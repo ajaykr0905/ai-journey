@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from ai_journey.lambada_cli import main
-from ai_journey.lambada_evidence import read_evidence
+from ai_journey.lambada_evidence import read_evidence, write_evidence
+from test_lambada import evidence_fixture
 from test_lambada import protocol_payload, server_payload
 
 
@@ -47,3 +48,26 @@ def test_cli_rejects_missing_reports(tmp_path):
     with pytest.raises(SystemExit) as result:
         main(["verify", "--report", str(tmp_path / "missing.json")])
     assert result.value.code == 2
+
+
+def test_cli_compares_verified_reports_on_identical_rows(tmp_path, capsys):
+    evidence = evidence_fixture()
+    baseline = tmp_path / "baseline.json"
+    candidate = tmp_path / "candidate.json"
+    write_evidence(baseline, evidence)
+    write_evidence(candidate, evidence)
+    assert (
+        main(
+            [
+                "compare",
+                "--baseline",
+                str(baseline),
+                "--candidate",
+                str(candidate),
+            ]
+        )
+        == 0
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert result["metrics"]["exact_match_accuracy_delta"] == 0
+    assert result["metrics"]["mcnemar_exact_p_value"] == 1
