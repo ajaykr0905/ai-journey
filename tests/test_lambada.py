@@ -6,7 +6,7 @@ import pytest
 
 from ai_journey.lambada import LambadaError, LambadaExample, LambadaProtocol
 from ai_journey.lambada import LambadaSource, examples_from_dataset_server
-from ai_journey.lambada import protocol_mapping, select_examples
+from ai_journey.lambada import encode_example, protocol_mapping, select_examples
 
 
 def source_payload(sample=b"bounded public response"):
@@ -192,3 +192,29 @@ def test_selection_rejects_missing_or_invalid_rows():
         select_examples(examples, start=6, count=2)
     with pytest.raises(LambadaError, match="validated"):
         select_examples([object()], start=7, count=1)
+
+
+def test_example_encoding_preserves_context_separator_and_utf8_target():
+    example = LambadaExample(4, "A café named its newest drink brûlée")
+    item = encode_example(example)
+    assert item.prompt == "A café named its newest drink ".encode()
+    assert item.target == "brûlée".encode()
+    assert item.example_sha256 == example.digest
+
+
+@pytest.mark.parametrize(
+    "text", ["singleword", "trailing whitespace ", "line without target\n"]
+)
+def test_example_encoding_rejects_ambiguous_last_word(text):
+    with pytest.raises(LambadaError, match="final word"):
+        encode_example(LambadaExample(0, text))
+
+
+def test_example_encoding_enforces_context_and_target_budgets():
+    example = LambadaExample(0, "context finalword")
+    with pytest.raises(LambadaError, match="budget"):
+        encode_example(example, max_context_bytes=2)
+    with pytest.raises(LambadaError, match="budget"):
+        encode_example(example, max_target_bytes=4)
+    with pytest.raises(LambadaError, match="budget"):
+        encode_example(example, max_target_bytes=True)

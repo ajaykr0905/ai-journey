@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import re
 
 
 class LambadaError(ValueError):
@@ -250,3 +251,42 @@ def select_examples(
     if [item.row_index for item in selected] != list(range(start, start + count)):
         raise LambadaError("dataset response does not cover the requested slice")
     return selected
+
+
+@dataclass(frozen=True)
+class LambadaItem:
+    """A source example split into context bytes and one final-word target."""
+
+    row_index: int
+    example_sha256: str
+    prompt: bytes
+    target: bytes
+
+
+def encode_example(
+    example: LambadaExample,
+    *,
+    max_context_bytes: int = 4096,
+    max_target_bytes: int = 64,
+) -> LambadaItem:
+    """Split the final non-whitespace word without normalizing source text."""
+    if not isinstance(example, LambadaExample):
+        raise TypeError("example must be LambadaExample")
+    for name, value, maximum in (
+        ("max_context_bytes", max_context_bytes, 32 * 1024),
+        ("max_target_bytes", max_target_bytes, 256),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not 1 <= value <= maximum
+        ):
+            raise LambadaError(f"{name} is outside the text budget")
+    match = re.fullmatch(r"(?s)(.+\s)(\S+)", example.text)
+    if match is None:
+        raise LambadaError("example must contain context and one final word")
+    prompt = match.group(1).encode("utf-8")
+    target = match.group(2).encode("utf-8")
+    if len(prompt) > max_context_bytes or len(target) > max_target_bytes:
+        raise LambadaError("encoded example exceeds the text budget")
+    return LambadaItem(example.row_index, example.digest, prompt, target)
