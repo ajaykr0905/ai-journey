@@ -8,7 +8,7 @@ import torch
 from ai_journey.lambada import LambadaError, LambadaExample, LambadaProtocol
 from ai_journey.lambada import LambadaSource, examples_from_dataset_server
 from ai_journey.lambada import encode_example, generate_target, protocol_mapping
-from ai_journey.lambada import score_target
+from ai_journey.lambada import score_example, score_target
 from ai_journey.lambada import select_examples
 from ai_journey.gpt2_config import GPT2Config
 from ai_journey.gpt2_model import GPT2LanguageModel
@@ -266,3 +266,16 @@ def test_greedy_generation_rejects_non_items():
     model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double()
     with pytest.raises(TypeError, match="LambadaItem"):
         generate_target(model, object())
+
+
+def test_scored_example_contains_identities_and_metrics_without_raw_text():
+    model = GPT2LanguageModel(GPT2Config(256, 8, 8, 2, 1)).double()
+    example = LambadaExample(11, "A public-safe context ends target")
+    result = score_example(model, example)
+    assert result["row_index"] == 11
+    assert result["example_sha256"] == example.digest
+    assert result["prompt_sha256"] == sha256(b"A public-safe context ends ").hexdigest()
+    assert result["target_sha256"] == sha256(b"target").hexdigest()
+    assert result["likelihood"]["target_bytes"] == 6
+    assert result["generation"]["generated_bytes"] == 6
+    assert "text" not in str(result)

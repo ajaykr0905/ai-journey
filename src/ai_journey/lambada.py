@@ -379,3 +379,26 @@ def generate_target(model, item: LambadaItem) -> dict:
         "exact_match": prediction == item.target,
         "matching_prefix_bytes": prefix,
     }
+
+
+def score_example(
+    model,
+    example: LambadaExample,
+    *,
+    max_context_bytes: int = 4096,
+    max_target_bytes: int = 64,
+) -> dict:
+    """Score one row while keeping benchmark narrative and target text private."""
+    item = encode_example(
+        example,
+        max_context_bytes=max_context_bytes,
+        max_target_bytes=max_target_bytes,
+    )
+    return {
+        "row_index": item.row_index,
+        "example_sha256": item.example_sha256,
+        "prompt_sha256": sha256(item.prompt).hexdigest(),
+        "target_sha256": sha256(item.target).hexdigest(),
+        "likelihood": score_target(model, item),
+        "generation": generate_target(model, item),
+    }
