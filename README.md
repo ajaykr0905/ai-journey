@@ -1,7 +1,7 @@
 # AI Journey: Reproducible Transformer Training and Serving Lab
 
 This repository is a public-safe, executable record of an added setup day plus the
-selected verified code through Day 62 of a 90-day AI engineering learning plan. It combines
+selected verified code through Day 63 of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -51,6 +51,10 @@ then grow these exercises into production-quality training and inference project
 - Checksum-pinned HellaSwag ingestion, completion-only likelihood scoring,
   calibration, uncertainty, exact sharding, and sealed paired comparisons in the
   [bounded evaluation runbook](docs/hellaswag-evaluation.md)
+- A checksum-pinned LAMBADA last-word evaluator with contamination checks,
+  content-private score records, deterministic uncertainty, paired comparisons,
+  and a model-identity-gated three-axis suite in the
+  [evaluation harness guide](docs/evaluation-harness.md)
 - Grouped preference cross-validation with response-only DPO-style scoring,
   matched full/LoRA arms, negative findings, and exact replay in the
   [preference optimization guide](docs/preference-optimization.md)
@@ -490,6 +494,7 @@ do not reinterpret the pinned assumptions as observations of local hardware.
 | 57 | 2026-10-31 | Exact ZeRO stage planning and executed CPU/Gloo collective conformance |
 | 60 | 2026-11-03 | Analytical Chinchilla target, IsoFLOP allocation, corpus sufficiency, and sealed replay |
 | 62 | 2026-11-05 | Bounded scaling sweep protocol, held-out extrapolation gates, and sealed reference replay |
+| 63 | 2026-11-06 | Held-out likelihood, HellaSwag, and contamination-audited LAMBADA evaluation suite |
 
 ## License
 
