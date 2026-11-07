@@ -8,6 +8,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from hashlib import sha256
 from typing import Any
 
 from .project1_contract import Project1RunError
@@ -89,3 +90,58 @@ class Project1Event:
             "completed_step": self.completed_step,
             "payload": dict(self.payload),
         }
+
+
+def chain_event(
+    event: Project1Event, previous_sha256: str | None = None
+) -> dict[str, Any]:
+    """Bind an event to every previously accepted journal record."""
+
+    if not isinstance(event, Project1Event):
+        raise TypeError("event must be Project1Event")
+    if previous_sha256 is not None and (
+        not isinstance(previous_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", previous_sha256) is None
+    ):
+        raise Project1RunError("previous_sha256 must be a SHA-256 digest")
+    record = {"previous_sha256": previous_sha256, "event": event.to_mapping()}
+    record["event_sha256"] = sha256(
+        json.dumps(record, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return record
+
+
+def verify_event_chain(records: object) -> tuple[Project1Event, ...]:
+    """Verify sequence continuity, record digests, and hash-chain ancestry."""
+
+    if not isinstance(records, list) or not records:
+        raise Project1RunError("event chain must be a non-empty list")
+    events: list[Project1Event] = []
+    previous = None
+    for index, record in enumerate(records):
+        if not isinstance(record, Mapping) or set(record) != {
+            "previous_sha256",
+            "event",
+            "event_sha256",
+        }:
+            raise Project1RunError("event record fields do not match schema")
+        if record["previous_sha256"] != previous:
+            raise Project1RunError("event chain ancestry does not match")
+        unsigned = {
+            "previous_sha256": record["previous_sha256"],
+            "event": record["event"],
+        }
+        expected = sha256(
+            json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        if record["event_sha256"] != expected:
+            raise Project1RunError("event record digest does not match")
+        try:
+            event = Project1Event(**record["event"])
+        except (TypeError, ValueError) as exc:
+            raise Project1RunError("event record is invalid") from exc
+        if event.sequence != index:
+            raise Project1RunError("event sequence is not contiguous")
+        events.append(event)
+        previous = record["event_sha256"]
+    return tuple(events)
