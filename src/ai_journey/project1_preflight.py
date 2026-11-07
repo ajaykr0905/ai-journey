@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
 from hashlib import sha256
+from typing import Any
 
 from .gpt2_training import GPT2TrainingSpec
 from .project1_contract import Project1RunContract, Project1RunError
@@ -68,3 +71,69 @@ def admit_training_run(
             parameter_bytes + gradient_bytes + adamw_state_bytes
         ),
     )
+
+
+def seal_preflight(
+    contract: Project1RunContract, preflight: Project1Preflight
+) -> dict[str, Any]:
+    """Seal analytical admission evidence with an explicit claim boundary."""
+
+    if not isinstance(contract, Project1RunContract):
+        raise TypeError("contract must be Project1RunContract")
+    if not isinstance(preflight, Project1Preflight):
+        raise TypeError("preflight must be Project1Preflight")
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "contract_sha256": contract.fingerprint(),
+        "admission": asdict(preflight),
+        "evidence_boundary": (
+            "Analytical CPU FP32 parameter, gradient, and AdamW-state bytes only; "
+            "excludes activations, allocator overhead, runtime, GPU, and throughput."
+        ),
+    }
+    payload["preflight_sha256"] = sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return payload
+
+
+def verify_preflight(
+    payload: Mapping[str, Any], contract: Project1RunContract
+) -> Project1Preflight:
+    """Recompute the preflight seal and exact byte-accounting relationships."""
+
+    if not isinstance(payload, Mapping) or set(payload) != {
+        "schema_version",
+        "contract_sha256",
+        "admission",
+        "evidence_boundary",
+        "preflight_sha256",
+    }:
+        raise Project1RunError("preflight fields do not match schema")
+    if (
+        payload["schema_version"] != 1
+        or payload["contract_sha256"] != contract.fingerprint()
+    ):
+        raise Project1RunError("preflight does not match its run contract")
+    unsigned = {
+        key: value for key, value in payload.items() if key != "preflight_sha256"
+    }
+    expected = sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if payload["preflight_sha256"] != expected:
+        raise Project1RunError("preflight digest does not match")
+    try:
+        preflight = Project1Preflight(**payload["admission"])
+    except (TypeError, ValueError) as exc:
+        raise Project1RunError("preflight admission is invalid") from exc
+    if (
+        preflight.parameter_bytes != preflight.parameter_count * 4
+        or preflight.gradient_bytes != preflight.parameter_count * 4
+        or preflight.adamw_state_bytes != preflight.parameter_count * 8
+        or preflight.persistent_training_bytes != preflight.parameter_count * 16
+        or preflight.total_target_tokens
+        != preflight.optimizer_steps * preflight.tokens_per_step
+    ):
+        raise Project1RunError("preflight accounting relationships do not match")
+    return preflight

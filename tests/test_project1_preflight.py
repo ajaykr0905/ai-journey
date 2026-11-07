@@ -10,7 +10,11 @@ from ai_journey.gpt2_training import (
     GPT2TrainingSpec,
 )
 from ai_journey.project1_contract import Project1RunContract
-from ai_journey.project1_preflight import admit_training_run
+from ai_journey.project1_preflight import (
+    admit_training_run,
+    seal_preflight,
+    verify_preflight,
+)
 
 SOURCE = b"public project one training text\n" * 4
 
@@ -89,3 +93,19 @@ def test_preflight_admits_exact_source_spec_and_resource_counts():
 def test_preflight_rejects_identity_and_budget_mismatches(changed, source, message):
     with pytest.raises(ValueError, match=message):
         admit_training_run(replace(contract(), **changed), spec(), source)
+
+
+def test_preflight_seal_verifies_exact_accounting_and_boundary():
+    admitted = admit_training_run(contract(), spec(), SOURCE)
+    sealed = seal_preflight(contract(), admitted)
+
+    assert verify_preflight(sealed, contract()) == admitted
+    assert "excludes activations" in sealed["evidence_boundary"]
+
+
+def test_preflight_verifier_rejects_resealed_but_false_accounting():
+    admitted = admit_training_run(contract(), spec(), SOURCE)
+    changed = seal_preflight(contract(), replace(admitted, parameter_bytes=1))
+
+    with pytest.raises(ValueError, match="accounting relationships"):
+        verify_preflight(changed, contract())
