@@ -41,4 +41,3 @@ automation run is not evidence that Ajay watched the RAG lesson, launched a
 personal training job, or wrote a reflection. A larger public-data run needs a
 new immutable spec and contract plus its own compute approval and measured
 hardware evidence.
-

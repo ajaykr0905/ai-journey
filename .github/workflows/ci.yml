@@ -993,3 +993,53 @@ jobs:
           export PATH="$RUNNER_TEMP/serving-evidence-installed/bin:$PATH"
           python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/serving-evidence-installed/")'
           ai-journey-serving-evidence --help
+  project1-run-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install pinned CPU runtime and verification tools
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2" "matplotlib>=3.7,<4"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check Project 1 run operator contracts
+        run: |
+          ruff check src/ai_journey/project1_*.py tests/test_project1_*.py
+          ruff format --check src/ai_journey/project1_*.py tests/test_project1_*.py
+          python -m compileall -q src/ai_journey/project1_*.py tests/test_project1_*.py
+          python -m pytest -q tests/test_project1_*.py
+      - name: Build and install isolated Project 1 operator wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/project1-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/project1-installed" "$RUNNER_TEMP"/project1-dist/*.whl
+      - name: Execute and independently verify installed Project 1 run
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/project1-installed
+        run: |
+          export PATH="$RUNNER_TEMP/project1-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/project1-installed/")'
+          ai-journey-project1 init --source "$GITHUB_WORKSPACE/data/day-19-demo-names.txt" --spec "$GITHUB_WORKSPACE/config/gpt2-training.json" --contract "$GITHUB_WORKSPACE/config/day-64-project1-run.json" --run-dir "$RUNNER_TEMP/project1-run"
+          ai-journey-project1 run --source "$GITHUB_WORKSPACE/data/day-19-demo-names.txt" --spec "$GITHUB_WORKSPACE/config/gpt2-training.json" --run-dir "$RUNNER_TEMP/project1-run"
+          ai-journey-project1 status --run-dir "$RUNNER_TEMP/project1-run"
+          ai-journey-project1 verify --run-dir "$RUNNER_TEMP/project1-run"
+      - name: Retain Project 1 run evidence and installed package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: project1-run-evidence
+          path: |
+            ${{ runner.temp }}/project1-run/
+            ${{ runner.temp }}/project1-dist/
+          if-no-files-found: error
