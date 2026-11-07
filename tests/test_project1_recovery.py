@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 
 from ai_journey.project1_journal import Project1Event
-from ai_journey.project1_recovery import heartbeat_status
+from ai_journey.project1_recovery import failure_event, heartbeat_status
 
 
 def events():
@@ -61,3 +61,35 @@ def test_heartbeat_status_rejects_terminal_invalid_and_backward_observations():
             observed_at_utc="2026-11-07T07:30:59+00:00",
             timeout_seconds=60,
         )
+
+
+def test_failure_event_records_bounded_identity_without_exception_text():
+    event = failure_event(
+        sequence=2,
+        attempt_id=events()[0].attempt_id,
+        recorded_at_utc="2026-11-07T07:32:00+00:00",
+        completed_step=0,
+        error=RuntimeError("private path /tmp/example"),
+        retryable=True,
+    )
+
+    assert event.kind == "failed"
+    assert event.payload["error_type"] == "RuntimeError"
+    assert event.payload["message_length"] == len("private path /tmp/example")
+    assert event.payload["retryable"] is True
+    assert "private path" not in str(event.payload)
+
+
+def test_failure_event_requires_explicit_exception_and_retry_decision():
+    arguments = {
+        "sequence": 2,
+        "attempt_id": events()[0].attempt_id,
+        "recorded_at_utc": "2026-11-07T07:32:00+00:00",
+        "completed_step": 0,
+        "error": RuntimeError("boom"),
+        "retryable": True,
+    }
+    with pytest.raises(TypeError, match="exception"):
+        failure_event(**{**arguments, "error": "boom"})
+    with pytest.raises(TypeError, match="boolean"):
+        failure_event(**{**arguments, "retryable": 1})

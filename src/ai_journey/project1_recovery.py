@@ -6,6 +6,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from hashlib import sha256
 
 from .project1_contract import Project1RunError
 from .project1_journal import Project1Event
@@ -53,4 +54,35 @@ def heartbeat_status(
         fresh=age <= timeout_seconds,
         age_seconds=age,
         timeout_seconds=float(timeout_seconds),
+    )
+
+
+def failure_event(
+    *,
+    sequence: int,
+    attempt_id: str,
+    recorded_at_utc: str,
+    completed_step: int,
+    error: BaseException,
+    retryable: bool,
+) -> Project1Event:
+    """Record failure identity without copying exception text into public evidence."""
+
+    if not isinstance(error, BaseException):
+        raise TypeError("error must be an exception")
+    if not isinstance(retryable, bool):
+        raise TypeError("retryable must be a boolean")
+    message = str(error)
+    return Project1Event(
+        sequence=sequence,
+        attempt_id=attempt_id,
+        kind="failed",
+        recorded_at_utc=recorded_at_utc,
+        completed_step=completed_step,
+        payload={
+            "error_type": type(error).__name__,
+            "message_sha256": sha256(message.encode()).hexdigest(),
+            "message_length": len(message),
+            "retryable": retryable,
+        },
     )
