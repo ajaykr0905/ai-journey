@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .project1_contract import Project1RunError
-from .project1_journal import Project1Event, verify_event_chain
+from .project1_journal import Project1Event, chain_event, verify_event_chain
 
 
 def write_event_chain(path: Path, records: list[Mapping[str, Any]]) -> None:
@@ -63,3 +63,23 @@ def load_event_chain(
     except json.JSONDecodeError as exc:
         raise Project1RunError("journal is not valid JSON") from exc
     return verify_event_chain(records)
+
+
+def append_event(path: Path, event: Project1Event) -> tuple[Project1Event, ...]:
+    """Append one event while preserving contiguous sequence and hash ancestry."""
+
+    if not isinstance(event, Project1Event):
+        raise TypeError("event must be Project1Event")
+    if path.exists():
+        existing = load_event_chain(path)
+        records = json.loads(path.read_bytes())
+    else:
+        existing, records = (), []
+    if event.sequence != len(existing):
+        raise Project1RunError("appended event sequence is not contiguous")
+    if existing and event.attempt_id != existing[-1].attempt_id:
+        raise Project1RunError("journal cannot mix attempt identities")
+    previous = records[-1]["event_sha256"] if records else None
+    records.append(chain_event(event, previous))
+    write_event_chain(path, records)
+    return (*existing, event)

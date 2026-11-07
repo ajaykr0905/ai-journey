@@ -3,7 +3,11 @@ import json
 import pytest
 
 from ai_journey.project1_journal import Project1Event, chain_event
-from ai_journey.project1_journal_io import load_event_chain, write_event_chain
+from ai_journey.project1_journal_io import (
+    append_event,
+    load_event_chain,
+    write_event_chain,
+)
 
 
 def event() -> Project1Event:
@@ -51,3 +55,47 @@ def test_journal_writer_preserves_existing_file_after_rejected_chain(tmp_path):
         write_event_chain(path, [chain_event(event()), chain_event(event())])
 
     assert path.read_bytes() == before
+
+
+def test_append_event_preserves_sequence_identity_and_ancestry(tmp_path):
+    path = tmp_path / "journal.json"
+    first = event()
+    second = Project1Event(
+        sequence=1,
+        attempt_id=first.attempt_id,
+        kind="heartbeat",
+        recorded_at_utc="2026-11-07T07:31:00+00:00",
+        completed_step=0,
+        payload={},
+    )
+
+    assert append_event(path, first) == (first,)
+    assert append_event(path, second) == (first, second)
+    assert load_event_chain(path) == (first, second)
+
+
+def test_append_event_rejects_sequence_gaps_and_attempt_mixing(tmp_path):
+    path = tmp_path / "journal.json"
+    append_event(path, event())
+    gap = Project1Event(
+        sequence=2,
+        attempt_id=event().attempt_id,
+        kind="heartbeat",
+        recorded_at_utc="2026-11-07T07:31:00+00:00",
+        completed_step=0,
+        payload={},
+    )
+    with pytest.raises(ValueError, match="sequence"):
+        append_event(path, gap)
+    with pytest.raises(ValueError, match="attempt identities"):
+        append_event(
+            path,
+            Project1Event(
+                sequence=1,
+                attempt_id="attempt-2-fedcba9876543210",
+                kind="started",
+                recorded_at_utc="2026-11-07T07:31:00+00:00",
+                completed_step=0,
+                payload={},
+            ),
+        )
