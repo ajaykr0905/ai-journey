@@ -19,6 +19,10 @@ class Project1Preflight:
     optimizer_steps: int
     tokens_per_step: int
     total_target_tokens: int
+    parameter_bytes: int
+    gradient_bytes: int
+    adamw_state_bytes: int
+    persistent_training_bytes: int
 
 
 def admit_training_run(
@@ -48,10 +52,19 @@ def admit_training_run(
     if parameters > contract.max_parameters:
         raise Project1RunError("model exceeds the admitted parameter count")
     training = spec.training
+    parameter_bytes = parameters * 4
+    gradient_bytes = parameters * 4
+    adamw_state_bytes = parameters * 8
     return Project1Preflight(
         parameter_count=parameters,
         source_bytes=len(source),
         optimizer_steps=training.optimizer_steps,
         tokens_per_step=training.tokens_per_step,
         total_target_tokens=training.total_target_tokens,
+        parameter_bytes=parameter_bytes,
+        gradient_bytes=gradient_bytes,
+        adamw_state_bytes=adamw_state_bytes,
+        persistent_training_bytes=(
+            parameter_bytes + gradient_bytes + adamw_state_bytes
+        ),
     )

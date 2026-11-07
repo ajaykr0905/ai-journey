@@ -70,6 +70,10 @@ def test_preflight_admits_exact_source_spec_and_resource_counts():
     assert result.tokens_per_step == 32
     assert result.total_target_tokens == 96
     assert 0 < result.parameter_count < contract().max_parameters
+    assert result.parameter_bytes == result.parameter_count * 4
+    assert result.gradient_bytes == result.parameter_count * 4
+    assert result.adamw_state_bytes == result.parameter_count * 8
+    assert result.persistent_training_bytes == result.parameter_count * 16
 
 
 @pytest.mark.parametrize(
