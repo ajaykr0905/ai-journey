@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
-from deployment_readiness_check import check_readiness
+from deployment_readiness_check import check_readiness  # noqa: E402
 
 
 def test_readiness_requires_complete_project1_operator():
