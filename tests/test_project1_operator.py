@@ -11,7 +11,12 @@ from ai_journey.gpt2_training import (
 )
 from ai_journey.project1_contract import Project1RunContract
 from ai_journey.project1_journal_io import load_event_chain
-from ai_journey.project1_operator import execute_fresh_run, initialize_run
+from ai_journey.project1_operator import (
+    execute_fresh_run,
+    finalize_run_bundle,
+    initialize_run,
+    verify_run_bundle,
+)
 from ai_journey.project1_state import reduce_run_state
 
 SOURCE = b"public project one training text\n" * 4
@@ -167,3 +172,49 @@ def test_execute_fresh_run_refuses_to_overwrite_completed_attempt(tmp_path):
             run_dir=run_dir,
             recorded_at_utc="2026-11-07T07:32:00+00:00",
         )
+
+
+def test_finalize_and_verify_run_bundle_from_stored_bytes(tmp_path):
+    source, spec, contract = prepare_inputs(tmp_path)
+    run_dir = tmp_path / "run"
+    initialize_run(
+        source_path=source,
+        spec_path=spec,
+        contract_path=contract,
+        run_dir=run_dir,
+        recorded_at_utc="2026-11-07T07:30:00+00:00",
+    )
+    execute_fresh_run(
+        source_path=source,
+        spec_path=spec,
+        run_dir=run_dir,
+        recorded_at_utc="2026-11-07T07:31:00+00:00",
+    )
+
+    bundle = finalize_run_bundle(run_dir)
+
+    assert verify_run_bundle(run_dir) == bundle
+    assert bundle["artifacts"]["checkpoint.pt"]["bytes"] > 0
+
+
+def test_bundle_verifier_detects_changed_training_report(tmp_path):
+    source, spec, contract = prepare_inputs(tmp_path)
+    run_dir = tmp_path / "run"
+    initialize_run(
+        source_path=source,
+        spec_path=spec,
+        contract_path=contract,
+        run_dir=run_dir,
+        recorded_at_utc="2026-11-07T07:30:00+00:00",
+    )
+    execute_fresh_run(
+        source_path=source,
+        spec_path=spec,
+        run_dir=run_dir,
+        recorded_at_utc="2026-11-07T07:31:00+00:00",
+    )
+    finalize_run_bundle(run_dir)
+    (run_dir / "training-report.json").write_text("{}")
+
+    with pytest.raises(ValueError, match="manifest does not match"):
+        verify_run_bundle(run_dir)

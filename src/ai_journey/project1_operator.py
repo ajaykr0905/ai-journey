@@ -12,6 +12,13 @@ from typing import Any
 
 from .gpt2_training import GPT2StepMetric, load_training_spec
 from .gpt2_training_cli import load_source_bytes, run_and_publish
+from .gpt2_training_evidence_io import load_training_evidence
+from .project1_bundle import (
+    build_artifact_manifest,
+    seal_bundle_index,
+    verify_artifact_manifest,
+    verify_bundle_index,
+)
 from .project1_contract import (
     Project1RunError,
     contract_from_mapping,
@@ -171,3 +178,80 @@ def execute_fresh_run(
         ),
     )
     return report
+
+
+def _atomic_write_json(path: Path, payload: Any) -> None:
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            )
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+
+
+def finalize_run_bundle(run_dir: Path) -> dict[str, Any]:
+    """Seal a completed attempt's contract, journal, checkpoint, and report."""
+
+    contract = _load_contract(run_dir / "contract.json")
+    preflight = json.loads((run_dir / "preflight.json").read_bytes())
+    verify_preflight(preflight, contract)
+    state = reduce_run_state(load_event_chain(run_dir / "journal.json"))
+    if state.status != "completed":
+        raise Project1RunError("only a completed run can be finalized")
+    load_training_evidence(run_dir / "training-report.json")
+    artifacts = build_artifact_manifest(
+        run_dir,
+        [
+            "checkpoint.pt",
+            "contract.json",
+            "journal.json",
+            "preflight.json",
+            "training-report.json",
+        ],
+    )
+    index = seal_bundle_index(
+        run_id=run_id(contract),
+        contract_sha256=contract.fingerprint(),
+        preflight_sha256=preflight["preflight_sha256"],
+        journal_sha256=artifacts["journal.json"]["sha256"],
+        artifacts=artifacts,
+    )
+    _atomic_write_json(run_dir / "bundle.json", index)
+    return index
+
+
+def verify_run_bundle(run_dir: Path) -> dict[str, Any]:
+    """Independently verify a finalized Project 1 run from stored bytes."""
+
+    if not isinstance(run_dir, Path) or run_dir.is_symlink() or not run_dir.is_dir():
+        raise Project1RunError("run_dir must be a real directory")
+    bundle_path = run_dir / "bundle.json"
+    if bundle_path.is_symlink() or not bundle_path.is_file():
+        raise Project1RunError("bundle index must be a regular non-symlink file")
+    try:
+        index = verify_bundle_index(json.loads(bundle_path.read_bytes()))
+    except json.JSONDecodeError as exc:
+        raise Project1RunError("bundle index is not valid JSON") from exc
+    verify_artifact_manifest(run_dir, index["artifacts"])
+    contract = _load_contract(run_dir / "contract.json")
+    if (
+        index["run_id"] != run_id(contract)
+        or index["contract_sha256"] != contract.fingerprint()
+    ):
+        raise Project1RunError("bundle identity does not match its contract")
+    preflight = json.loads((run_dir / "preflight.json").read_bytes())
+    verify_preflight(preflight, contract)
+    if index["preflight_sha256"] != preflight["preflight_sha256"]:
+        raise Project1RunError("bundle preflight identity does not match")
+    state = reduce_run_state(load_event_chain(run_dir / "journal.json"))
+    if state.status != "completed":
+        raise Project1RunError("bundle journal is not complete")
+    load_training_evidence(run_dir / "training-report.json")
+    return index
