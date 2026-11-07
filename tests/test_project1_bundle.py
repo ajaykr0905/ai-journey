@@ -1,10 +1,13 @@
 import os
+from copy import deepcopy
 
 import pytest
 
 from ai_journey.project1_bundle import (
     build_artifact_manifest,
+    seal_bundle_index,
     verify_artifact_manifest,
+    verify_bundle_index,
 )
 
 
@@ -47,3 +50,32 @@ def test_artifact_verification_detects_changed_bytes(tmp_path):
 
     with pytest.raises(ValueError, match="does not match"):
         verify_artifact_manifest(tmp_path, manifest)
+
+
+def test_bundle_index_seals_contract_preflight_journal_and_artifacts():
+    artifacts = {"report.json": {"bytes": 6, "sha256": "e" * 64}}
+    bundle = seal_bundle_index(
+        run_id="day-64-project1-0123456789abcdef",
+        contract_sha256="a" * 64,
+        preflight_sha256="b" * 64,
+        journal_sha256="c" * 64,
+        artifacts=artifacts,
+    )
+
+    assert verify_bundle_index(bundle) == bundle
+    assert "does not prove W&B" in bundle["evidence_boundary"]
+
+
+def test_bundle_index_rejects_tampering_even_when_artifact_shape_is_plausible():
+    bundle = seal_bundle_index(
+        run_id="day-64-project1-0123456789abcdef",
+        contract_sha256="a" * 64,
+        preflight_sha256="b" * 64,
+        journal_sha256="c" * 64,
+        artifacts={"report.json": {"bytes": 6, "sha256": "e" * 64}},
+    )
+    changed = deepcopy(bundle)
+    changed["artifacts"]["report.json"]["bytes"] = 7
+
+    with pytest.raises(ValueError, match="bundle digest"):
+        verify_bundle_index(changed)
