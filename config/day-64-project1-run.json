@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "run_name": "day-64-project1",
+  "spec_sha256": "e2a329afb54343bfbf8549dd9fc024f9dc45c68fa1dbc173b5177e05e472410a",
+  "source_sha256": "f3670d269756a7b8800389c29599c25b2eccc63ca16e7b4f84b532d21f973411",
+  "max_source_bytes": 4096,
+  "max_parameters": 5000000,
+  "telemetry_interval_steps": 1,
+  "checkpoint_interval_steps": 4
+}
