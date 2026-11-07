@@ -6,19 +6,22 @@ import json
 import os
 import shutil
 import tempfile
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from .gpt2_training import load_training_spec
-from .gpt2_training_cli import load_source_bytes
+from .gpt2_training import GPT2StepMetric, load_training_spec
+from .gpt2_training_cli import load_source_bytes, run_and_publish
 from .project1_contract import (
     Project1RunError,
     contract_from_mapping,
 )
 from .project1_identity import attempt_id, run_id
 from .project1_journal import Project1Event
-from .project1_journal_io import append_event
-from .project1_preflight import admit_training_run, seal_preflight
+from .project1_journal_io import append_event, load_event_chain
+from .project1_metrics import step_metric_event
+from .project1_preflight import admit_training_run, seal_preflight, verify_preflight
+from .project1_state import reduce_run_state
 
 
 def _load_contract(path: Path, *, max_bytes: int = 64 * 1024):
@@ -99,3 +102,72 @@ def initialize_run(
         "preflight_sha256": sealed_preflight["preflight_sha256"],
         "run_dir": str(run_dir),
     }
+
+
+def execute_fresh_run(
+    *,
+    source_path: Path,
+    spec_path: Path,
+    run_dir: Path,
+    recorded_at_utc: str,
+) -> dict[str, Any]:
+    """Execute one admitted fresh schedule and journal every measured update."""
+
+    contract = _load_contract(run_dir / "contract.json")
+    spec = load_training_spec(spec_path)
+    source = load_source_bytes(source_path, max_bytes=contract.max_source_bytes)
+    admitted = admit_training_run(contract, spec, source)
+    preflight_payload = json.loads((run_dir / "preflight.json").read_bytes())
+    if verify_preflight(preflight_payload, contract) != admitted:
+        raise Project1RunError("stored preflight differs from current admitted inputs")
+    events = load_event_chain(run_dir / "journal.json")
+    state = reduce_run_state(events)
+    if state.status != "running" or state.completed_step != 0 or state.event_count != 1:
+        raise Project1RunError(
+            "fresh execution requires an initialized untouched journal"
+        )
+    report = run_and_publish(
+        source_path=source_path,
+        spec_path=spec_path,
+        checkpoint_path=run_dir / "checkpoint.pt",
+        report_path=run_dir / "training-report.json",
+        max_source_bytes=contract.max_source_bytes,
+        max_parameters=contract.max_parameters,
+    )
+    sequence = 1
+    for payload in report["metrics"]:
+        metric = GPT2StepMetric(**payload)
+        append_event(
+            run_dir / "journal.json",
+            step_metric_event(
+                sequence=sequence,
+                attempt_id=state.attempt_id,
+                recorded_at_utc=recorded_at_utc,
+                metric=metric,
+            ),
+        )
+        sequence += 1
+    checkpoint_digest = sha256((run_dir / "checkpoint.pt").read_bytes()).hexdigest()
+    append_event(
+        run_dir / "journal.json",
+        Project1Event(
+            sequence=sequence,
+            attempt_id=state.attempt_id,
+            kind="checkpoint",
+            recorded_at_utc=recorded_at_utc,
+            completed_step=report["progress"]["completed_step"],
+            payload={"checkpoint_sha256": checkpoint_digest},
+        ),
+    )
+    append_event(
+        run_dir / "journal.json",
+        Project1Event(
+            sequence=sequence + 1,
+            attempt_id=state.attempt_id,
+            kind="completed",
+            recorded_at_utc=recorded_at_utc,
+            completed_step=report["progress"]["completed_step"],
+            payload={"evidence_sha256": report["evidence_sha256"]},
+        ),
+    )
+    return report

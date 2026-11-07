@@ -11,7 +11,8 @@ from ai_journey.gpt2_training import (
 )
 from ai_journey.project1_contract import Project1RunContract
 from ai_journey.project1_journal_io import load_event_chain
-from ai_journey.project1_operator import initialize_run
+from ai_journey.project1_operator import execute_fresh_run, initialize_run
+from ai_journey.project1_state import reduce_run_state
 
 SOURCE = b"public project one training text\n" * 4
 
@@ -106,3 +107,63 @@ def test_initialize_run_rejects_existing_destination_without_changes(tmp_path):
         )
 
     assert marker.read_text() == "preserve"
+
+
+def test_execute_fresh_run_journals_each_step_checkpoint_and_completion(tmp_path):
+    source, spec, contract = prepare_inputs(tmp_path)
+    run_dir = tmp_path / "run"
+    initialize_run(
+        source_path=source,
+        spec_path=spec,
+        contract_path=contract,
+        run_dir=run_dir,
+        recorded_at_utc="2026-11-07T07:30:00+00:00",
+    )
+
+    report = execute_fresh_run(
+        source_path=source,
+        spec_path=spec,
+        run_dir=run_dir,
+        recorded_at_utc="2026-11-07T07:31:00+00:00",
+    )
+
+    events = load_event_chain(run_dir / "journal.json")
+    state = reduce_run_state(events)
+    assert state.status == "completed"
+    assert state.completed_step == 2
+    assert [event.kind for event in events] == [
+        "started",
+        "step",
+        "step",
+        "checkpoint",
+        "completed",
+    ]
+    assert report["progress"] == {"started_step": 0, "completed_step": 2}
+    assert (run_dir / "checkpoint.pt").is_file()
+    assert (run_dir / "training-report.json").is_file()
+
+
+def test_execute_fresh_run_refuses_to_overwrite_completed_attempt(tmp_path):
+    source, spec, contract = prepare_inputs(tmp_path)
+    run_dir = tmp_path / "run"
+    initialize_run(
+        source_path=source,
+        spec_path=spec,
+        contract_path=contract,
+        run_dir=run_dir,
+        recorded_at_utc="2026-11-07T07:30:00+00:00",
+    )
+    execute_fresh_run(
+        source_path=source,
+        spec_path=spec,
+        run_dir=run_dir,
+        recorded_at_utc="2026-11-07T07:31:00+00:00",
+    )
+
+    with pytest.raises(ValueError, match="untouched journal"):
+        execute_fresh_run(
+            source_path=source,
+            spec_path=spec,
+            run_dir=run_dir,
+            recorded_at_utc="2026-11-07T07:32:00+00:00",
+        )
