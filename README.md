@@ -234,6 +234,11 @@ system, machine architecture, CPU capability, and thread count. Replay requires
 that environment because floating-point kernels can differ across platforms;
 `verify` remains portable and checks the published report without re-execution.
 
+Day 64 wraps this exact training path in a hash-chained lifecycle journal and a
+content-addressed final bundle. The [Project 1 run operator](docs/project1-run-operator.md)
+documents the checked-in CPU fixture, installed commands, artifact layout, and
+the strict boundary between automated run evidence and learner or GPU evidence.
+
 ## Compare opt-in decoder architectures on CPU
 
 The GPT-2 weight-interoperable model remains unchanged. A separate decoder can
