@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -20,6 +21,15 @@ class Project1HeartbeatStatus:
     fresh: bool
     age_seconds: float
     timeout_seconds: float
+
+
+@dataclass(frozen=True)
+class Project1ResumeDecision:
+    """Checkpoint lineage admitted for the next training attempt."""
+
+    next_attempt_number: int
+    checkpoint_step: int
+    checkpoint_sha256: str
 
 
 def heartbeat_status(
@@ -85,4 +95,43 @@ def failure_event(
             "message_length": len(message),
             "retryable": retryable,
         },
+    )
+
+
+def resume_decision(
+    events: Sequence[Project1Event],
+    *,
+    checkpoint_step: int,
+    checkpoint_sha256: str,
+    optimizer_steps: int,
+) -> Project1ResumeDecision:
+    """Admit retry only from a retryable failure and its latest checkpoint."""
+
+    state = reduce_run_state(events)
+    if state.status != "failed" or events[-1].payload.get("retryable") is not True:
+        raise Project1RunError("resume requires an explicitly retryable failed attempt")
+    for name, value in (
+        ("checkpoint_step", checkpoint_step),
+        ("optimizer_steps", optimizer_steps),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"{name} must be an integer")
+    if (
+        state.checkpoint_step is None
+        or checkpoint_step != state.checkpoint_step
+        or checkpoint_step > state.completed_step
+    ):
+        raise Project1RunError("resume checkpoint does not match journal progress")
+    if checkpoint_step >= optimizer_steps:
+        raise Project1RunError("resume checkpoint must precede schedule completion")
+    if (
+        not isinstance(checkpoint_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", checkpoint_sha256) is None
+    ):
+        raise Project1RunError("checkpoint_sha256 must be a SHA-256 digest")
+    attempt_number = int(state.attempt_id.split("-", 2)[1])
+    return Project1ResumeDecision(
+        next_attempt_number=attempt_number + 1,
+        checkpoint_step=checkpoint_step,
+        checkpoint_sha256=checkpoint_sha256,
     )
