@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 
-from ai_journey.project1_contract import Project1RunContract
+from ai_journey.project1_contract import Project1RunContract, contract_from_mapping
 
 
 def contract() -> Project1RunContract:
@@ -23,6 +23,16 @@ def test_run_contract_has_stable_versioned_identity():
     assert first.to_mapping()["schema_version"] == 1
     assert first.fingerprint() == contract().fingerprint()
     assert first.fingerprint() != replace(first, max_parameters=99_999).fingerprint()
+
+
+def test_run_contract_round_trips_without_ignoring_fields():
+    payload = contract().to_mapping()
+
+    assert contract_from_mapping(payload) == contract()
+    with pytest.raises(ValueError, match="fields"):
+        contract_from_mapping({**payload, "ignored": True})
+    with pytest.raises(ValueError, match="version"):
+        contract_from_mapping({**payload, "schema_version": 2})
 
 
 @pytest.mark.parametrize(

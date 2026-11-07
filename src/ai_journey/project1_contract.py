@@ -14,6 +14,16 @@ class Project1RunError(ValueError):
 
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _RUN_NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
+_CONTRACT_FIELDS = {
+    "schema_version",
+    "run_name",
+    "spec_sha256",
+    "source_sha256",
+    "max_source_bytes",
+    "max_parameters",
+    "telemetry_interval_steps",
+    "checkpoint_interval_steps",
+}
 
 
 @dataclass(frozen=True)
@@ -62,3 +72,15 @@ class Project1RunContract:
             self.to_mapping(), sort_keys=True, separators=(",", ":")
         ).encode()
         return sha256(encoded).hexdigest()
+
+
+def contract_from_mapping(payload: object) -> Project1RunContract:
+    """Parse a submitted run contract without ignoring unknown controls."""
+
+    if not isinstance(payload, dict) or set(payload) != _CONTRACT_FIELDS:
+        raise Project1RunError("run contract fields do not match schema")
+    if payload["schema_version"] != 1:
+        raise Project1RunError("run contract schema version is unsupported")
+    return Project1RunContract(
+        **{name: value for name, value in payload.items() if name != "schema_version"}
+    )
