@@ -2,6 +2,7 @@
 
 import base64
 import binascii
+from dataclasses import dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -12,6 +13,13 @@ from .web_source import WebPage
 
 MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
 MAX_SNAPSHOT_PAGES = 1_000
+
+
+@dataclass(frozen=True)
+class WebSnapshot:
+    pages: tuple[WebPage, ...]
+    artifact_bytes: int
+    sha256: str
 
 
 def _unique_object(pairs):
@@ -55,8 +63,8 @@ def _decode_row(payload: bytes, index: int) -> WebPage:
     return WebPage(row["url"], row["content_type"], page_bytes)
 
 
-def load_web_snapshot(path: Path) -> tuple[WebPage, ...]:
-    """Load a bounded regular file and verify every page before returning any."""
+def load_web_snapshot_evidence(path: Path) -> WebSnapshot:
+    """Load and fingerprint the exact snapshot bytes used for page validation."""
     if not isinstance(path, Path):
         raise TypeError("web snapshot path must be pathlib.Path")
     if not path.is_file() or path.is_symlink():
@@ -77,4 +85,9 @@ def load_web_snapshot(path: Path) -> tuple[WebPage, ...]:
     urls = [page.url for page in pages]
     if len(set(urls)) != len(urls):
         raise TokenizerError("web snapshot contains duplicate page URLs")
-    return pages
+    return WebSnapshot(pages, len(payload), sha256(payload).hexdigest())
+
+
+def load_web_snapshot(path: Path) -> tuple[WebPage, ...]:
+    """Load a bounded regular file and verify every page before returning any."""
+    return load_web_snapshot_evidence(path).pages

@@ -5,7 +5,7 @@ import json
 import pytest
 
 from ai_journey.bpe import TokenizerError
-from ai_journey.web_snapshot import load_web_snapshot
+from ai_journey.web_snapshot import load_web_snapshot, load_web_snapshot_evidence
 
 
 def _row(url="https://example.com/page", payload=b"<p>public page</p>"):
@@ -32,6 +32,17 @@ def test_snapshot_loads_verified_pages_in_declared_order(tmp_path):
         "https://example.com/next",
     ]
     assert pages[1].payload == b"<p>next</p>"
+
+
+def test_snapshot_evidence_binds_the_exact_validated_file_bytes(tmp_path):
+    path = tmp_path / "pages.jsonl"
+    _write(path, [_row()])
+
+    evidence = load_web_snapshot_evidence(path)
+
+    assert evidence.pages == load_web_snapshot(path)
+    assert evidence.artifact_bytes == len(path.read_bytes())
+    assert evidence.sha256 == sha256(path.read_bytes()).hexdigest()
 
 
 def test_snapshot_rejects_digest_drift(tmp_path):
