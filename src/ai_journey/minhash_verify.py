@@ -6,8 +6,12 @@ import math
 from pathlib import Path
 
 from .bpe import TokenizerError
-from .minhash_dedup import MinHashDedupPolicy
-from .minhash_report import canonical_json_bytes
+from .minhash_corpus import load_project1_corpus
+from .minhash_dedup import (
+    MinHashDedupPolicy,
+    deduplicate_with_minhash,
+)
+from .minhash_report import build_minhash_report, canonical_json_bytes
 
 
 def _unique_object(pairs):
@@ -267,4 +271,22 @@ def verify_minhash_artifacts(directory: Path) -> dict:
         or removed_ids.intersection(kept_ids)
     ):
         raise TokenizerError("MinHash corpus removal coverage mismatch")
+    return report
+
+
+def replay_minhash_artifacts(dataset: Path, evidence: Path) -> dict:
+    """Recompute a MinHash run from the exact verified Project 1 source shards."""
+    report = verify_minhash_artifacts(evidence)
+    corpus = load_project1_corpus(dataset)
+    source = report["input"]
+    if (
+        corpus.dataset_report_sha256 != source["dataset_report_sha256"]
+        or corpus.shard_sha256s != tuple(source["shard_sha256s"])
+        or len(corpus.documents) != source["documents"]
+    ):
+        raise TokenizerError("MinHash replay source identity mismatch")
+    policy = MinHashDedupPolicy(**report["policy"])
+    result = deduplicate_with_minhash(corpus.documents, policy)
+    if build_minhash_report(corpus, policy, result) != report:
+        raise TokenizerError("MinHash evidence does not replay")
     return report
