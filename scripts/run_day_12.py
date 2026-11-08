@@ -35,7 +35,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     return parser.parse_args(argv)
 
-
+# Need to add doc strings.
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     config = TransformerConfig(
