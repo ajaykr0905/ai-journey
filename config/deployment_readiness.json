@@ -1,6 +1,7 @@
 {
   "required_files": [
     "config/day-66-minhash-dedup.json",
+    "docs/minhash-deduplication.md",
     "src/ai_journey/minhash_text.py",
     "src/ai_journey/minhash_hash.py",
     "src/ai_journey/minhash_family.py",
@@ -39,6 +40,7 @@
     "tests/test_minhash_default_config.py",
     "tests/test_minhash_ci_contract.py",
     "tests/test_minhash_readiness.py",
+    "tests/test_minhash_docs.py",
     "config/day-64-project1-run.json",
     "docs/project1-run-operator.md",
     "src/ai_journey/project1_contract.py",
