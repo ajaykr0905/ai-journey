@@ -1,6 +1,6 @@
 # Progress and Evidence
 
-Last updated: 2026-11-02
+Last updated: 2026-11-08
 
 This file separates repository-verifiable work from activities that require the
 learner's own completion evidence.
@@ -53,6 +53,7 @@ learner's own completion evidence.
 | 59 | Pinned English PUD ingestion, deterministic cleaning and quality decisions, exact deduplication, leakage-safe split, balanced shards, train-only BPE token and compression report, atomic publication, independent replay, installed CLI, CI acceptance, and operator guide present | No primary lecture scheduled; quantization support video pending user confirmation | Learner-run dataset build, inspection of the three rejected records, compression interpretation, and support-video reflection pending |
 | 60 | Declared 100M-model token and 6ND compute targets, complete-update alignment, corpus-reuse accounting, same-budget IsoFLOP grid, strict preregistration, sealed replay, atomic publication, installed CLI, CI evidence gate, and operator guide present | Stanford CS336 Lecture 9 and LoRA support video pending user confirmation | Learner's personal Chinchilla calculation, lecture notes, independent planner run, interpretation, and real-run data/hardware/cost approval pending |
 | 62 | Complete model/token/seed grid, immutable input and run identities, exact compute envelope, replicate dispersion, largest-model holdout, residual diagnostics, bounded extrapolation policy, sealed replay, atomic publication, and non-measured fixture present | Stanford CS336 Lecture 11 and RLHF support video pending user confirmation | Learner's personal experiment protocol, lecture notes, independent interpretation, real training observations, hardware manifest, and cost approval pending |
+| 65 | Public URL and snapshot validation, bounded charset decoding, visible-text extraction, 100-page quality gate, per-page rejection evidence, atomic publication, independent verification, installed CLI, and CI gate present | Stanford CS336 Lecture 13 and Mamba/S4 support video pending user confirmation | Learner-run extraction over 100 public pages, source selection rationale, output inspection, bad-default examples, and personal lecture notes pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,
