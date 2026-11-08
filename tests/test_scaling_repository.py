@@ -8,7 +8,7 @@ def test_repository_surfaces_scaling_work_without_claiming_learning_completion()
     readme = (ROOT / "README.md").read_text()
     progress = (ROOT / "PROGRESS.md").read_text()
 
-    assert "selected verified code through Day 63" in readme
+    assert "selected verified code through Day 65" in readme
     assert (
         "[Day 62 scaling experiment guide](docs/scaling-experiment-protocol.md)"
         in readme

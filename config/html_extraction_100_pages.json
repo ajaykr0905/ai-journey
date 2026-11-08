@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "minimum_pages": 100,
+    "minimum_text_characters": 200,
+    "maximum_replacement_fraction": 0.005
+  }
+}
