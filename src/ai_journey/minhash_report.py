@@ -75,7 +75,13 @@ def build_minhash_report(
         "policy": asdict(policy),
         "metrics": asdict(result.metrics),
         "candidates": [asdict(row) for row in result.assessments],
-        "clusters": [asdict(row) for row in result.decisions],
+        "clusters": [
+            {
+                "canonical_id": row.canonical_id,
+                "duplicate_ids": list(row.duplicate_ids),
+            }
+            for row in result.decisions
+        ],
         "corpus": {
             "path": "deduplicated-corpus.jsonl",
             "documents": len(result.documents),
