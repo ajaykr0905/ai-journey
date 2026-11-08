@@ -23,3 +23,19 @@ def build_minhash_signature(
         min((coefficient * value + offset) % MERSENNE_PRIME for value in reduced)
         for coefficient, offset in family.permutations()
     )
+
+
+def signature_similarity(left: tuple[int, ...], right: tuple[int, ...]) -> float:
+    """Estimate Jaccard similarity as the fraction of matching minima."""
+    if (
+        not isinstance(left, tuple)
+        or not isinstance(right, tuple)
+        or not left
+        or len(left) != len(right)
+        or any(
+            type(value) is not int or not 0 <= value < MERSENNE_PRIME
+            for value in (*left, *right)
+        )
+    ):
+        raise TokenizerError("MinHash signatures must be equal nonempty hash tuples")
+    return sum(a == b for a, b in zip(left, right, strict=True)) / len(left)
