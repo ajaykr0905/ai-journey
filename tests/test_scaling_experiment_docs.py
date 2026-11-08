@@ -9,7 +9,7 @@ def test_repository_surfaces_day62_without_claiming_execution_or_learning():
     progress = (ROOT / "PROGRESS.md").read_text()
     guide = (ROOT / "docs/scaling-experiment-protocol.md").read_text()
 
-    assert "selected verified code through Day 63" in readme
+    assert "selected verified code through Day 65" in readme
     assert "[Day 62 scaling experiment guide]" in readme
     assert "| 62 | 2026-11-05 |" in readme
     assert "| 62 | Complete model/token/seed grid" in progress
