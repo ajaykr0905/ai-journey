@@ -46,6 +46,12 @@ def test_extractor_recovers_after_malformed_suppressed_markup():
     assert extract_visible_text(page).text == "Useful text"
 
 
+def test_self_closing_suppressed_element_does_not_hide_following_content():
+    page = _decoded("<nav/><article>Useful text after navigation.</article>")
+
+    assert extract_visible_text(page).text == "Useful text after navigation."
+
+
 def test_extractor_rejects_markup_without_visible_content():
     with pytest.raises(TokenizerError, match="no visible text"):
         extract_visible_text(_decoded("<script>only_code()</script>"))

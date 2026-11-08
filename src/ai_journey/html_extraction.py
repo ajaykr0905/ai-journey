@@ -103,6 +103,8 @@ class _VisibleTextParser(HTMLParser):
 
     def handle_startendtag(self, tag, attrs) -> None:
         self.handle_starttag(tag, attrs)
+        if tag.lower() not in _VOID_TAGS:
+            self.handle_endtag(tag)
 
     def handle_endtag(self, tag) -> None:
         tag = tag.lower()
