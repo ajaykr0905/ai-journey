@@ -1,9 +1,14 @@
 """Locality-sensitive hashing parameters for MinHash candidate discovery."""
 
 from dataclasses import dataclass
+from hashlib import sha256
 import math
 
 from .bpe import TokenizerError
+from .minhash_family import MERSENNE_PRIME
+
+
+_BAND_DOMAIN = b"ai-journey-minhash-band-v1\0"
 
 
 @dataclass(frozen=True)
@@ -40,3 +45,28 @@ class LSHBanding:
         ):
             raise TokenizerError("LSH similarity must be finite from zero to one")
         return 1 - (1 - float(similarity) ** self.rows_per_band) ** self.bands
+
+
+def band_keys(
+    signature: tuple[int, ...], banding: LSHBanding
+) -> tuple[tuple[int, str], ...]:
+    """Encode each signature band as a domain-separated bucket identity."""
+    if not isinstance(banding, LSHBanding):
+        raise TypeError("LSH bucket keys require an LSHBanding contract")
+    if (
+        not isinstance(signature, tuple)
+        or len(signature) != banding.num_hashes
+        or any(
+            type(value) is not int or not 0 <= value < MERSENNE_PRIME
+            for value in signature
+        )
+    ):
+        raise TokenizerError("LSH bucket signature does not match its banding")
+    width = banding.rows_per_band
+    keys = []
+    for band in range(banding.bands):
+        values = signature[band * width : (band + 1) * width]
+        payload = b"".join(value.to_bytes(8, "big") for value in values)
+        digest = sha256(_BAND_DOMAIN + band.to_bytes(4, "big") + payload).hexdigest()
+        keys.append((band, digest))
+    return tuple(keys)
