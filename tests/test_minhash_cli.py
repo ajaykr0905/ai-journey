@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -77,3 +78,57 @@ def test_parser_requires_a_command_and_build_arguments():
         parser.parse_args([])
     with pytest.raises(SystemExit):
         parser.parse_args(["build"])
+
+
+def test_verify_command_checks_published_artifacts(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(
+        "ai_journey.minhash_cli.load_project1_corpus", lambda _: _corpus()
+    )
+    monkeypatch.setattr(
+        "ai_journey.minhash_cli.load_minhash_policy",
+        lambda _: MinHashDedupPolicy(2, 64, 66, 32, 0.8),
+    )
+    output = tmp_path / "output"
+    main(
+        [
+            "build",
+            "--dataset",
+            str(tmp_path / "dataset"),
+            "--config",
+            str(tmp_path / "config.json"),
+            "--output",
+            str(output),
+        ]
+    )
+    capsys.readouterr()
+
+    assert main(["verify", "--evidence", str(output)]) == 0
+    assert json.loads(capsys.readouterr().out)["removed_documents"] == 1
+
+
+def test_replay_command_dispatches_dataset_and_evidence(tmp_path, monkeypatch, capsys):
+    observed = {}
+
+    def replay(dataset, evidence):
+        observed.update(dataset=dataset, evidence=evidence)
+        return {
+            "metrics": {
+                "input_documents": 2,
+                "kept_documents": 1,
+                "removed_documents": 1,
+                "removed_fraction": 0.5,
+            },
+            "report_sha256": "a" * 64,
+        }
+
+    monkeypatch.setattr("ai_journey.minhash_cli.replay_minhash_artifacts", replay)
+    dataset = tmp_path / "dataset"
+    evidence = tmp_path / "evidence"
+
+    assert main(["replay", "--dataset", str(dataset), "--evidence", str(evidence)]) == 0
+
+    assert observed == {
+        "dataset": Path(dataset).resolve(),
+        "evidence": Path(evidence).resolve(),
+    }
+    assert json.loads(capsys.readouterr().out)["report_sha256"] == "a" * 64

@@ -9,6 +9,7 @@ from .minhash_config import load_minhash_policy
 from .minhash_corpus import load_project1_corpus
 from .minhash_dedup import deduplicate_with_minhash
 from .minhash_io import publish_minhash_artifacts
+from .minhash_verify import replay_minhash_artifacts, verify_minhash_artifacts
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -20,6 +21,13 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--dataset", required=True, type=Path)
     build.add_argument("--config", required=True, type=Path)
     build.add_argument("--output", required=True, type=Path)
+    verify = commands.add_parser("verify", help="verify published MinHash evidence")
+    verify.add_argument("--evidence", required=True, type=Path)
+    replay = commands.add_parser(
+        "replay", help="recompute evidence from verified Project 1 shards"
+    )
+    replay.add_argument("--dataset", required=True, type=Path)
+    replay.add_argument("--evidence", required=True, type=Path)
     return parser
 
 
@@ -41,15 +49,22 @@ def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        dataset = args.dataset.resolve()
-        config = args.config.resolve()
-        output = args.output.resolve()
-        if output in {dataset, config}:
-            raise TokenizerError("MinHash output must not alias an input")
-        corpus = load_project1_corpus(dataset)
-        policy = load_minhash_policy(config)
-        result = deduplicate_with_minhash(corpus.documents, policy)
-        report = publish_minhash_artifacts(output, corpus, policy, result)
+        if args.command == "build":
+            dataset = args.dataset.resolve()
+            config = args.config.resolve()
+            output = args.output.resolve()
+            if output in {dataset, config}:
+                raise TokenizerError("MinHash output must not alias an input")
+            corpus = load_project1_corpus(dataset)
+            policy = load_minhash_policy(config)
+            result = deduplicate_with_minhash(corpus.documents, policy)
+            report = publish_minhash_artifacts(output, corpus, policy, result)
+        elif args.command == "verify":
+            report = verify_minhash_artifacts(args.evidence.resolve())
+        else:
+            report = replay_minhash_artifacts(
+                args.dataset.resolve(), args.evidence.resolve()
+            )
     except (OSError, TypeError, ValueError) as exc:
         parser.error(str(exc))
     print(_summary(report))
