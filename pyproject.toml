@@ -65,6 +65,7 @@ ai-journey-scaling-experiment = "ai_journey.scaling_experiment_cli:main"
 ai-journey-inference = "ai_journey.inference_cli:main"
 ai-journey-project1 = "ai_journey.project1_cli:main"
 ai-journey-html-extract = "ai_journey.web_extraction_cli:main"
+ai-journey-minhash = "ai_journey.minhash_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

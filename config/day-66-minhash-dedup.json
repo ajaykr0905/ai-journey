@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "shingle_width": 5,
+    "num_hashes": 128,
+    "seed": 20261109,
+    "bands": 16,
+    "duplicate_threshold": 0.8
+  }
+}

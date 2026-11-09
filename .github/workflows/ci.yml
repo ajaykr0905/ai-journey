@@ -841,6 +841,12 @@ jobs:
           ruff check src/ai_journey/web_*.py src/ai_journey/html_extraction.py tests/test_web_*.py tests/test_html_extraction.py
           ruff format --check src/ai_journey/web_*.py src/ai_journey/html_extraction.py tests/test_web_*.py tests/test_html_extraction.py
           python -m pytest -q tests/test_web_*.py tests/test_html_extraction.py
+      - name: Check replayable MinHash deduplication contracts
+        run: |
+          ruff check src/ai_journey/minhash_*.py tests/test_minhash_*.py
+          ruff format --check src/ai_journey/minhash_*.py tests/test_minhash_*.py
+          python -m compileall -q src/ai_journey/minhash_*.py tests/test_minhash_*.py
+          python -m pytest -q tests/test_minhash_*.py
       - name: Build and install an isolated data pipeline wheel
         run: |
           python -m build --wheel --outdir "$RUNNER_TEMP/data-pipeline-dist"
@@ -858,6 +864,9 @@ jobs:
           ai-journey-data-pipeline build --snapshot "$RUNNER_TEMP/en_pud-ud-test.conllu" --config "$GITHUB_WORKSPACE/config/day-59-data-pipeline.json" --output "$RUNNER_TEMP/data-pipeline-evidence"
           ai-journey-data-pipeline verify --dataset "$RUNNER_TEMP/data-pipeline-evidence"
           ai-journey-data-pipeline accept --dataset "$RUNNER_TEMP/data-pipeline-evidence" --contract "$GITHUB_WORKSPACE/config/day-59-data-pipeline-acceptance.json" --config "$GITHUB_WORKSPACE/config/day-59-data-pipeline.json" --snapshot "$RUNNER_TEMP/en_pud-ud-test.conllu"
+          ai-journey-minhash build --dataset "$RUNNER_TEMP/data-pipeline-evidence" --config "$GITHUB_WORKSPACE/config/day-66-minhash-dedup.json" --output "$RUNNER_TEMP/minhash-evidence"
+          ai-journey-minhash verify --evidence "$RUNNER_TEMP/minhash-evidence"
+          ai-journey-minhash replay --dataset "$RUNNER_TEMP/data-pipeline-evidence" --evidence "$RUNNER_TEMP/minhash-evidence"
       - name: Retain public dataset evidence and installed package
         if: always()
         uses: actions/upload-artifact@v4
@@ -865,6 +874,7 @@ jobs:
           name: data-pipeline-cpu-evidence
           path: |
             ${{ runner.temp }}/data-pipeline-evidence/
+            ${{ runner.temp }}/minhash-evidence/
             ${{ runner.temp }}/data-pipeline-dist/
           if-no-files-found: error
   scaling-plan-cpu:
