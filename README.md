@@ -1,7 +1,7 @@
 # AI Journey: Reproducible Transformer Training and Serving Lab
 
 This repository is a public-safe, executable record of an added setup day plus the
-selected verified code through Day 66 of a 90-day AI engineering learning plan. It combines
+selected verified code through Day 67 of a 90-day AI engineering learning plan. It combines
 short study notes with small, deterministic Python exercises that can be reviewed
 and rerun.
 
@@ -16,6 +16,10 @@ then grow these exercises into production-quality training and inference project
 
 ## What is included
 
+- A reproducible 500-example SFT dataset builder with an immutable public source,
+  explicit CC BY-SA attribution, category-balanced selection, assistant-only ChatML
+  spans, leakage-free partitions, sealed artifacts, exact source replay, and an
+  installed CI gate in the [SFT dataset guide](docs/sft-dataset-construction.md)
 - A replayable Project 1 MinHash/LSH deduplicator with stable word shingles,
   seeded signatures, exact Jaccard acceptance, transitive clusters, deterministic
   representatives, removal metrics, sealed artifacts, source-byte replay, and an

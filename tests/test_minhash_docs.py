@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_readme_links_the_day66_minhash_operator_guide():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "selected verified code through Day 66" in readme
+    assert "selected verified code through Day 67" in readme
     assert "[MinHash deduplication guide](docs/minhash-deduplication.md)" in readme
 
 
