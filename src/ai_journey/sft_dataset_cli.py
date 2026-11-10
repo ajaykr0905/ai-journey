@@ -7,6 +7,7 @@ from pathlib import Path
 from .sft_dataset_build import SFTDatasetPolicy, build_sft_dataset
 from .sft_dataset_io import publish_sft_dataset
 from .sft_dataset_record import SFTDatasetError
+from .sft_dataset_replay import replay_sft_dataset
 from .sft_dataset_source import SFTSourceSpec, load_dolly_snapshot
 from .sft_dataset_verify import verify_sft_dataset
 
@@ -49,6 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--output", required=True, type=Path)
     verify = commands.add_parser("verify", help="verify published dataset evidence")
     verify.add_argument("--evidence", required=True, type=Path)
+    replay = commands.add_parser(
+        "replay", help="rebuild evidence from pinned source bytes"
+    )
+    replay.add_argument("--source", required=True, type=Path)
+    replay.add_argument("--evidence", required=True, type=Path)
     return parser
 
 
@@ -79,8 +85,12 @@ def main(argv=None) -> int:
             records = load_dolly_snapshot(source_path, source)
             build = build_sft_dataset(records, policy)
             manifest = publish_sft_dataset(output, source, policy, build)
-        else:
+        elif args.command == "verify":
             manifest = verify_sft_dataset(args.evidence.resolve())
+        else:
+            manifest = replay_sft_dataset(
+                args.source.resolve(), args.evidence.resolve()
+            )
     except (OSError, TypeError, ValueError) as exc:
         parser.error(str(exc))
     print(_summary(manifest))

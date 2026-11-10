@@ -107,6 +107,65 @@ def test_verify_command_rejects_missing_or_tampered_evidence(tmp_path: Path):
         main(["verify", "--evidence", str(tmp_path / "missing")])
 
 
+def test_replay_command_recomputes_exact_source_evidence(tmp_path: Path, capsys):
+    source_path, config, _, _ = write_inputs(tmp_path)
+    output = tmp_path / "evidence"
+    main(
+        [
+            "build",
+            "--source",
+            str(source_path),
+            "--config",
+            str(config),
+            "--output",
+            str(output),
+        ]
+    )
+    capsys.readouterr()
+    assert (
+        main(
+            [
+                "replay",
+                "--source",
+                str(source_path),
+                "--evidence",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["examples"] == 30
+
+
+def test_replay_command_rejects_source_drift(tmp_path: Path):
+    source_path, config, _, _ = write_inputs(tmp_path)
+    output = tmp_path / "evidence"
+    main(
+        [
+            "build",
+            "--source",
+            str(source_path),
+            "--config",
+            str(config),
+            "--output",
+            str(output),
+        ]
+    )
+    source_path.write_bytes(
+        source_path.read_bytes().replace(b"Question 0", b"Question X", 1)
+    )
+    with pytest.raises(SystemExit, match="2"):
+        main(
+            [
+                "replay",
+                "--source",
+                str(source_path),
+                "--evidence",
+                str(output),
+            ]
+        )
+
+
 def test_build_command_rejects_alias_and_existing_output(tmp_path: Path):
     source_path, config, _, _ = write_inputs(tmp_path)
     with pytest.raises(SystemExit, match="2"):
