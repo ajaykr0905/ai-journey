@@ -1,0 +1,24 @@
+{
+  "source": {
+    "dataset_id": "databricks/databricks-dolly-15k",
+    "revision": "bdd27f4d94b9c1f951818a7da7fd7aeea5dbff1a",
+    "filename": "databricks-dolly-15k.jsonl",
+    "sha256": "2df9083338b4abd6bceb5635764dab5d833b393b55759dffb0959b6fcbf794ec",
+    "bytes": 13085339,
+    "license": "CC-BY-SA-3.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/3.0/",
+    "source_url": "https://huggingface.co/datasets/databricks/databricks-dolly-15k/resolve/bdd27f4d94b9c1f951818a7da7fd7aeea5dbff1a/databricks-dolly-15k.jsonl"
+  },
+  "policy": {
+    "example_count": 500,
+    "validation_count": 50,
+    "selection_seed": 67,
+    "split_seed": 6701,
+    "quality": {
+      "min_response_bytes": 1,
+      "max_prompt_bytes": 16384,
+      "max_response_bytes": 16384,
+      "reject_identity_answers": true
+    }
+  }
+}

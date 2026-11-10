@@ -21,6 +21,6 @@ def test_evaluation_guide_documents_reproducible_commands_and_claim_limits():
 
 def test_readme_links_day_63_evaluation_harness():
     readme = (ROOT / "README.md").read_text()
-    assert "selected verified code through Day 66" in readme
+    assert "selected verified code through Day 67" in readme
     assert "[evaluation harness guide](docs/evaluation-harness.md)" in readme
     assert "| 63 | 2026-11-06 |" in readme
