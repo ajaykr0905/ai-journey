@@ -81,6 +81,32 @@ def test_config_loader_round_trips_strict_source_and_policy(tmp_path: Path):
     assert load_build_config(config) == (source, policy)
 
 
+def test_verify_command_checks_existing_artifacts_without_rebuilding(
+    tmp_path: Path, capsys
+):
+    source_path, config, _, _ = write_inputs(tmp_path)
+    output = tmp_path / "evidence"
+    main(
+        [
+            "build",
+            "--source",
+            str(source_path),
+            "--config",
+            str(config),
+            "--output",
+            str(output),
+        ]
+    )
+    capsys.readouterr()
+    assert main(["verify", "--evidence", str(output)]) == 0
+    assert json.loads(capsys.readouterr().out)["examples"] == 30
+
+
+def test_verify_command_rejects_missing_or_tampered_evidence(tmp_path: Path):
+    with pytest.raises(SystemExit, match="2"):
+        main(["verify", "--evidence", str(tmp_path / "missing")])
+
+
 def test_build_command_rejects_alias_and_existing_output(tmp_path: Path):
     source_path, config, _, _ = write_inputs(tmp_path)
     with pytest.raises(SystemExit, match="2"):
