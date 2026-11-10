@@ -847,6 +847,12 @@ jobs:
           ruff format --check src/ai_journey/minhash_*.py tests/test_minhash_*.py
           python -m compileall -q src/ai_journey/minhash_*.py tests/test_minhash_*.py
           python -m pytest -q tests/test_minhash_*.py
+      - name: Check replayable SFT dataset contracts
+        run: |
+          ruff check src/ai_journey/sft_dataset_*.py tests/test_sft_dataset_*.py
+          ruff format --check src/ai_journey/sft_dataset_*.py tests/test_sft_dataset_*.py
+          python -m compileall -q src/ai_journey/sft_dataset_*.py tests/test_sft_dataset_*.py
+          python -m pytest -q tests/test_sft_dataset_*.py
       - name: Build and install an isolated data pipeline wheel
         run: |
           python -m build --wheel --outdir "$RUNNER_TEMP/data-pipeline-dist"
@@ -854,6 +860,9 @@ jobs:
       - name: Fetch immutable public English PUD snapshot
         run: |
           curl --fail --location --retry 2 --max-time 60 https://raw.githubusercontent.com/UniversalDependencies/UD_English-PUD/6e328e8195c04a297c1e375d21fe663be1ce6178/en_pud-ud-test.conllu --output "$RUNNER_TEMP/en_pud-ud-test.conllu"
+      - name: Fetch immutable public Databricks Dolly snapshot
+        run: |
+          curl --fail --location --retry 2 --max-time 120 https://huggingface.co/datasets/databricks/databricks-dolly-15k/resolve/bdd27f4d94b9c1f951818a7da7fd7aeea5dbff1a/databricks-dolly-15k.jsonl --output "$RUNNER_TEMP/databricks-dolly-15k.jsonl"
       - name: Build verify and accept installed public dataset evidence
         working-directory: ${{ runner.temp }}
         env:
@@ -867,6 +876,9 @@ jobs:
           ai-journey-minhash build --dataset "$RUNNER_TEMP/data-pipeline-evidence" --config "$GITHUB_WORKSPACE/config/day-66-minhash-dedup.json" --output "$RUNNER_TEMP/minhash-evidence"
           ai-journey-minhash verify --evidence "$RUNNER_TEMP/minhash-evidence"
           ai-journey-minhash replay --dataset "$RUNNER_TEMP/data-pipeline-evidence" --evidence "$RUNNER_TEMP/minhash-evidence"
+          ai-journey-sft-dataset build --source "$RUNNER_TEMP/databricks-dolly-15k.jsonl" --config "$GITHUB_WORKSPACE/config/day-67-sft-dataset.json" --output "$RUNNER_TEMP/sft-dataset-evidence"
+          ai-journey-sft-dataset verify --evidence "$RUNNER_TEMP/sft-dataset-evidence"
+          ai-journey-sft-dataset replay --source "$RUNNER_TEMP/databricks-dolly-15k.jsonl" --evidence "$RUNNER_TEMP/sft-dataset-evidence"
       - name: Retain public dataset evidence and installed package
         if: always()
         uses: actions/upload-artifact@v4
@@ -875,6 +887,7 @@ jobs:
           path: |
             ${{ runner.temp }}/data-pipeline-evidence/
             ${{ runner.temp }}/minhash-evidence/
+            ${{ runner.temp }}/sft-dataset-evidence/
             ${{ runner.temp }}/data-pipeline-dist/
           if-no-files-found: error
   scaling-plan-cpu:
