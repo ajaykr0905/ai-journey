@@ -462,6 +462,12 @@ do not reinterpret the pinned assumptions as observations of local hardware.
 
 ## Daily map
 
+Run the sealed Day 68 public-data SFT comparison with
+`ai-journey-sft-finetune build`, then bind or reproduce it with `verify` and
+`replay`. See [the SFT fine-tuning operator guide](docs/sft-finetuning.md) for the
+assistant-only masking, deterministic checkpoint, evidence, and interpretation
+boundaries.
+
 | Day | Date | Focus |
 |---:|:---:|---|
 | 0 | 2026-09-04 | Added repository setup and configuration safety day |
@@ -512,6 +518,7 @@ do not reinterpret the pinned assumptions as observations of local hardware.
 | 60 | 2026-11-03 | Analytical Chinchilla target, IsoFLOP allocation, corpus sufficiency, and sealed replay |
 | 62 | 2026-11-05 | Bounded scaling sweep protocol, held-out extrapolation gates, and sealed reference replay |
 | 63 | 2026-11-06 | Held-out likelihood, HellaSwag, and contamination-audited LAMBADA evaluation suite |
+| 68 | 2026-11-11 | Public-data assistant-only SFT, matched pre/post evaluation, checkpoints, and exact replay |
 
 ## License
 
