@@ -1,0 +1,15 @@
+{
+  "seed": 68,
+  "block_size": 64,
+  "embedding_dim": 16,
+  "head_count": 2,
+  "layer_count": 1,
+  "batch_size": 4,
+  "steps": 8,
+  "learning_rate": 0.01,
+  "weight_decay": 0.0,
+  "gradient_clip": 1.0,
+  "evaluation_examples": 8,
+  "generation_tokens": 8,
+  "checkpoint_interval": 4
+}

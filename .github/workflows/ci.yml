@@ -853,6 +853,12 @@ jobs:
           ruff format --check src/ai_journey/sft_dataset_*.py tests/test_sft_dataset_*.py
           python -m compileall -q src/ai_journey/sft_dataset_*.py tests/test_sft_dataset_*.py
           python -m pytest -q tests/test_sft_dataset_*.py
+      - name: Check replayable SFT fine-tuning contracts
+        run: |
+          ruff check src/ai_journey/sft_finetune_*.py tests/test_sft_finetune_*.py
+          ruff format --check src/ai_journey/sft_finetune_*.py tests/test_sft_finetune_*.py
+          python -m compileall -q src/ai_journey/sft_finetune_*.py tests/test_sft_finetune_*.py
+          python -m pytest -q tests/test_sft_finetune_*.py
       - name: Build and install an isolated data pipeline wheel
         run: |
           python -m build --wheel --outdir "$RUNNER_TEMP/data-pipeline-dist"
@@ -879,6 +885,9 @@ jobs:
           ai-journey-sft-dataset build --source "$RUNNER_TEMP/databricks-dolly-15k.jsonl" --config "$GITHUB_WORKSPACE/config/day-67-sft-dataset.json" --output "$RUNNER_TEMP/sft-dataset-evidence"
           ai-journey-sft-dataset verify --evidence "$RUNNER_TEMP/sft-dataset-evidence"
           ai-journey-sft-dataset replay --source "$RUNNER_TEMP/databricks-dolly-15k.jsonl" --evidence "$RUNNER_TEMP/sft-dataset-evidence"
+          ai-journey-sft-finetune build --dataset "$RUNNER_TEMP/sft-dataset-evidence/chatml.jsonl" --config "$GITHUB_WORKSPACE/config/day-68-sft-finetune.json" --output "$RUNNER_TEMP/sft-finetune-report.json"
+          ai-journey-sft-finetune verify --dataset "$RUNNER_TEMP/sft-dataset-evidence/chatml.jsonl" --report "$RUNNER_TEMP/sft-finetune-report.json"
+          ai-journey-sft-finetune replay --dataset "$RUNNER_TEMP/sft-dataset-evidence/chatml.jsonl" --report "$RUNNER_TEMP/sft-finetune-report.json"
       - name: Retain public dataset evidence and installed package
         if: always()
         uses: actions/upload-artifact@v4
@@ -888,6 +897,7 @@ jobs:
             ${{ runner.temp }}/data-pipeline-evidence/
             ${{ runner.temp }}/minhash-evidence/
             ${{ runner.temp }}/sft-dataset-evidence/
+            ${{ runner.temp }}/sft-finetune-report.json
             ${{ runner.temp }}/data-pipeline-dist/
           if-no-files-found: error
   scaling-plan-cpu:
