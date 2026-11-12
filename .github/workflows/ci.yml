@@ -859,6 +859,12 @@ jobs:
           ruff format --check src/ai_journey/sft_finetune_*.py tests/test_sft_finetune_*.py
           python -m compileall -q src/ai_journey/sft_finetune_*.py tests/test_sft_finetune_*.py
           python -m pytest -q tests/test_sft_finetune_*.py
+      - name: Check verifiable reward and recovery contracts
+        run: |
+          ruff check src/ai_journey/verifiable_reward_*.py tests/test_verifiable_reward_*.py
+          ruff format --check src/ai_journey/verifiable_reward_*.py tests/test_verifiable_reward_*.py
+          python -m compileall -q src/ai_journey/verifiable_reward_*.py tests/test_verifiable_reward_*.py
+          python -m pytest -q tests/test_verifiable_reward_*.py
       - name: Build and install an isolated data pipeline wheel
         run: |
           python -m build --wheel --outdir "$RUNNER_TEMP/data-pipeline-dist"
@@ -888,6 +894,9 @@ jobs:
           ai-journey-sft-finetune build --dataset "$RUNNER_TEMP/sft-dataset-evidence/chatml.jsonl" --config "$GITHUB_WORKSPACE/config/day-68-sft-finetune.json" --output "$RUNNER_TEMP/sft-finetune-report.json"
           ai-journey-sft-finetune verify --dataset "$RUNNER_TEMP/sft-dataset-evidence/chatml.jsonl" --report "$RUNNER_TEMP/sft-finetune-report.json"
           ai-journey-sft-finetune replay --dataset "$RUNNER_TEMP/sft-dataset-evidence/chatml.jsonl" --report "$RUNNER_TEMP/sft-finetune-report.json"
+          ai-journey-verifiable-rewards build --config "$GITHUB_WORKSPACE/config/day-69-verifiable-rewards.json" --output "$RUNNER_TEMP/verifiable-reward-report.json"
+          ai-journey-verifiable-rewards verify --config "$GITHUB_WORKSPACE/config/day-69-verifiable-rewards.json" --report "$RUNNER_TEMP/verifiable-reward-report.json"
+          ai-journey-verifiable-rewards replay --config "$GITHUB_WORKSPACE/config/day-69-verifiable-rewards.json" --report "$RUNNER_TEMP/verifiable-reward-report.json"
       - name: Retain public dataset evidence and installed package
         if: always()
         uses: actions/upload-artifact@v4
@@ -898,6 +907,7 @@ jobs:
             ${{ runner.temp }}/minhash-evidence/
             ${{ runner.temp }}/sft-dataset-evidence/
             ${{ runner.temp }}/sft-finetune-report.json
+            ${{ runner.temp }}/verifiable-reward-report.json
             ${{ runner.temp }}/data-pipeline-dist/
           if-no-files-found: error
   scaling-plan-cpu:

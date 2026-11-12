@@ -68,6 +68,7 @@ ai-journey-html-extract = "ai_journey.web_extraction_cli:main"
 ai-journey-minhash = "ai_journey.minhash_cli:main"
 ai-journey-sft-dataset = "ai_journey.sft_dataset_cli:main"
 ai-journey-sft-finetune = "ai_journey.sft_finetune_cli:main"
+ai-journey-verifiable-rewards = "ai_journey.verifiable_reward_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

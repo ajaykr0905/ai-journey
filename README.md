@@ -468,6 +468,12 @@ Run the sealed Day 68 public-data SFT comparison with
 assistant-only masking, deterministic checkpoint, evidence, and interpretation
 boundaries.
 
+Run the Day 69 fixture-backed reward and recovery workflow with
+`ai-journey-verifiable-rewards build`, then independently reconstruct it with
+`verify` or reproduce it with `replay`. The
+[verifiable reward guide](docs/verifiable-rewards.md) defines its verifier,
+failure-injection, recovery, and evidence boundaries.
+
 | Day | Date | Focus |
 |---:|:---:|---|
 | 0 | 2026-09-04 | Added repository setup and configuration safety day |
@@ -519,6 +525,7 @@ boundaries.
 | 62 | 2026-11-05 | Bounded scaling sweep protocol, held-out extrapolation gates, and sealed reference replay |
 | 63 | 2026-11-06 | Held-out likelihood, HellaSwag, and contamination-audited LAMBADA evaluation suite |
 | 68 | 2026-11-11 | Public-data assistant-only SFT, matched pre/post evaluation, checkpoints, and exact replay |
+| 69 | 2026-11-12 | Verifiable reward groups, deterministic failure injection, exact recovery, and sealed replay |
 
 ## License
 
