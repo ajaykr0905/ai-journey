@@ -1,0 +1,60 @@
+{
+  "run": {
+    "seed": 69,
+    "candidates_per_task": 4,
+    "max_tasks": 8,
+    "max_response_bytes": 512,
+    "max_attempts": 2
+  },
+  "tasks": [
+    {
+      "task_id": "exact-restart-term",
+      "prompt": "Return the repository term for a resumed run whose next committed state matches the uninterrupted control.",
+      "verifier": "exact",
+      "expected": "Exact Restart",
+      "options": {"case_sensitive": false, "collapse_whitespace": true}
+    },
+    {
+      "task_id": "checkpoint-loss-count",
+      "prompt": "A failure occurs after a durable group-boundary checkpoint. Return the number of lost committed groups.",
+      "verifier": "numeric",
+      "expected": 0,
+      "options": {"absolute_tolerance": "0"}
+    },
+    {
+      "task_id": "recovery-decision-json",
+      "prompt": "Return strict JSON containing the declared recovery decision and lost committed steps.",
+      "verifier": "json",
+      "expected": {"decision": "retry", "lost_steps": 0},
+      "options": {}
+    }
+  ],
+  "groups": [
+    {
+      "task_id": "exact-restart-term",
+      "responses": [
+        "The next state is identical.\nFINAL: Exact Restart",
+        "FINAL: successful resume",
+        "Exact Restart",
+        "FINAL: exact   restart"
+      ]
+    },
+    {
+      "task_id": "checkpoint-loss-count",
+      "responses": ["FINAL: 0", "FINAL: 1", "Reasoning omitted.\nFINAL: 0.0", "FINAL: 0"]
+    },
+    {
+      "task_id": "recovery-decision-json",
+      "responses": [
+        "FINAL: {\"decision\":\"retry\",\"lost_steps\":0}",
+        "FINAL: {\"decision\":\"abort\",\"lost_steps\":0}",
+        "FINAL: {\"decision\":\"retry\",\"decision\":\"abort\",\"lost_steps\":0}",
+        "FINAL: {\"lost_steps\":0,\"decision\":\"retry\"}"
+      ]
+    }
+  ],
+  "faults": [
+    {"task_id": "exact-restart-term", "candidate_index": 0, "attempt": 1, "kind": "transient"},
+    {"task_id": "checkpoint-loss-count", "candidate_index": 3, "attempt": 1, "kind": "permanent"}
+  ]
+}
