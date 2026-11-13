@@ -123,6 +123,9 @@ def test_server_command_is_isolated_shell_free_and_validated(tmp_path):
     assert argv[:3] == (sys.executable, "-I", "-c")
     assert Path(argv[4]) == Path(__file__).resolve().parents[1] / "src" / "ai_journey"
     assert argv[argv.index("--lifetime-id") + 1] == LIFETIME
+    assert argv[-2:] == ("--hold-response-ms", "0")
+    with pytest.raises(ValueError, match="hold_response_ms"):
+        command(tmp_path, hold_response_ms=10_001)
     with pytest.raises(ValueError, match="lifetime_id"):
         command(tmp_path, lifetime_id="lifetime-x")
     with pytest.raises(TypeError, match="pathlib"):

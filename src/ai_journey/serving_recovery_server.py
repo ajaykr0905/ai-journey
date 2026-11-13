@@ -5,6 +5,9 @@ pid, lifetime and model identity as one JSON handshake line on stdout.
 ``GET /health`` reports the same identity. ``POST /generate`` validates a
 bounded request, computes the deterministic completion, commits an execution
 journal record and only then sends the response. SIGTERM drains and exits 0.
+An optional bounded ``--hold-response-ms`` window delays each committed
+response, so a kill inside it provably loses an executed response; SIGTERM
+releases held responses before draining.
 
 ``server_command`` starts the module in isolated mode (``python -I``) behind a
 package stub, so the child imports only the standard library and this lab's
@@ -54,6 +57,7 @@ LOOPBACK = "127.0.0.1"
 MAX_BODY_BYTES = 4096
 MAX_HANDSHAKE_BYTES = 1024
 MAX_CONNECTIONS = 16
+MAX_HOLD_RESPONSE_MS = 10_000
 SOCKET_TIMEOUT_SECONDS = 5
 KEY_HEADER = "Idempotency-Key"
 ATTEMPT_HEADER = "X-Attempt"
@@ -77,6 +81,7 @@ def server_command(
     model_sha256: str,
     max_new_tokens: int,
     max_records: int,
+    hold_response_ms: int = 0,
 ) -> tuple[str, ...]:
     """Build an isolated, shell-free argument vector for one server lifetime."""
 
@@ -86,6 +91,7 @@ def server_command(
     require_digest(model_sha256, "model_sha256")
     require_int(max_new_tokens, "max_new_tokens", 1, MAX_NEW_TOKENS)
     require_int(max_records, "max_records", 1, MAX_JOURNAL_RECORDS)
+    require_int(hold_response_ms, "hold_response_ms", 0, MAX_HOLD_RESPONSE_MS)
     return (
         sys.executable,
         "-I",
@@ -104,6 +110,8 @@ def server_command(
         str(max_new_tokens),
         "--max-records",
         str(max_records),
+        "--hold-response-ms",
+        str(hold_response_ms),
     )
 
 
@@ -197,6 +205,7 @@ class RecoveryHTTPServer(ThreadingHTTPServer):
         journal: ExecutionJournal,
         lifetime_id: str,
         max_new_tokens: int,
+        hold_response_ms: int = 0,
     ) -> None:
         if journal.model_sha256 != model.model_sha256:
             raise ServingRecoveryError("journal and model identities differ")
@@ -208,11 +217,24 @@ class RecoveryHTTPServer(ThreadingHTTPServer):
         self.max_new_tokens = require_int(
             max_new_tokens, "max_new_tokens", 1, MAX_NEW_TOKENS
         )
+        self.hold_response_ms = require_int(
+            hold_response_ms, "hold_response_ms", 0, MAX_HOLD_RESPONSE_MS
+        )
         self.health = health_body(
             lifetime_id=lifetime_id, pid=os.getpid(), model_sha256=model.model_sha256
         )
+        self._released = threading.Event()
         self._slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
         super().__init__((LOOPBACK, 0), _GenerationHandler)
+
+    def hold_committed_response(self) -> None:
+        """Wait inside the declared commit-to-response window, if any."""
+
+        if self.hold_response_ms:
+            self._released.wait(self.hold_response_ms / 1000)
+
+    def release_held_responses(self) -> None:
+        self._released.set()
 
     def server_bind(self) -> None:
         # HTTPServer.server_bind performs a reverse DNS lookup; skip it.
@@ -300,6 +322,7 @@ class _GenerationHandler(BaseHTTPRequestHandler):
         except ServingRecoveryError:
             self._error(503, "execution journal is unavailable")
             return
+        self.server.hold_committed_response()
         self._reply(200, body, identified=True)
 
     def _single_header(self, name: str) -> str:
@@ -356,6 +379,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-sha256", required=True)
     parser.add_argument("--max-new-tokens", type=int, required=True)
     parser.add_argument("--max-records", type=int, required=True)
+    parser.add_argument("--hold-response-ms", type=int, default=0)
     return parser
 
 
@@ -386,12 +410,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             journal=journal,
             lifetime_id=lifetime_id,
             max_new_tokens=arguments.max_new_tokens,
+            hold_response_ms=arguments.hold_response_ms,
         )
     except (OSError, ServingRecoveryError, TypeError) as exc:
         journal.close()
         return _startup_failure(exc)
 
     def stop(signum: int, frame: object) -> None:
+        server.release_held_responses()
         threading.Thread(target=server.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGTERM, stop)
