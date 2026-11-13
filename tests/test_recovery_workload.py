@@ -15,6 +15,11 @@ def test_workload_is_ordered_bounded_and_content_private():
     assert [item.index for item in workload.items] == list(range(20))
     assert len({item.payload_sha256 for item in workload.items}) == 20
     assert source.decode().strip() not in str(workload)
+    assert len(workload.fingerprint()) == 64
+    assert (
+        workload.fingerprint()
+        == build_recovery_workload(source, valid_config()).fingerprint()
+    )
 
 
 def test_workload_identity_changes_with_source_or_item_count():
@@ -25,6 +30,7 @@ def test_workload_identity_changes_with_source_or_item_count():
 
     assert first.source_sha256 != second.source_sha256
     assert first.items != second.items
+    assert first.fingerprint() != second.fingerprint()
 
 
 @pytest.mark.parametrize("source", [b"", b"12345"])

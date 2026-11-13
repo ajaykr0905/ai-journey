@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from hashlib import sha256
 
@@ -23,6 +24,21 @@ class RecoveryWorkload:
     source_bytes: int
     source_sha256: str
     items: tuple[RecoveryWorkItem, ...]
+
+    def fingerprint(self) -> str:
+        """Bind source identity, source size, order, and every work item."""
+
+        payload = {
+            "source_bytes": self.source_bytes,
+            "source_sha256": self.source_sha256,
+            "items": [
+                {"index": item.index, "payload_sha256": item.payload_sha256}
+                for item in self.items
+            ],
+        }
+        return sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
 
 
 def build_recovery_workload(
