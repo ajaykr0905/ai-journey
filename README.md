@@ -492,6 +492,36 @@ or cost claim. See the
 [serving failure recovery guide](docs/serving-failure-recovery.md) for the run
 directory, metrics, reconciliation and limitations.
 
+## Model SIMT execution limits analytically
+
+Build the pinned SIMT execution-model report from declared NVIDIA inputs, then
+recompute every field independently:
+
+```bash
+ai-journey-simt build \
+  --config config/day-71-simt-execution-plan.json \
+  --output /tmp/day-71-simt-report.json
+ai-journey-simt verify \
+  --report /tmp/day-71-simt-report.json
+```
+
+Both commands print the same SHA-256 digest with the counts `devices=3`,
+`sweep_cells=40`, `memory_rows=18` and `arithmetic_rows=12` and the flags
+`measured=false gpu_executed=false`. They return 0 on success and 1 for an
+invalid plan, report or path; `build` refuses to write over its plan. The report
+covers CUDA launch limits, 1D and 2D index coverage with masked lanes,
+theoretical occupancy under the `cuda_occupancy.h` allocation rules,
+Little's-law latency hiding, wave quantization, and FP32/DRAM roofline balance
+for the V100 SXM2, T4 and A100 SXM4 80GB.
+
+Everything in the report is analytical. Architecture limits, device specs,
+latencies, register budgets and kernel byte and FLOP counts are declared inputs
+cited from the CUDA C++ Programming Guide v12.6, CUDA 12.6 `cuda_occupancy.h`,
+and NVIDIA datasheets and whitepapers; each device must reproduce its datasheet
+FP32 peak. No GPU, CUDA kernel, or latency was executed or measured, so no
+number in it is achieved occupancy, bandwidth or run time. See the
+[SIMT execution model guide](docs/simt-execution-model.md).
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with

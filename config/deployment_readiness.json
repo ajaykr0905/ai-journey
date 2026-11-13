@@ -30,6 +30,7 @@
     "tests/test_simt_pinned_plan.py",
     "tests/test_simt_package.py",
     "tests/test_simt_readiness.py",
+    "tests/test_simt_delivery.py",
     "config/day-70-serving-recovery.json",
     "docs/serving-failure-recovery.md",
     "src/ai_journey/serving_recovery_config.py",
