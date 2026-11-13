@@ -370,8 +370,8 @@ def start_an_acknowledgement_after_its_server_exited(run_dir):
     retime(run_dir)
 
 
-def journal_a_refused_attempt(run_dir):
-    """Credit the replacement with executing an attempt whose connect was refused."""
+def credit_execution(run_dir, attempt, lifetime_id):
+    """Append ``attempt``'s execution to one lifetime's journal and reseal."""
 
     config = experiment_config()
     model = build_serving_model(FIXTURE.read_bytes())
@@ -380,34 +380,35 @@ def journal_a_refused_attempt(run_dir):
         run_id=serving_run_id(config, model_sha256=model.model_sha256),
         model=model,
     )
-    attempts = load_attempt_log(run_dir / "attempts.json")
-    refused = next(a for a in attempts if a.outcome == "connection_refused")
-    planned = plan[refused.request_index]
+    planned = plan[attempt.request_index]
     report = json.loads((run_dir / "report.json").read_bytes())
-    entry = report["evidence"]["journals"][-1]
+    entries = report["evidence"]["journals"]
+    entry = next(item for item in entries if item["lifetime_id"] == lifetime_id)
+    path = run_dir / entry["file"]
+    data = path.read_bytes()
+    committed = data[: len(data) - entry["torn_tail_bytes"]]
     record = ExecutionRecord(
-        lifetime_id=entry["lifetime_id"],
+        lifetime_id=lifetime_id,
         sequence=entry["records"],
-        idempotency_key=refused.idempotency_key,
-        attempt=refused.attempt,
+        idempotency_key=attempt.idempotency_key,
+        attempt=attempt.attempt,
         request_sha256=planned.request.request_sha256(),
         response_sha256=sha256(completion_body(model, planned.request)).hexdigest(),
         model_sha256=model.model_sha256,
     )
-    with (run_dir / entry["file"]).open("ab") as stream:
-        stream.write(canonical_json_bytes(record.to_mapping()) + b"\n")
+    path.write_bytes(committed + canonical_json_bytes(record.to_mapping()) + b"\n")
     journals = [
         read_execution_journal(
             run_dir / item["file"],
             lifetime_id=item["lifetime_id"],
             max_records=journal_capacity(config),
-            allow_torn_tail=item is not entry,
+            allow_torn_tail=True,
         )
-        for item in report["evidence"]["journals"]
+        for item in entries
     ]
     reconciliation = reconcile_serving_run(
         plan=plan,
-        attempts=attempts,
+        attempts=load_attempt_log(run_dir / "attempts.json"),
         journals=journals,
         retry_budget=config.retry_budget,
         model_sha256=model.model_sha256,
@@ -415,16 +416,71 @@ def journal_a_refused_attempt(run_dir):
 
     def mutate(report):
         report["reconciliation"] = reconciliation
-        report["evidence"]["journals"][-1]["records"] += 1
+        for item in report["evidence"]["journals"]:
+            if item["lifetime_id"] == lifetime_id:
+                item.update(records=item["records"] + 1, torn_tail_bytes=0)
 
-    reseal(run_dir, mutate, refresh=[entry["file"]])
+    reseal(run_dir, mutate, refresh=["attempts.json", entry["file"]])
+
+
+def journal_a_refused_attempt(run_dir):
+    """Credit the replacement with executing an attempt whose connect was refused."""
+
+    attempts = load_attempt_log(run_dir / "attempts.json")
+    refused = next(a for a in attempts if a.outcome == "connection_refused")
+    _, events = load_trace(run_dir / "trace.json")
+    credit_execution(run_dir, refused, events[-1].lifetime_id)
+
+
+def journal_an_attempt_sent_after_the_killed_lifetime_exited(run_dir):
+    """Credit the killed lifetime with an attempt sent after its observed exit.
+
+    The last refusal is relabeled a reset, so it counts as connected; only its
+    start, after the observed exit, shows the killed server never received it.
+    """
+
+    _, events = load_trace(run_dir / "trace.json")
+    fault = next(e for e in events if e.kind == "fault")
+    exited_ns = next(
+        e.monotonic_ns
+        for e in events
+        if e.kind == "exit_observed" and e.lifetime_id == fault.lifetime_id
+    )
+    late = max(
+        (
+            a
+            for a in load_attempt_log(run_dir / "attempts.json")
+            if a.outcome == "connection_refused"
+        ),
+        key=lambda a: a.started_ns,
+    )
+    assert late.started_ns > exited_ns
+
+    def relabel(payload):
+        (item,) = (
+            a
+            for a in payload["attempts"]
+            if (a["idempotency_key"], a["attempt"])
+            == (late.idempotency_key, late.attempt)
+        )
+        item.update(outcome="connection_reset", error="ConnectionResetError")
+
+    edit_json(run_dir / "attempts.json", relabel)
+    credit_execution(run_dir, late, fault.lifetime_id)
 
 
 @pytest.mark.parametrize(
     ("forge", "message"),
     [
-        (start_an_acknowledgement_after_its_server_exited, "after its lifetime"),
+        (
+            start_an_acknowledgement_after_its_server_exited,
+            "acknowledgement started after",
+        ),
         (journal_a_refused_attempt, "never connected"),
+        (
+            journal_an_attempt_sent_after_the_killed_lifetime_exited,
+            "journal executed an attempt sent after",
+        ),
     ],
 )
 def test_verifier_rejects_attempts_the_lifecycle_makes_impossible(

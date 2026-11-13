@@ -194,10 +194,10 @@ host and its load.
 - The report seal and the evidence digests prove content identity, not
   authorship or honest collection. Someone who rewrites the raw evidence
   consistently and reseals it is caught only when a derived value stops
-  matching or the evidence breaks physical order: an acknowledgement that
-  started after its lifetime's exit was observed, or a journal execution of
-  an attempt that never connected (refused, `connect_error` or
-  `connect_timeout`). Retain the run directory and compare it with
-  independent runs.
+  matching or the evidence breaks physical order: an acknowledgement or a
+  journal execution of an attempt that started after the serving lifetime's
+  exit was observed, or a journal execution of an attempt that never
+  connected (refused, `connect_error` or `connect_timeout`). Retain the run
+  directory and compare it with independent runs.
 - The idempotency key identifies and reconciles retries. It does not make the
   server exactly-once.
