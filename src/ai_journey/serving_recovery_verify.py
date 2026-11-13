@@ -259,7 +259,11 @@ def _check_traced_controls(events, config) -> None:
 
 
 def verify_serving_recovery_run(run_dir: Path) -> dict[str, Any]:
-    """Recompute and check every identity, digest and metric of one run."""
+    """Recompute every identity, digest and derived metric of one run.
+
+    The wall-clock run duration has no independent raw record, so it is bounded
+    by the traced lifecycle span and ``max_run_ms`` rather than recomputed.
+    """
 
     if not isinstance(run_dir, Path):
         raise TypeError("run_dir must be pathlib.Path")

@@ -476,10 +476,12 @@ ai-journey-serving-recovery verify \
 ```
 
 Both commands print the same JSON receipt. `verify` recomputes every identity,
-digest and metric from the raw attempts, per-lifetime journals and hash-chained
-trace. Exit code 0 means verified and recovered, 1 rejected evidence, 2 invalid
-input or an incomplete run, and 3 verified but not recovered within the
-declared bounds.
+digest and derived metric from the raw attempts, per-lifetime journals and
+hash-chained trace. The wall-clock run duration has no independent raw record,
+so `verify` only checks that it covers the traced lifecycle and stays within
+`max_run_ms`. Exit code 0 means verified and recovered, 1 rejected evidence,
+2 invalid input or an incomplete run, and 3 verified but not recovered within
+the declared bounds.
 
 Detection, restart, client-observed unavailability, time to SLO recovery and
 nearest-rank p50/p95/p99 latency are real measurements from one monotonic clock

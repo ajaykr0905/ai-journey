@@ -36,6 +36,9 @@ def test_readme_states_operation_measurements_and_evidence_boundary():
         "real measurements from one monotonic clock",
         "declared lab controls, not external targets",
         "127.0.0.1 loopback",
+        "The wall-clock run duration has no independent raw record, so `verify` "
+        "only checks that it covers the traced lifecycle and stays within "
+        "`max_run_ms`",
     ):
         assert phrase in section, phrase
     claim = "not GPU, CUDA, distributed, multi-host or production serving evidence"
