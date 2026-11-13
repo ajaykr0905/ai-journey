@@ -66,9 +66,11 @@ same code `verify` uses.
    `restart_limit` restarts are allowed. If they run out, or the supervisor
    itself fails unexpectedly, it records that failure, clients stop at their
    next attempt, and the run ends at once with that error and exit code 2.
-7. After every request finishes, the replacement is stopped with SIGTERM. The
-   runner reconciles attempts with both lifetimes' journals, measures recovery,
-   chains the lifecycle trace, writes the sealed report and verifies it.
+7. After every request finishes, the ready replacement is stopped with
+   SIGTERM. The runner reconciles attempts with the journal of every spawned
+   lifetime, counting one that never became ready and left no journal as
+   empty, measures recovery, chains the lifecycle trace, writes the sealed
+   report and verifies it.
 
 ## Run directory
 

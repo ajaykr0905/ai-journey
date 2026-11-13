@@ -560,8 +560,10 @@ invalid input or a refused output.
 No GPU, CUDA kernel, cache, or device timing was executed or measured for the
 analytical report, and the CPU timings do not measure or predict GPU, CUDA,
 tensor-core, distributed, or production performance. CI benchmarks
-`config/day-74-memory-access-ci-smoke.json`, the pinned plan with a single
-32^3 shape. See the [memory-access model guide](docs/memory-access-model.md).
+`config/day-74-memory-access-ci-smoke.json`, which equals the pinned plan
+except for its name and a benchmark of one 32^3 case per backend with 1 warmup
+and 3 repeats instead of 2 and 7. See the
+[memory-access model guide](docs/memory-access-model.md).
 
 ## Project 1 release status
 
