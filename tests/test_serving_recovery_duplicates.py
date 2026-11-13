@@ -132,8 +132,10 @@ def test_sigterm_releases_held_responses_before_draining(tmp_path):
         wait_for_commit(tmp_path / "journal-1.jsonl")
         os.killpg(view.pid, signal.SIGTERM)
         worker.join(timeout=10)
+        # The supervisor restarts the exited lifetime, so wait for a stable fact.
         assert owner.wait_until(
-            lambda: owner.observations()[-1].kind == "exit_observed", timeout_ms=5000
+            lambda: any(o.kind == "exit_observed" for o in owner.observations()),
+            timeout_ms=5000,
         )
 
     assert results[0].outcome == "ok"
