@@ -230,6 +230,26 @@ def test_plan_rejects_unknown_missing_and_out_of_contract_fields(change, message
         plan_from_mapping(change(make_plan_mapping()))
 
 
+def test_oversized_sections_are_rejected_before_any_entry_is_analyzed():
+    mapping = make_plan_mapping()
+    invalid = {
+        "name": "invalid",
+        "leading_dimension": 32,
+        "element_bytes": 4,
+        "matrix_size": 0,
+    }
+    mapping["transposes"] = [invalid] * 17
+    with pytest.raises(MemoryAccessError, match="transposes must hold 1 to 16"):
+        plan_from_mapping(mapping)
+    mapping["transposes"] = [invalid]
+    with pytest.raises(MemoryAccessError, match="matrix_size"):
+        plan_from_mapping(mapping)
+    mapping = make_plan_mapping()
+    mapping["patterns"] = [{"name": "bad", "kind": "diagonal"}] * 65
+    with pytest.raises(MemoryAccessError, match="patterns must hold 1 to 64"):
+        plan_from_mapping(mapping)
+
+
 def test_plan_rejects_non_object_payloads():
     for payload in ([], "plan", None):
         with pytest.raises(MemoryAccessError):

@@ -452,9 +452,11 @@ def _plan(payload: object) -> MemoryAccessPlan:
     plan = _fields(payload, _PLAN_FIELDS, "plan")
     if type(plan["schema_version"]) is not int or plan["schema_version"] != 1:
         raise MemoryAccessError("plan schema_version must be 1")
-    for key in ("patterns", "transposes"):
+    for key, maximum in (("patterns", MAX_PATTERNS), ("transposes", MAX_TRANSPOSES)):
         if type(plan[key]) is not list:
             raise MemoryAccessError(f"{key} must be a list")
+        if not 1 <= len(plan[key]) <= maximum:
+            raise MemoryAccessError(f"{key} must hold 1 to {maximum} entries")
     matmul = _fields(plan["matmul"], {"dtype", "shapes", "tiles"}, "matmul")
     if type(matmul["tiles"]) is not list:
         raise MemoryAccessError("matmul tiles must be a list")
