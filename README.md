@@ -460,6 +460,38 @@ remote storage, or claim measured throughput. Change bandwidth, latency,
 topology, dtype, and storage values only when recording a new explicit scenario;
 do not reinterpret the pinned assumptions as observations of local hardware.
 
+## Inject serving failures and measure recovery
+
+Kill a real loopback inference server under bounded client load, restart it,
+and verify what the clients observed. Use a run directory that does not exist
+yet; the runner refuses to reuse one or overwrite evidence:
+
+```bash
+ai-journey-serving-recovery run \
+  --source data/day-19-demo-names.txt \
+  --config config/day-70-serving-recovery.json \
+  --run-dir /tmp/day-70-serving-recovery
+ai-journey-serving-recovery verify \
+  --run-dir /tmp/day-70-serving-recovery
+```
+
+Both commands print the same JSON receipt. `verify` recomputes every identity,
+digest and metric from the raw attempts, per-lifetime journals and hash-chained
+trace. Exit code 0 means verified and recovered, 1 rejected evidence, 2 invalid
+input or an incomplete run, and 3 verified but not recovered within the
+declared bounds.
+
+Detection, restart, client-observed unavailability, time to SLO recovery and
+nearest-rank p50/p95/p99 latency are real measurements from one monotonic clock
+on the host that runs `run`, so they change with that host and its load. The
+SLO, timeout, retry and backoff values are declared lab controls, not external
+targets. Evidence boundary: one CPU host, 127.0.0.1 loopback, and a tiny
+deterministic character-bigram model. This is not GPU, CUDA, distributed,
+multi-host or production serving evidence and makes no model-quality, capacity
+or cost claim. See the
+[serving failure recovery guide](docs/serving-failure-recovery.md) for the run
+directory, metrics, reconciliation and limitations.
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with
@@ -479,9 +511,10 @@ Recorded external cloud and GPU spend for the checked-in CPU fixtures is **₹0*
 Host electricity, engineering time, and employer-provided compute were not
 metered, so total INR cost is unavailable. What went wrong: this environment
 still lacks the required real NVIDIA multi-GPU run, GPU utilization and memory
-measurements, verified vLLM or SGLang deployment, and a distributed or serving
-failure trace. The local recovery measurement is useful process evidence, not a
-GPU, distributed-scale, production-readiness, or model-quality claim.
+measurements, verified vLLM or SGLang deployment, and a distributed or GPU
+serving failure trace. The local recovery measurement is useful process
+evidence, not a GPU, distributed-scale, production-readiness, or model-quality
+claim.
 
 ## Daily map
 

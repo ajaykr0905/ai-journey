@@ -40,6 +40,7 @@
     "tests/test_serving_recovery_cli.py",
     "tests/test_serving_recovery_package.py",
     "tests/test_serving_recovery_readiness.py",
+    "tests/test_serving_recovery_delivery.py",
     "config/day-70-worker-recovery.json",
     "docs/project1-release.md",
     "src/ai_journey/recovery_config.py",
