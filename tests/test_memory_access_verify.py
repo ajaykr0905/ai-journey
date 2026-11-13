@@ -295,3 +295,24 @@ def test_resealed_measurement_drift_is_rejected(change, message):
 
     with pytest.raises(MemoryAccessVerificationError, match=message):
         verify_report(report)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (tamper(("results", 0, "warmup"), lambda v: True), "planned case"),
+        (tamper(("results", 0, "k"), float), "planned case"),
+        (tamper(("results", 0, "timing", "iqr_ns"), lambda v: False), "timing"),
+        (tamper(("results", 1, "flops"), float), "GFLOP/s"),
+        (
+            tamper(("results", 2, "correctness", "checked_results"), float),
+            "rounding bound",
+        ),
+        (tamper(("summary", "cases"), float), "summary"),
+    ],
+)
+def test_measurement_integers_reject_booleans_and_integral_floats(change, message):
+    report = reseal(change(deepcopy(measurement())))
+
+    with pytest.raises(MemoryAccessVerificationError, match=message):
+        verify_report(report)

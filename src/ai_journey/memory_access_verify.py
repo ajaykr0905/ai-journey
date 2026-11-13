@@ -537,6 +537,12 @@ def _benchmark(mapping: object) -> BenchmarkSpec:
     return spec
 
 
+def _exact(actual: object, expected: object) -> bool:
+    """Compare JSON values by canonical bytes, so true, 1 and 1.0 stay distinct."""
+
+    return canonical_json_bytes(actual) == canonical_json_bytes(expected)
+
+
 def _finite(value: object, minimum: float = 0.0) -> bool:
     return type(value) is float and math.isfinite(value) and value >= minimum
 
@@ -578,12 +584,16 @@ def _check_result(result: object, case, spec: BenchmarkSpec) -> None:
     )
     shape = case.shape
     _require(
-        (result["backend"], result["m"], result["n"], result["k"])
-        == (case.backend, shape.m, shape.n, shape.k)
+        _exact(
+            [result["backend"], result["m"], result["n"], result["k"]],
+            [case.backend, shape.m, shape.n, shape.k],
+        )
         and result["device"] == "cpu"
         and result["dtype"] == spec.dtype
-        and (result["warmup"], result["repeats"], result["seed"])
-        == (spec.warmup, spec.repeats, spec.seed),
+        and _exact(
+            [result["warmup"], result["repeats"], result["seed"]],
+            [spec.warmup, spec.repeats, spec.seed],
+        ),
         "measurement result does not match its planned case",
     )
     _require(
@@ -608,12 +618,17 @@ def _check_result(result: object, case, spec: BenchmarkSpec) -> None:
         "max_ns": ordered[-1],
     }
     timing["iqr_ns"] = timing["p75_ns"] - timing["p25_ns"]
-    _require(result["timing"] == timing, "timing statistics do not recompute")
+    _require(_exact(result["timing"], timing), "timing statistics do not recompute")
     flops = 2 * shape.m * shape.n * shape.k
     _require(
-        result["flops"] == flops
-        and result["median_gflops_per_second"] == flops / timing["median_ns"]
-        and result["best_gflops_per_second"] == flops / timing["min_ns"],
+        _exact(
+            [
+                result["flops"],
+                result["median_gflops_per_second"],
+                result["best_gflops_per_second"],
+            ],
+            [flops, flops / timing["median_ns"], flops / timing["min_ns"]],
+        ),
         "FLOP and GFLOP/s accounting does not recompute",
     )
     correctness = result["correctness"]
@@ -630,8 +645,8 @@ def _check_result(result: object, case, spec: BenchmarkSpec) -> None:
         }
         and correctness["reference"] == "float64"
         and correctness["bound"] == "(gamma_K(2**-24) + gamma_K(2**-53)) * (|A| @ |B|)"
-        and correctness["tolerance"] == _tolerance(shape.k)
-        and correctness["checked_results"] == spec.warmup + spec.repeats
+        and _exact(correctness["tolerance"], _tolerance(shape.k))
+        and _exact(correctness["checked_results"], spec.warmup + spec.repeats)
         and _finite(correctness["max_abs_error"])
         and _finite(correctness["max_bound_ratio"])
         and correctness["max_bound_ratio"] <= 1.0,
@@ -689,16 +704,18 @@ def _verify_measurement(
             "backends measured different inputs for one shape",
         )
     _require(
-        report["summary"]
-        == {
-            "cases": len(results),
-            "checked_results": sum(
-                item["correctness"]["checked_results"] for item in results
-            ),
-            "max_bound_ratio": max(
-                item["correctness"]["max_bound_ratio"] for item in results
-            ),
-        },
+        _exact(
+            report["summary"],
+            {
+                "cases": len(results),
+                "checked_results": sum(
+                    item["correctness"]["checked_results"] for item in results
+                ),
+                "max_bound_ratio": max(
+                    item["correctness"]["max_bound_ratio"] for item in results
+                ),
+            },
+        ),
         "measurement summary does not reconcile",
     )
     return {
