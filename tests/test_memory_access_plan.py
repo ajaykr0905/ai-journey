@@ -8,6 +8,7 @@ from ai_journey.memory_access_plan import (
     canonical_json_bytes,
     plan_from_mapping,
 )
+from ai_journey.memory_access_report import build_analysis_report
 from ai_journey.memory_access_tiling import MatmulShape
 
 
@@ -248,6 +249,23 @@ def test_oversized_sections_are_rejected_before_any_entry_is_analyzed():
     mapping["patterns"] = [{"name": "bad", "kind": "diagonal"}] * 65
     with pytest.raises(MemoryAccessError, match="patterns must hold 1 to 64"):
         plan_from_mapping(mapping)
+
+
+@pytest.mark.parametrize(
+    "field", ["peak_flops_per_second", "memory_bandwidth_bytes_per_second"]
+)
+def test_sub_unit_ceilings_are_rejected_so_every_plan_can_be_analyzed(field):
+    tiny = make_plan_mapping()
+    tiny["roofline"][field] = 1e-300
+    with pytest.raises(MemoryAccessError, match=field):
+        plan_from_mapping(tiny)
+
+    edge = make_plan_mapping()
+    edge["roofline"][field] = 1
+    edge["matmul"]["shapes"] = [{"m": 65536, "n": 65536, "k": 65536}]
+    edge["matmul"]["tiles"] = [1, 32]
+    report = build_analysis_report(plan_from_mapping(edge))
+    assert canonical_json_bytes(report)
 
 
 def test_plan_rejects_non_object_payloads():

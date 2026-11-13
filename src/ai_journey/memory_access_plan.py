@@ -45,6 +45,7 @@ MAX_SWEEP_SHAPES = 16
 MAX_BENCHMARK_SHAPES = 8
 MAX_BENCHMARK_FLOPS = 1 << 36
 MAX_SOURCE_TEXT = 600
+MIN_CEILING = 1.0
 MAX_CEILING = 1e30
 
 _NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
@@ -315,10 +316,16 @@ class DeclaredRoofline:
             or len(self.source_note) > MAX_SOURCE_TEXT
         ):
             raise MemoryAccessError("source_note must be canonical nonempty text")
+        # At least 1 per second keeps every roofline time finite for the
+        # largest modeled matmul, so the analytical report always serializes.
         for name in ("peak_flops_per_second", "memory_bandwidth_bytes_per_second"):
             value = getattr(self, name)
-            if type(value) not in (int, float) or not 0 < value <= MAX_CEILING:
-                raise MemoryAccessError(f"{name} must be positive, finite and bounded")
+            if type(value) not in (int, float) or not (
+                MIN_CEILING <= value <= MAX_CEILING
+            ):
+                raise MemoryAccessError(
+                    f"{name} must be positive, finite and in [1, 1e30]"
+                )
 
     @property
     def hardware(self) -> RooflineHardware:
