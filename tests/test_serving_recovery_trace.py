@@ -103,6 +103,7 @@ def test_failed_replacements_and_exhaustion_are_valid_histories():
         (HAPPY[:2] + (step("exit_observed", 1, pid=999),), "another process"),
         (HAPPY[:2] + (step("ready", 2),), "another lifetime"),
         (HAPPY[:2] + (step("fault", 1, signal="SIGTERM"),), "SIGKILL"),
+        (HAPPY[:3] + (step("exit_observed", 1, exit_code=0),), "exit by SIGKILL"),
         (HAPPY[:5] + (step("finished", 2),), "cannot follow spawned"),
     ],
 )

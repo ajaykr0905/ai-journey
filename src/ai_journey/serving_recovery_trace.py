@@ -3,14 +3,15 @@
 Each event binds the canonical digest of the whole preceding trace, as in the
 worker recovery trace. Verification replays a lifecycle state machine: the
 first lifetime is spawned, readiness follows its spawn, the single fault hits a
-ready lifetime, an exit is observed before any restart, a restart names its
-exited parent and the next lifetime number, recovery is declared only on a
-ready post-fault lifetime, and ``finished`` or ``exhausted`` is terminal.
-Payloads have one exact schema per event kind.
+ready lifetime whose observed exit is that SIGKILL, an exit is observed before
+any restart, a restart names its exited parent and the next lifetime number,
+recovery is declared only on a ready post-fault lifetime, and ``finished`` or
+``exhausted`` is terminal. Payloads have one exact schema per event kind.
 """
 
 from __future__ import annotations
 
+import signal
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -166,6 +167,10 @@ class _Lifecycle:
             require_int(payload["acknowledged_responses"], "acknowledged", 1, 255)
             self.fault_lifetime, self.state = event.lifetime_id, "faulted"
         elif event.kind == "exit_observed":
+            if self.state == "faulted" and payload["exit_code"] != -signal.SIGKILL:
+                raise ServingRecoveryError(
+                    "the faulted lifetime did not exit by SIGKILL"
+                )
             self.state = "exited"
         elif event.kind == "recovered":
             if self.fault_lifetime is None or self.recovered:
