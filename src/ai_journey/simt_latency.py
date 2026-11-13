@@ -3,8 +3,11 @@
 Little's law says concurrency = throughput x latency. To sustain a declared
 DRAM bandwidth ``B`` bytes/s at a declared latency of ``L`` SM clock cycles on
 ``S`` SMs clocked at ``f`` Hz, each SM must keep ``B * L / (S * f)`` bytes in
-flight. Latencies here are always declared inputs; nothing is measured, and
-cache hits, coalescing losses, and DRAM efficiency are not modeled.
+flight. The same law sizes arithmetic pipelines: accepting ``R``
+warp-instructions per cycle across a dependent-issue latency of ``L`` cycles
+needs ``R * L`` independent instructions in flight. Latencies here are always
+declared inputs; nothing is measured, and cache hits, coalescing losses, DRAM
+efficiency, and instruction mix are not modeled.
 """
 
 from __future__ import annotations
@@ -13,7 +16,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 import math
 
-from .simt_device import SimtDevice, SimtError, require_int
+from .simt_device import SimtArchitecture, SimtDevice, SimtError, require_int
 
 # CUDA C++ Programming Guide 5.3.2: global memory instructions read or write
 # words of 1, 2, 4, 8, or 16 bytes per thread.
@@ -145,4 +148,98 @@ def memory_latency_hiding(
             Fraction(1), warps * pattern.bytes_per_warp / in_flight
         ),
         dram_bandwidth_bytes_per_second=device.dram_bandwidth_bytes_per_second,
+    )
+
+
+ARITHMETIC_PIPELINES = ("fp32", "issue")
+
+
+@dataclass(frozen=True)
+class ArithmeticLatencyHiding:
+    """Independent warp-instructions an SM needs to hide a dependent latency."""
+
+    compute_capability: str
+    pipeline: str
+    warp_instructions_per_cycle: Fraction
+    latency_cycles: int
+    independent_instructions: int
+    instructions_in_flight: Fraction
+    warps_needed: int
+    max_warps_per_sm: int
+    resident_warps: int
+    sustainable_throughput_fraction: Fraction
+
+    @property
+    def full_throughput_within_warp_limit(self) -> bool:
+        return self.warps_needed <= self.max_warps_per_sm
+
+    def to_mapping(self) -> dict[str, object]:
+        return {
+            "compute_capability": self.compute_capability,
+            "pipeline": self.pipeline,
+            "warp_instructions_per_cycle": float(self.warp_instructions_per_cycle),
+            "latency_cycles": self.latency_cycles,
+            "independent_instructions": self.independent_instructions,
+            "instructions_in_flight": float(self.instructions_in_flight),
+            "warps_needed": self.warps_needed,
+            "max_warps_per_sm": self.max_warps_per_sm,
+            "full_throughput_within_warp_limit": (
+                self.full_throughput_within_warp_limit
+            ),
+            "resident_warps": self.resident_warps,
+            "sustainable_throughput_fraction": float(
+                self.sustainable_throughput_fraction
+            ),
+        }
+
+
+def arithmetic_latency_hiding(
+    architecture: SimtArchitecture,
+    *,
+    pipeline: str,
+    latency_cycles: int,
+    independent_instructions: int,
+    resident_warps: int,
+) -> ArithmeticLatencyHiding:
+    """Apply Little's law to an arithmetic pipeline with a declared latency.
+
+    ``fp32`` accepts ``fp32_lanes_per_sm / warp_size`` warp-instructions per
+    cycle per SM. ``issue`` is the guide's maximum-throughput case of one
+    instruction per warp scheduler per cycle, where hiding ``L`` cycles needs
+    ``4L`` instructions on a four-scheduler SM. Each resident warp contributes
+    ``independent_instructions`` instructions that do not wait on each other.
+    """
+
+    if not isinstance(architecture, SimtArchitecture):
+        raise TypeError("architecture must be SimtArchitecture")
+    if pipeline == "fp32":
+        rate = Fraction(architecture.fp32_lanes_per_sm, architecture.warp_size)
+    elif pipeline == "issue":
+        rate = Fraction(architecture.warp_schedulers_per_sm)
+    else:
+        raise SimtError(f"pipeline must be one of {ARITHMETIC_PIPELINES}")
+    latency = require_int(latency_cycles, "latency_cycles", minimum=1, maximum=10_000)
+    parallelism = require_int(
+        independent_instructions, "independent_instructions", minimum=1, maximum=64
+    )
+    warps = require_int(
+        resident_warps,
+        "resident_warps",
+        minimum=1,
+        maximum=architecture.max_warps_per_sm,
+    )
+    in_flight = rate * latency
+    return ArithmeticLatencyHiding(
+        compute_capability=architecture.compute_capability,
+        pipeline=pipeline,
+        warp_instructions_per_cycle=rate,
+        latency_cycles=latency,
+        independent_instructions=parallelism,
+        instructions_in_flight=in_flight,
+        warps_needed=math.ceil(in_flight / parallelism),
+        max_warps_per_sm=architecture.max_warps_per_sm,
+        resident_warps=warps,
+        sustainable_throughput_fraction=min(
+            Fraction(1), warps * parallelism / in_flight
+        ),
     )

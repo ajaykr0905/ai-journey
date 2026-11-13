@@ -2,8 +2,12 @@ from fractions import Fraction
 
 import pytest
 
-from ai_journey.simt_device import PINNED_DEVICES, SimtError
-from ai_journey.simt_latency import MemoryAccessPattern, memory_latency_hiding
+from ai_journey.simt_device import PINNED_ARCHITECTURES, PINNED_DEVICES, SimtError
+from ai_journey.simt_latency import (
+    MemoryAccessPattern,
+    arithmetic_latency_hiding,
+    memory_latency_hiding,
+)
 
 A100 = PINNED_DEVICES["a100-sxm4-80gb"]
 V100 = PINNED_DEVICES["tesla-v100-sxm2"]
@@ -149,3 +153,75 @@ def test_partial_lanes_reduce_bytes_in_flight_per_warp():
 def test_memory_latency_inputs_are_strict(call, error, message):
     with pytest.raises(error, match=message):
         call()
+
+
+def test_guide_example_needs_sixteen_warps_to_hide_four_cycles():
+    # Guide 5.2.3: on 7.x most arithmetic instructions take about 4 cycles, so
+    # 4 schedulers * 4 cycles = 16 independent instructions must be in flight;
+    # with one per warp that is 16 active warps.
+    result = arithmetic_latency_hiding(
+        PINNED_ARCHITECTURES["7.0"],
+        pipeline="issue",
+        latency_cycles=4,
+        independent_instructions=1,
+        resident_warps=64,
+    )
+
+    assert result.warp_instructions_per_cycle == 4
+    assert result.instructions_in_flight == 16
+    assert result.warps_needed == 16
+    assert result.sustainable_throughput_fraction == 1
+
+
+def test_fp32_pipeline_needs_fewer_warps_and_ilp_divides_the_need():
+    # 64 FP32 lanes / 32 lanes per warp = 2 warp-instructions per cycle, so a
+    # 4-cycle dependency needs 8 instructions in flight: 8 warps at ILP 1,
+    # 4 at ILP 2, ceil(8 / 3) = 3 at ILP 3, and 2 at ILP 4.
+    for architecture in (PINNED_ARCHITECTURES["7.0"], PINNED_ARCHITECTURES["7.5"]):
+        needed = {
+            ilp: arithmetic_latency_hiding(
+                architecture,
+                pipeline="fp32",
+                latency_cycles=4,
+                independent_instructions=ilp,
+                resident_warps=1,
+            ).warps_needed
+            for ilp in (1, 2, 3, 4)
+        }
+        assert needed == {1: 8, 2: 4, 3: 3, 4: 2}
+
+
+def test_too_few_resident_warps_sustain_a_fraction_of_the_pipeline():
+    # 4 resident warps * 1 instruction / 8 needed = 50% of FP32 throughput.
+    half = arithmetic_latency_hiding(
+        PINNED_ARCHITECTURES["7.5"],
+        pipeline="fp32",
+        latency_cycles=4,
+        independent_instructions=1,
+        resident_warps=4,
+    )
+    assert half.sustainable_throughput_fraction == Fraction(1, 2)
+    assert half.to_mapping()["sustainable_throughput_fraction"] == 0.5
+    assert half.full_throughput_within_warp_limit is True
+
+
+@pytest.mark.parametrize(
+    ("changes", "error", "message"),
+    [
+        ({"pipeline": "tensor"}, SimtError, "pipeline must be one of"),
+        ({"latency_cycles": 0}, SimtError, "latency_cycles"),
+        ({"independent_instructions": 0}, SimtError, "independent_instructions"),
+        ({"resident_warps": 33}, SimtError, "between 1 and 32"),
+        ({"resident_warps": 4.0}, TypeError, "resident_warps must be an integer"),
+    ],
+)
+def test_arithmetic_latency_inputs_are_strict(changes, error, message):
+    arguments = {
+        "pipeline": "fp32",
+        "latency_cycles": 4,
+        "independent_instructions": 1,
+        "resident_warps": 8,
+        **changes,
+    }
+    with pytest.raises(error, match=message):
+        arithmetic_latency_hiding(PINNED_ARCHITECTURES["7.5"], **arguments)
