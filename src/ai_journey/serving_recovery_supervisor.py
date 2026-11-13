@@ -6,6 +6,9 @@ process group of a child it spawned and has not reaped, under the same lock
 that polls exit status, so a recycled pid is never signaled. Liveness is the
 child's exit status, polled every probe interval, plus ``GET /health`` probes;
 a live child failing probes for the detection timeout is killed as unresponsive.
+After an observed exit the supervisor waits a doubling backoff and launches a
+replacement lifetime, at most ``restart_limit`` times per run; a replacement
+that fails readiness consumes one restart. Exhaustion is recorded, not hidden.
 """
 
 from __future__ import annotations
@@ -34,7 +37,15 @@ from .serving_recovery_server import (
     parse_handshake,
 )
 
-LIFECYCLE_KINDS = ("spawn", "ready", "unresponsive", "exit_observed", "stopped")
+LIFECYCLE_KINDS = (
+    "spawn",
+    "ready",
+    "unresponsive",
+    "exit_observed",
+    "restart",
+    "exhausted",
+    "stopped",
+)
 CommandFactory = Callable[[int, str], Sequence[str]]
 
 
@@ -49,6 +60,7 @@ class LifecycleObservation:
     pid: int
     port: int | None = None
     exit_code: int | None = None
+    backoff_ms: int | None = None
 
 
 @dataclass(frozen=True)
@@ -139,10 +151,14 @@ class ServingSupervisor:
         self._observations: list[LifecycleObservation] = []
         self._monitor: threading.Thread | None = None
         self._endpoint: str | None = None
+        self._restarts = 0
+        self._failure: ServingRecoveryError | None = None
 
     # Observation and snapshots -------------------------------------------------
 
-    def _observe(self, kind: str, lifetime: _Lifetime) -> LifecycleObservation:
+    def _observe(
+        self, kind: str, lifetime: _Lifetime, *, backoff_ms: int | None = None
+    ) -> LifecycleObservation:
         with self._changed:
             observation = LifecycleObservation(
                 kind,
@@ -152,6 +168,7 @@ class ServingSupervisor:
                 lifetime.process.pid,
                 lifetime.port,
                 lifetime.exit_code,
+                backoff_ms,
             )
             self._observations.append(observation)
             self._changed.notify_all()
@@ -160,6 +177,18 @@ class ServingSupervisor:
     def observations(self) -> tuple[LifecycleObservation, ...]:
         with self._lock:
             return tuple(self._observations)
+
+    @property
+    def restarts_used(self) -> int:
+        with self._lock:
+            return self._restarts
+
+    @property
+    def failure(self) -> ServingRecoveryError | None:
+        """Return the exhaustion error once restarts can no longer recover."""
+
+        with self._lock:
+            return self._failure
 
     def current(self) -> LifetimeView:
         with self._lock:
@@ -313,9 +342,11 @@ class ServingSupervisor:
             timeout_ms=self.config.probe_timeout_ms,
         )
 
-    def _launch(self, number: int, kind: str) -> _Lifetime:
+    def _launch(
+        self, number: int, kind: str, *, backoff_ms: int | None = None
+    ) -> _Lifetime:
         lifetime = self._spawn(number)
-        spawned = self._observe(kind, lifetime)
+        spawned = self._observe(kind, lifetime, backoff_ms=backoff_ms)
         try:
             self._await_ready(lifetime, spawned.monotonic_ns)
         except BaseException:
@@ -344,9 +375,36 @@ class ServingSupervisor:
         return lifetime.view()
 
     def _watch(self) -> None:
+        lifetime: _Lifetime | None = self._lifetimes[-1]
+        while lifetime is not None and not self._stopping.is_set():
+            self._watch_lifetime(lifetime)
+            lifetime = None if self._stopping.is_set() else self._restart()
+
+    def _restart(self) -> _Lifetime | None:
+        """Launch a replacement after backoff until one is ready or none remain."""
+
+        while not self._stopping.is_set():
+            with self._lock:
+                if self._restarts >= self.config.restart_limit:
+                    self._failure = ServingRecoveryError(
+                        f"restart limit of {self.config.restart_limit} exhausted"
+                    )
+                    self._observe("exhausted", self._lifetimes[-1])
+                    return None
+                self._restarts += 1
+                backoff_ms = self.config.restart_delay_ms(self._restarts)
+                number = len(self._lifetimes) + 1
+            if self._stopping.wait(backoff_ms / 1000):
+                return None
+            try:
+                return self._launch(number, "restart", backoff_ms=backoff_ms)
+            except (ServingRecoveryError, OSError, TypeError):
+                continue
+        return None
+
+    def _watch_lifetime(self, lifetime: _Lifetime) -> None:
         interval = self.config.probe_interval_ms / 1000
         detection_ns = self.config.detection_timeout_ms * 1_000_000
-        lifetime = self._lifetimes[-1]
         last_healthy_ns = self._clock_ns()
         while not self._stopping.is_set():
             if self._poll(lifetime) is not None:

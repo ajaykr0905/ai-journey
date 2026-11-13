@@ -14,6 +14,8 @@ from ai_journey.serving_recovery_supervisor import ServingSupervisor, probe_heal
 FIXTURE = Path(__file__).resolve().parents[1] / "data" / "day-19-demo-names.txt"
 MODEL = build_serving_model(FIXTURE.read_bytes())
 RUN = "serving-recovery-test-0123456789abcdef"
+# A long restart backoff that closing interrupts keeps liveness checks isolated.
+NO_RESTART = {"restart_backoff_ms": 5000, "retry_budget": 22}
 
 
 def real_server(tmp_path):
@@ -57,6 +59,10 @@ def kinds(owner):
     return [observation.kind for observation in owner.observations()]
 
 
+def observed(owner, kind):
+    return any(observation.kind == kind for observation in owner.observations())
+
+
 def exited(pid):
     try:
         os.kill(pid, 0)
@@ -87,34 +93,34 @@ def test_supervisor_launches_a_ready_lifetime_and_stops_it_cleanly(tmp_path):
 
 
 def test_exit_status_liveness_observes_a_killed_child(tmp_path):
-    with supervisor(tmp_path) as owner:
+    with supervisor(tmp_path, **NO_RESTART) as owner:
         view = owner.start()
         target, signaled_ns = owner.signal_current(view.lifetime_id, signal.SIGKILL)
         assert target == view
         assert owner.wait_until(
-            lambda: owner.current().exit_code is not None, timeout_ms=5000
+            lambda: observed(owner, "exit_observed"), timeout_ms=5000
         )
         with pytest.raises(ValueError, match="not ready"):
             owner.signal_current(view.lifetime_id, signal.SIGKILL)
 
-    observed = owner.observations()[-1]
-    assert kinds(owner) == ["spawn", "ready", "exit_observed"]
-    assert observed.exit_code == -signal.SIGKILL
-    assert observed.monotonic_ns >= signaled_ns
+    exit_observed = owner.observations()[2]
+    assert kinds(owner)[:3] == ["spawn", "ready", "exit_observed"]
+    assert exit_observed.exit_code == -signal.SIGKILL
+    assert exit_observed.monotonic_ns >= signaled_ns
 
 
 def test_health_probes_kill_a_live_but_unresponsive_child(tmp_path):
-    with supervisor(tmp_path) as owner:
+    with supervisor(tmp_path, **NO_RESTART) as owner:
         view = owner.start()
         _, stopped_ns = owner.signal_current(view.lifetime_id, signal.SIGSTOP)
         assert owner.wait_until(
-            lambda: owner.current().exit_code is not None, timeout_ms=10_000
+            lambda: observed(owner, "exit_observed"), timeout_ms=10_000
         )
 
-    assert kinds(owner) == ["spawn", "ready", "unresponsive", "exit_observed"]
-    unresponsive, observed = owner.observations()[-2:]
+    assert kinds(owner)[:4] == ["spawn", "ready", "unresponsive", "exit_observed"]
+    unresponsive, exit_observed = owner.observations()[2:4]
     assert unresponsive.monotonic_ns > stopped_ns
-    assert observed.exit_code == -signal.SIGKILL
+    assert exit_observed.exit_code == -signal.SIGKILL
 
 
 def closed_port():
