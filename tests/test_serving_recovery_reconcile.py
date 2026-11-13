@@ -68,9 +68,9 @@ def scenario():
             ]
             second.append((6, 2))
         elif index == 7:
-            attempts += [
+            attempts += [attempt(7, 1, "connect_error")] + [
                 attempt(7, number, "connection_refused")
-                for number in range(1, BUDGET + 2)
+                for number in range(2, BUDGET + 2)
             ]
         else:
             lifetime = FIRST if index < 5 else SECOND
@@ -135,7 +135,8 @@ def test_reconciliation_counts_outcomes_duplicates_and_lost_responses():
     assert rows[7].response_sha256 is None
     assert result.attempt_outcomes == {
         "ok": 23,
-        "connection_refused": 1 + 1 + 15,
+        "connection_refused": 1 + 1 + 14,
+        "connect_error": 1,
         "connection_reset": 1,
         "timeout": 0,
         "http_error": 0,

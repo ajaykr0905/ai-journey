@@ -50,9 +50,13 @@ same code `verify` uses.
    from the pid it spawned and then requires an exact `/health` identity.
 4. Up to `concurrency` client threads send requests. Every attempt has a
    whole-request deadline and is classified as `ok`, `connection_refused`,
-   `connection_reset`, `timeout`, `http_error` or `invalid_response`. Failed
-   attempts retry with capped exponential backoff against the currently
-   published endpoint. That endpoint stays stale until a replacement is ready.
+   `connect_error`, `connection_reset`, `timeout`, `http_error` or
+   `invalid_response`. Only a refused connect (ECONNREFUSED) is
+   `connection_refused`. Any other connect failure, such as a local `EMFILE`
+   or `EADDRNOTAVAIL`, is a `connect_error` that records the errno name and
+   says nothing about the server. Failed attempts retry with capped
+   exponential backoff against the currently published endpoint. That
+   endpoint stays stale until a replacement is ready.
 5. When the shared attempt ledger records the K-th acknowledged response, it
    asks the supervisor to SIGKILL its current, ready, live child. This happens
    while the ledger holds its lock, so no later acknowledgement is recorded

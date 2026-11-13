@@ -1,3 +1,5 @@
+import errno
+import os
 import re
 import socket
 import struct
@@ -9,6 +11,7 @@ from pathlib import Path
 import pytest
 from test_serving_recovery_config import valid_config
 
+import ai_journey.serving_recovery_client as serving_recovery_client
 from ai_journey.serving_recovery_client import (
     AttemptRecord,
     attempt_from_mapping,
@@ -198,6 +201,25 @@ def test_refused_connections_are_classified_before_any_exchange():
     assert (record.outcome, record.error) == (
         "connection_refused",
         "ConnectionRefusedError",
+    )
+
+
+@pytest.mark.parametrize(
+    "code",
+    [errno.EMFILE, errno.ENFILE, errno.EADDRNOTAVAIL, errno.ENOBUFS],
+    ids=errno.errorcode.get,
+)
+def test_local_connect_errors_are_not_classified_as_refusals(monkeypatch, code):
+    def fail(address, timeout):
+        raise OSError(code, os.strerror(code))
+
+    monkeypatch.setattr(serving_recovery_client.socket, "create_connection", fail)
+    record = attempt(closed_port())
+    assert (record.outcome, record.error) == ("connect_error", errno.errorcode[code])
+    assert (record.http_status, record.lifetime_id, record.response_sha256) == (
+        None,
+        None,
+        None,
     )
 
 
