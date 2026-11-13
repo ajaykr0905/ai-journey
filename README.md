@@ -460,6 +460,29 @@ remote storage, or claim measured throughput. Change bandwidth, latency,
 topology, dtype, and storage values only when recording a new explicit scenario;
 do not reinterpret the pinned assumptions as observations of local hardware.
 
+## Project 1 release status
+
+The flagship is a decoder-only transformer training and serving lab with
+deterministic checkpoints, public-data GPT-2 interoperability, assistant-only
+SFT, LoRA/full-fine-tune comparisons, HellaSwag and LAMBADA evaluation paths,
+serving admission controls, and verifiable-reward fixtures. Day 70 adds a real
+local CPU worker process kill, measured controller-side detection and recovery,
+restart from a sealed checkpoint, and exact lost/replayed work accounting.
+
+Run `ai-journey-recovery run` with
+`config/day-70-worker-recovery.json`, then use `ai-journey-recovery verify` on the
+result directory. The [Project 1 release guide](docs/project1-release.md) records
+the architecture, evaluation surface, operating steps, claim boundary, and
+remaining failures.
+
+Recorded external cloud and GPU spend for the checked-in CPU fixtures is **₹0**.
+Host electricity, engineering time, and employer-provided compute were not
+metered, so total INR cost is unavailable. What went wrong: this environment
+still lacks the required real NVIDIA multi-GPU run, GPU utilization and memory
+measurements, verified vLLM or SGLang deployment, and a distributed or serving
+failure trace. The local recovery measurement is useful process evidence, not a
+GPU, distributed-scale, production-readiness, or model-quality claim.
+
 ## Daily map
 
 Run the sealed Day 68 public-data SFT comparison with
@@ -526,6 +549,7 @@ failure-injection, recovery, and evidence boundaries.
 | 63 | 2026-11-06 | Held-out likelihood, HellaSwag, and contamination-audited LAMBADA evaluation suite |
 | 68 | 2026-11-11 | Public-data assistant-only SFT, matched pre/post evaluation, checkpoints, and exact replay |
 | 69 | 2026-11-12 | Verifiable reward groups, deterministic failure injection, exact recovery, and sealed replay |
+| 70 | 2026-11-13 | Real local worker kill, measured detection and recovery, exact loss accounting, and Project 1 release boundaries |
 
 ## License
 
