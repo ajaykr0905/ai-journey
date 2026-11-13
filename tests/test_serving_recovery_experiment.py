@@ -2,6 +2,7 @@ import json
 import os
 import signal
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -107,5 +108,37 @@ def test_a_server_that_cannot_start_fails_the_run_without_orphans(
     assert sorted(path.name for path in (tmp_path / "run").iterdir()) == [
         "config.json",
         "lifetime-1.stderr",
+        "source.txt",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("replacement", "message", "stderr_logs"),
+    [
+        # Popen rejects a NUL byte with ValueError, which no restart expects.
+        (("-c", "\0"), "monitor failed: ValueError: embedded null", 1),
+        (("-c", "raise SystemExit(4)"), "restart limit of 2 exhausted", 3),
+    ],
+)
+def test_a_failed_supervisor_ends_the_run_promptly_with_its_error(
+    tmp_path, monkeypatch, replacement, message, stderr_logs
+):
+    real = experiment.server_command
+
+    def command(**options):
+        if options["journal_path"].name == "journal-lifetime-1.jsonl":
+            return real(**options)
+        return (sys.executable, "-I", *replacement)
+
+    monkeypatch.setattr(experiment, "server_command", command)
+    max_run_ms = 20_000
+    started = time.monotonic()
+    with pytest.raises(ValueError, match=message):
+        run(tmp_path, max_run_ms=max_run_ms)
+    assert time.monotonic() - started < max_run_ms / 1000 / 2
+    assert sorted(path.name for path in (tmp_path / "run").iterdir()) == [
+        "config.json",
+        "journal-lifetime-1.jsonl",
+        *(f"lifetime-{number}.stderr" for number in range(1, stderr_logs + 1)),
         "source.txt",
     ]

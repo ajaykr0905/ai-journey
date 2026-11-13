@@ -59,7 +59,9 @@ same code `verify` uses.
    before the kill.
 6. The supervisor observes the exit status, waits the declared restart
    backoff, launches a replacement lifetime and waits for its readiness. At most
-   `restart_limit` restarts are allowed.
+   `restart_limit` restarts are allowed. If they run out, or the supervisor
+   itself fails unexpectedly, it records that failure, clients stop at their
+   next attempt, and the run ends at once with that error and exit code 2.
 7. After every request finishes, the replacement is stopped with SIGTERM. The
    runner reconciles attempts with both lifetimes' journals, measures recovery,
    chains the lifecycle trace, writes the sealed report and verifies it.

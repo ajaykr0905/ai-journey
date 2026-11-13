@@ -8,8 +8,10 @@ child's exit status, polled every probe interval, plus ``GET /health`` probes;
 a live child failing probes for the detection timeout is killed as unresponsive.
 After an observed exit the supervisor waits a doubling backoff and launches a
 replacement lifetime, at most ``restart_limit`` times per run; a replacement
-that fails to spawn or to become ready consumes one restart. Exhaustion is
-recorded, not hidden.
+that fails to spawn or to become ready consumes one restart. Exhaustion, or
+any unexpected error that stops the monitor, is recorded as the supervisor's
+failure, not hidden; ``endpoint`` then raises it so clients stop retrying a
+server that will not come back.
 """
 
 from __future__ import annotations
@@ -186,7 +188,7 @@ class ServingSupervisor:
 
     @property
     def failure(self) -> ServingRecoveryError | None:
-        """Return the exhaustion error once restarts can no longer recover."""
+        """Return the error that ended supervision: exhaustion or a monitor fault."""
 
         with self._lock:
             return self._failure
@@ -198,9 +200,15 @@ class ServingSupervisor:
             return self._lifetimes[-1].view()
 
     def endpoint(self) -> str:
-        """Return the most recently published endpoint, which may be stale."""
+        """Return the most recently published endpoint, which may be stale.
+
+        Once supervision has failed no lifetime will be published again, so the
+        recorded failure is raised instead.
+        """
 
         with self._lock:
+            if self._failure is not None:
+                raise ServingRecoveryError(str(self._failure)) from self._failure
             if self._endpoint is None:
                 raise ServingRecoveryError("no server lifetime has become ready")
             return self._endpoint
@@ -383,10 +391,19 @@ class ServingSupervisor:
         return lifetime.view()
 
     def _watch(self) -> None:
-        lifetime: _Lifetime | None = self._lifetimes[-1]
-        while lifetime is not None and not self._stopping.is_set():
-            self._watch_lifetime(lifetime)
-            lifetime = None if self._stopping.is_set() else self._restart()
+        try:
+            lifetime: _Lifetime | None = self._lifetimes[-1]
+            while lifetime is not None and not self._stopping.is_set():
+                self._watch_lifetime(lifetime)
+                lifetime = None if self._stopping.is_set() else self._restart()
+        except BaseException as exc:  # recorded: the run must fail, not hang
+            failure = ServingRecoveryError(
+                f"supervisor monitor failed: {type(exc).__name__}: {exc}"
+            )
+            failure.__cause__ = exc
+            with self._changed:
+                self._failure = failure
+                self._changed.notify_all()
 
     def _restart(self) -> _Lifetime | None:
         """Launch a replacement after backoff until one is ready or none remain."""
