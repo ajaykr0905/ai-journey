@@ -157,11 +157,12 @@ samples, FLOP and GFLOP/s arithmetic, correctness bounds, and summaries.
 
 ## Verification
 
-`verify` recomputes every analytical number without the model modules: sectors,
-lines, and banks from the bytes each lane touches; transposes and inner loops by
-enumerating lane addresses; tile traffic by clipping each partial block and
-phase; roofline times from the declared ceilings. It then rebuilds the report
-from its embedded plan and requires byte-identical canonical JSON.
+`verify` recomputes every analytical number without the model modules: pattern
+lane addresses from their declared parameters; sectors, lines, and banks from
+the bytes each lane touches; transposes and inner loops by enumerating lane
+addresses; tile traffic by clipping each partial block and phase; roofline
+times from the declared ceilings. It then rebuilds the report from its embedded
+plan and requires byte-identical canonical JSON.
 
 ## Sources
 

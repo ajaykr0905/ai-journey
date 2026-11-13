@@ -1,8 +1,9 @@
 """Independent verification of sealed memory-access reports.
 
 Analytical reports are checked twice. First, every analytical number is
-recomputed here from first principles without the model modules: sectors,
-lines and banks by enumerating the bytes each lane touches, tile traffic by
+recomputed here from first principles without the model modules: each
+pattern's lane addresses from its declared parameters, sectors, lines and
+banks by enumerating the bytes each lane touches, tile traffic by
 clipping every partial block and phase, and roofline times from the declared
 ceilings. Second, the whole report is rebuilt from its embedded plan and must
 match byte for byte, which also pins names, sources and exclusions.
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import math
 import re
+from hashlib import sha256
 
 from .memory_access_benchmark import PERCENTILE_METHOD, TIMER
 from .memory_access_pattern import MemoryAccessError
@@ -127,6 +129,56 @@ def _ceil_div(numerator: int, denominator: int) -> int:
     return -(-numerator // denominator)
 
 
+def _permutation(seed: int) -> list[int]:
+    """Re-derive the SHA-256 counter Fisher-Yates order of one warp's lanes."""
+
+    order = list(range(_LANES))
+    for index in range(_LANES - 1, 0, -1):
+        bound = index + 1
+        attempt = 0
+        while True:
+            label = f"ai-journey-memory-access-permutation:{seed}:{index}:{attempt}"
+            value = int.from_bytes(sha256(label.encode()).digest()[:8], "big")
+            if value < 2**64 - 2**64 % bound:
+                break
+            attempt += 1
+        other = value % bound
+        order[index], order[other] = order[other], order[index]
+    return order
+
+
+def _declared_lanes(kind: str, values: dict[str, int]) -> list[int | None]:
+    """Recompute one pattern's per-lane byte addresses from its parameters."""
+
+    width = values["access_bytes"]
+    base = values.get("base_bytes", 0)
+    if kind == "broadcast":
+        lanes = [values["address_bytes"]] * _LANES
+    elif kind == "permutation":
+        lanes = [base + element * width for element in _permutation(values["seed"])]
+    elif kind == "row":
+        first = values.get("start_column", 0)
+        lanes = [
+            base + (values["row"] * values["leading_dimension"] + column) * width
+            if column < values["columns"]
+            else None
+            for column in range(first, first + _LANES)
+        ]
+    elif kind == "column":
+        first = values.get("start_row", 0)
+        lanes = [
+            base + (row * values["leading_dimension"] + values["column"]) * width
+            if row < values["rows"]
+            else None
+            for row in range(first, first + _LANES)
+        ]
+    else:
+        stride = values.get("stride_elements", 1)
+        lanes = [base + lane * stride * width for lane in range(_LANES)]
+    mask = values.get("active_mask", (1 << _LANES) - 1)
+    return [address if mask >> lane & 1 else None for lane, address in enumerate(lanes)]
+
+
 def _global_metrics(lane_addresses: list, width: int) -> dict[str, object]:
     active = [address for address in lane_addresses if address is not None]
     touched = {byte for address in active for byte in range(address, address + width)}
@@ -220,6 +272,17 @@ def _check_patterns(report: dict[str, object], plan: MemoryAccessPlan) -> None:
         _require(
             entry["shared_memory"] == expected_shared,
             f"pattern {entry['name']} bank accounting does not recompute",
+        )
+
+
+def _check_lanes(report: dict[str, object], plan: MemoryAccessPlan) -> None:
+    """Catch a generator bug that the rebuilt report would faithfully repeat."""
+
+    for entry, spec in zip(report["patterns"], plan.patterns, strict=True):
+        _require(
+            entry["access"]["lane_addresses"]
+            == _declared_lanes(spec.kind, dict(spec.parameters)),
+            f"pattern {spec.name} lane addresses do not follow its declared parameters",
         )
 
 
@@ -499,6 +562,7 @@ def _verify_analysis(
         canonical_json_bytes(report) == canonical_json_bytes(expected),
         "analytical report does not match its rebuilt plan",
     )
+    _check_lanes(report, embedded)
     return {
         "kind": ANALYSIS_KIND,
         "report_sha256": report[DIGEST_FIELD],

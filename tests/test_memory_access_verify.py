@@ -2,11 +2,12 @@ from copy import deepcopy
 
 import pytest
 
+import ai_journey.memory_access_plan as plan_module
 import ai_journey.memory_access_report as report_module
 from ai_journey.memory_access_banks import analyze_banks
 from ai_journey.memory_access_baseline import cpu_environment
 from ai_journey.memory_access_coalescing import CoalescingAnalysis, analyze_coalescing
-from ai_journey.memory_access_pattern import broadcast_access
+from ai_journey.memory_access_pattern import WarpAccess, broadcast_access
 from ai_journey.memory_access_plan import plan_from_mapping
 from ai_journey.memory_access_report import (
     build_analysis_report,
@@ -204,6 +205,37 @@ def test_first_principles_checks_catch_a_model_bug_that_rebuilding_would_repeat(
     report = seal_report(build_analysis_report(make_plan()))
 
     with pytest.raises(MemoryAccessVerificationError, match="global accounting"):
+        verify_report(report)
+
+
+@pytest.mark.parametrize(
+    "generator",
+    [
+        "contiguous_access",
+        "strided_access",
+        "broadcast_access",
+        "permuted_access",
+        "row_access",
+        "column_access",
+    ],
+)
+def test_first_principles_checks_catch_a_lane_generator_bug(monkeypatch, generator):
+    real = getattr(plan_module, generator)
+
+    def shifted(*args, **kwargs):
+        access = real(*args, **kwargs)
+        return WarpAccess(
+            access.access_bytes,
+            tuple(
+                None if address is None else address + access.access_bytes
+                for address in access.lane_addresses
+            ),
+        )
+
+    monkeypatch.setattr(plan_module, generator, shifted)
+    report = seal_report(build_analysis_report(make_plan()))
+
+    with pytest.raises(MemoryAccessVerificationError, match="declared parameters"):
         verify_report(report)
 
 
