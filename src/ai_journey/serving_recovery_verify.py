@@ -157,6 +157,28 @@ def _journals(run_dir, report, events, capacity):
     return tuple(journals)
 
 
+def _check_attempt_timeline(attempts, events) -> None:
+    """Bind every attempt to a published port inside the traced lifecycle."""
+
+    ports = {e.lifetime_id: e.payload["port"] for e in events if e.kind == "ready"}
+    _require(bool(attempts) and bool(ports), "run has no attempts or readiness")
+    for attempt in attempts:
+        _require(
+            attempt.port in ports.values(),
+            "an attempt used a port no lifetime published",
+        )
+        _require(
+            attempt.outcome != "ok" or ports.get(attempt.lifetime_id) == attempt.port,
+            "an acknowledgement names a lifetime that did not own its port",
+        )
+    first_ready = next(e.monotonic_ns for e in events if e.kind == "ready")
+    _require(
+        first_ready <= min(a.started_ns for a in attempts)
+        and max(a.finished_ns for a in attempts) <= events[-1].monotonic_ns,
+        "attempts fall outside the traced server lifecycle",
+    )
+
+
 def _fault_boundaries(events, attempts, config):
     faults = [e for e in events if e.kind == "fault"]
     _require(len(faults) == 1, "trace must contain exactly one fault")
@@ -273,6 +295,7 @@ def verify_serving_recovery_run(run_dir: Path) -> dict[str, Any]:
         "lifetime identities do not recompute",
     )
     journals = _journals(run_dir, report, events, journal_capacity(config))
+    _check_attempt_timeline(attempts, events)
 
     expected = {
         p.idempotency_key: sha256_hex(completion_body(model, p.request)) for p in plan

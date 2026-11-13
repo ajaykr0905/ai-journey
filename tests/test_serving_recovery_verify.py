@@ -77,6 +77,10 @@ def stretch_first_ok(payload):
     first["finished_ns"] += 1
 
 
+def move_first_port(payload):
+    payload["attempts"][0]["port"] = 1
+
+
 def advance_first_failure(run_dir):
     """Move the first post-kill failure 1 ns earlier, shifting unavailability."""
 
@@ -151,6 +155,13 @@ def reroute_response(payload):
         (
             lambda d: edit_json(d / "attempts.json", stretch_first_ok),
             "attempt log digest",
+        ),
+        (
+            lambda d: (
+                edit_json(d / "attempts.json", move_first_port),
+                reseal(d, refresh=["attempts.json"]),
+            ),
+            "port",
         ),
         (lambda d: (d / "source.txt").write_bytes(b"zara\n"), "source"),
         (
