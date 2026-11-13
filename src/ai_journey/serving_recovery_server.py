@@ -329,6 +329,13 @@ class _GenerationHandler(BaseHTTPRequestHandler):
         return key, attempt_number, request
 
 
+def _startup_failure(exc: BaseException) -> int:
+    # OS errors can embed absolute paths; logs keep only the error class.
+    detail = type(exc).__name__ if isinstance(exc, OSError) else str(exc)
+    sys.stderr.write(f"serving recovery server: {detail}\n")
+    return 2
+
+
 def _publish_handshake(handshake: ServerHandshake) -> None:
     line = memoryview(handshake.to_line())
     while line:
@@ -372,8 +379,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_records=arguments.max_records,
         )
     except (OSError, ServingRecoveryError, TypeError) as exc:
-        sys.stderr.write(f"serving recovery server: {exc}\n")
-        return 2
+        return _startup_failure(exc)
     try:
         server = RecoveryHTTPServer(
             model=model,
@@ -383,8 +389,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     except (OSError, ServingRecoveryError, TypeError) as exc:
         journal.close()
-        sys.stderr.write(f"serving recovery server: {exc}\n")
-        return 2
+        return _startup_failure(exc)
 
     def stop(signum: int, frame: object) -> None:
         threading.Thread(target=server.shutdown, daemon=True).start()
