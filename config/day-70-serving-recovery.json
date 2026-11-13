@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "experiment_name": "day-70-serving-recovery",
+  "seed": 70,
+  "requests": 48,
+  "concurrency": 2,
+  "max_new_tokens": 12,
+  "fault_after_acknowledged": 16,
+  "probe_interval_ms": 10,
+  "probe_timeout_ms": 250,
+  "detection_timeout_ms": 1000,
+  "readiness_timeout_ms": 3000,
+  "restart_limit": 2,
+  "restart_backoff_ms": 50,
+  "request_deadline_ms": 1000,
+  "retry_budget": 14,
+  "retry_backoff_ms": 10,
+  "max_retry_backoff_ms": 500,
+  "slo_latency_ms": 250,
+  "slo_consecutive_successes": 8,
+  "max_run_ms": 60000,
+  "shutdown_timeout_ms": 2000
+}
