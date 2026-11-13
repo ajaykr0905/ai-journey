@@ -223,6 +223,37 @@ def test_local_connect_errors_are_not_classified_as_refusals(monkeypatch, code):
     )
 
 
+@pytest.mark.parametrize(
+    ("outcome", "error", "connected"),
+    [
+        ("connection_refused", "ConnectionRefusedError", False),
+        ("connect_error", "EMFILE", False),
+        ("timeout", "connect_timeout", False),
+        ("timeout", "receive_timeout", True),
+        ("timeout", "deadline_elapsed", True),
+        ("connection_reset", "closed_before_response", True),
+        ("invalid_response", "response_body", True),
+    ],
+)
+def test_only_attempts_whose_connect_succeeded_count_as_connected(
+    outcome, error, connected
+):
+    record = AttemptRecord(
+        request_index=0,
+        idempotency_key=PLAN[0].idempotency_key,
+        attempt=1,
+        port=8080,
+        started_ns=0,
+        finished_ns=1,
+        outcome=outcome,
+        error=error,
+        http_status=None,
+        lifetime_id=None,
+        response_sha256=None,
+    )
+    assert record.connected is connected
+
+
 def test_attempt_records_round_trip_and_reject_incoherent_evidence(tmp_path):
     with live_server(tmp_path) as port:
         record = attempt(port)

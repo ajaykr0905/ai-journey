@@ -144,6 +144,15 @@ class AttemptRecord:
     def latency_ns(self) -> int:
         return self.finished_ns - self.started_ns
 
+    @property
+    def connected(self) -> bool:
+        """False when the connect itself failed, so no server could run it."""
+
+        return self.outcome not in ("connection_refused", "connect_error") and (
+            self.outcome,
+            self.error,
+        ) != ("timeout", "connect_timeout")
+
     def to_mapping(self) -> dict[str, Any]:
         return {field.name: getattr(self, field.name) for field in fields(self)}
 

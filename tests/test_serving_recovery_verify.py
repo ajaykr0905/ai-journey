@@ -7,11 +7,22 @@ import pytest
 from test_serving_recovery_experiment import FIXTURE, experiment_config
 
 import ai_journey.serving_recovery_experiment as experiment
+from ai_journey.serving_recovery_client import plan_requests
 from ai_journey.serving_recovery_config import canonical_json_bytes
-from ai_journey.serving_recovery_experiment import run_serving_recovery_experiment
+from ai_journey.serving_recovery_experiment import (
+    journal_capacity,
+    run_serving_recovery_experiment,
+)
+from ai_journey.serving_recovery_identity import serving_run_id
+from ai_journey.serving_recovery_io import load_attempt_log, load_trace
+from ai_journey.serving_recovery_journal import ExecutionRecord, read_execution_journal
+from ai_journey.serving_recovery_metrics import measure_serving_recovery
+from ai_journey.serving_recovery_model import build_serving_model, completion_body
+from ai_journey.serving_recovery_reconcile import reconcile_serving_run
 from ai_journey.serving_recovery_report import (
     build_serving_report,
     seal_serving_report,
+    summary_milliseconds,
     write_serving_report,
 )
 from ai_journey.serving_recovery_trace import ServingLifecycleEvent, chain_serving_trace
@@ -305,5 +316,121 @@ def test_verifier_binds_the_traced_lifecycle_to_the_controls(
 ):
     run_dir = copy_run(sealed_run, tmp_path)
     rechain(run_dir, mutate)
+    with pytest.raises(ValueError, match=message):
+        verify_serving_recovery_run(run_dir)
+
+
+def retime(run_dir):
+    """Recompute the timing section from edited attempts, as a forger would."""
+
+    config = experiment_config()
+    _, events = load_trace(run_dir / "trace.json")
+    fault = next(e for e in events if e.kind == "fault")
+    exit_event = next(
+        e
+        for e in events
+        if e.kind == "exit_observed" and e.lifetime_id == fault.lifetime_id
+    )
+    ready = next(e for e in events if e.kind == "ready" and e.sequence > fault.sequence)
+    timing = measure_serving_recovery(
+        attempts=load_attempt_log(run_dir / "attempts.json"),
+        fault_injected_ns=fault.monotonic_ns,
+        faulted_lifetime_id=fault.lifetime_id,
+        exit_observed_ns=exit_event.monotonic_ns,
+        replacement_lifetime_id=ready.lifetime_id,
+        replacement_ready_ns=ready.monotonic_ns,
+        slo_latency_ms=config.slo_latency_ms,
+        slo_consecutive_successes=config.slo_consecutive_successes,
+    ).to_mapping()
+    reseal(
+        run_dir,
+        lambda report: report.update(
+            timing=timing, summary_ms=summary_milliseconds(timing)
+        ),
+        refresh=["attempts.json"],
+    )
+
+
+def start_an_acknowledgement_after_its_server_exited(run_dir):
+    """Move a pre-fault ack to start after its killed lifetime's exit."""
+
+    _, events = load_trace(run_dir / "trace.json")
+    fault = next(e for e in events if e.kind == "fault")
+    recovered = next(e for e in events if e.kind == "recovered")
+    # After the SLO run and before the final stop, so no other check notices.
+    assert recovered.monotonic_ns + 2 < events[-1].monotonic_ns
+
+    def mutate(payload):
+        first = next(a for a in payload["attempts"] if a["outcome"] == "ok")
+        assert first["lifetime_id"] == fault.lifetime_id
+        first["started_ns"] = recovered.monotonic_ns + 1
+        first["finished_ns"] = recovered.monotonic_ns + 2
+
+    edit_json(run_dir / "attempts.json", mutate)
+    retime(run_dir)
+
+
+def journal_a_refused_attempt(run_dir):
+    """Credit the replacement with executing an attempt whose connect was refused."""
+
+    config = experiment_config()
+    model = build_serving_model(FIXTURE.read_bytes())
+    plan = plan_requests(
+        config,
+        run_id=serving_run_id(config, model_sha256=model.model_sha256),
+        model=model,
+    )
+    attempts = load_attempt_log(run_dir / "attempts.json")
+    refused = next(a for a in attempts if a.outcome == "connection_refused")
+    planned = plan[refused.request_index]
+    report = json.loads((run_dir / "report.json").read_bytes())
+    entry = report["evidence"]["journals"][-1]
+    record = ExecutionRecord(
+        lifetime_id=entry["lifetime_id"],
+        sequence=entry["records"],
+        idempotency_key=refused.idempotency_key,
+        attempt=refused.attempt,
+        request_sha256=planned.request.request_sha256(),
+        response_sha256=sha256(completion_body(model, planned.request)).hexdigest(),
+        model_sha256=model.model_sha256,
+    )
+    with (run_dir / entry["file"]).open("ab") as stream:
+        stream.write(canonical_json_bytes(record.to_mapping()) + b"\n")
+    journals = [
+        read_execution_journal(
+            run_dir / item["file"],
+            lifetime_id=item["lifetime_id"],
+            max_records=journal_capacity(config),
+            allow_torn_tail=item is not entry,
+        )
+        for item in report["evidence"]["journals"]
+    ]
+    reconciliation = reconcile_serving_run(
+        plan=plan,
+        attempts=attempts,
+        journals=journals,
+        retry_budget=config.retry_budget,
+        model_sha256=model.model_sha256,
+    ).to_mapping()
+
+    def mutate(report):
+        report["reconciliation"] = reconciliation
+        report["evidence"]["journals"][-1]["records"] += 1
+
+    reseal(run_dir, mutate, refresh=[entry["file"]])
+
+
+@pytest.mark.parametrize(
+    ("forge", "message"),
+    [
+        (start_an_acknowledgement_after_its_server_exited, "after its lifetime"),
+        (journal_a_refused_attempt, "never connected"),
+    ],
+)
+def test_verifier_rejects_attempts_the_lifecycle_makes_impossible(
+    sealed_run, tmp_path, forge, message
+):
+    run_dir = copy_run(sealed_run, tmp_path)
+    forge(run_dir)
     with pytest.raises(ValueError, match=message):
         verify_serving_recovery_run(run_dir)

@@ -6,7 +6,9 @@ plan from the config, checks every evidence file digest, replays the chained
 lifecycle trace against the declared restart and SLO controls, re-reads every
 lifetime's journal, recomputes each expected response body, then recomputes
 reconciliation and every timing metric and requires the sealed report to match
-them exactly.
+them exactly. Evidence that the lifecycle makes impossible is rejected too: an
+acknowledgement that started after its lifetime's exit was observed, or a
+journal execution of an attempt that never connected.
 """
 
 from __future__ import annotations
@@ -178,6 +180,11 @@ def _check_attempt_timeline(attempts, events) -> None:
     """Bind every attempt to a published port inside the traced lifecycle."""
 
     ports = {e.lifetime_id: e.payload["port"] for e in events if e.kind == "ready"}
+    ends = {
+        e.lifetime_id: e.monotonic_ns
+        for e in events
+        if e.kind in ("exit_observed", "finished")
+    }
     _require(bool(attempts) and bool(ports), "run has no attempts or readiness")
     for attempt in attempts:
         _require(
@@ -187,6 +194,12 @@ def _check_attempt_timeline(attempts, events) -> None:
         _require(
             attempt.outcome != "ok" or ports.get(attempt.lifetime_id) == attempt.port,
             "an acknowledgement names a lifetime that did not own its port",
+        )
+        # A dead server cannot answer a connection opened after it exited.
+        _require(
+            attempt.outcome != "ok"
+            or attempt.started_ns <= ends.get(attempt.lifetime_id, -1),
+            "an acknowledgement started after its lifetime's exit was observed",
         )
     first_ready = next(e.monotonic_ns for e in events if e.kind == "ready")
     _require(
@@ -357,11 +370,16 @@ def verify_serving_recovery_run(run_dir: Path) -> dict[str, Any]:
             or attempt.response_sha256 == expected.get(attempt.idempotency_key),
             "an acknowledged response differs from the recomputed output",
         )
+    connected = {(a.idempotency_key, a.attempt): a.connected for a in attempts}
     for journal in journals:
         for record in journal.records:
             _require(
                 record.response_sha256 == expected.get(record.idempotency_key),
                 "an executed response differs from the recomputed output",
+            )
+            _require(
+                connected.get((record.idempotency_key, record.attempt), True),
+                "a journal executed an attempt that never connected",
             )
 
     reconciliation = reconcile_serving_run(
