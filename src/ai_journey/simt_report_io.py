@@ -16,7 +16,14 @@ MAX_SIMT_REPORT_BYTES = 1024 * 1024
 
 
 def _aliases(first: Path, second: Path) -> bool:
-    if first.resolve() == second.resolve():
+    try:
+        same_target = first.resolve() == second.resolve()
+    except (OSError, RuntimeError) as error:
+        # Python 3.11 raises RuntimeError when a path is a symlink loop.
+        raise SimtError(
+            "SIMT report paths must resolve without a symlink loop"
+        ) from error
+    if same_target:
         return True
     try:
         return first.exists() and second.exists() and first.samefile(second)
@@ -41,8 +48,10 @@ def save_simt_report(
     protected input such as the plan the report was built from.
     """
 
-    if not isinstance(path, Path) or path.name in ("", ".", ".."):
-        raise TypeError("SIMT report path must be a pathlib.Path naming a file")
+    if not isinstance(path, Path):
+        raise TypeError("SIMT report path must be pathlib.Path")
+    if path.name in ("", ".", ".."):
+        raise SimtError("SIMT report path must name a file")
     if any(not isinstance(item, Path) for item in protected):
         raise TypeError("protected inputs must be pathlib.Path values")
     verify_simt_report(report)

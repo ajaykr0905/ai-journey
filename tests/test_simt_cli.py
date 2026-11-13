@@ -43,6 +43,20 @@ def test_build_refuses_to_overwrite_its_own_plan(tmp_path: Path, capsys):
     assert config.read_bytes() == before
 
 
+def test_unusable_output_paths_return_the_invalid_exit_code(tmp_path: Path, capsys):
+    # "." and ".." name no file, and Path.resolve() raises RuntimeError on a
+    # symlink loop in Python 3.11; each must fail like any other bad path.
+    config = write_plan(tmp_path / "plan.json")
+    loop = tmp_path / "loop"
+    loop.symlink_to("loop")
+
+    for output in (".", str(tmp_path / ".."), str(loop), str(loop / "report.json")):
+        code = main(["build", "--config", str(config), "--output", output])
+        assert code == EXIT_INVALID, output
+        assert "ai-journey-simt build failed" in capsys.readouterr().err
+    assert sorted(item.name for item in tmp_path.iterdir()) == ["loop", "plan.json"]
+
+
 def test_invalid_plans_and_reports_return_the_invalid_exit_code(tmp_path: Path, capsys):
     config = tmp_path / "plan.json"
     config.write_bytes(b'{"name":"a","name":"b"}')
