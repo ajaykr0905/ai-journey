@@ -1,10 +1,12 @@
 import json
 import shutil
+import sys
 from hashlib import sha256
 
 import pytest
 from test_serving_recovery_experiment import FIXTURE, experiment_config
 
+import ai_journey.serving_recovery_experiment as experiment
 from ai_journey.serving_recovery_config import canonical_json_bytes
 from ai_journey.serving_recovery_experiment import run_serving_recovery_experiment
 from ai_journey.serving_recovery_report import (
@@ -180,4 +182,69 @@ def test_verifier_rejects_forged_or_tampered_evidence(
     run_dir = copy_run(sealed_run, tmp_path)
     tamper(run_dir)
     with pytest.raises(ValueError, match=message):
+        verify_serving_recovery_run(run_dir)
+
+
+def as_float(section, name):
+    return lambda report: report[section].update({name: float(report[section][name])})
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda r: r["reconciliation"]["totals"].update(failed=False),
+            "reconciliation",
+        ),
+        (as_float("timing", "detection_latency_ns"), "timing"),
+        (as_float("fault", "acknowledged_responses"), "fault"),
+        (as_float("experiment", "source_bytes"), "source"),
+        (lambda r: r["slo"].update(recovered=1), "SLO"),
+        (lambda r: r["experiment"]["config"].update(seed=70.0), "config"),
+        (
+            lambda r: r["evidence"]["journals"][0].update(torn_tail_bytes=False),
+            "journal counts",
+        ),
+    ],
+)
+def test_verifier_rejects_report_values_that_only_compare_equal(
+    sealed_run, tmp_path, mutate, message
+):
+    run_dir = copy_run(sealed_run, tmp_path)
+    reseal(run_dir, mutate)
+    with pytest.raises(ValueError, match=message):
+        verify_serving_recovery_run(run_dir)
+
+
+def test_verifier_binds_the_entry_of_a_lifetime_that_never_journaled(
+    tmp_path, monkeypatch
+):
+    real = experiment.server_command
+
+    def command(**options):
+        if options["journal_path"].name == "journal-lifetime-2.jsonl":
+            return (sys.executable, "-I", "-c", "raise SystemExit(4)")
+        return real(**options)
+
+    monkeypatch.setattr(experiment, "server_command", command)
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(experiment_config().to_mapping()))
+    run_dir = tmp_path / "run"
+    result = run_serving_recovery_experiment(
+        source_path=FIXTURE, config_path=config, run_dir=run_dir
+    )
+    write_serving_report(
+        run_dir / "report.json", build_serving_report(result, run_dir=run_dir)
+    )
+    assert [event.kind for event in result.events][4:8] == [
+        "restart",
+        "exit_observed",
+        "restart",
+        "ready",
+    ]
+    assert not (run_dir / "journal-lifetime-2.jsonl").exists()
+    assert verify_serving_recovery_run(run_dir)["verified"] is True
+
+    reseal(run_dir, lambda r: r["evidence"]["journals"][1].update(records=3))
+    with pytest.raises(ValueError, match="missing journal"):
         verify_serving_recovery_run(run_dir)

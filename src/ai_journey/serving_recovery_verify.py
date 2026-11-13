@@ -16,6 +16,7 @@ from typing import Any
 from .serving_recovery_client import plan_requests
 from .serving_recovery_config import (
     ServingRecoveryError,
+    canonical_json_bytes,
     load_serving_recovery_config,
     read_bounded_file,
     sha256_hex,
@@ -109,6 +110,12 @@ def _require(condition: bool, message: str) -> None:
         raise ServingRecoveryError(message)
 
 
+def _same(stored: object, recomputed: object) -> bool:
+    """Compare JSON values by canonical bytes, so true, 1 and 1.0 differ."""
+
+    return canonical_json_bytes(stored) == canonical_json_bytes(recomputed)
+
+
 def _file_digest(run_dir: Path, name: str, max_bytes: int) -> str:
     return sha256_hex(read_bounded_file(run_dir / name, max_bytes=max_bytes, name=name))
 
@@ -134,7 +141,14 @@ def _journals(run_dir, report, events, capacity):
         )
         if not (run_dir / name).exists():
             _require(not ready, "a ready lifetime is missing its journal")
-            _require(entry["file"] is None, "report names a missing journal")
+            missing = {
+                "lifetime_id": lifetime_id,
+                "file": None,
+                "file_sha256": None,
+                "records": 0,
+                "torn_tail_bytes": 0,
+            }
+            _require(_same(entry, missing), "report misstates a missing journal")
             journals.append(JournalContents(lifetime_id, (), 0))
             continue
         _require(entry["file"] == name, "report journal file name differs")
@@ -149,8 +163,10 @@ def _journals(run_dir, report, events, capacity):
             allow_torn_tail=not clean,
         )
         _require(
-            (entry["records"], entry["torn_tail_bytes"])
-            == (len(journal.records), journal.torn_tail_bytes),
+            _same(
+                (entry["records"], entry["torn_tail_bytes"]),
+                (len(journal.records), journal.torn_tail_bytes),
+            ),
             "report journal counts do not match the journal",
         )
         journals.append(journal)
@@ -253,7 +269,7 @@ def verify_serving_recovery_run(run_dir: Path) -> dict[str, Any]:
     )
 
     config = load_serving_recovery_config(run_dir / CONFIG_FILE)
-    _require(experiment["config"] == config.to_mapping(), "config differs")
+    _require(_same(experiment["config"], config.to_mapping()), "config differs")
     _require(experiment["config_sha256"] == config.fingerprint(), "config digest")
     _require(
         evidence["config_file_sha256"] == _file_digest(run_dir, CONFIG_FILE, 16 * 1024),
@@ -263,8 +279,10 @@ def verify_serving_recovery_run(run_dir: Path) -> dict[str, Any]:
         run_dir / SOURCE_FILE, max_bytes=MAX_SOURCE_BYTES, name="source"
     )
     _require(
-        (experiment["source_bytes"], experiment["source_sha256"])
-        == (len(source), sha256_hex(source)),
+        _same(
+            (experiment["source_bytes"], experiment["source_sha256"]),
+            (len(source), sha256_hex(source)),
+        ),
         "source copy does not match the report",
     )
     model = build_serving_model(source)
@@ -321,19 +339,21 @@ def verify_serving_recovery_run(run_dir: Path) -> dict[str, Any]:
         model_sha256=model.model_sha256,
     )
     _require(
-        report["reconciliation"] == reconciliation.to_mapping(),
+        _same(report["reconciliation"], reconciliation.to_mapping()),
         "reconciliation does not match the raw evidence",
     )
     fault, exit_event, ready_event = _fault_boundaries(events, attempts, config)
     _require(
-        report["fault"]
-        == {
-            "mechanism": "process_kill",
-            "signal": fault.payload["signal"],
-            "lifetime_id": fault.lifetime_id,
-            "acknowledged_responses": fault.payload["acknowledged_responses"],
-            "injected_ns": fault.monotonic_ns,
-        },
+        _same(
+            report["fault"],
+            {
+                "mechanism": "process_kill",
+                "signal": fault.payload["signal"],
+                "lifetime_id": fault.lifetime_id,
+                "acknowledged_responses": fault.payload["acknowledged_responses"],
+                "injected_ns": fault.monotonic_ns,
+            },
+        ),
         "fault section does not match the trace",
     )
     timing = measure_serving_recovery(
@@ -346,9 +366,9 @@ def verify_serving_recovery_run(run_dir: Path) -> dict[str, Any]:
         slo_latency_ms=config.slo_latency_ms,
         slo_consecutive_successes=config.slo_consecutive_successes,
     ).to_mapping()
-    _require(report["timing"] == timing, "timing does not match the raw evidence")
+    _require(_same(report["timing"], timing), "timing does not match the raw evidence")
     _require(
-        report["summary_ms"] == summary_milliseconds(timing),
+        _same(report["summary_ms"], summary_milliseconds(timing)),
         "millisecond summary does not match the timing",
     )
     recovered_events = [e for e in events if e.kind == "recovered"]
@@ -359,12 +379,14 @@ def verify_serving_recovery_run(run_dir: Path) -> dict[str, Any]:
         "trace recovery does not match the measured SLO recovery",
     )
     _require(
-        report["slo"]
-        == {
-            "latency_ms": config.slo_latency_ms,
-            "consecutive_successes": config.slo_consecutive_successes,
-            "recovered": slo_recovered,
-        },
+        _same(
+            report["slo"],
+            {
+                "latency_ms": config.slo_latency_ms,
+                "consecutive_successes": config.slo_consecutive_successes,
+                "recovered": slo_recovered,
+            },
+        ),
         "SLO section does not match the measurement",
     )
     recovered = slo_recovered and reconciliation.totals["failed"] == 0
