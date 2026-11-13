@@ -34,6 +34,7 @@
     "tests/test_memory_access_operations.py",
     "tests/test_memory_access_package.py",
     "tests/test_memory_access_readiness.py",
+    "tests/test_memory_access_delivery.py",
     "config/day-71-simt-execution-plan.json",
     "docs/simt-execution-model.md",
     "src/ai_journey/simt_device.py",

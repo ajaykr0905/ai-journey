@@ -522,6 +522,45 @@ FP32 peak. No GPU, CUDA kernel, or latency was executed or measured, so no
 number in it is achieved occupancy, bandwidth or run time. See the
 [SIMT execution model guide](docs/simt-execution-model.md).
 
+## Model GPU memory access and time CPU matmul baselines
+
+Seal the analytical report, measure the CPU baseline into a separate report,
+and verify each against the pinned plan:
+
+```bash
+ai-journey-memory-access analyze \
+  --config config/day-74-memory-access-plan.json \
+  --output /tmp/day-74-memory-access-analysis.json
+ai-journey-memory-access verify \
+  --report /tmp/day-74-memory-access-analysis.json \
+  --config config/day-74-memory-access-plan.json
+ai-journey-memory-access benchmark \
+  --config config/day-74-memory-access-plan.json \
+  --output /tmp/day-74-memory-access-measurement.json
+ai-journey-memory-access verify \
+  --report /tmp/day-74-memory-access-measurement.json \
+  --config config/day-74-memory-access-plan.json
+```
+
+`analyze` is analytical and prints `measured=false gpu_executed=false`: per-warp
+32-byte sectors, 128-byte lines and coalescing efficiency, shared-memory bank
+conflicts for 1-, 2- and 4-byte lanes, a 32 x 32 transpose tile with and
+without padding, and naive versus shared-tiled matmul traffic on a roofline
+whose A100 80GB SXM FP32 ceilings are declared from NVIDIA's specifications
+table. `benchmark` is the only measurement: wall-clock float32 NumPy and torch
+matmuls on the CPU of the host that runs it, each checked against a float64
+rounding bound and sealed in a separate report with scope
+`cpu_wall_clock_this_host`. `verify` recomputes every analytical number
+independently and checks the measurement accounting, but cannot re-observe a
+timing. Exit code 0 means success, 1 a report that failed verification, and 2
+invalid input or a refused output.
+
+No GPU, CUDA kernel, cache, or device timing was executed or measured for the
+analytical report, and the CPU timings do not measure or predict GPU, CUDA,
+tensor-core, distributed, or production performance. CI benchmarks
+`config/day-74-memory-access-ci-smoke.json`, the pinned plan with a single
+32^3 shape. See the [memory-access model guide](docs/memory-access-model.md).
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with
