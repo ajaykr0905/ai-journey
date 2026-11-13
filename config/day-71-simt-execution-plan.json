@@ -1,0 +1,282 @@
+{
+  "schema_version": 1,
+  "name": "day-71-simt-execution-plan",
+  "statement": "Declared inputs for an analytical SIMT execution-model report. Hardware values are copied from the cited NVIDIA sources; latencies, register budgets, and kernel byte and FLOP counts are labeled planning inputs. No GPU, CUDA kernel, or latency was executed or measured.",
+  "architectures": [
+    {
+      "compute_capability": "7.0",
+      "warp_size": 32,
+      "max_threads_per_block": 1024,
+      "max_block_dim_x": 1024,
+      "max_block_dim_y": 1024,
+      "max_block_dim_z": 64,
+      "max_grid_dim_x": 2147483647,
+      "max_grid_dim_y": 65535,
+      "max_grid_dim_z": 65535,
+      "max_threads_per_sm": 2048,
+      "max_warps_per_sm": 64,
+      "max_blocks_per_sm": 32,
+      "registers_per_sm": 65536,
+      "registers_per_block": 65536,
+      "max_registers_per_thread": 255,
+      "register_allocation_unit": 256,
+      "register_allocation_granularity": "warp",
+      "register_sub_partitions_per_sm": 4,
+      "warp_schedulers_per_sm": 4,
+      "fp32_lanes_per_sm": 64,
+      "shared_memory_per_sm_bytes": 98304,
+      "shared_memory_carveouts_bytes": [
+        0,
+        8192,
+        16384,
+        32768,
+        65536,
+        98304
+      ],
+      "shared_memory_per_block_bytes": 49152,
+      "shared_memory_per_block_optin_bytes": 98304,
+      "shared_memory_allocation_unit_bytes": 256,
+      "reserved_shared_memory_per_block_bytes": 0,
+      "sources": [
+        "NVIDIA CUDA C++ Programming Guide v12.6 (archive 12.6.3), Table 21 Technical Specifications per Compute Capability, and Table 4 (64 FP32 add/multiply/multiply-add results per clock per SM for 7.x and 8.0)",
+        "NVIDIA CUDA C++ Programming Guide v12.6 (archive 12.6.3), section 16.6 Compute Capability 7.x: 64 FP32 cores and 4 warp schedulers per SM; Volta shared memory capacity 0, 8, 16, 32, 64 or 96 KB; one block may address the full 96 KB with dynamic opt-in above 48 KB",
+        "NVIDIA CUDA Toolkit 12.6 cuda_occupancy.h (cuda_cudart 12.6.77): registers are allocated per warp in units of 256 across 4 sub-partitions per SM; shared memory is allocated in 256-byte units for compute capability 7.0"
+      ]
+    },
+    {
+      "compute_capability": "7.5",
+      "warp_size": 32,
+      "max_threads_per_block": 1024,
+      "max_block_dim_x": 1024,
+      "max_block_dim_y": 1024,
+      "max_block_dim_z": 64,
+      "max_grid_dim_x": 2147483647,
+      "max_grid_dim_y": 65535,
+      "max_grid_dim_z": 65535,
+      "max_threads_per_sm": 1024,
+      "max_warps_per_sm": 32,
+      "max_blocks_per_sm": 16,
+      "registers_per_sm": 65536,
+      "registers_per_block": 65536,
+      "max_registers_per_thread": 255,
+      "register_allocation_unit": 256,
+      "register_allocation_granularity": "warp",
+      "register_sub_partitions_per_sm": 4,
+      "warp_schedulers_per_sm": 4,
+      "fp32_lanes_per_sm": 64,
+      "shared_memory_per_sm_bytes": 65536,
+      "shared_memory_carveouts_bytes": [
+        32768,
+        65536
+      ],
+      "shared_memory_per_block_bytes": 49152,
+      "shared_memory_per_block_optin_bytes": 65536,
+      "shared_memory_allocation_unit_bytes": 256,
+      "reserved_shared_memory_per_block_bytes": 0,
+      "sources": [
+        "NVIDIA CUDA C++ Programming Guide v12.6 (archive 12.6.3), Table 21 Technical Specifications per Compute Capability, and Table 4 (64 FP32 add/multiply/multiply-add results per clock per SM for 7.x and 8.0)",
+        "NVIDIA CUDA C++ Programming Guide v12.6 (archive 12.6.3), section 16.6 Compute Capability 7.x: 64 FP32 cores and 4 warp schedulers per SM; Turing shared memory capacity 32 KB or 64 KB; one block may address the full 64 KB with dynamic opt-in above 48 KB",
+        "NVIDIA CUDA Toolkit 12.6 cuda_occupancy.h (cuda_cudart 12.6.77): registers are allocated per warp in units of 256 across 4 sub-partitions per SM; shared memory is allocated in 256-byte units for compute capability 7.5"
+      ]
+    },
+    {
+      "compute_capability": "8.0",
+      "warp_size": 32,
+      "max_threads_per_block": 1024,
+      "max_block_dim_x": 1024,
+      "max_block_dim_y": 1024,
+      "max_block_dim_z": 64,
+      "max_grid_dim_x": 2147483647,
+      "max_grid_dim_y": 65535,
+      "max_grid_dim_z": 65535,
+      "max_threads_per_sm": 2048,
+      "max_warps_per_sm": 64,
+      "max_blocks_per_sm": 32,
+      "registers_per_sm": 65536,
+      "registers_per_block": 65536,
+      "max_registers_per_thread": 255,
+      "register_allocation_unit": 256,
+      "register_allocation_granularity": "warp",
+      "register_sub_partitions_per_sm": 4,
+      "warp_schedulers_per_sm": 4,
+      "fp32_lanes_per_sm": 64,
+      "shared_memory_per_sm_bytes": 167936,
+      "shared_memory_carveouts_bytes": [
+        0,
+        8192,
+        16384,
+        32768,
+        65536,
+        102400,
+        135168,
+        167936
+      ],
+      "shared_memory_per_block_bytes": 49152,
+      "shared_memory_per_block_optin_bytes": 166912,
+      "shared_memory_allocation_unit_bytes": 128,
+      "reserved_shared_memory_per_block_bytes": 1024,
+      "sources": [
+        "NVIDIA CUDA C++ Programming Guide v12.6 (archive 12.6.3), Table 21 Technical Specifications per Compute Capability, and Table 4 (64 FP32 add/multiply/multiply-add results per clock per SM for 7.x and 8.0)",
+        "NVIDIA CUDA C++ Programming Guide v12.6 (archive 12.6.3), section 16.7 Compute Capability 8.x: 64 FP32 cores and 4 warp schedulers per SM for 8.0; shared memory capacity 0, 8, 16, 32, 64, 100, 132 or 164 KB; up to 163 KB per block with 1 KB reserved for system use",
+        "NVIDIA CUDA Toolkit 12.6 cuda_occupancy.h (cuda_cudart 12.6.77): registers are allocated per warp in units of 256 across 4 sub-partitions per SM; shared memory is allocated in 128-byte units for compute capability 8.0"
+      ]
+    }
+  ],
+  "devices": [
+    {
+      "key": "tesla-v100-sxm2",
+      "name": "NVIDIA Tesla V100 SXM2",
+      "compute_capability": "7.0",
+      "sm_count": 80,
+      "boost_clock_mhz": 1530,
+      "dram_bandwidth_gb_per_second": 900,
+      "datasheet_fp32_tflops": "15.7",
+      "sources": [
+        "NVIDIA V100 Tensor Core GPU datasheet (JAN20): V100 SXM2 single-precision 15.7 TFLOPS; memory bandwidth 900 GB/sec",
+        "NVIDIA Tesla V100 GPU Architecture whitepaper WP-08608-001_v1.1, Table 1: Tesla V100 80 SMs, 64 FP32 cores per SM, GPU boost clock 1530 MHz"
+      ]
+    },
+    {
+      "key": "tesla-t4",
+      "name": "NVIDIA T4",
+      "compute_capability": "7.5",
+      "sm_count": 40,
+      "boost_clock_mhz": 1590,
+      "dram_bandwidth_gb_per_second": 300,
+      "datasheet_fp32_tflops": "8.1",
+      "sources": [
+        "NVIDIA T4 Tensor Core GPU datasheet (MAR19): single-precision 8.1 TFLOPS; 16 GB GDDR6 at 300 GB/sec",
+        "NVIDIA Turing GPU Architecture whitepaper WP-09183-001_v01, Table 5: Tesla T4 40 SMs, 64 CUDA cores per SM, GPU boost clock 1,590 MHz; it lists 320 GB/sec, but this record declares the datasheet figure"
+      ]
+    },
+    {
+      "key": "a100-sxm4-80gb",
+      "name": "NVIDIA A100 SXM4 80GB",
+      "compute_capability": "8.0",
+      "sm_count": 108,
+      "boost_clock_mhz": 1410,
+      "dram_bandwidth_gb_per_second": 2039,
+      "datasheet_fp32_tflops": "19.5",
+      "sources": [
+        "NVIDIA A100 Tensor Core GPU datasheet (JUN21): FP32 19.5 TFLOPS; A100 80GB SXM GPU memory bandwidth 2,039 GB/s",
+        "NVIDIA A100 Tensor Core GPU Architecture whitepaper V1.0, Table 4: A100 SXM4 108 SMs, 64 FP32 cores per SM, GPU boost clock 1410 MHz"
+      ]
+    }
+  ],
+  "vector_add": {
+    "elements": 16777216,
+    "dtype": "float32",
+    "threads_per_block": 256,
+    "registers_per_thread": 16,
+    "devices": [
+      "tesla-v100-sxm2",
+      "tesla-t4",
+      "a100-sxm4-80gb"
+    ],
+    "basis": "c[i] = a[i] + b[i] over 2^24 float32 elements: one add, two 4-byte reads, and one 4-byte write per element. 16 registers per thread is a declared budget, not a compiler result; every budget from 1 to 32 gives the same occupancy for 256-thread blocks on these devices."
+  },
+  "rgb_to_grayscale": {
+    "width": 1920,
+    "height": 1080,
+    "block_x": 16,
+    "block_y": 16,
+    "input_bytes_per_pixel": 3,
+    "output_bytes_per_pixel": 1,
+    "flops_per_pixel": 5,
+    "registers_per_thread": 16,
+    "devices": [
+      "tesla-v100-sxm2",
+      "tesla-t4",
+      "a100-sxm4-80gb"
+    ],
+    "basis": "Interleaved 8-bit RGB in and one 8-bit luma value out per pixel, counting three weighted channel products and two adds; the register budget is declared, not compiled."
+  },
+  "occupancy_sweep": {
+    "devices": [
+      "a100-sxm4-80gb",
+      "tesla-t4"
+    ],
+    "threads_per_block": [
+      64,
+      128,
+      256,
+      512,
+      1024
+    ],
+    "registers_per_thread": [
+      32,
+      64,
+      128,
+      255
+    ],
+    "static_shared_bytes": 0,
+    "dynamic_shared_bytes": 0,
+    "basis": "Declared sweep points with no shared memory beyond the driver reservation; 255 is the guide's per-thread register maximum."
+  },
+  "memory_latency": {
+    "devices": [
+      "tesla-v100-sxm2",
+      "tesla-t4",
+      "a100-sxm4-80gb"
+    ],
+    "latency_cycles": [
+      400,
+      800
+    ],
+    "access_patterns": [
+      {
+        "name": "fp32-scalar",
+        "bytes_per_lane": 4,
+        "active_lanes": 32,
+        "independent_loads": 1
+      },
+      {
+        "name": "fp32-vector-add",
+        "bytes_per_lane": 4,
+        "active_lanes": 32,
+        "independent_loads": 2
+      },
+      {
+        "name": "fp32x4-vector",
+        "bytes_per_lane": 16,
+        "active_lanes": 32,
+        "independent_loads": 1
+      }
+    ],
+    "basis": "The CUDA guide (section 5.2.3) says off-chip memory latency is typically hundreds of clock cycles; 400 and 800 SM cycles are declared sensitivity points in that range, not measured or device-specific latencies. Rows are evaluated at each SM's maximum resident warps."
+  },
+  "arithmetic_latency": {
+    "architectures": [
+      "7.0",
+      "7.5"
+    ],
+    "pipelines": [
+      "issue",
+      "fp32"
+    ],
+    "latency_cycles": 4,
+    "independent_instructions": [
+      1,
+      2,
+      4
+    ],
+    "basis": "The CUDA guide (section 5.2.3) states a typical 4-cycle latency for most arithmetic instructions only for compute capability 7.x, so compute capability 8.0 is not tabulated."
+  },
+  "wave_quantization": {
+    "total_blocks": 1024,
+    "threads_per_block": 256,
+    "registers_per_thread": 64,
+    "devices": [
+      "tesla-v100-sxm2",
+      "tesla-t4",
+      "a100-sxm4-80gb"
+    ],
+    "basis": "A fixed grid of 1,024 blocks, for example a 32 x 32 grid of output tiles, with a declared 64-register budget."
+  },
+  "sources": [
+    "NVIDIA CUDA C++ Programming Guide v12.6 (archive 12.6.3), section 5.2.3 Multiprocessor Level: most arithmetic instructions take typically 4 cycles on 7.x, so 4 schedulers need 16 warps; off-chip latency is typically hundreds of clock cycles",
+    "NVIDIA CUDA C++ Programming Guide v12.6, section 5.3.2 Device Memory Accesses: global memory instructions move 1, 2, 4, 8 or 16-byte words",
+    "NVIDIA CUDA C++ Programming Guide v12.6, sections 2.2 Thread Hierarchy and 4.1 SIMT Architecture: a 2D thread ID is x + y * Dx and warps hold consecutive thread IDs starting at thread 0",
+    "NVIDIA CUDA Toolkit 12.6 cuda_occupancy.h, cudaOccMaxActiveBlocksPerMultiprocessor: warp, register, shared memory and block limits per SM"
+  ]
+}
