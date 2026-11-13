@@ -24,9 +24,13 @@ _RECORD_FIELDS = {
 
 def verify_recovery_trace(
     records: Sequence[dict[str, Any]],
+    *,
+    require_completed: bool = True,
 ) -> tuple[RecoveryEvent, ...]:
     """Verify exact records, chain ancestry, time, progress, and attempt changes."""
 
+    if not isinstance(require_completed, bool):
+        raise TypeError("require_completed must be a boolean")
     if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
         raise TypeError("records must be a sequence")
     if not records:
@@ -83,7 +87,7 @@ def verify_recovery_trace(
         monotonic_ns = event.monotonic_ns
         completed_items = event.completed_items
         events.append(event)
-    if events[-1].kind != "completed":
+    if require_completed and events[-1].kind != "completed":
         raise RecoveryExperimentError("recovery trace must end with completed")
     json.dumps(records, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return tuple(events)
