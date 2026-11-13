@@ -153,3 +153,18 @@ def test_writer_never_replaces_a_protected_input_or_a_symlink(tmp_path: Path):
     assert other.read_bytes() == b"other\n"
     with pytest.raises(TypeError, match="pathlib"):
         write_report(str(tmp_path / "x.json"), report)
+
+
+def test_writer_refuses_symlink_loops_instead_of_crashing(tmp_path: Path):
+    plan_path = write_plan(tmp_path / "plan.json")
+    loop = tmp_path / "loop.json"
+    loop.symlink_to(loop)
+    output = tmp_path / "analysis.json"
+    report = sealed_report()
+
+    with pytest.raises(MemoryAccessError, match="non-symlink"):
+        write_report(loop, report, protected=(plan_path,))
+    write_report(output, report, protected=(loop,))
+
+    assert load_report(output) == report
+    assert loop.is_symlink()

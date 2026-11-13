@@ -156,3 +156,23 @@ def test_module_entry_point_runs_the_cli(tmp_path):
     assert completed.returncode == 0, completed.stderr
     assert "memory_access_analysis=" in completed.stdout
     assert load_report(output)["kind"] == "memory_access_analysis"
+
+
+def test_symlink_loop_paths_exit_two_without_a_traceback(tmp_path, capsys):
+    config = write_plan(tmp_path / "plan.json")
+    loop = tmp_path / "loop.json"
+    loop.symlink_to(loop)
+    output = tmp_path / "out.json"
+
+    for command in ("analyze", "benchmark"):
+        code = main(
+            [command, "--config", str(config), "--output", str(loop)],
+            clock=fake_clock(),
+        )
+        assert code == EXIT_INVALID
+        assert "non-symlink" in capsys.readouterr().err
+        code = main([command, "--config", str(loop), "--output", str(output)])
+        assert code == EXIT_INVALID
+        assert "non-symlink" in capsys.readouterr().err
+    assert loop.is_symlink()
+    assert not output.exists()

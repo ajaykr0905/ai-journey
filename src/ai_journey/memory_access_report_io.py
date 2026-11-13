@@ -117,9 +117,15 @@ def load_report(path: Path) -> dict[str, object]:
 
 
 def paths_alias(first: Path, second: Path) -> bool:
-    """Return whether two paths name the same file, including links."""
+    """Return whether two paths name the same file, including links.
 
-    if first.resolve() == second.resolve():
+    ``os.path.realpath`` resolves as far as it can without raising, so a
+    symlink loop is compared like any other path instead of crashing (Python
+    3.11's ``Path.resolve`` raises RuntimeError); the strict reader and the
+    writer then refuse the loop itself.
+    """
+
+    if os.path.realpath(first) == os.path.realpath(second):
         return True
     try:
         return first.exists() and second.exists() and first.samefile(second)
