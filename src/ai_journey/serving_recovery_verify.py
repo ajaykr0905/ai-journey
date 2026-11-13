@@ -3,9 +3,10 @@
 The verifier trusts no stored summary. It rebuilds the model from the copied
 source, recomputes the run, lifetime and idempotency identities and the request
 plan from the config, checks every evidence file digest, replays the chained
-lifecycle trace, re-reads every lifetime's journal, recomputes each expected
-response body, then recomputes reconciliation and every timing metric and
-requires the sealed report to match them exactly.
+lifecycle trace against the declared restart and SLO controls, re-reads every
+lifetime's journal, recomputes each expected response body, then recomputes
+reconciliation and every timing metric and requires the sealed report to match
+them exactly.
 """
 
 from __future__ import annotations
@@ -230,6 +231,33 @@ def _fault_boundaries(events, attempts, config):
     return fault, exits[0], readies[0]
 
 
+def _check_traced_controls(events, config) -> None:
+    """Bind traced restart backoffs and SLO payloads to the declared controls."""
+
+    restart = 0
+    for event in events:
+        if event.kind == "restart":
+            # A restart whose spawn failed is untraced but still spends its delay.
+            restart = next(
+                (
+                    number
+                    for number in range(restart + 1, config.restart_limit + 1)
+                    if config.restart_delay_ms(number) == event.payload["backoff_ms"]
+                ),
+                0,
+            )
+            _require(restart > 0, "a restart breaks the declared backoff schedule")
+        elif event.kind == "recovered":
+            _require(
+                event.payload
+                == {
+                    "consecutive_successes": config.slo_consecutive_successes,
+                    "slo_latency_ms": config.slo_latency_ms,
+                },
+                "the traced SLO recovery names other controls",
+            )
+
+
 def verify_serving_recovery_run(run_dir: Path) -> dict[str, Any]:
     """Recompute and check every identity, digest and metric of one run."""
 
@@ -313,6 +341,7 @@ def verify_serving_recovery_run(run_dir: Path) -> dict[str, Any]:
         "lifetime identities do not recompute",
     )
     journals = _journals(run_dir, report, events, journal_capacity(config))
+    _check_traced_controls(events, config)
     _check_attempt_timeline(attempts, events)
 
     expected = {

@@ -14,6 +14,7 @@ from ai_journey.serving_recovery_report import (
     seal_serving_report,
     write_serving_report,
 )
+from ai_journey.serving_recovery_trace import ServingLifecycleEvent, chain_serving_trace
 from ai_journey.serving_recovery_verify import verify_serving_recovery_run
 
 
@@ -247,4 +248,62 @@ def test_verifier_binds_the_entry_of_a_lifetime_that_never_journaled(
 
     reseal(run_dir, lambda r: r["evidence"]["journals"][1].update(records=3))
     with pytest.raises(ValueError, match="missing journal"):
+        verify_serving_recovery_run(run_dir)
+
+
+def rechain(run_dir, mutate):
+    """Edit trace payloads, re-chain every digest and reseal, as a forger would."""
+
+    events = []
+    for record in json.loads((run_dir / "trace.json").read_bytes()):
+        mutate(record)
+        fields = {
+            key: value
+            for key, value in record.items()
+            if key not in ("previous_sha256", "event_sha256")
+        }
+        events.append(ServingLifecycleEvent(**fields))
+    chained = chain_serving_trace(events)
+    (run_dir / "trace.json").write_bytes(canonical_json_bytes(chained))
+    head = chained[-1]["event_sha256"]
+    reseal(
+        run_dir,
+        lambda report: report["evidence"].update(trace_head_sha256=head),
+        refresh=["trace.json"],
+    )
+
+
+def payload_of(kind, **changes):
+    def mutate(record):
+        if record["kind"] == kind:
+            record["payload"].update(changes)
+
+    return mutate
+
+
+def test_rechained_traces_with_a_declared_schedule_still_verify(sealed_run, tmp_path):
+    faithful = copy_run(sealed_run, tmp_path / "faithful")
+    rechain(faithful, lambda record: None)
+    assert verify_serving_recovery_run(faithful)["verified"] is True
+    # A restart whose spawn failed is untraced but spends the first delay.
+    skipped = copy_run(sealed_run, tmp_path / "skipped")
+    rechain(skipped, payload_of("restart", backoff_ms=40))
+    assert verify_serving_recovery_run(skipped)["verified"] is True
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (payload_of("restart", backoff_ms=4321), "backoff schedule"),
+        (payload_of("restart", backoff_ms=80), "backoff schedule"),
+        (payload_of("recovered", consecutive_successes=1), "traced SLO"),
+        (payload_of("recovered", slo_latency_ms=10_000), "traced SLO"),
+    ],
+)
+def test_verifier_binds_the_traced_lifecycle_to_the_controls(
+    sealed_run, tmp_path, mutate, message
+):
+    run_dir = copy_run(sealed_run, tmp_path)
+    rechain(run_dir, mutate)
+    with pytest.raises(ValueError, match=message):
         verify_serving_recovery_run(run_dir)
