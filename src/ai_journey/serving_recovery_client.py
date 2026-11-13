@@ -2,11 +2,12 @@
 
 Each attempt derives every socket timeout from one absolute monotonic deadline
 and ends in exactly one class: ``ok``, ``connection_refused`` (the connect was
-refused, ECONNREFUSED), ``connect_error`` (any other connect failure, such as a
+refused, ECONNREFUSED), ``connect_error`` (any other connect error, such as a
 local EMFILE or EADDRNOTAVAIL, which says nothing about the server),
 ``connection_reset`` (including a peer close before a complete response),
-``timeout``, ``http_error`` (a complete non-200 response) or
-``invalid_response`` (a complete 200 that breaks the protocol). A record keeps
+``timeout`` (including a connect that ran out of time, ``connect_timeout``),
+``http_error`` (a complete non-200 response) or ``invalid_response`` (a
+complete 200 that breaks the protocol). A record keeps
 monotonic start and finish times, the lifetime that answered and the SHA-256
 of the exact response body, so later reconciliation can byte-compare retries.
 """
