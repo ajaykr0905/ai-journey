@@ -49,6 +49,8 @@ _WORD = 4
 _BANKS = 32
 _ELEMENT_BYTES = {"float64": 8, "float32": 4, "float16": 2, "bfloat16": 2}
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_SLUG = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
+_TOKEN = re.compile(r"[A-Za-z0-9._+-]{1,64}")
 _ANALYSIS_FIELDS = {
     "schema_version",
     "kind",
@@ -557,8 +559,8 @@ def _check_environment(environment: object) -> None:
     for name in _ENVIRONMENT_FIELDS - {"cpu_count", "torch_threads"}:
         value = environment[name]
         _require(
-            isinstance(value, str) and 0 < len(value) <= 64 and value.isprintable(),
-            f"environment {name} must be short printable text",
+            isinstance(value, str) and _TOKEN.fullmatch(value) is not None,
+            f"environment {name} must be a version or platform token",
         )
     count = environment["cpu_count"]
     _require(
@@ -657,6 +659,11 @@ def _verify_measurement(
         isinstance(report["plan_sha256"], str)
         and _SHA256.fullmatch(report["plan_sha256"]) is not None,
         "plan_sha256 must be a SHA-256 hex digest",
+    )
+    _require(
+        isinstance(report["plan_name"], str)
+        and _SLUG.fullmatch(report["plan_name"]) is not None,
+        "plan_name must be a lowercase plan slug",
     )
     spec = _benchmark(report["benchmark"])
     if plan is not None:

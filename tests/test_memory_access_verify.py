@@ -273,7 +273,17 @@ def test_sealed_measurement_passes_structural_and_accounting_checks():
         (insert(("environment", "hostname"), "lab-host"), "environment fields"),
         (tamper(("environment", "cpu_count"), lambda v: 0), "cpu_count"),
         (tamper(("environment", "torch_threads"), lambda v: True), "torch_threads"),
-        (tamper(("environment", "platform_system"), lambda v: ""), "printable text"),
+        (tamper(("environment", "platform_system"), lambda v: ""), "platform token"),
+        (
+            tamper(("environment", "platform_machine"), lambda v: "/home/lab/x86_64"),
+            "platform token",
+        ),
+        (
+            tamper(("environment", "python_version"), lambda v: "3.11 on lab-host"),
+            "platform token",
+        ),
+        (tamper(("plan_name",), lambda v: "Lab Host Plan"), "plan slug"),
+        (tamper(("plan_name",), lambda v: "/srv/plans/day-74"), "plan slug"),
         (tamper(("benchmark", "repeats"), lambda v: v + 1), "planned case"),
         (tamper(("benchmark", "backends"), lambda v: ["cupy"]), "failed verification"),
         (tamper(("summary", "checked_results"), lambda v: v + 1), "summary"),
