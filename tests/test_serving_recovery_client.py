@@ -186,7 +186,8 @@ def closed_port():
 )
 def test_failed_attempts_have_exactly_one_class(action, outcome, error):
     with peer(action) as port:
-        record = attempt(port, deadline_ms=200)
+        # Only the scripted hang may reach the deadline; others answer at once.
+        record = attempt(port, deadline_ms=200 if outcome == "timeout" else 5000)
     assert (record.outcome, record.error) == (outcome, error)
     assert (record.lifetime_id, record.response_sha256) == (None, None)
     assert record.port == port

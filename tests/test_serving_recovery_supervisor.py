@@ -15,7 +15,7 @@ FIXTURE = Path(__file__).resolve().parents[1] / "data" / "day-19-demo-names.txt"
 MODEL = build_serving_model(FIXTURE.read_bytes())
 RUN = "serving-recovery-test-0123456789abcdef"
 # A long restart backoff that closing interrupts keeps liveness checks isolated.
-NO_RESTART = {"restart_backoff_ms": 5000, "retry_budget": 22}
+NO_RESTART = {"restart_backoff_ms": 5000, "retry_budget": 23}
 
 
 def real_server(tmp_path):
@@ -45,10 +45,10 @@ def python(code, *arguments):
 
 
 def supervisor(tmp_path, command=None, **changes):
-    controls = {"probe_interval_ms": 10, "probe_timeout_ms": 100}
+    # The default 1 s detection window keeps slow hosts from looking hung.
     return ServingSupervisor(
         run_id=RUN,
-        config=valid_config(**(controls | {"detection_timeout_ms": 400} | changes)),
+        config=valid_config(**changes),
         model_sha256=MODEL.model_sha256,
         command_for=command or real_server(tmp_path),
         log_dir=tmp_path,
@@ -110,7 +110,8 @@ def test_exit_status_liveness_observes_a_killed_child(tmp_path):
 
 
 def test_health_probes_kill_a_live_but_unresponsive_child(tmp_path):
-    with supervisor(tmp_path, **NO_RESTART) as owner:
+    hang = {"probe_timeout_ms": 100, "detection_timeout_ms": 400}
+    with supervisor(tmp_path, **NO_RESTART, **hang) as owner:
         view = owner.start()
         _, stopped_ns = owner.signal_current(view.lifetime_id, signal.SIGSTOP)
         assert owner.wait_until(

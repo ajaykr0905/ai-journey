@@ -119,7 +119,7 @@ def test_a_failed_replacement_is_followed_by_a_ready_one(tmp_path):
 
 def test_stop_interrupts_a_pending_restart_backoff(tmp_path):
     owner = supervisor(
-        tmp_path, restart_backoff_ms=5000, retry_budget=22, restart_limit=1
+        tmp_path, restart_backoff_ms=5000, retry_budget=23, restart_limit=1
     )
     with owner:
         view = owner.start()
