@@ -230,3 +230,15 @@ def test_canonical_json_is_sorted_compact_ascii_and_finite():
         loads_strict("{}", "value")
     with pytest.raises(TypeError, match="pathlib.Path"):
         read_bounded("plan.json", limit=1, label="plan")
+
+
+def test_strict_json_rejects_number_literals_it_cannot_represent():
+    # json.loads turns an overflowing float literal into infinity instead of
+    # failing, and CPython's int() refuses literals longer than
+    # sys.get_int_max_str_digits() (4,300 by default) with a bare ValueError.
+    for literal in (b"1e999", b"-1e999"):
+        with pytest.raises(SimtError, match="non-finite JSON number"):
+            loads_strict(b'{"x":' + literal + b"}", "value")
+    with pytest.raises(SimtError):
+        loads_strict(b"[" + b"1" * 5_000 + b"]", "value")
+    assert loads_strict(b"[1e308,-0.5,12]", "value") == [1e308, -0.5, 12]

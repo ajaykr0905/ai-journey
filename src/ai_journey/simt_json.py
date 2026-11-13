@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+import math
 import os
 from pathlib import Path
 import stat
@@ -43,6 +44,13 @@ def _reject_constant(name: str) -> object:
     raise SimtError(f"non-finite JSON number: {name}")
 
 
+def _finite_float(literal: str) -> float:
+    value = float(literal)
+    if not math.isfinite(value):
+        raise SimtError(f"non-finite JSON number: {literal}")
+    return value
+
+
 def loads_strict(payload: bytes, label: str) -> object:
     """Parse UTF-8 JSON, rejecting duplicate fields and non-finite numbers."""
 
@@ -52,12 +60,18 @@ def loads_strict(payload: bytes, label: str) -> object:
         return json.loads(
             payload.decode("utf-8"),
             object_pairs_hook=_unique_object,
+            parse_float=_finite_float,
             parse_constant=_reject_constant,
         )
     except SimtError:
         raise
     except (UnicodeError, json.JSONDecodeError, RecursionError) as error:
         raise SimtError(f"{label} is not strict UTF-8 JSON") from error
+    except ValueError as error:
+        # int() refuses literals longer than sys.get_int_max_str_digits().
+        raise SimtError(
+            f"{label} holds an integer literal too long to parse"
+        ) from error
 
 
 def read_bounded(path: Path, *, limit: int, label: str) -> bytes:

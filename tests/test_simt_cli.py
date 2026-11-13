@@ -70,6 +70,19 @@ def test_invalid_plans_and_reports_return_the_invalid_exit_code(tmp_path: Path, 
     assert "unable to read SIMT report" in capsys.readouterr().err
 
 
+def test_overlong_json_integers_return_the_invalid_exit_code(tmp_path: Path, capsys):
+    # A 5,000-digit literal exceeds CPython's default 4,300-digit int limit, so
+    # json.loads raises a bare ValueError while parsing the plan or report.
+    huge = tmp_path / "huge.json"
+    huge.write_bytes(b'{"schema_version":' + b"1" * 5_000 + b"}")
+    output = tmp_path / "report.json"
+
+    assert main(["build", "--config", str(huge), "--output", str(output)]) == 1
+    assert main(["verify", "--report", str(huge)]) == EXIT_INVALID
+    assert capsys.readouterr().err.count("failed:") == 2
+    assert not output.exists()
+
+
 def test_usage_errors_exit_with_argparse_status():
     with pytest.raises(SystemExit) as error:
         main(["build", "--config", "plan.json"])
