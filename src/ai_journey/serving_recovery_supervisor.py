@@ -8,7 +8,8 @@ child's exit status, polled every probe interval, plus ``GET /health`` probes;
 a live child failing probes for the detection timeout is killed as unresponsive.
 After an observed exit the supervisor waits a doubling backoff and launches a
 replacement lifetime, at most ``restart_limit`` times per run; a replacement
-that fails readiness consumes one restart. Exhaustion is recorded, not hidden.
+that fails to spawn or to become ready consumes one restart. Exhaustion is
+recorded, not hidden.
 """
 
 from __future__ import annotations
@@ -223,9 +224,11 @@ class ServingSupervisor:
         argv = tuple(self._command_for(number, lifetime_id))
         if not argv or any(type(argument) is not str for argument in argv):
             raise TypeError("command_for must return a non-empty string sequence")
+        log_path = None
         stderr = subprocess.DEVNULL
         if self._log_dir is not None:
-            stderr = (self._log_dir / f"lifetime-{number}.stderr").open("xb")
+            log_path = self._log_dir / f"lifetime-{number}.stderr"
+            stderr = log_path.open("xb")
         try:
             process = subprocess.Popen(
                 argv,
@@ -236,6 +239,11 @@ class ServingSupervisor:
                 start_new_session=True,
                 env={},
             )
+        except BaseException:
+            # No child started, so the next restart reuses this lifetime number.
+            if log_path is not None:
+                log_path.unlink(missing_ok=True)
+            raise
         finally:
             if stderr is not subprocess.DEVNULL:
                 stderr.close()

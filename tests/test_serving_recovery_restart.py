@@ -117,6 +117,47 @@ def test_a_failed_replacement_is_followed_by_a_ready_one(tmp_path):
     assert owner.restarts_used == 2 and owner.failure is None
 
 
+def test_a_replacement_that_fails_to_spawn_spends_only_one_restart(tmp_path):
+    calls = []
+
+    def command(number, lifetime_id):
+        calls.append(number)
+        if calls == [1, 2]:
+            return (str(tmp_path / "missing-interpreter"),)
+        return real_server(tmp_path)(number, lifetime_id)
+
+    with supervisor(tmp_path, command) as owner:
+        owner.start()
+        kill_current(owner)
+        assert owner.wait_until(
+            lambda: owner.failure is not None
+            or (owner.current().number == 2 and owner.current().ready),
+            timeout_ms=10_000,
+        )
+        assert owner.failure is None
+        assert owner.stop() == 0
+
+    assert calls == [1, 2, 2]
+    assert kinds(owner) == [
+        "spawn",
+        "ready",
+        "exit_observed",
+        "restart",
+        "ready",
+        "stopped",
+    ]
+    restart = owner.observations()[3]
+    assert (restart.lifetime_number, restart.backoff_ms) == (
+        2,
+        owner.config.restart_delay_ms(2),
+    )
+    assert owner.restarts_used == 2
+    assert sorted(path.name for path in tmp_path.glob("lifetime-*.stderr")) == [
+        "lifetime-1.stderr",
+        "lifetime-2.stderr",
+    ]
+
+
 def test_stop_interrupts_a_pending_restart_backoff(tmp_path):
     owner = supervisor(
         tmp_path, restart_backoff_ms=5000, retry_budget=23, restart_limit=1
