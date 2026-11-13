@@ -34,6 +34,12 @@ def analysis():
 
 def measurement():
     plan = make_plan()
+    measurements = make_measurements(plan, host_timer=True)
+    return seal_report(build_measurement_report(plan, measurements, cpu_environment()))
+
+
+def synthetic():
+    plan = make_plan()
     return seal_report(
         build_measurement_report(plan, make_measurements(plan), cpu_environment())
     )
@@ -253,6 +259,36 @@ def test_sealed_measurement_passes_structural_and_accounting_checks():
     }
     with pytest.raises(MemoryAccessVerificationError, match="supplied plan"):
         verify_report(report, plan=other_plan())
+
+
+def test_injected_clock_report_verifies_only_as_synthetic_timing():
+    report = synthetic()
+    summary = verify_report(report, plan=make_plan())
+
+    assert summary == {
+        "kind": "memory_access_cpu_measurement",
+        "report_sha256": report["report_sha256"],
+        "plan_sha256": make_plan().fingerprint(),
+        "cases": 4,
+        "measured": False,
+        "scope": "synthetic_injected_clock",
+    }
+
+
+@pytest.mark.parametrize(
+    ("name", "message"),
+    [
+        ("timer", "must be measured"),
+        ("measured", "must not claim a measurement"),
+        ("measurement_scope", "boundary"),
+        ("evidence_boundary", "boundary"),
+    ],
+)
+def test_injected_clock_labels_cannot_be_promoted_one_at_a_time(name, message):
+    report = reseal({**synthetic(), name: measurement()[name]})
+
+    with pytest.raises(MemoryAccessVerificationError, match=message):
+        verify_report(report)
 
 
 @pytest.mark.parametrize(

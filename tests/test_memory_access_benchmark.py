@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from ai_journey.memory_access_benchmark import (
@@ -7,6 +9,7 @@ from ai_journey.memory_access_benchmark import (
     gflops_per_second,
     summarize_timings,
     time_repeats,
+    timer_name,
 )
 from ai_journey.memory_access_pattern import MemoryAccessError
 
@@ -97,6 +100,16 @@ def test_clock_must_be_monotonic_integer_and_advance_across_each_call(
             repeats=len(readings) // 2,
             clock=FakeClock(readings, []),
         )
+
+
+def test_only_the_host_timer_is_named_as_a_measurement_clock(monkeypatch):
+    host = time.perf_counter_ns
+
+    assert timer_name(host) == "time.perf_counter_ns"
+    assert timer_name(lambda: host()) == "injected"
+    assert timer_name(FakeClock([1, 2], [])) == "injected"
+    monkeypatch.setattr(time, "perf_counter_ns", lambda: 5)
+    assert timer_name(time.perf_counter_ns) == "injected"
 
 
 def test_inspection_failures_propagate_instead_of_being_timed():

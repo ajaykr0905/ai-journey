@@ -1,7 +1,9 @@
 """Bounded wall-clock timing core for CPU measurements on this host.
 
 Timings come from an injectable integer nanosecond clock that defaults to
-``time.perf_counter_ns``. Warmup calls run but are never timed. Each measured
+``time.perf_counter_ns``. Only that host timer yields a measurement; any other
+clock, such as a scripted test clock, is named ``injected`` and its durations
+are synthetic. Warmup calls run but are never timed. Each measured
 repeat times exactly one operation call between two clock readings, and
 result inspection runs after the clock stops, for warmup and measured calls
 alike. Percentiles use the nearest-rank method without interpolation
@@ -22,6 +24,8 @@ from .memory_access_pattern import MemoryAccessError
 from .serving_analysis import nearest_rank_percentile
 
 TIMER = "time.perf_counter_ns"
+INJECTED_TIMER = "injected"
+_HOST_CLOCK = time.perf_counter_ns
 MAX_REPEATS = 50
 MAX_WARMUP = 10
 PERCENTILE_METHOD = (
@@ -85,6 +89,16 @@ def gflops_per_second(flops: int, elapsed_ns: int) -> float:
         if value <= 0:
             raise MemoryAccessError(f"{name} must be positive")
     return flops / elapsed_ns
+
+
+def timer_name(clock: Callable[[], int]) -> str:
+    """Name the clock behind a timing; only the host timer is a measurement.
+
+    The host timer is captured at import, so a later patch of ``time`` or a
+    wrapper around it is still reported as ``injected``.
+    """
+
+    return TIMER if clock is _HOST_CLOCK else INJECTED_TIMER
 
 
 def _count(value: object, name: str, minimum: int, maximum: int) -> int:

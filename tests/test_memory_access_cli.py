@@ -1,6 +1,7 @@
 import itertools
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -51,6 +52,33 @@ def test_benchmark_labels_every_printed_number_as_a_cpu_host_measurement(
     config = write_plan(tmp_path / "plan.json")
     output = tmp_path / "measurement.json"
 
+    code = main(["benchmark", "--config", str(config), "--output", str(output)])
+
+    assert code == EXIT_OK
+    lines = capsys.readouterr().out.splitlines()
+    report = load_report(output)
+    assert report["timer"] == "time.perf_counter_ns"
+    assert lines[-1] == (
+        f"memory_access_measurement={report['report_sha256']} cases=4 "
+        "scope=cpu_wall_clock_this_host gpu_executed=false"
+    )
+    assert len(lines) == 5
+    for line in lines[:4]:
+        assert re.fullmatch(
+            r"cpu_host_measurement backend=(numpy|torch) m=\d+ n=\d+ k=\d+ "
+            r"median_ns=[1-9]\d* iqr_ns=\d+ median_gflops_per_second=\d+\.\d{3}",
+            line,
+        ), line
+    assert main(["verify", "--report", str(output), "--config", str(config)]) == 0
+    assert capsys.readouterr().out == f"verified_{lines[-1]}\n"
+
+
+def test_an_injected_clock_benchmark_is_printed_and_verified_as_synthetic(
+    tmp_path, capsys
+):
+    config = write_plan(tmp_path / "plan.json")
+    output = tmp_path / "synthetic.json"
+
     code = main(
         ["benchmark", "--config", str(config), "--output", str(output)],
         clock=fake_clock(),
@@ -59,15 +87,17 @@ def test_benchmark_labels_every_printed_number_as_a_cpu_host_measurement(
     assert code == EXIT_OK
     lines = capsys.readouterr().out.splitlines()
     report = load_report(output)
+    assert (report["timer"], report["measured"]) == ("injected", False)
     assert lines[-1] == (
-        f"memory_access_measurement={report['report_sha256']} cases=4 "
-        "scope=cpu_wall_clock_this_host gpu_executed=false"
+        f"memory_access_synthetic_timing={report['report_sha256']} cases=4 "
+        "scope=synthetic_injected_clock measured=false gpu_executed=false"
     )
     assert len(lines) == 5
-    assert all(line.startswith("cpu_host_measurement backend=") for line in lines[:4])
+    assert all(line.startswith("synthetic_timing backend=") for line in lines[:4])
     assert "median_ns=750" in lines[0]
     assert report["results"][0]["samples_ns"] == [750, 750, 750]
     assert main(["verify", "--report", str(output), "--config", str(config)]) == 0
+    assert capsys.readouterr().out == f"verified_{lines[-1]}\n"
 
 
 def test_verify_rejects_tampered_or_rebound_reports_with_exit_one(tmp_path, capsys):

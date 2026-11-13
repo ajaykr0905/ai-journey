@@ -1,7 +1,9 @@
 """Real float32 CPU matmul baselines for NumPy and PyTorch on this host.
 
-Every duration produced here is a wall-clock measurement of a CPU matmul on
-the machine that ran it; nothing is a GPU measurement or prediction. Inputs
+Every duration produced with the default host timer is a wall-clock
+measurement of a CPU matmul on the machine that ran it; a measurement records
+which timer produced its samples, so durations from an injected clock stay
+labeled synthetic. Nothing is a GPU measurement or prediction. Inputs
 are seeded standard-normal float32 matrices. After its clock stops, every
 warmup and measured result is checked against a float64 reference: each
 element must lie within ``(gamma_K(2**-24) + gamma_K(2**-53)) * (|A| @ |B|)``,
@@ -29,6 +31,7 @@ from .memory_access_benchmark import (
     gflops_per_second,
     summarize_timings,
     time_repeats,
+    timer_name,
 )
 from .memory_access_pattern import MemoryAccessError
 from .memory_access_tiling import MatmulShape
@@ -186,7 +189,7 @@ class MatmulChecker:
 
 @dataclass(frozen=True)
 class MatmulMeasurement:
-    """Wall-clock samples of one checked CPU matmul case on this host."""
+    """Timed samples of one checked CPU matmul case and the timer behind them."""
 
     case: MatmulCase
     warmup: int
@@ -195,6 +198,7 @@ class MatmulMeasurement:
     input_sha256: str
     samples_ns: tuple[int, ...]
     correctness: CorrectnessCheck
+    timer: str
 
     @property
     def flops(self) -> int:
@@ -268,6 +272,7 @@ def measure_matmul(
         input_sha256=inputs_sha256(left, right),
         samples_ns=samples,
         correctness=checker.result(),
+        timer=timer_name(clock),
     )
 
 

@@ -161,6 +161,14 @@ about GPU performance. Verification cannot recompute them; it checks schemas,
 the plan binding, the CPU-only boundary, statistics recomputed from raw
 samples, FLOP and GFLOP/s arithmetic, correctness bounds, and summaries.
 
+The `benchmark` command always times with `time.perf_counter_ns`. In Python,
+`main`, `run_benchmark` and `measure_matmul` also accept an injected clock so
+tests can script durations. A report timed that way records timer `injected`,
+`measured: false`, scope `synthetic_injected_clock` and a boundary with
+`cpu_measurement_this_host: false`, and its lines print as `synthetic_timing`.
+`verify` accepts it only as synthetic timing, never as a CPU measurement, and
+rejects any report whose timer, `measured` flag, scope and boundary disagree.
+
 ## Verification
 
 `verify` recomputes every analytical number without the model modules: pattern

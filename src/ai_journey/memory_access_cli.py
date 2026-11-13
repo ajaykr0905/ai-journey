@@ -2,8 +2,10 @@
 
 ``analyze`` seals an analytical report computed from the declared plan.
 ``benchmark`` times the plan's float32 NumPy and torch matmuls on this CPU
-host and seals a separate measurement report. ``verify`` checks either kind,
-optionally against the plan it must have been built from.
+host and seals a separate measurement report; a clock injected through
+``main`` or ``run_benchmark`` yields a report printed and verified as
+synthetic timing instead. ``verify`` checks either kind, optionally against
+the plan it must have been built from.
 
 Exit codes: 0 success; 1 the report was read but failed verification; 2 usage
 errors, unreadable or invalid inputs, and refused outputs.
@@ -21,6 +23,7 @@ from .memory_access_baseline import cpu_environment, measure_matmul
 from .memory_access_plan import MemoryAccessPlan, canonical_json_bytes
 from .memory_access_pattern import MemoryAccessError
 from .memory_access_report import (
+    ANALYSIS_KIND,
     build_analysis_report,
     build_measurement_report,
     seal_report,
@@ -68,7 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
 def run_benchmark(
     plan: MemoryAccessPlan, *, clock: Callable[[], int] = time.perf_counter_ns
 ) -> dict[str, object]:
-    """Measure every planned CPU case and seal the measurement report."""
+    """Measure every planned CPU case and seal the measurement report.
+
+    Any ``clock`` other than the host timer makes the report synthetic.
+    """
 
     benchmark = plan.benchmark
     measurements = tuple(
@@ -85,23 +91,30 @@ def run_benchmark(
 
 
 def _summary_line(prefix: str, summary: dict[str, object]) -> str:
+    if summary["kind"] == ANALYSIS_KIND:
+        return (
+            f"{prefix}_analysis={summary['report_sha256']} "
+            f"patterns={summary['patterns']} transposes={summary['transposes']} "
+            f"tiled_estimates={summary['tiled_estimates']} measured=false "
+            "gpu_executed=false"
+        )
     if summary["measured"]:
         return (
             f"{prefix}_measurement={summary['report_sha256']} "
             f"cases={summary['cases']} scope={summary['scope']} gpu_executed=false"
         )
     return (
-        f"{prefix}_analysis={summary['report_sha256']} "
-        f"patterns={summary['patterns']} transposes={summary['transposes']} "
-        f"tiled_estimates={summary['tiled_estimates']} measured=false "
+        f"{prefix}_synthetic_timing={summary['report_sha256']} "
+        f"cases={summary['cases']} scope={summary['scope']} measured=false "
         "gpu_executed=false"
     )
 
 
 def _print_measurements(report: dict[str, object]) -> None:
+    label = "cpu_host_measurement" if report["measured"] else "synthetic_timing"
     for result in report["results"]:
         print(
-            "cpu_host_measurement "
+            f"{label} "
             f"backend={result['backend']} m={result['m']} n={result['n']} "
             f"k={result['k']} median_ns={result['timing']['median_ns']} "
             f"iqr_ns={result['timing']['iqr_ns']} "
@@ -125,7 +138,10 @@ def _verify_file(args: argparse.Namespace) -> int:
 def main(
     argv: Sequence[str] | None = None, *, clock: Callable[[], int] | None = None
 ) -> int:
-    """Run one command; ``clock`` replaces the benchmark timer in tests."""
+    """Run one command; ``clock`` replaces the benchmark timer in tests.
+
+    A replaced timer's durations are reported as synthetic, never measured.
+    """
 
     args = build_parser().parse_args(argv)
     try:
