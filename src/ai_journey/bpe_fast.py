@@ -49,6 +49,12 @@ def _encode_piece(tokenizer, text):
 
 
 def encode_fast(tokenizer: ByteTokenizer, text: str) -> tuple[int, ...]:
+    """Encode through a heap of candidate merges, matching the reference ids exactly.
+
+    The reference rescans every adjacent pair each round; the heap pops merges in
+    the same rank order and skips stale entries. Regex tokenizers are encoded
+    piece by piece, as in the reference.
+    """
     if not isinstance(tokenizer, ByteTokenizer) or not isinstance(text, str):
         raise TypeError("fast encoding requires a byte tokenizer and text")
     pieces = (

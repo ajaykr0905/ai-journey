@@ -80,6 +80,11 @@ def _parser():
 
 
 def verify_decoder_document_report(report, train_bytes, heldout_bytes):
+    """Check schema, runtime, digest and source hashes, then replay exactly.
+
+    Returns the plan; any mismatch, including a replay that is not identical,
+    raises ValueError.
+    """
     if (
         type(report) is not dict
         or set(report)
@@ -115,6 +120,11 @@ def verify_decoder_document_report(report, train_bytes, heldout_bytes):
 
 
 def main(argv=None):
+    """Plan, run, verify, run-public or verify-public document experiments.
+
+    New outputs never replace an existing path, verification replays training,
+    and failures exit through argparse with status 2.
+    """
     parser = _parser()
     args = parser.parse_args(argv)
     try:

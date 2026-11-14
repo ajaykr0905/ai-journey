@@ -10,6 +10,8 @@ from .scaling_laws import _positive_integer
 
 @dataclass(frozen=True)
 class CorpusReusePlan:
+    """Full and partial passes over the unique corpus that a token target needs."""
+
     target_tokens: int
     unique_train_tokens: int
     full_epochs: int
@@ -18,10 +20,14 @@ class CorpusReusePlan:
 
     @property
     def repeats_data(self) -> bool:
+        """Return True when the target exceeds the unique tokens available."""
+
         return self.target_tokens > self.unique_train_tokens
 
     @property
     def distinct_token_fraction(self) -> Decimal:
+        """Return the share of trained tokens that are distinct, capped at one."""
+
         return min(
             Decimal(1),
             Decimal(self.unique_train_tokens) / Decimal(self.target_tokens),

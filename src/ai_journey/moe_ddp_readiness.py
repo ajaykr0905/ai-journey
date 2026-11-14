@@ -45,6 +45,14 @@ def _command(arguments, *, name, directory, environment):
 
 
 def run_readiness(*, installed_root: Path, repository: Path, output_dir: Path):
+    """Prove that an installed wheel's replicated MoE restart is exact.
+
+    Through the installed console entry point it plans, trains four steps
+    continuously and two plus two with a resume, then requires identical
+    model, optimizer, RNG, cursor and metrics and fresh resumed worker PIDs.
+    Writes readiness.json; a failed command raises RuntimeError and a state
+    mismatch raises ValueError.
+    """
     installed_root = installed_root.resolve()
     if not Path(__file__).resolve().is_relative_to(installed_root):
         raise ValueError("MoE readiness requires the isolated installed package")

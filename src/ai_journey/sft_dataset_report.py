@@ -9,6 +9,7 @@ from .sft_dataset_source import SFTSourceSpec
 
 
 def manifest_sha256(manifest: dict) -> str:
+    """Seal over every manifest field except manifest_sha256 itself."""
     if not isinstance(manifest, dict):
         raise TypeError("manifest must be a dictionary")
     unsealed = {
@@ -20,6 +21,11 @@ def manifest_sha256(manifest: dict) -> str:
 def build_sft_manifest(
     source: SFTSourceSpec, policy: SFTDatasetPolicy, build: SFTDatasetBuild
 ) -> dict:
+    """Describe source, policy, pipeline counts, metrics and artifacts, then seal.
+
+    input_records adds the quality rejections back, so every source row is
+    accounted for.
+    """
     if not isinstance(source, SFTSourceSpec):
         raise TypeError("source must be SFTSourceSpec")
     if not isinstance(policy, SFTDatasetPolicy):

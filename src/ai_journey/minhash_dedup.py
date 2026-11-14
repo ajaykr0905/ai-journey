@@ -18,6 +18,12 @@ from .minhash_text import word_shingles
 
 @dataclass(frozen=True)
 class MinHashDedupPolicy:
+    """Pinned Day 66 controls: shingle width, hash family, LSH bands and threshold.
+
+    Construction also builds the family and banding, so an inconsistent policy,
+    such as bands that do not divide num_hashes, fails before any hashing.
+    """
+
     shingle_width: int
     num_hashes: int
     seed: int
@@ -40,6 +46,8 @@ class MinHashDedupPolicy:
 
 @dataclass(frozen=True)
 class MinHashDedupMetrics:
+    """Sealed counts in which kept plus removed documents equal the input."""
+
     input_documents: int
     candidate_pairs: int
     duplicate_pairs: int
@@ -51,6 +59,8 @@ class MinHashDedupMetrics:
 
 @dataclass(frozen=True)
 class MinHashDedupResult:
+    """Kept documents and the candidate assessments and clusters that justify them."""
+
     documents: tuple[CleanedDocument, ...]
     assessments: tuple[CandidateAssessment, ...]
     decisions: tuple[ClusterDecision, ...]

@@ -11,6 +11,14 @@ from .http_measurements import validated_request
 
 @dataclass(frozen=True)
 class HTTPWorkloadProfile:
+    """Bounded workload that one load run must execute exactly as declared.
+
+    Construction checks every control and rejects a profile whose worst case
+    exceeds 8192 request tokens or 120 seconds of back-to-back timeouts, so a
+    profile cannot drive unbounded work against the loopback lab. Raises
+    ValueError.
+    """
+
     prompts: tuple[tuple[int, ...], ...] = ((1, 2),)
     measured_requests: int = 8
     warmup_requests: int = 1
@@ -95,6 +103,12 @@ class HTTPWorkloadProfile:
             raise ValueError("HTTP profile exceeds its declared 120-second I/O budget")
 
     def sampling(self, index):
+        """Sampling controls for request ``index``, with a per-request seed.
+
+        Seeds advance with the index (modulo 2**64), so requests sample
+        independently yet a verifier can rebuild each one.
+        """
+
         return {
             "max_new_tokens": self.max_new_tokens,
             "temperature": self.temperature,
@@ -104,9 +118,13 @@ class HTTPWorkloadProfile:
         }
 
     def to_mapping(self):
+        """JSON-ready fields, prompts as lists, as recorded in the raw run."""
+
         return asdict(self) | {"prompts": [list(prompt) for prompt in self.prompts]}
 
     def fingerprint(self):
+        """SHA-256 of the canonical mapping that binds a run to this profile."""
+
         return sha256(
             json.dumps(
                 self.to_mapping(),
@@ -118,6 +136,12 @@ class HTTPWorkloadProfile:
 
 
 def http_profile_from_mapping(payload):
+    """Rebuild a recorded profile, requiring every field to be present.
+
+    A partial mapping would silently pick up current defaults, so it raises
+    ValueError; the constructor then reapplies every bound.
+    """
+
     if (
         type(payload) is not dict
         or set(payload) != {field.name for field in fields(HTTPWorkloadProfile)}
@@ -133,6 +157,14 @@ def http_profile_from_mapping(payload):
 def http_request_schedule(
     profile: HTTPWorkloadProfile, run_id: str, *, phase="measured"
 ):
+    """Deterministic request rows for one phase of a run.
+
+    Request IDs embed the run ID, so the verifier regenerates this exact
+    schedule to detect omitted or reordered attempts. Only measured rows carry
+    planned cancellations. Raises ValueError for a run_id that is not 32
+    lowercase hex characters or for an unknown phase.
+    """
+
     if type(run_id) is not str or re.fullmatch(r"[0-9a-f]{32}", run_id) is None:
         raise ValueError("run_id must be a fresh UUID hex value")
     if phase not in {"warmup", "measured"}:

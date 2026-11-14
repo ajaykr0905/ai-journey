@@ -1,5 +1,8 @@
+from hashlib import sha256
+
 import pytest
 
+from ai_journey.sft_dataset_identity import record_id, record_sha256
 from ai_journey.sft_dataset_record import DollyRecord, SFTDatasetError
 from ai_journey.sft_dataset_select import select_records
 
@@ -25,6 +28,21 @@ def test_selection_returns_exact_seeded_category_quotas():
         "open_qa": 5,
         "summarization": 1,
     }
+
+
+def test_selection_keeps_the_lowest_seeded_ranks_of_each_category():
+    rows = candidates()
+    result = select_records(rows, target=9, seed=67)
+
+    def rank(value):
+        digest = record_sha256(value)
+        return sha256(f"67:{digest}".encode()).hexdigest(), record_id(value)
+
+    expected = []
+    for category, quota in result.quotas:
+        members = [row for row in rows if row.category == category]
+        expected.extend(sorted(members, key=rank)[:quota])
+    assert result.records == tuple(sorted(expected, key=record_id))
 
 
 def test_selection_is_independent_of_source_order():

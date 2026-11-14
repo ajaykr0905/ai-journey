@@ -13,6 +13,12 @@ _BAND_DOMAIN = b"ai-journey-minhash-band-v1\0"
 
 @dataclass(frozen=True)
 class LSHBanding:
+    """Equal signature bands; documents that share any band become candidates.
+
+    bands must divide num_hashes; more bands lower the similarity at which
+    pairs start to collide.
+    """
+
     num_hashes: int
     bands: int
 
@@ -28,6 +34,7 @@ class LSHBanding:
 
     @property
     def rows_per_band(self) -> int:
+        """Signature values per band; a band matches with probability similarity**r."""
         return self.num_hashes // self.bands
 
     @property

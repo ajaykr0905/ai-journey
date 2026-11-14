@@ -153,10 +153,14 @@ class TrainingWorkload:
 
     @property
     def tokens_per_micro_batch(self) -> int:
+        """Return tokens one data-parallel rank processes per micro-batch."""
+
         return self.sequence_length * self.micro_batch_size
 
     @property
     def tokens_per_optimizer_step(self) -> int:
+        """Return tokens one global update consumes across accumulation and ranks."""
+
         return (
             self.tokens_per_micro_batch
             * self.gradient_accumulation_steps
@@ -165,6 +169,8 @@ class TrainingWorkload:
 
     @property
     def total_training_tokens(self) -> int:
+        """Return tokens consumed over every declared optimizer step."""
+
         return self.tokens_per_optimizer_step * self.optimizer_steps
 
 

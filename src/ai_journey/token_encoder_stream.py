@@ -27,6 +27,12 @@ class DocumentEncodingStream:
     def feed(
         self, payload: bytes, *, document_end=False, final=False
     ) -> tuple[int, ...]:
+        """Buffer a chunk and encode the buffer only at document_end or final.
+
+        Merges always see the whole document, so chunk boundaries never change
+        ids. Passing max_document_bytes or feeding after final raises
+        TokenizerError.
+        """
         if not isinstance(payload, bytes):
             raise TypeError("stream payload must be bytes")
         if not isinstance(document_end, bool) or not isinstance(final, bool):
@@ -44,6 +50,7 @@ class DocumentEncodingStream:
         return tokens
 
     def snapshot(self) -> dict:
+        """Checkpoint the unflushed bytes with the tokenizer identity and budget."""
         return {
             "schema_version": 1,
             "tokenizer_sha256": self.identity,
@@ -53,6 +60,12 @@ class DocumentEncodingStream:
         }
 
     def restore(self, state: dict) -> None:
+        """Resume from a snapshot taken with the same tokenizer and budget.
+
+        Other identities or budgets, malformed base64, an over-budget buffer or
+        bytes left in a finalized stream raise TokenizerError and leave the live
+        state unchanged.
+        """
         if not isinstance(state, dict) or set(state) != {
             "schema_version",
             "tokenizer_sha256",

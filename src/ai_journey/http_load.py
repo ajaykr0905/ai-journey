@@ -24,6 +24,14 @@ HTTP_LOAD_SCOPE = (
 
 
 def http_load_totals(observations, *, work_started_ns, work_finished_ns):
+    """Count outcomes and rates over one measured work window.
+
+    Every rate divides by the whole window, failures included. Only completed
+    requests contribute output tokens; tokens received before a cancellation
+    or failure are counted separately as partial. Raises ValueError for a
+    non-positive window or an unknown outcome.
+    """
+
     elapsed = work_finished_ns - work_started_ns
     if elapsed <= 0:
         raise ValueError("HTTP load work window must be positive")

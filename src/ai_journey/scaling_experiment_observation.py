@@ -16,6 +16,13 @@ from .scaling_laws import ScalingLawError, _positive_integer
 
 @dataclass(frozen=True)
 class ScalingObservation:
+    """One supplied run result whose trained tokens equal its declared target.
+
+    Results are supplied, not authenticated: run_id is a SHA-256 digest that
+    verify_observation_identity rebinds, and loss and elapsed time must be
+    positive and finite.
+    """
+
     run_id: str
     point: ExperimentPoint
     validation_loss: float

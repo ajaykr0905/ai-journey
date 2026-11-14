@@ -10,6 +10,10 @@ from .decoder_variant_runtime import isolated_decoder_runtime
 
 
 def require_finite_decoder_state(value) -> None:
+    """Raise FloatingPointError if any nested tensor or float is non-finite.
+
+    Training checks model and optimizer state before and after every update.
+    """
     if isinstance(value, torch.Tensor):
         if not bool(torch.isfinite(value).all()):
             raise FloatingPointError("decoder state contains non-finite tensors")

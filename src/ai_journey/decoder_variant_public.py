@@ -22,6 +22,11 @@ def public_decoder_partitions(
     heldout_documents=4,
     split_seed=52,
 ):
+    """Split a pinned snapshot into seeded, content-disjoint train and held-out bytes.
+
+    Documents are ordered by a seeded hash of their digests; repeated content
+    or too few documents raise ValueError, and evidence lists digests, not text.
+    """
     for name, value, maximum in (
         ("train_documents", train_documents, 128),
         ("heldout_documents", heldout_documents, 32),
@@ -66,6 +71,7 @@ def public_decoder_partitions(
 def run_public_decoder_comparison(
     plan, snapshot, source, *, train_documents=16, heldout_documents=4, split_seed=52
 ):
+    """Run the document comparison on a pinned public split and seal the report."""
     train, heldout, evidence = public_decoder_partitions(
         snapshot,
         source,
@@ -83,6 +89,7 @@ def run_public_decoder_comparison(
 
 
 def verify_public_decoder_report(report, snapshot, source):
+    """Check the pinned source identity and digest, then require an exact replay."""
     if (
         type(report) is not dict
         or set(report) != {"schema", "public_corpus", "comparison", "report_sha256"}

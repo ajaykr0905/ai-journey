@@ -11,6 +11,10 @@ from .tokenizer_io import tokenizer_state
 
 
 def canonical_json_bytes(value) -> bytes:
+    """The one encoding of shard rows and the report seal; changing it changes all.
+
+    Sorted keys, compact separators, UTF-8, no NaN and a trailing newline.
+    """
     return (
         json.dumps(
             value,

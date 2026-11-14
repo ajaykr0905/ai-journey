@@ -8,6 +8,12 @@ import torch
 
 @dataclass(frozen=True)
 class DecoderOptimizerConfig:
+    """Explicit AdamW controls recorded with every decoder experiment.
+
+    Values are stored as floats; weight decay must lie in [0, 1], betas in
+    [0, 1) and epsilon in (0, 1], else ValueError.
+    """
+
     weight_decay: float = 0.01
     beta1: float = 0.9
     beta2: float = 0.999
@@ -52,6 +58,12 @@ def decoder_optimizer_groups(model) -> dict:
 def build_decoder_optimizer(
     model, *, learning_rate: float, config: DecoderOptimizerConfig
 ) -> torch.optim.AdamW:
+    """Build AdamW that decays matrices, not vectors, with tied tensors once.
+
+    foreach and fused are pinned off so the update path never follows torch
+    defaults; a learning rate outside (0, 0.1] raises ValueError.
+    """
+
     if not isinstance(config, DecoderOptimizerConfig):
         raise TypeError("optimizer config must be DecoderOptimizerConfig")
     if (

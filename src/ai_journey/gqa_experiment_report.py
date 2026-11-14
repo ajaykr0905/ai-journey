@@ -107,6 +107,11 @@ def _evaluation(score, report, plan, targets, windows):
 
 
 def verify_gqa_experiment_report(report):
+    """Check a document report offline and return its plan.
+
+    Schema, digest, runtime, per-arm architecture and optimizer accounting,
+    traces and the paired summary must recompute; replay re-runs training.
+    """
     _fields(
         report,
         "schema plan runtime train_sha256 heldout_sha256 documents evaluation_windows resource_admission trials summary verification_scope report_sha256",
@@ -268,6 +273,11 @@ def verify_gqa_experiment_report(report):
 
 
 def replay_gqa_experiment_report(report, train_bytes, heldout_bytes):
+    """Re-run a verified report on the supplied bytes and require identical JSON.
+
+    The recorded torch version and both source digests must match first, else
+    ValueError.
+    """
     plan = verify_gqa_experiment_report(report)
     if (
         report["runtime"]["torch_version"] != str(torch.__version__)

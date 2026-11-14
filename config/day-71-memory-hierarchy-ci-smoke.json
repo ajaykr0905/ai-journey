@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "name": "day-71-memory-hierarchy-ci-smoke",
+  "dtype": "float64",
+  "seed": 71,
+  "timing": {
+    "warmup": 1,
+    "repeats": 3,
+    "target_bytes_per_sample": 1048576,
+    "max_runtime_seconds": 20
+  },
+  "stream": {
+    "kernels": ["copy", "scale", "add", "triad"],
+    "elements": [1024, 65536]
+  },
+  "access": {
+    "elements": 65536,
+    "stride_elements": 16
+  },
+  "matmul": {"m": 64, "n": 64, "k": 64},
+  "littles_law": {
+    "latency_ns": 100,
+    "latency_note": "Stated round figure of 100 ns for one load that misses every cache level on a current client CPU, used only to illustrate Little's law. This lab does not measure latency, and the figure is not a datasheet value for this host."
+  }
+}

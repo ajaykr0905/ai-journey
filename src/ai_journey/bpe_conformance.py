@@ -133,6 +133,7 @@ def normalization_collisions(
 
 
 def audit_fingerprint(report: dict) -> str:
+    """Seal a training audit: SHA-256 of canonical JSON of all but audit_sha256."""
     if not isinstance(report, dict):
         raise TypeError("audit report must be an object")
     semantic = {key: value for key, value in report.items() if key != "audit_sha256"}

@@ -73,6 +73,7 @@ ai-journey-recovery = "ai_journey.recovery_cli:main"
 ai-journey-serving-recovery = "ai_journey.serving_recovery_cli:main"
 ai-journey-simt = "ai_journey.simt_cli:main"
 ai-journey-memory-access = "ai_journey.memory_access_cli:main"
+ai-journey-memory-hierarchy = "ai_journey.memory_hierarchy_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

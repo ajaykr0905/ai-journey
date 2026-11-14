@@ -55,14 +55,24 @@ class RequestTiming:
 
     @property
     def queue_time_ns(self) -> int:
+        """Nanoseconds from receipt to service start on the shared clock."""
+
         return self.started_ns - self.received_ns
 
     @property
     def service_time_ns(self) -> int:
+        """Nanoseconds from service start to completion, excluding queueing."""
+
         return self.completed_ns - self.started_ns
 
     @property
     def time_to_first_token_ns(self) -> int | None:
+        """Nanoseconds from receipt, not service start, to the first token.
+
+        Measuring from receipt keeps queueing inside the TTFT that goodput
+        compares with its SLO; None when no token was produced.
+        """
+
         if self.first_token_ns is None:
             return None
         return self.first_token_ns - self.received_ns

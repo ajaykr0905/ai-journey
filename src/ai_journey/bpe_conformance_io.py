@@ -18,6 +18,7 @@ def _validate_seal(report: dict) -> None:
 
 
 def save_training_audit(path: Path, report: dict) -> None:
+    """Publish an audit atomically, and only while its seal matches its fields."""
     if not isinstance(path, Path):
         raise TypeError("training audit path must be pathlib.Path")
     _validate_seal(report)
@@ -25,6 +26,11 @@ def save_training_audit(path: Path, report: dict) -> None:
 
 
 def load_training_audit(path: Path) -> dict:
+    """Load an audit whose seal still matches, before any replay reads its fields.
+
+    Files over 2 MiB, duplicate JSON fields or a broken seal raise
+    TokenizerError; verify_training_audit then rebuilds it from source.
+    """
     if not isinstance(path, Path):
         raise TypeError("training audit path must be pathlib.Path")
 

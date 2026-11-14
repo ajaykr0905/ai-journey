@@ -9,6 +9,8 @@ from .data_cleaning import CleanedDocument
 
 @dataclass(frozen=True)
 class DataSplit:
+    """Disjoint train and validation partitions plus the seed that ranked them."""
+
     train: tuple[CleanedDocument, ...]
     validation: tuple[CleanedDocument, ...]
     seed: int

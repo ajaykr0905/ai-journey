@@ -10,6 +10,12 @@ from .parallel_corpus import extract_sentences
 
 @dataclass(frozen=True)
 class PublicCorpus:
+    """Pinned identity of a public treebank file: commit, size, SHA-256, license.
+
+    Loading compares exact bytes against it, so an upstream edit or moved branch
+    cannot change the corpus silently.
+    """
+
     language: str
     repository: str
     revision: str
@@ -20,10 +26,12 @@ class PublicCorpus:
 
     @property
     def url(self):
+        """Raw file URL at the pinned revision; the SHA-256 check decides acceptance."""
         return f"https://raw.githubusercontent.com/{self.repository}/{self.revision}/{self.filename}"
 
     @property
     def license_url(self):
+        """LICENSE.txt at the same revision, cited by exported evidence."""
         return f"https://github.com/{self.repository}/blob/{self.revision}/LICENSE.txt"
 
 

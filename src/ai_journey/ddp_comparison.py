@@ -89,6 +89,24 @@ def compare_decompositions(
 
 
 def verify_comparison(report):
+    """Recheck the three predeclared decomposition arms and their evidence.
+
+    Each arm must keep its declared world, micro-batch and accumulation split,
+    verify as training evidence and share every other spec field, and its
+    parameter error must stay within the fixed 1e-10 tolerance. Returns the
+    report; raises ValueError.
+    """
+    if not isinstance(report, dict):
+        raise ValueError("comparison schema or digest does not match")
+    try:
+        return _verify_comparison(report)
+    except (KeyError, TypeError, OverflowError) as error:
+        # Like verify_evidence: a resealed comparison with a missing field or a
+        # wrongly typed value is invalid, not a crash of the verifier.
+        raise ValueError("comparison fields are malformed") from error
+
+
+def _verify_comparison(report):
     if (
         type(report.get("schema_version")) is not int
         or report["schema_version"] not in (1, 2)
@@ -149,6 +167,10 @@ def verify_comparison(report):
 
 
 def write_comparison(path: Path, report):
+    """Verify, then atomically publish a comparison as canonical JSON.
+
+    A symlinked destination raises ValueError.
+    """
     verify_comparison(report)
     if path.is_symlink():
         raise ValueError("comparison output must not be a symlink")

@@ -15,6 +15,12 @@ from .scaling_laws import ScalingLawError
 
 @dataclass(frozen=True, order=True)
 class AggregatedPoint:
+    """Seed replicates of one (parameters, tokens) coordinate as mean and spread.
+
+    Different coordinates are never pooled; points sort by parameters, then
+    tokens.
+    """
+
     parameter_count: int
     train_tokens: int
     mean_validation_loss: float
@@ -24,12 +30,16 @@ class AggregatedPoint:
 
 @dataclass(frozen=True)
 class FitSplit:
+    """Fitting points and the largest model per token budget held out from them."""
+
     training: tuple[AggregatedPoint, ...]
     holdout: tuple[AggregatedPoint, ...]
 
 
 @dataclass(frozen=True)
 class FitResiduals:
+    """In-sample error of a fit; its log-space RMSE sets the residual band width."""
+
     mean_absolute_error: float
     mean_absolute_percentage_error: float
     root_mean_squared_log_error: float
@@ -38,6 +48,13 @@ class FitResiduals:
 
 @dataclass(frozen=True)
 class ExtrapolationScope:
+    """How far a target compute lies beyond the largest fitted compute.
+
+    ``classification`` is interpolation up to a factor of one,
+    bounded_extrapolation up to the bounded factor, and
+    speculative_extrapolation beyond it.
+    """
+
     target_compute: float
     factor_beyond_observed_maximum: float
     classification: str
@@ -45,6 +62,11 @@ class ExtrapolationScope:
 
 @dataclass(frozen=True)
 class ResidualPredictionBand:
+    """A descriptive multiplicative band around one prediction, not a CI.
+
+    The bounds divide and multiply the estimate by exp(multiplier * log RMSE).
+    """
+
     estimate: float
     lower: float
     upper: float
@@ -53,6 +75,8 @@ class ResidualPredictionBand:
 
 @dataclass(frozen=True)
 class HoldoutEvaluation:
+    """Error of the unrefitted fit on held-out points and the share in its bands."""
+
     mean_absolute_percentage_error: float
     within_residual_band_fraction: float
     holdout_count: int
@@ -60,6 +84,12 @@ class HoldoutEvaluation:
 
 @dataclass(frozen=True)
 class ScalingAcceptancePolicy:
+    """Preregistered gates a fit must pass before its extrapolation is shown.
+
+    Fractions lie in [0, 1] and the extrapolation factor is at least one;
+    violations raise ScalingLawError.
+    """
+
     minimum_log_r_squared: float
     maximum_holdout_mape: float
     minimum_band_coverage: float
@@ -91,6 +121,8 @@ class ScalingAcceptancePolicy:
 
 @dataclass(frozen=True)
 class ScalingAcceptance:
+    """Whether a fit is admitted, with every failed gate's reason if it is not."""
+
     admitted: bool
     reasons: tuple[str, ...]
 

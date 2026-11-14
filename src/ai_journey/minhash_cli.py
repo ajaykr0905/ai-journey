@@ -46,6 +46,10 @@ def _summary(report: dict) -> str:
 
 
 def main(argv=None) -> int:
+    """Run build, verify or replay and print the sealed summary; errors exit with 2.
+
+    build refuses an output path that aliases the dataset or config.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

@@ -10,6 +10,14 @@ from .training_models import base_model_config, expected_training_parameters
 
 
 def preflight(source: Path, spec_path: Path, *, world_size: int, steps: int):
+    """Admit a run's source and budgets before any model or process exists.
+
+    The source must be a regular file of at most 1 MiB matching the spec's
+    digest, and the model must fit one million parameters and a 128-token
+    context. The run may use at most four workers, 128 updates within the
+    spec's schedule and 8192 tokens per global update, and must supply one
+    complete global batch. Returns the spec; raises ValueError.
+    """
     integer(world_size, "world_size", 1)
     integer(steps, "steps", 1)
     if world_size > 4 or steps > 128:

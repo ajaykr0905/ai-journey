@@ -16,6 +16,12 @@ from .transformer_lab import model_fingerprint
 def benchmark_bpe_serving(
     artifact, prompt, *, new_tokens=4, repeats=3, seed=40, temperature=0.8, top_k=1
 ):
+    """Time cached and full-forward generation in alternating, warmed-up pairs.
+
+    Every run must reproduce the reference sample token for token and the model
+    fingerprint is checked before and after, so a timing never describes other
+    output or drifted weights. 1-10 repeats, 1-32 new tokens; local CPU only.
+    """
     if not isinstance(artifact, BPEArtifact):
         raise TypeError("serving benchmark requires a verified BPEArtifact")
     if (

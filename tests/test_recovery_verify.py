@@ -22,6 +22,19 @@ def evidence(tmp_path):
     return build_recovery_report(result), run_dir / "trace.json"
 
 
+@pytest.fixture(scope="module")
+def measured(tmp_path_factory):
+    # One real kill-and-resume run is the expensive part. Every test verifies
+    # that same evidence, never writes its trace, and edits only a deep copy.
+    return evidence(tmp_path_factory.mktemp("recovery-verify"))
+
+
+@pytest.fixture
+def report_and_trace(measured):
+    report, trace = measured
+    return copy.deepcopy(report), trace
+
+
 def reseal(report):
     unsigned = {key: value for key, value in report.items() if key != "report_sha256"}
     report["report_sha256"] = sha256(
@@ -29,8 +42,8 @@ def reseal(report):
     ).hexdigest()
 
 
-def test_verifier_recomputes_report_and_trace_relationships(tmp_path):
-    report, trace = evidence(tmp_path)
+def test_verifier_recomputes_report_and_trace_relationships(report_and_trace):
+    report, trace = report_and_trace
     assert verify_recovery_report(report, trace_path=trace) == report
 
 
@@ -46,9 +59,9 @@ def test_verifier_recomputes_report_and_trace_relationships(tmp_path):
     ],
 )
 def test_verifier_rejects_resealed_but_incoherent_evidence(
-    tmp_path, section, field, value, message
+    report_and_trace, section, field, value, message
 ):
-    report, _ = evidence(tmp_path)
+    report, _ = report_and_trace
     changed = copy.deepcopy(report)
     if section == "attempts" and field == "resumed_attempt_id" and value == "same":
         value = changed["attempts"]["failed_attempt_id"]
@@ -58,8 +71,8 @@ def test_verifier_rejects_resealed_but_incoherent_evidence(
         verify_recovery_report(changed)
 
 
-def test_verifier_rejects_digest_tampering_and_trace_mismatch(tmp_path):
-    report, trace = evidence(tmp_path)
+def test_verifier_rejects_digest_tampering_and_trace_mismatch(report_and_trace):
+    report, trace = report_and_trace
     changed = copy.deepcopy(report)
     changed["loss_assessment"]["final_items"] = 19
     with pytest.raises(ValueError, match="digest"):

@@ -14,6 +14,12 @@ from .data_tokenization import TokenizationReport, build_tokenization_report
 
 @dataclass(frozen=True)
 class DataPipelineConfig:
+    """Day 59 controls; defaults equal config/day-59-data-pipeline.json.
+
+    Vocabulary 256-4096, min_frequency of at least 2, positive counts and a
+    32-bit seed keep the run small and valid; violations raise TokenizerError.
+    """
+
     quality: QualityPolicy = QualityPolicy()
     validation_count: int = 100
     train_shards: int = 4
@@ -48,6 +54,8 @@ class DataPipelineConfig:
 
 @dataclass(frozen=True)
 class DataPipelineResult:
+    """Every stage's output, rejections and duplicates included, for the report."""
+
     config: DataPipelineConfig
     input_documents: int
     changed_documents: int

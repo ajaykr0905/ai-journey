@@ -38,6 +38,46 @@ def test_resealed_forged_worker_evidence_is_rejected(field, value):
         verify_evidence(reseal(report))
 
 
+@pytest.mark.parametrize(
+    "location,value",
+    [
+        (("ranks",), [7, 8]),
+        (("ranks", 0), {"pid": 1, "model_sha256": "0" * 64}),
+        (("metrics", 0, "gradient_norm"), "large"),
+        (("metrics", 0, "loss_sum"), 10**400),
+        (("runtime",), []),
+    ],
+    ids=[
+        "non-dict-ranks",
+        "rank-without-rank",
+        "text-gradient-norm",
+        "unconvertible-loss",
+        "list-runtime",
+    ],
+)
+def test_resealed_malformed_worker_evidence_is_rejected_not_crashed(location, value):
+    report = json.loads(
+        (ROOT / "artifacts/ddp-lab-2026-10-22/comparison.json").read_text()
+    )["arms"][1]["evidence"]
+    parent = report
+    for key in location[:-1]:
+        parent = parent[key]
+    parent[location[-1]] = value
+    with pytest.raises(ValueError, match="malformed"):
+        verify_evidence(reseal(report))
+
+
+def test_resealed_malformed_comparison_is_rejected_not_crashed():
+    report = json.loads(
+        (ROOT / "artifacts/ddp-lab-2026-10-22/comparison.json").read_text()
+    )
+    del report["arms"][0]["name"]
+    with pytest.raises(ValueError, match="malformed"):
+        verify_comparison(reseal(report))
+    with pytest.raises(ValueError, match="schema"):
+        verify_comparison([report])
+
+
 def test_resealed_comparison_cannot_relax_the_predeclared_error_threshold():
     report = json.loads(
         (ROOT / "artifacts/ddp-lab-2026-10-22/comparison.json").read_text()

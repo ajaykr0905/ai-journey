@@ -9,12 +9,24 @@ from .resource_report import verify_resource_report
 
 
 def validate_run_id(run_id: str) -> str:
+    """Return ``run_id`` if it is a canonical UUID string, else raise ValueError.
+
+    Only the canonical lowercase hyphenated form is accepted, so string
+    equality decides whether two records belong to one run.
+    """
     if not isinstance(run_id, str) or str(UUID(run_id)) != run_id:
         raise ValueError("preflight run_id must be a canonical UUID")
     return run_id
 
 
 def verify_gpu_rank_evidence(payload: dict) -> dict:
+    """Recheck one rank's preflight record: seal, identity, mapping, admission.
+
+    The record may not claim training, GPU kernel or collective execution,
+    its rank must map to the topology's device, and its admission must
+    recompute from its own resource report and probe. Returns the payload;
+    raises ValueError.
+    """
     fields = {
         "schema_version",
         "kind",
@@ -143,6 +155,12 @@ def build_gpu_run_evidence(
 
 
 def verify_gpu_run_evidence(payload: dict) -> dict:
+    """Recheck a whole preflight run by rebuilding it from its rank records.
+
+    An edited run field, a missing or duplicated rank, or ranks that disagree
+    on runtime or device inventory make the rebuild fail or its digest
+    differ. Returns the payload; raises ValueError.
+    """
     fields = {
         "schema_version",
         "kind",

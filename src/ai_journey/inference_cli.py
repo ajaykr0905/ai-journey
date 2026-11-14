@@ -17,6 +17,12 @@ MAX_PROTOCOL_BYTES = 64 * 1024
 
 
 def load_inference_protocol(path) -> InferenceProtocol:
+    """Load one bounded, regular JSON protocol file as a validated protocol.
+
+    Symlinks and files over MAX_PROTOCOL_BYTES are refused from lstat before
+    any read; malformed JSON or containers raise ValueError.
+    """
+
     target = Path(path)
     metadata = target.lstat()
     if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_PROTOCOL_BYTES:
@@ -39,6 +45,11 @@ def load_inference_protocol(path) -> InferenceProtocol:
 
 
 def build_command(protocol_path, output_path) -> str:
+    """Build, seal and atomically write a report, returning its digest.
+
+    The report must recompute exactly before it can replace the output.
+    """
+
     report = seal_inference_report(
         build_inference_report(load_inference_protocol(protocol_path))
     )
@@ -47,6 +58,8 @@ def build_command(protocol_path, output_path) -> str:
 
 
 def verify_command(report_path) -> str:
+    """Return a saved report's digest only after every field recomputes."""
+
     return read_inference_report(report_path)["report_sha256"]
 
 
@@ -62,6 +75,8 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    """Print only the report digest, which build and verify share for one report."""
+
     arguments = parser().parse_args(argv)
     if arguments.command == "build":
         digest = build_command(arguments.protocol, arguments.output)

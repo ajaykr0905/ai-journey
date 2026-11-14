@@ -102,6 +102,11 @@ def summarize_decoder_trials(plan: DecoderExperimentPlan, trials: list[dict]) ->
 
 
 def decoder_comparison_digest(report: dict) -> str:
+    """Return the SHA-256 of every report field except ``report_sha256``.
+
+    Document, public and GQA reports seal with it; NaN or infinity raise
+    ValueError.
+    """
     content = {key: value for key, value in report.items() if key != "report_sha256"}
     return sha256(
         json.dumps(
@@ -113,6 +118,11 @@ def decoder_comparison_digest(report: dict) -> str:
 def run_decoder_document_comparison(
     plan: DecoderExperimentPlan, train_bytes: bytes, heldout_bytes: bytes
 ) -> dict:
+    """Run each declared seed's matched trial and assemble the sealed report.
+
+    Fresh runs and restarts share one assembler, so both yield identical
+    evidence.
+    """
     trials = [
         run_decoder_document_trial(plan, train_bytes, heldout_bytes, seed=seed)
         for seed in plan.seeds

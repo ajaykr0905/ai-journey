@@ -69,6 +69,11 @@ def build_controlled_gqa_model(config, seed):
 
 
 def summarize_gqa_trials(plan, trials):
+    """Summarize held-out NLL per arm and pair each grouped arm with full MHA.
+
+    Deltas are candidate minus control within one seed, so each compares arms
+    trained on the same batch schedule.
+    """
     measurements = {
         heads: [trial["arms"][index]["heldout"]["mean_nll"] for trial in trials]
         for index, heads in enumerate(plan.kv_heads)
@@ -105,6 +110,11 @@ def summarize_gqa_trials(plan, trials):
 def run_gqa_comparison(
     plan, train_bytes, heldout_bytes, *, _completed_arm=None, _cache_prefix_lengths=()
 ):
+    """Train and evaluate every kv_heads arm per seed on one shared schedule.
+
+    The whole job is admitted against the work budget before training, inside
+    the pinned float32 single-thread CPU runtime; the report carries its digest.
+    """
     documents = prepare_decoder_documents(
         train_bytes, heldout_bytes, context_length=plan.decoder.gpt2.context_length
     )

@@ -68,6 +68,7 @@ class EvaluationResult:
             raise EvaluationSuiteError("evaluation result fields are invalid")
 
     def to_mapping(self) -> dict:
+        """Return the validated result as the plain mapping the suite seals."""
         return asdict(self)
 
 

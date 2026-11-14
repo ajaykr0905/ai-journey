@@ -10,9 +10,11 @@ response, so a kill inside it provably loses an executed response; SIGTERM
 releases held responses before draining.
 
 ``server_command`` starts the module in isolated mode (``python -I``) behind a
-package stub, so the child imports only the standard library and this lab's
-stdlib-only modules. The package ``__init__`` eagerly imports torch, which
-would add more than a second to every cold restart on the measured host.
+package stub that resolves ``ai_journey`` to the supervisor's own package
+directory and never runs the package ``__init__``. That pins the child to the
+supervisor's source tree, never an ``ai_journey`` on ``PYTHONPATH`` or in
+site-packages, and keeps it stdlib-only: it imports only the standard library
+and this lab's stdlib-only modules.
 """
 
 from __future__ import annotations

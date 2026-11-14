@@ -10,6 +10,13 @@ from .inference_kv import InferenceCapacityError, _positive_integer
 
 @dataclass(frozen=True)
 class PagedAllocation:
+    """Whole-page KV allocation for a set of live sequences.
+
+    Each sequence rounds up to whole ``block_tokens`` pages on its own, so the
+    unused tail of each partial last page is internal waste, and bytes are
+    charged for allocated rather than requested tokens.
+    """
+
     requested_tokens: int
     blocks: int
     block_tokens: int
@@ -19,11 +26,15 @@ class PagedAllocation:
 
     @property
     def internal_waste_fraction(self) -> Fraction:
+        """Return the exact share of allocated tokens lost to partial pages."""
+
         return Fraction(self.internal_waste_tokens, self.allocated_tokens)
 
 
 @dataclass(frozen=True)
 class PagedAdmission:
+    """Admission verdict charged on whole-page bytes, not requested tokens."""
+
     allocation: PagedAllocation
     capacity_bytes: int
     admitted: bool
@@ -31,6 +42,13 @@ class PagedAdmission:
 
 @dataclass(frozen=True)
 class SharedPrefixAllocation:
+    """KV tokens for a batch that stores one shared prompt prefix once.
+
+    Each sequence pays only its private suffix, so ``saved_tokens`` is the
+    prefix length times one less than the batch, and bytes follow physical
+    tokens.
+    """
+
     logical_tokens: int
     physical_tokens: int
     saved_tokens: int

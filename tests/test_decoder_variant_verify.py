@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -28,11 +29,14 @@ def _run(module: str, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-@pytest.fixture
-def comparison(tmp_path: Path) -> tuple[Path, Path, Path]:
-    train_path = tmp_path / "train.bin"
-    heldout_path = tmp_path / "heldout.bin"
-    report_path = tmp_path / "comparison.json"
+@pytest.fixture(scope="module")
+def published_comparison(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, Path, Path]:
+    directory = tmp_path_factory.mktemp("decoder-comparison")
+    train_path = directory / "train.bin"
+    heldout_path = directory / "heldout.bin"
+    report_path = directory / "comparison.json"
     train_path.write_bytes(b"public training bytes for replay verification" * 2)
     heldout_path.write_bytes(
         b"distinct public heldout bytes for replay verification" * 2
@@ -52,6 +56,19 @@ def comparison(tmp_path: Path) -> tuple[Path, Path, Path]:
     )
     assert completed.returncode == 0, completed.stderr
     return report_path, train_path, heldout_path
+
+
+@pytest.fixture
+def comparison(
+    published_comparison: tuple[Path, Path, Path], tmp_path: Path
+) -> tuple[Path, Path, Path]:
+    # Tests tamper with, link and rewrite these files, so each gets copies of
+    # the one comparison run instead of retraining every decoder arm.
+    report, train, heldout = (
+        Path(shutil.copy2(source, tmp_path / source.name))
+        for source in published_comparison
+    )
+    return report, train, heldout
 
 
 def _verify(

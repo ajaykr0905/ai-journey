@@ -12,6 +12,10 @@ from .transformer_lab import model_fingerprint
 
 
 def main(argv=None):
+    """Serve only from a fully verified artifact: sample text or benchmark backends.
+
+    The output may not alias any training input; errors exit with status 2.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("report", "checkpoint", "tokenizer", "train", "validation", "output"):
         parser.add_argument(f"--{name}", required=True, type=Path)

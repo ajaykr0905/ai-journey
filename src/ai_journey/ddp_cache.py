@@ -12,6 +12,13 @@ from .gqa_config import cache_head_count
 
 @dataclass(frozen=True)
 class KVCache:
+    """Per-layer keys and values bound to the exact model and architecture.
+
+    The two digests let cached_forward refuse a cache built by another
+    checkpoint or decoder. Construction requires matching finite CPU (batch,
+    heads, time, width) tensors for every layer; raises ValueError.
+    """
+
     model_sha256: str
     keys: tuple[torch.Tensor, ...]
     values: tuple[torch.Tensor, ...]
@@ -60,16 +67,19 @@ class KVCache:
 
     @property
     def length(self) -> int:
+        """Number of cached positions, the tensors' time dimension."""
         return self.keys[0].shape[2]
 
     @property
     def storage_bytes(self) -> int:
+        """Bytes held by every key and value tensor."""
         return sum(
             tensor.numel() * tensor.element_size()
             for tensor in (*self.keys, *self.values)
         )
 
     def clone(self):
+        """Copy that shares no tensor storage and keeps both bound digests."""
         return KVCache(
             self.model_sha256,
             tuple(tensor.clone() for tensor in self.keys),

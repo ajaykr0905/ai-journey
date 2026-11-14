@@ -11,6 +11,12 @@ from .scaling_laws import _positive_decimal
 
 @dataclass(frozen=True)
 class CorpusAdmissionPolicy:
+    """Declared limits on corpus epochs and distinct-token share for a plan.
+
+    Both must be positive decimals and the fraction at most one; invalid
+    values raise TypeError, ScalingLawError or ValueError.
+    """
+
     maximum_epochs: int | float | str
     minimum_distinct_token_fraction: int | float | str
 
@@ -26,6 +32,11 @@ class CorpusAdmissionPolicy:
 
 @dataclass(frozen=True)
 class CorpusAdmission:
+    """Corpus verdict with the reasons for any failed limit.
+
+    It records the reuse it judged and never changes the token target.
+    """
+
     admitted: bool
     reasons: tuple[str, ...]
     total_epochs: Decimal

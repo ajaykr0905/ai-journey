@@ -16,6 +16,11 @@ class LoRAExperimentError(ValueError):
 
 @dataclass(frozen=True)
 class Document:
+    """One authored text with an id, long enough to yield a scored target.
+
+    Blank ids or texts shorter than two characters raise LoRAExperimentError.
+    """
+
     document_id: str
     text: str
 
@@ -29,6 +34,7 @@ class Document:
 
 
 def canonical_digest(value) -> str:
+    """Hash JSON evidence with sorted keys, compact separators and no NaN."""
     return sha256(
         json.dumps(
             value, sort_keys=True, separators=(",", ":"), allow_nan=False
@@ -38,6 +44,12 @@ def canonical_digest(value) -> str:
 
 @dataclass(frozen=True)
 class DocumentSplit:
+    """Pretrain, adaptation and validation documents with no shared ids or texts.
+
+    The codec is fit on pretrain and train text only, so validation must reuse
+    their characters; violations raise LoRAExperimentError.
+    """
+
     pretrain: tuple[Document, ...]
     train: tuple[Document, ...]
     validation: tuple[Document, ...]
@@ -67,11 +79,13 @@ class DocumentSplit:
                 ) from exc
 
     def codec(self) -> CharacterCodec:
+        """Return the codec fit on pretrain and train text, never validation."""
         return CharacterCodec.from_text(
             "".join(doc.text for doc in self.pretrain + self.train)
         )
 
     def evidence(self) -> dict:
+        """Return per-partition ids, digests and target counts plus the codec."""
         result = {}
         for name in ("pretrain", "train", "validation"):
             documents = getattr(self, name)
@@ -123,6 +137,10 @@ def synthetic_fixture() -> DocumentSplit:
 
 
 def bounded_integer(value, name, minimum, maximum):
+    """Return ``value`` only if it is a plain int within the inclusive bounds.
+
+    The exact type check rejects bools; violations raise LoRAExperimentError.
+    """
     if type(value) is not int or not minimum <= value <= maximum:
         raise LoRAExperimentError(
             f"{name} must be an integer in [{minimum}, {maximum}]"
@@ -145,6 +163,8 @@ def _encoded_documents(documents, codec):
 
 @dataclass(frozen=True)
 class TrainingWindow:
+    """One next-token window cut from a single document, never across two."""
+
     document_id: str
     start: int
     inputs: tuple[int, ...]
@@ -153,6 +173,8 @@ class TrainingWindow:
 
 @dataclass(frozen=True)
 class HeldoutTarget:
+    """One validation character scored from its bounded same-document context."""
+
     document_id: str
     target_index: int
     context: tuple[int, ...]
@@ -187,6 +209,7 @@ def training_batches(documents, codec, *, block_size, batch_size, steps, seed):
 
 
 def schedule_evidence(batches):
+    """Return window and target counts plus a digest of the exact schedule."""
     return {
         "steps": len(batches),
         "windows": sum(len(batch) for batch in batches),
@@ -217,6 +240,11 @@ def heldout_targets(documents, codec, *, block_size):
 
 
 def heldout_evidence(documents, codec, *, block_size):
+    """Return per-document target counts and a digest of every held-out target.
+
+    The ``policy`` string names the document-local rule that skips each
+    document's first character.
+    """
     targets = heldout_targets(documents, codec, block_size=block_size)
     return {
         "target_tokens": len(targets),

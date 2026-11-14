@@ -37,6 +37,12 @@ def _write_text(path, data):
 
 
 def main(argv=None):
+    """Export one language's disjoint train and held-out sample with provenance.
+
+    Snapshots are byte-checked, and the manifest is published only after both
+    partitions, which it pins by SHA-256. The five paths must differ and counts
+    lie in [1, 100]; errors exit with status 2.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("hindi", "english", "train-output", "validation-output", "manifest"):
         parser.add_argument(f"--{name}", required=True, type=Path)

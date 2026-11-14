@@ -42,6 +42,13 @@ from .transformer_lab import (
 
 @dataclass(frozen=True)
 class SFTComparisonConfig:
+    """Bounded controls for the paired-seed chat SFT comparison.
+
+    Every control has a range and the total is capped at 50M work units, so any
+    accepted protocol stays a replayable CPU run; violations raise
+    SFTDataError.
+    """
+
     seeds: tuple[int, ...] = (43, 44)
     block_size: int = 32
     embedding_dim: int = 16
@@ -91,6 +98,10 @@ class SFTComparisonConfig:
 
     @property
     def work_units(self):
+        """Return the coarse compute proxy capped by the CPU work budget.
+
+        It counts the base pretraining steps and four arms of SFT steps.
+        """
         return (
             len(self.seeds)
             * (self.base_steps + 4 * self.sft_steps)
@@ -100,6 +111,7 @@ class SFTComparisonConfig:
         )
 
     def model_config(self, vocab_size):
+        """Return the one-layer, dropout-free decoder config shared by every arm."""
         return TransformerConfig(
             vocab_size=vocab_size,
             block_size=self.block_size,
@@ -112,10 +124,16 @@ class SFTComparisonConfig:
 
 
 def sft_config_dict(config):
+    """Return the JSON form, with seeds as a list, that reports store."""
     return {**asdict(config), "seeds": list(config.seeds)}
 
 
 def sft_config_from_dict(value):
+    """Rebuild a config from exactly the declared controls and a seeds list.
+
+    Missing or extra fields raise SFTDataError, so a protocol or report cannot
+    carry controls that replay would ignore.
+    """
     if (
         not isinstance(value, dict)
         or set(value) != {field.name for field in fields(SFTComparisonConfig)}

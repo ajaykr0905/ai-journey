@@ -11,6 +11,11 @@ from .tokenizer_training import train_documents
 
 @dataclass(frozen=True)
 class TokenizationReport:
+    """Train-only tokenizer evidence with exact token and byte denominators.
+
+    token_reduction_fraction is 1 - tokens / UTF-8 bytes over both partitions.
+    """
+
     vocabulary_size: int
     tokenizer_sha256: str
     train: CompressionMetrics
@@ -21,6 +26,7 @@ class TokenizationReport:
     token_reduction_fraction: float
 
     def as_dict(self) -> dict:
+        """Nested dict sealed into the Day 59 manifest and compared on replay."""
         return asdict(self)
 
 

@@ -10,6 +10,12 @@ from .scaling_laws import _positive_decimal, _positive_integer
 
 @dataclass(frozen=True)
 class RuntimeAssumptions:
+    """Declared sustained throughput, accelerator count and hourly price.
+
+    These are planning inputs, not measurements; nonpositive values raise
+    ScalingLawError.
+    """
+
     sustained_flops_per_second: int | float | str
     accelerator_count: int
     hourly_cost_per_accelerator: int | float | str
@@ -28,6 +34,8 @@ class RuntimeAssumptions:
 
 @dataclass(frozen=True)
 class RuntimeEstimate:
+    """Idealized wall time, accelerator hours and cost under declared assumptions."""
+
     training_flops: int
     assumptions: RuntimeAssumptions
     seconds: Decimal

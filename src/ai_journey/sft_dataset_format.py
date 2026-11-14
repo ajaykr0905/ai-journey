@@ -12,6 +12,8 @@ _EXAMPLE_ID = re.compile(r"dolly-[0-9a-f]{24}")
 
 @dataclass(frozen=True)
 class ChatTurn:
+    """One user or assistant message, renormalized like source text on creation."""
+
     role: str
     content: str
 
@@ -27,6 +29,12 @@ class ChatTurn:
 
 @dataclass(frozen=True)
 class ChatExample:
+    """A strict user-then-assistant pair tied to its source record's identity.
+
+    example_id and source_sha256 must have the Dolly id and digest formats, so
+    every exported row traces back to one exact source record.
+    """
+
     example_id: str
     source_sha256: str
     category: str
@@ -58,6 +66,7 @@ class ChatExample:
             )
 
     def as_record(self) -> dict:
+        """Message-format row for dataset.jsonl; export adds the split field."""
         return {
             "category": self.category,
             "example_id": self.example_id,
@@ -70,6 +79,11 @@ class ChatExample:
 
 
 def format_dolly_record(record: DollyRecord) -> ChatExample:
+    """Turn a record into one user turn and one assistant turn.
+
+    Nonempty context follows the instruction under a "Context:" heading, and the
+    ids come from the record's content digest.
+    """
     if not isinstance(record, DollyRecord):
         raise TypeError("record must be DollyRecord")
     prompt = record.instruction

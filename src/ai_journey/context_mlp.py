@@ -23,6 +23,12 @@ class ContextMLPError(ValueError):
 
 @dataclass(frozen=True)
 class ContextDataset:
+    """Fixed-width context windows and next-character targets for one split.
+
+    Each record's windows start from boundary padding, so no sample spans two
+    records; ``contexts`` has shape (samples, block_size).
+    """
+
     vocabulary: Vocabulary
     contexts: np.ndarray
     targets: np.ndarray
@@ -35,6 +41,12 @@ class ContextDataset:
 
 @dataclass(frozen=True)
 class ContextMLP:
+    """Embedding, tanh hidden layer and softmax output parameters as arrays.
+
+    Training builds a new instance each step instead of updating arrays in
+    place, and loss_and_gradients returns its gradients in the same shape.
+    """
+
     embeddings: np.ndarray
     input_weights: np.ndarray
     input_bias: np.ndarray
@@ -44,6 +56,11 @@ class ContextMLP:
 
 @dataclass(frozen=True)
 class TrainingResult:
+    """Final model, every pre-update loss plus the final loss, and the trace.
+
+    ``losses`` has one more entry than ``trace``: the loss after the last step.
+    """
+
     model: ContextMLP
     losses: tuple[float, ...]
     trace: tuple[TrainingStep, ...]
@@ -51,6 +68,13 @@ class TrainingResult:
 
 @dataclass(frozen=True)
 class TrainingStep:
+    """One update's pre-update loss, applied gradient norm and learning rate.
+
+    The norm is measured after clipping when ``max_gradient_norm`` is set and
+    is the raw norm otherwise. ``step`` counts from ``start_step``, so a
+    resumed run keeps one numbering.
+    """
+
     step: int
     loss: float
     gradient_norm: float
@@ -59,18 +83,28 @@ class TrainingStep:
 
 @dataclass(frozen=True)
 class CorpusSplit:
+    """Whole records split into train and validation by corpus position.
+
+    Each input record lands in exactly one split; duplicates are not merged,
+    so a record repeated in the corpus can appear in both.
+    """
+
     train: tuple[str, ...]
     validation: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class DatasetSplit:
+    """Train and validation datasets encoded with one shared vocabulary."""
+
     train: ContextDataset
     validation: ContextDataset
 
 
 @dataclass(frozen=True)
 class EvaluationMetrics:
+    """Mean next-character NLL in nats and its perplexity, exp(nll)."""
+
     nll: float
     perplexity: float
 

@@ -41,6 +41,11 @@ def base_model_config(value: TrainingModelConfig | TrainingModel) -> GPT2Config:
 
 
 def expected_training_parameters(config: TrainingModelConfig) -> int:
+    """Return the analytical parameter count for any supported architecture.
+
+    build_training_model checks it against max_parameters before allocating,
+    so an oversized model is refused without being built.
+    """
     if isinstance(config, GQAConfig):
         return expected_gqa_parameter_count(config)
     if isinstance(config, MoEConfig):

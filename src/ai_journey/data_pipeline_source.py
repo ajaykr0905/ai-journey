@@ -15,6 +15,12 @@ PUD_ATTRIBUTION = (
 
 @dataclass(frozen=True)
 class SourceEvidence:
+    """Validated documents plus the provenance the manifest must carry.
+
+    metadata is the pinned PublicCorpus record; attribution must be nonempty
+    because the CC-BY-SA source license requires credit.
+    """
+
     metadata: dict
     source_url: str
     license_url: str

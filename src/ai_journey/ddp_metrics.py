@@ -18,6 +18,12 @@ def ddp_loss_scale(local_tokens: int, global_tokens: int, world_size: int) -> fl
 
 
 def weighted_mean(totals: list[tuple[float, int]]) -> float:
+    """Token-weighted mean loss from (loss_sum, tokens) totals.
+
+    Summed losses divide by summed tokens, never by a count of per-rank means,
+    so ranks with different token counts stay correctly weighted. Raises
+    ValueError for negative or non-finite sums or zero tokens.
+    """
     if not totals:
         raise ValueError("at least one total is required")
     for loss_sum, tokens in totals:

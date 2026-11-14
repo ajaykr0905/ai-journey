@@ -8,6 +8,12 @@ from .data_cleaning import CleanedDocument
 
 @dataclass(frozen=True)
 class QualityPolicy:
+    """Admission thresholds; the defaults are the pinned Day 59 values.
+
+    Lengths count code points of cleaned text and the alphanumeric fraction
+    ignores whitespace. Out-of-bounds values raise TokenizerError.
+    """
+
     min_characters: int = 20
     max_characters: int = 4_096
     min_alphanumeric_fraction: float = 0.5
@@ -29,12 +35,19 @@ class QualityPolicy:
 
 @dataclass(frozen=True)
 class QualityDecision:
+    """Admission outcome that keeps a rejected document and every rule it failed."""
+
     document: CleanedDocument
     accepted: bool
     reasons: tuple[str, ...]
 
 
 def assess_quality(document: CleanedDocument, policy: QualityPolicy) -> QualityDecision:
+    """Apply every rule and collect all failures instead of stopping at the first.
+
+    Reasons are too_short, too_long, low_alphanumeric_fraction and
+    repeated_character_run.
+    """
     if not isinstance(document, CleanedDocument) or not isinstance(
         policy, QualityPolicy
     ):
@@ -56,6 +69,7 @@ def assess_quality(document: CleanedDocument, policy: QualityPolicy) -> QualityD
 
 
 def longest_character_run(text: str) -> int:
+    """Longest run of one repeated character ("!!!!" is 4), for the run-length rule."""
     longest = active = 0
     previous = None
     for character in text:

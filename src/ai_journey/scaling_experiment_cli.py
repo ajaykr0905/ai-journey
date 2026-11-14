@@ -94,6 +94,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Build or verify a sealed experiment report from supplied observations.
+
+    Verify recomputes every field, build refuses an output that aliases the
+    protocol, and each printed line states execution_authenticated=false.
+    """
+
     args = build_parser().parse_args(argv)
     if args.command == "verify":
         report = load_experiment_report(args.report)

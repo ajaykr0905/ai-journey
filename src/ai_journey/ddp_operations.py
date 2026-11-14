@@ -19,6 +19,11 @@ from .ddp_service import GenerationService, GenerationRequest
 
 
 def write_report(path: Path, report):
+    """Atomically publish a JSON report via a fsynced temporary sibling.
+
+    Unlike write_evidence it does not verify the payload; a symlinked
+    destination raises ValueError.
+    """
     body = (
         json.dumps(report, sort_keys=True, separators=(",", ":"), allow_nan=False)
         + "\n"

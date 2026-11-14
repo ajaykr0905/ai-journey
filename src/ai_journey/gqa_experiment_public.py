@@ -23,6 +23,11 @@ def run_public_gqa_comparison(
     heldout_documents=4,
     split_seed=53,
 ):
+    """Run the comparison on a seeded split of a digest-pinned public snapshot.
+
+    The sealed report is verified before it is returned; an unsupported source
+    or a snapshot that differs from its pin raises.
+    """
     if type(source_name) is not str or source_name not in PUBLIC_SOURCES:
         raise ValueError("unsupported pinned GQA public source")
     train, heldout, evidence = public_decoder_partitions(
@@ -44,6 +49,11 @@ def run_public_gqa_comparison(
 
 
 def verify_public_gqa_report(report):
+    """Check a public report offline and return its plan.
+
+    Digest, pinned source and license, partition identities and the nested
+    comparison must agree; this is internal consistency, not replay.
+    """
     _fields(
         report,
         "schema public_source public_corpus comparison report_sha256",
@@ -98,6 +108,10 @@ def verify_public_gqa_report(report):
 
 
 def replay_public_gqa_report(report, snapshot):
+    """Rebuild the partitions from the snapshot and re-run every arm exactly.
+
+    Differing partition evidence or replayed results raise ValueError.
+    """
     plan = verify_public_gqa_report(report)
     evidence = report["public_corpus"]
     train, heldout, expected = public_decoder_partitions(

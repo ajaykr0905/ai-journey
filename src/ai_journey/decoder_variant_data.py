@@ -15,6 +15,13 @@ _MAX_SOURCE_BYTES = 1024 * 1024
 
 @dataclass(frozen=True)
 class DecoderDocuments:
+    """Content-disjoint train and held-out documents with one context length.
+
+    No document may repeat within or across partitions, each partition is
+    bounded, and training needs a document longer than the context;
+    violations raise ValueError.
+    """
+
     train: tuple[Document, ...]
     heldout: tuple[Document, ...]
     context_length: int
@@ -151,4 +158,5 @@ def document_training_batch(documents: DecoderDocuments, rows):
 
 
 def document_schedule_fingerprint(schedule) -> str:
+    """Return the SHA-256 of the exact schedule rows that trials record."""
     return sha256(json.dumps(schedule, separators=(",", ":")).encode()).hexdigest()

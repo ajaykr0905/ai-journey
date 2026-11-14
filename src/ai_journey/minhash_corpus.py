@@ -12,6 +12,12 @@ from .data_pipeline_verify import verify_pipeline_artifacts
 
 @dataclass(frozen=True)
 class Project1Corpus:
+    """Verified Day 59 documents with the report and shard digests evidence cites.
+
+    Shards are re-hashed after verification, so MinHash evidence names exactly
+    the bytes it deduplicated.
+    """
+
     documents: tuple[CleanedDocument, ...]
     dataset_report_sha256: str
     shard_sha256s: tuple[str, ...]

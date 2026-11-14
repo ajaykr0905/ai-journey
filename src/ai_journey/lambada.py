@@ -38,6 +38,11 @@ class LambadaSource:
 
     @classmethod
     def from_mapping(cls, payload: dict) -> "LambadaSource":
+        """Validate the pinned lambada_openai identity or raise LambadaError.
+
+        Fields must match exactly, digests must be lowercase hex, sizes positive
+        and the license MIT.
+        """
         fields = {
             "repository",
             "revision",
@@ -76,6 +81,10 @@ class LambadaSource:
         return cls(**payload)
 
     def verify_sample(self, source: bytes) -> None:
+        """Reject a dataset response whose size or SHA-256 differs from the pin.
+
+        Evaluation checks this before parsing the rows it will score.
+        """
         if not isinstance(source, bytes):
             raise TypeError("sample response must be bytes")
         if (
@@ -107,6 +116,7 @@ class LambadaExample:
 
     @property
     def digest(self) -> str:
+        """Return the SHA-256 of the row index and exact text, its identity."""
         payload = {"row_index": self.row_index, "text": self.text}
         return sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -127,6 +137,11 @@ class LambadaProtocol:
 
     @classmethod
     def from_mapping(cls, payload: dict) -> "LambadaProtocol":
+        """Validate a schema-1 protocol whose slice fits the test set.
+
+        Each control has a budget (up to 1000 rows, 32 KiB contexts and 256-byte
+        targets); violations raise LambadaError.
+        """
         fields = {
             "schema_version",
             "source",
@@ -170,6 +185,7 @@ class LambadaProtocol:
 
     @property
     def fingerprint(self) -> str:
+        """Return the SHA-256 of the canonical protocol mapping that runs record."""
         return sha256(
             json.dumps(
                 protocol_mapping(self), sort_keys=True, separators=(",", ":")
@@ -178,6 +194,7 @@ class LambadaProtocol:
 
 
 def protocol_mapping(protocol: LambadaProtocol) -> dict:
+    """Return the schema-1 JSON form that fingerprints and sealed evidence use."""
     if not isinstance(protocol, LambadaProtocol):
         raise TypeError("protocol must be LambadaProtocol")
     return {
@@ -265,6 +282,7 @@ def select_examples(
 
 
 def examples_digest(examples) -> str:
+    """Return one digest over each selected example's row index and digest."""
     examples = tuple(examples)
     if not examples or any(not isinstance(item, LambadaExample) for item in examples):
         raise LambadaError("digest requires validated LAMBADA examples")
@@ -641,6 +659,11 @@ def _payload_digest(payload: dict) -> str:
 
 
 def evaluation_runtime(report: dict) -> dict:
+    """Return the runtime fields sealed with evidence.
+
+    Verification requires a CPU device and the run's dtype and thread count;
+    versions and platform names are descriptive.
+    """
     import torch
 
     return {

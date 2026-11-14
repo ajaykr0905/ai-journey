@@ -16,6 +16,13 @@ from .swiglu import SwiGLU
 
 @dataclass(frozen=True)
 class MoELayerOutput:
+    """Expert FFN output with live auxiliary losses and detached routing stats.
+
+    The two losses stay in the autograd graph; ``stats`` holds plain Python
+    counts for reports, and ``idle_experts`` lists experts that accepted no
+    route, so their parameters receive no gradient from this pass.
+    """
+
     hidden: Tensor
     balance_loss: Tensor
     router_z_loss: Tensor
@@ -50,11 +57,20 @@ class MoEFeedForward(nn.Module):
         )
 
     def forward(self, inputs: Tensor, *, token_mask: Tensor | None = None) -> Tensor:
+        """Hidden states only, for callers that do not use the auxiliary losses."""
         return self.forward_training(inputs, token_mask=token_mask).hidden
 
     def forward_training(
         self, inputs: Tensor, *, token_mask: Tensor | None = None
     ) -> MoELayerOutput:
+        """Route, admit by capacity, dispatch, and compute the auxiliary losses.
+
+        Capacity drops apply only in training mode; eval is dropless. The
+        balance loss is expert_count * sum(route frequency * mean probability),
+        with frequency counted before capacity drops, and the z loss is the
+        mean squared router log-sum-exp. Raises ValueError if either is
+        non-finite.
+        """
         routes = self.router(inputs, token_mask=token_mask)
         plan = plan_capacity(
             routes,

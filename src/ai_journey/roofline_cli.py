@@ -80,6 +80,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Build or verify an analytical roofline report and print its digest line.
+
+    Verify recomputes every field, build refuses an output that aliases the
+    config, and each printed line states measured=false.
+    """
+
     args = build_parser().parse_args(argv)
     if args.command == "verify":
         report = load_roofline_report(args.report)

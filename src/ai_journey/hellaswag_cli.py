@@ -25,6 +25,12 @@ def _read_json(path: Path, *, maximum: int) -> dict:
 
 
 def main(argv=None) -> int:
+    """Evaluate, verify, replay or compare HellaSwag evidence; print a receipt.
+
+    Outputs may not alias an input, replay re-scores the model on the pinned
+    response, and compare refuses evidence from different rows; failures exit
+    through argparse with status 2.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     evaluate = commands.add_parser("evaluate")

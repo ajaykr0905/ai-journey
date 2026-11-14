@@ -27,6 +27,12 @@ def _number(value, name, minimum, maximum):
 
 @dataclass(frozen=True)
 class MoEExperimentArm:
+    """One named arm of a dense-versus-MoE document comparison.
+
+    Router objective weights lie in [0, 1], and a dense arm may not set them
+    because it has no router for them to act on. Raises ValueError.
+    """
+
     name: str
     config: DecoderVariantConfig
     balance_weight: float = 0.0
@@ -49,6 +55,8 @@ class MoEExperimentArm:
             raise ValueError("dense arms cannot apply inactive router objectives")
 
     def to_mapping(self):
+        """JSON form; MoE models are tagged ``kind: moe`` so parsing is exact."""
+
         return {
             "name": self.name,
             "model": (
@@ -63,6 +71,14 @@ class MoEExperimentArm:
 
 @dataclass(frozen=True)
 class MoEExperimentPlan:
+    """A dense baseline and one to three MoE arms trained under shared controls.
+
+    MoE arms must match every dense architecture control of the baseline and
+    differ from each other, so each comparison isolates one expert
+    intervention, and the whole job is charged against its work budget at
+    construction. Raises ValueError (TypeError for a wrong optimizer type).
+    """
+
     arms: tuple[MoEExperimentArm, ...]
     seeds: tuple[int, ...] = (53,)
     steps: int = 2
@@ -156,6 +172,8 @@ class MoEExperimentPlan:
         require_moe_experiment_work(self, evaluation_windows=1)
 
     def to_mapping(self):
+        """Versioned JSON form that reports embed and the plan digest hashes."""
+
         from dataclasses import asdict
 
         return {
@@ -171,6 +189,8 @@ class MoEExperimentPlan:
         }
 
     def fingerprint(self):
+        """SHA-256 of the canonical mapping; every paired trial must carry it."""
+
         return sha256(
             json.dumps(
                 self.to_mapping(),
@@ -200,6 +220,12 @@ def require_moe_experiment_work(plan, *, evaluation_windows):
 
 
 def moe_experiment_plan_from_mapping(payload):
+    """Rebuild a plan from JSON with exact field sets at every nesting level.
+
+    Missing or extra fields would silently change an experiment, so they
+    raise ValueError; the constructors then reapply every bound.
+    """
+
     if (
         type(payload) is not dict
         or set(payload)

@@ -97,6 +97,10 @@ def verify_comparison(report, hindi, english):
 
 
 def main(argv=None):
+    """Replay a published comparison from the pinned snapshots; return 2 on failure.
+
+    The seal and the exact replay decide the result; reported metrics never do.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("report", "hindi", "english"):
         parser.add_argument(f"--{name}", type=Path, required=True)

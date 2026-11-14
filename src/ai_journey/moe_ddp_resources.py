@@ -5,6 +5,11 @@ from .moe_resources import expected_checkpoint_records
 
 
 def estimate_moe_ddp_job(config):
+    """Work and retention estimate for one replicated job, from shapes alone.
+
+    Nothing is allocated, so a job can be admitted before any tensor exists;
+    work units are a proxy, not measured FLOPs.
+    """
     model = config.model
     stored, active = (
         expected_moe_parameter_count(model),
@@ -34,6 +39,12 @@ def estimate_moe_ddp_job(config):
 
 
 def require_moe_ddp_budget(config):
+    """Return the job estimate, or raise ValueError above a fixed lab budget.
+
+    Limits cover stored parameters per rank, positions per update, retained
+    route and attention elements, whole-job work units and checkpoint
+    records; the error names the first budget exceeded.
+    """
     report = estimate_moe_ddp_job(config)
     for name, limit in (
         ("stored_parameters_per_rank", 1_000_000),

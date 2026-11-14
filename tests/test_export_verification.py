@@ -65,3 +65,9 @@ class ExportVerificationTests(unittest.TestCase):
         self.paths[0].write_text(json.dumps(self.manifest))
         with self.assertRaisesRegex(TokenizerError, "disjoint"):
             verify_export(*self.paths)
+
+    def test_manifest_must_declare_split_seed_40(self):
+        self.manifest["split_seed"] = 41
+        self.paths[0].write_text(json.dumps(self.manifest))
+        with self.assertRaisesRegex(TokenizerError, "split controls"):
+            verify_export(*self.paths)

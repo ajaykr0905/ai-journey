@@ -19,6 +19,12 @@ from .serving_metrics import ServingMetrics
 
 
 class AdmissionRejected(RuntimeError):
+    """The token bucket cannot cover a request's prompt and output budget yet.
+
+    ``retry_after`` is the number of seconds until enough tokens refill; the
+    HTTP layer returns it as a 429 response's Retry-After header.
+    """
+
     def __init__(self, retry_after: float):
         super().__init__("generation token budget exhausted")
         self.retry_after = retry_after
@@ -33,6 +39,13 @@ class ServiceOverloaded(RuntimeError):
 
 
 class TokenBucket:
+    """Thread-safe token-bucket admission measured in prompt plus output tokens.
+
+    The bucket refills continuously up to ``capacity`` at ``refill_per_second``.
+    A non-finite clock reading raises ValueError, and a clock that moves
+    backwards raises RuntimeError.
+    """
+
     def __init__(
         self,
         capacity: int = 8192,
@@ -67,6 +80,11 @@ class TokenBucket:
         return now
 
     def consume(self, cost: int):
+        """Spend ``cost`` tokens, or raise AdmissionRejected with a retry delay.
+
+        A cost above the capacity could never be admitted, so it raises
+        ValueError at once instead.
+        """
         integer(cost, "cost", 1)
         if cost > self.capacity:
             raise ValueError("request cannot fit the admission capacity")
@@ -85,6 +103,11 @@ class TokenBucket:
 
 @dataclass(frozen=True)
 class GenerationRequest:
+    """A request with a safe ID, 1 to 512 prompt tokens and up to 128 new ones.
+
+    Raises ValueError for anything outside those bounds.
+    """
+
     request_id: str
     prompt: tuple[int, ...]
     sampling: SamplingConfig
@@ -108,12 +131,24 @@ class GenerationRequest:
             raise ValueError("service generation budget is 128 tokens")
 
     def fingerprint(self):
+        """SHA-256 of the whole request, which a reused request_id must match.
+
+        While the ID's completed response is still in the bounded response
+        cache, the service replays it only if this digest is unchanged and
+        refuses different input under that ID. Evicted IDs, and requests that
+        were cancelled or hit their deadline, are not remembered.
+        """
         return sha256(
             json.dumps(asdict(self), sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
 
     @classmethod
     def from_mapping(cls, payload):
+        """Parse a decoded JSON request with exactly its three top-level fields.
+
+        Unknown sampling fields, and numbers the float sampler cannot
+        represent, raise ValueError before the request reaches admission.
+        """
         if (
             not isinstance(payload, dict)
             or set(payload) != {"request_id", "prompt", "sampling"}
@@ -191,6 +226,7 @@ class GenerationService:
             self.prefix_metrics = PrefixMetrics(prefix_store)
 
     def render_metrics(self):
+        """Prometheus text for serving metrics, plus prefix-cache metrics if on."""
         text = self.metrics.render_prometheus(operational_state=self.health())
         return (
             text
@@ -292,6 +328,13 @@ class GenerationService:
         deadline=None,
         on_token=None,
     ) -> dict:
+        """Generate for one request and record its outcome in the metrics.
+
+        Admission may raise ServiceDraining, ServiceOverloaded or
+        AdmissionRejected. A repeated request ID with identical input replays
+        its cached completion, and cancellation or the deadline ends the
+        request early with that finish reason.
+        """
         started = time.perf_counter()
         observation = {"tokens": 0, "cached": False, "prefix": {}}
         outcome = "error"
@@ -434,6 +477,7 @@ class GenerationService:
             return response
 
     def health(self) -> dict:
+        """Readiness and lifecycle counters; ready turns False once draining."""
         with self._stats_lock:
             return {
                 "ready": not self._draining,

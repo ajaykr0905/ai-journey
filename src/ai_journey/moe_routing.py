@@ -11,6 +11,13 @@ MAX_ROUTER_ENTRIES = 2_000_000
 
 @dataclass(frozen=True)
 class RoutingOutput:
+    """Top-two routes for the eligible tokens of one router call.
+
+    Rows follow ``token_indices``, the eligible positions of the flattened
+    token shape, so masked positions never appear; probabilities and logits
+    cover every expert for the auxiliary losses.
+    """
+
     token_shape: tuple[int, ...]
     token_indices: Tensor
     expert_indices: Tensor
@@ -80,6 +87,12 @@ class Top2Router(nn.Module):
         self.projection = nn.Linear(width, expert_count, bias=False)
 
     def forward(self, inputs: Tensor, *, token_mask: Tensor | None = None):
+        """Project only eligible rows and choose two distinct experts per token.
+
+        Masked rows are dropped before the projection, so padding consumes no
+        routing work, and an all-masked chunk returns empty routes. Raises
+        ValueError for a mismatched width or dtype or above the entry budget.
+        """
         shape, indices, selected = eligible_tokens(inputs, token_mask)
         if selected.shape[-1] != self.projection.in_features:
             raise ValueError("router input width does not match")

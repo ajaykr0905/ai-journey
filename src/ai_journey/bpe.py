@@ -10,6 +10,11 @@ class TokenizerError(ValueError):
 
 
 def token_ids(values: Sequence[int]) -> tuple[int, ...]:
+    """Validate an untrusted list or tuple of ids and return an immutable copy.
+
+    bool, float and negative entries raise TokenizerError instead of aliasing
+    real ids; upper bounds are checked by the callers that know the vocabulary.
+    """
     if not isinstance(values, (list, tuple)):
         raise TypeError("token ids must be a list or tuple")
     if any(type(value) is not int or value < 0 for value in values):
@@ -33,30 +38,57 @@ def merge_pair(
     token_ids(list(pair) + [replacement])
     if replacement in pair:
         raise TokenizerError("replacement must be a new token id")
+    return _merge_known_pair(values, pair, replacement)
+
+
+def _merge_known_pair(values, pair, replacement):
+    """Merge already-validated ids, jumping between C-level searches for pair[0].
+
+    Equivalent to scanning one position at a time: a match consumes both ids,
+    and a first id without its partner is copied before the search resumes.
+    """
+    first, second = pair
     output = []
-    index = 0
-    while index < len(values):
-        if values[index : index + 2] == pair:
+    start = 0
+    last = len(values) - 1
+    while True:
+        try:
+            index = values.index(first, start, last)
+        except ValueError:
+            break
+        if values[index + 1] == second:
+            output.extend(values[start:index])
             output.append(replacement)
-            index += 2
+            start = index + 2
         else:
-            output.append(values[index])
-            index += 1
+            output.extend(values[start : index + 1])
+            start = index + 1
+    output.extend(values[start:])
     return tuple(output)
 
 
 def _weighted_pair_counts(streams):
+    """Count pairs of trusted training streams, each weighted by multiplicity.
+
+    Most corpus segments are unique, so weight-one streams are counted by
+    Counter.update in C; repeated streams multiply their own pair counts.
+    """
     counts = Counter()
     for stream, weight in streams.items():
-        for pair, frequency in pair_counts(stream).items():
-            counts[pair] += frequency * weight
+        pairs = zip(stream, stream[1:])
+        if weight == 1:
+            counts.update(pairs)
+        else:
+            for pair, frequency in Counter(pairs).items():
+                counts[pair] += frequency * weight
     return counts
 
 
 def _merge_weighted_streams(streams, pair, replacement):
+    """Apply one merge to trusted streams, adding weights of streams that converge."""
     merged = Counter()
     for stream, weight in streams.items():
-        merged[merge_pair(stream, pair, replacement)] += weight
+        merged[_merge_known_pair(stream, pair, replacement)] += weight
     return merged
 
 
@@ -91,14 +123,23 @@ class ByteTokenizer:
 
     @property
     def merges(self) -> tuple[tuple[int, int], ...]:
+        """Merge pairs in rank order; the pair at index i created token 256 + i."""
         return self._merges
 
     @property
     def vocab_size(self) -> int:
+        """256 byte tokens plus one token per merge, excluding special markers."""
         return len(self._vocabulary)
 
     @classmethod
     def train(cls, text: str, *, vocab_size: int = 320, min_frequency: int = 2):
+        """Learn merges from text as one stream, so merges may cross its lines.
+
+        Use tokenizer_training.train_documents to keep document boundaries.
+        Stops early once no pair reaches min_frequency; ties go to the smallest
+        pair. vocab_size outside [256, 4096], min_frequency below 2 or more than
+        1 MiB of UTF-8 raise TokenizerError.
+        """
         if not isinstance(text, str):
             raise TypeError("text must be a string")
         if type(vocab_size) is not int or not 256 <= vocab_size <= 4096:
@@ -128,13 +169,19 @@ class ByteTokenizer:
         return cls(tuple(merges))
 
     def _encode_bytes(self, payload: bytes) -> tuple[int, ...]:
+        """Apply the lowest-ranked present merge until no ranked pair remains.
+
+        Byte values and merge ids are valid by construction, so each round skips
+        the public helpers' revalidation without changing which merge applies.
+        """
         values = tuple(payload)
+        ranks = self._ranks
         while len(values) > 1:
-            available = set(pair_counts(values)) & self._ranks.keys()
+            available = set(zip(values, values[1:])) & ranks.keys()
             if not available:
                 break
-            pair = min(available, key=self._ranks.__getitem__)
-            values = merge_pair(values, pair, 256 + self._ranks[pair])
+            pair = min(available, key=ranks.__getitem__)
+            values = _merge_known_pair(values, pair, 256 + ranks[pair])
         return values
 
     def encode_bytes(self, payload: bytes) -> tuple[int, ...]:
@@ -144,23 +191,33 @@ class ByteTokenizer:
         return self._encode_bytes(payload)
 
     def encode(self, text: str) -> tuple[int, ...]:
+        """Encode text losslessly; unseen characters fall back to byte tokens."""
         if not isinstance(text, str):
             raise TypeError("text must be a string")
         return self._encode_bytes(text.encode("utf-8"))
 
     def decode_bytes(self, values) -> bytes:
+        """Join token bytes without UTF-8 decoding, for prefixes that end mid-character.
+
+        Ids outside this vocabulary raise TokenizerError instead of indexing past it.
+        """
         values = token_ids(values)
         if any(value >= self.vocab_size for value in values):
             raise TokenizerError("token id is outside the vocabulary")
         return b"".join(self._vocabulary[value] for value in values)
 
     def token_bytes(self, value: int) -> bytes:
+        """Return the exact bytes one id expands to, for byte-level accounting.
+
+        Serving masks, span offsets and training audits use this per-token view.
+        """
         token_ids([value])
         if value >= self.vocab_size:
             raise TokenizerError("token id is outside the vocabulary")
         return self._vocabulary[value]
 
     def decode(self, values) -> str:
+        """Decode strictly: ids cut mid-character raise instead of mangling text."""
         return self.decode_bytes(values).decode("utf-8")
 
 
@@ -184,9 +241,15 @@ class RegexTokenizer(ByteTokenizer):
 
     @property
     def pattern(self):
+        """The segmentation regex; checkpoints store it to keep piece boundaries."""
         return self._pattern_text
 
     def pieces(self, text):
+        """Split text into regex pieces that must tile it exactly.
+
+        A pattern that leaves a gap or matches empty text raises TokenizerError,
+        because uncovered characters would silently vanish from the encoding.
+        """
         if not isinstance(text, str):
             raise TypeError("text must be a string")
         pieces = []
@@ -202,6 +265,11 @@ class RegexTokenizer(ByteTokenizer):
 
     @classmethod
     def train(cls, text, *, vocab_size=320, min_frequency=2, pattern=DEFAULT_PATTERN):
+        """Learn merges inside regex pieces only, with ByteTokenizer.train's bounds.
+
+        With the default pattern no token joins a word to adjacent punctuation or
+        whitespace; repeated pieces are counted once, weighted by multiplicity.
+        """
         if not isinstance(text, str):
             raise TypeError("text must be a string")
         # Reuse basic training validation before applying boundary-aware counts.
@@ -215,6 +283,7 @@ class RegexTokenizer(ByteTokenizer):
         return cls(trained.merges, pattern=pattern)
 
     def encode(self, text):
+        """Encode each piece separately, so no token crosses a piece boundary."""
         return tuple(
             token
             for piece in self.pieces(text)
@@ -222,6 +291,7 @@ class RegexTokenizer(ByteTokenizer):
         )
 
     def encode_bytes(self, payload):
+        """Always raise: raw bytes have no decoded text to split into pieces."""
         raise TokenizerError("regex tokenization requires decoded text boundaries")
 
 
@@ -263,17 +333,27 @@ class SpecialTokenizer:
 
     @property
     def tokenizer(self):
+        """The wrapped ordinary tokenizer, which never emits a reserved marker id."""
         return self._tokenizer
 
     @property
     def names(self):
+        """Registered markers; names[i] has id tokenizer.vocab_size + i."""
         return self._names
 
     @property
     def vocab_size(self):
+        """Ordinary vocabulary plus one reserved id per marker, for model sizing."""
         return self.tokenizer.vocab_size + len(self.names)
 
     def encode(self, text: str, *, allowed: frozenset[str] = frozenset()):
+        """Encode text, mapping only markers named in allowed to their reserved ids.
+
+        Markers match left to right, longest first at each position. A matched
+        marker outside allowed raises TokenizerError, so untrusted input cannot
+        inject control tokens; one that overlaps an earlier match stays ordinary
+        text. allowed must be a frozenset of registered names.
+        """
         if not isinstance(text, str):
             raise TypeError("text must be a string")
         if not isinstance(allowed, frozenset) or not allowed.issubset(
@@ -295,6 +375,7 @@ class SpecialTokenizer:
         return tuple(output)
 
     def token_bytes(self, value):
+        """Return an ordinary token's bytes or a reserved id's UTF-8 marker text."""
         token_ids([value])
         if value < self.tokenizer.vocab_size:
             return self.tokenizer.token_bytes(value)
@@ -303,7 +384,9 @@ class SpecialTokenizer:
         return self._special_bytes[value - self.tokenizer.vocab_size]
 
     def decode_bytes(self, values):
+        """Join token bytes, rendering each reserved id as its marker text."""
         return b"".join(self.token_bytes(value) for value in token_ids(values))
 
     def decode(self, values):
+        """Decode strictly with markers as text, so authorized prompts round-trip."""
         return self.decode_bytes(values).decode("utf-8")

@@ -19,6 +19,12 @@ from .http_stream import (
 
 
 def loopback_address(endpoint):
+    """Return (host, port) for an ``http://127.0.0.1:PORT`` endpoint.
+
+    Load runs and their reports may only name the local lab service, so other
+    hosts, credentials, paths, queries and fragments raise ValueError.
+    """
+
     if not isinstance(endpoint, str):
         raise ValueError("endpoint must be a loopback HTTP URL")
     parsed = urlsplit(endpoint)
@@ -40,6 +46,13 @@ def loopback_address(endpoint):
 
 
 def validated_request(request):
+    """Return a normalized copy of one generation request, or raise ValueError.
+
+    Omitted sampling controls are filled with explicit defaults, so the body
+    that is sent states every control, and a request outside the protocol
+    bounds fails before any connection is opened.
+    """
+
     if type(request) is not dict or set(request) != {
         "request_id",
         "prompt",

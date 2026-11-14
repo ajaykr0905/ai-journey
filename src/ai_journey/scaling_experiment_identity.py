@@ -16,6 +16,12 @@ _GIT_SHA = re.compile(r"[0-9a-f]{40}")
 
 @dataclass(frozen=True)
 class ExperimentInputs:
+    """The immutable public inputs that every run identity binds.
+
+    The source URL must be HTTP(S), digests lowercase SHA-256 and the code
+    revision a full Git SHA; violations raise ScalingLawError.
+    """
+
     source_url: str
     source_sha256: str
     tokenizer_sha256: str

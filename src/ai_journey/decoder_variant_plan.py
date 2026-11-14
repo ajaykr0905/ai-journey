@@ -23,6 +23,13 @@ _ARCHITECTURE_FIELDS = {
 
 @dataclass(frozen=True)
 class DecoderExperimentPlan:
+    """A bounded architecture comparison whose arms differ only as declared.
+
+    The unchanged GPT-2 baseline comes first, every arm shares its base shape
+    and changes only declared_changes, and the whole job must fit the CPU
+    budget; violations raise ValueError or TypeError.
+    """
+
     variants: tuple[tuple[str, DecoderVariantConfig], ...]
     declared_changes: tuple[str, ...] = ("norm_kind", "mlp_kind", "position_kind")
     seeds: tuple[int, ...] = (52,)
@@ -145,6 +152,7 @@ class DecoderExperimentPlan:
         )
 
     def to_mapping(self) -> dict:
+        """Return the schema-tagged JSON plan that reports embed for replay."""
         return {
             "schema": PLAN_SCHEMA,
             "variants": [
@@ -162,6 +170,7 @@ class DecoderExperimentPlan:
         }
 
     def fingerprint(self) -> str:
+        """Return the SHA-256 of the canonical plan mapping."""
         return sha256(
             json.dumps(
                 self.to_mapping(),
@@ -173,6 +182,11 @@ class DecoderExperimentPlan:
 
 
 def decoder_plan_from_mapping(payload: dict) -> DecoderExperimentPlan:
+    """Rebuild a plan from exactly its schema fields, JSON lists and arm configs.
+
+    Missing or extra fields, another schema or non-list arrays raise
+    ValueError before the plan validates itself.
+    """
     names = {field.name for field in fields(DecoderExperimentPlan)} | {"schema"}
     if (
         type(payload) is not dict

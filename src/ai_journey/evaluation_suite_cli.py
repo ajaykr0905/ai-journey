@@ -19,6 +19,12 @@ from .lambada_evidence import read_evidence as read_lambada_evidence
 
 
 def main(argv=None) -> int:
+    """Build or verify the three-axis evaluation suite and print a JSON receipt.
+
+    Build measures held-out likelihood and reuses verified HellaSwag and
+    LAMBADA evidence; outputs may not alias an input, and failures exit through
+    argparse with status 2.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     build = commands.add_parser("build")

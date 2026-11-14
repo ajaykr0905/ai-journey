@@ -12,6 +12,11 @@ MAX_GQA_CACHE_BYTES = MAX_GQA_NATIVE_CACHE_BYTES
 
 
 def gqa_parameter_inventory(config: GQAConfig) -> dict:
+    """Return stored parameters by component, reconciled to the analytical total.
+
+    A sum that differs from expected_gqa_parameter_count raises ValueError, so
+    drift in either formula is caught.
+    """
     if not isinstance(config, GQAConfig):
         raise TypeError("config must be GQAConfig")
     base, decoder = config.gpt2, config.decoder
@@ -47,6 +52,11 @@ def estimate_gqa_execution(
     query_tokens: int | None = None,
     dtype: str = "float32",
 ) -> dict:
+    """Return the cache bytes and score elements one grouped forward needs.
+
+    The cache is sized by kv_heads while score work still uses every query
+    head; out-of-range batch, sequence, query or dtype raise ValueError.
+    """
     if not isinstance(config, GQAConfig):
         raise TypeError("config must be GQAConfig")
     if (
@@ -84,6 +94,11 @@ def estimate_gqa_execution(
 
 
 def require_gqa_execution_budget(config, **kwargs):
+    """Return the execution estimate only if it fits every CPU budget.
+
+    Forwards call this before allocating work; an estimate over the cache,
+    score or checkpoint-record budget raises ValueError.
+    """
     estimate = estimate_gqa_execution(config, **kwargs)
     if estimate["kv_cache_bytes"] > MAX_GQA_CACHE_BYTES:
         raise ValueError("grouped-query exceeds the native KV-cache byte budget")

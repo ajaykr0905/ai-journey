@@ -51,6 +51,12 @@ def parameter_capacity(
 
 @dataclass(frozen=True)
 class IsoFLOPCandidate:
+    """One model size given the whole budget, and its distance from the target ratio.
+
+    ``absolute_ratio_error`` ranks rows in closest_compute_optimal_candidate,
+    and training_flops never exceeds the budget.
+    """
+
     parameter_count: int
     token_count: int
     training_flops: int
@@ -61,6 +67,8 @@ class IsoFLOPCandidate:
 
 @dataclass(frozen=True)
 class ComputeOptimalCapacity:
+    """The largest whole model a budget funds at the declared ratio, and leftovers."""
+
     parameter_count: int
     token_count: int
     training_flops: int

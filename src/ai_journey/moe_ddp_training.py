@@ -36,6 +36,12 @@ class _CommonStepRejection(RuntimeError):
 
 
 def validate_moe_ddp_optimizer(session):
+    """Return the optimizer step after checking the declared fixed-rate protocol.
+
+    The optimizer's run contract must equal the one recorded when the session
+    was created, and every group must keep the declared learning rate, so an
+    altered optimizer can neither update nor checkpoint. Raises ValueError.
+    """
     actual = optimizer_run_contract(session.model, session.optimizer)
     if json.dumps(actual, sort_keys=True, allow_nan=False) != json.dumps(
         session._optimizer_contract, sort_keys=True, allow_nan=False
@@ -101,6 +107,13 @@ class MoEDDPTrainingSession:
         self.poisoned = False
 
     def step(self, window):
+        """Apply one globally weighted update on every rank, or on none.
+
+        Ranks agree at each phase. A common rejection after every backward
+        completed restores live state and raises MoEDDPRetryableError; any
+        other failure after the forward began poisons the session and raises
+        MoEDDPFatalError, because a partially run reducer is unsafe to reuse.
+        """
         if self.poisoned:
             raise MoEDDPFatalError("MoE DDP session is poisoned; use fresh processes")
         count, valid = 0, True

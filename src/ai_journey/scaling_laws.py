@@ -79,4 +79,6 @@ class ComputeOptimalTarget:
 
     @property
     def actual_tokens_per_parameter(self) -> Decimal:
+        """Return the realized ratio once the token target is rounded up."""
+
         return Decimal(self.token_target) / Decimal(self.parameter_count)

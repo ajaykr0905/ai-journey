@@ -21,6 +21,7 @@ def _digest(state):
 
 
 def save_training_state(path: Path, session: BPETrainingSession):
+    """Publish a session snapshot sealed with its SHA-256 via the atomic writer."""
     if not isinstance(session, BPETrainingSession):
         raise TypeError("checkpoint requires a BPETrainingSession")
     state = session.snapshot()
@@ -28,6 +29,12 @@ def save_training_state(path: Path, session: BPETrainingSession):
 
 
 def load_training_state(path: Path, documents):
+    """Resume only from an intact checkpoint taken on these exact documents.
+
+    The seal is checked before the merge prefix is replayed; files over 2 MiB,
+    duplicate fields or a digest mismatch raise TokenizerError.
+    """
+
     def unique(pairs):
         result = {}
         for key, value in pairs:
@@ -54,6 +61,11 @@ def load_training_state(path: Path, documents):
 
 
 def main(argv=None):
+    """Train or resume to --vocab-size, then publish the tokenizer and its state.
+
+    Resuming must keep the saved pattern and min_frequency and cannot shrink
+    the merge prefix; the three paths must differ. Errors exit with status 2.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("corpus", "tokenizer", "state"):
         parser.add_argument(f"--{name}", type=Path, required=True)

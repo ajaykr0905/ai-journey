@@ -70,6 +70,10 @@ def _as_finite_scalar(name: str, value: object) -> float:
     return result
 
 
+def _leaf_backward(gradient: float) -> None:
+    """Leaves have no parents to receive a gradient."""
+
+
 class Value:
     """A scalar value plus the local rule needed for reverse-mode autodiff."""
 
@@ -92,7 +96,10 @@ class Value:
         self.label = label
         self.operation = _operation
         self._parents = tuple(_children)
-        self._backward: Callable[[], None] = lambda: None
+        # Local rules receive their result's gradient instead of capturing the
+        # result, so nodes form no reference cycles and a dropped graph is freed
+        # at once rather than by the cyclic garbage collector.
+        self._backward: Callable[[float], None] = _leaf_backward
 
     def __repr__(self) -> str:
         details = f"data={self.data:g}, grad={self.grad:g}"
@@ -108,9 +115,9 @@ class Value:
         right = self._coerce(other)
         result = Value(self.data + right.data, (self, right), "+")
 
-        def backward() -> None:
-            self.grad += result.grad
-            right.grad += result.grad
+        def backward(gradient: float) -> None:
+            self.grad += gradient
+            right.grad += gradient
 
         result._backward = backward
         return result
@@ -122,9 +129,9 @@ class Value:
         right = self._coerce(other)
         result = Value(self.data * right.data, (self, right), "*")
 
-        def backward() -> None:
-            self.grad += right.data * result.grad
-            right.grad += self.data * result.grad
+        def backward(gradient: float) -> None:
+            self.grad += right.data * gradient
+            right.grad += self.data * gradient
 
         result._backward = backward
         return result
@@ -160,8 +167,8 @@ class Value:
             raise ValueError("power derivative must be finite and real")
         result = Value(float(data), (self,), f"**{power:g}")
 
-        def backward() -> None:
-            self.grad += float(local_derivative) * result.grad
+        def backward(gradient: float) -> None:
+            self.grad += float(local_derivative) * gradient
 
         result._backward = backward
         return result
@@ -186,8 +193,8 @@ class Value:
             raise ValueError("exp result must be finite")
         result = Value(data, (self,), "exp")
 
-        def backward() -> None:
-            self.grad += data * result.grad
+        def backward(gradient: float) -> None:
+            self.grad += data * gradient
 
         result._backward = backward
         return result
@@ -198,8 +205,8 @@ class Value:
         data = math_tanh(self.data)
         result = Value(data, (self,), "tanh")
 
-        def backward() -> None:
-            self.grad += (1.0 - data * data) * result.grad
+        def backward(gradient: float) -> None:
+            self.grad += (1.0 - data * data) * gradient
 
         result._backward = backward
         return result
@@ -210,8 +217,8 @@ class Value:
         data = max(0.0, self.data)
         result = Value(data, (self,), "ReLU")
 
-        def backward() -> None:
-            self.grad += (1.0 if self.data > 0.0 else 0.0) * result.grad
+        def backward(gradient: float) -> None:
+            self.grad += (1.0 if self.data > 0.0 else 0.0) * gradient
 
         result._backward = backward
         return result
@@ -225,7 +232,7 @@ class Value:
             node.grad = 0.0
         self.grad = seed
         for node in reversed(ordered):
-            node._backward()
+            node._backward(node.grad)
 
 
 def topological_sort(root: Value) -> tuple[Value, ...]:
@@ -234,22 +241,23 @@ def topological_sort(root: Value) -> tuple[Value, ...]:
     if not isinstance(root, Value):
         raise TypeError("root must be a Value")
     order: list[Value] = []
-    state: dict[Value, int] = {}
-
-    def visit(node: Value) -> None:
-        status = state.get(node, 0)
-        if status == 1:
-            raise GraphCycleError("computation graph must be acyclic")
-        if status == 2:
-            return
-        state[node] = 1
-        for parent in node._parents:
-            visit(parent)
-        state[node] = 2
-        order.append(node)
-
-    visit(root)
+    _visit(root, {}, order)
     return tuple(order)
+
+
+def _visit(node: Value, state: dict[Value, int], order: list[Value]) -> None:
+    # A module-level visitor, unlike a self-referencing nested closure, leaves
+    # no reference cycle that keeps every visited node alive after the sort.
+    status = state.get(node, 0)
+    if status == 1:
+        raise GraphCycleError("computation graph must be acyclic")
+    if status == 2:
+        return
+    state[node] = 1
+    for parent in node._parents:
+        _visit(parent, state, order)
+    state[node] = 2
+    order.append(node)
 
 
 def zero_grad(root: Value) -> None:

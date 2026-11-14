@@ -4,6 +4,12 @@ import threading
 
 
 class PrefixMetrics:
+    """Per-request prefix outcomes and token counts with fixed metric labels.
+
+    Labels come only from the hit, miss and bypass outcomes, never from
+    request content, so metric cardinality stays bounded.
+    """
+
     def __init__(self, store):
         self.store = store
         self._lock = threading.Lock()
@@ -11,6 +17,10 @@ class PrefixMetrics:
         self._reused = self._forwarded = 0
 
     def record(self, observation):
+        """Count one request's prefix outcome; an unused cache records nothing.
+
+        Unknown outcomes and token counts outside [0, 4096] raise ValueError.
+        """
         outcome = observation.get("outcome", "unused")
         if outcome == "unused":
             return
@@ -29,6 +39,7 @@ class PrefixMetrics:
             self._forwarded += forwarded
 
     def snapshot(self):
+        """Cumulative request counters plus a separately read pool snapshot."""
         with self._lock:
             result = {
                 "attempts": dict(self._attempts),
@@ -40,6 +51,7 @@ class PrefixMetrics:
         return {**result, "pool": self.store.snapshot()}
 
     def render_prometheus(self):
+        """Prometheus text for request counters, pool counters and pool gauges."""
         state = self.snapshot()
         lines = ["# TYPE ai_journey_prefix_attempts_total counter"]
         lines.extend(

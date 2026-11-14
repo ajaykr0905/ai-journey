@@ -19,6 +19,12 @@ from .tokenizer_sources import HINDI, ENGLISH, load_public_corpus
 
 
 def read_json(path: Path, *, limit=2 * 1024 * 1024):
+    """Read bounded JSON for the compare and verify CLIs, rejecting duplicate keys.
+
+    A repeated field could otherwise override the value a reviewer read; files
+    over limit raise TokenizerError before parsing.
+    """
+
     def unique(pairs):
         value = {}
         for key, item in pairs:
@@ -35,6 +41,7 @@ def read_json(path: Path, *, limit=2 * 1024 * 1024):
 
 
 def load_protocol(path):
+    """Load the predeclared protocol from at most 16 KiB of strict JSON."""
     raw = read_json(path, limit=16384)
     return VocabularyProtocol(
         **{
@@ -46,6 +53,10 @@ def load_protocol(path):
 
 
 def evidence_fingerprint(report):
+    """Seal a comparison report over every field but sha256, timings included.
+
+    The seal only detects corruption; bpe_model_verify replays every trial.
+    """
     return sha256(
         json.dumps(
             {key: value for key, value in report.items() if key != "sha256"},
@@ -59,6 +70,12 @@ def evidence_fingerprint(report):
 def run_public_comparison(
     hindi, english, protocol, *, train_count=10, validation_count=10
 ):
+    """Run the ablation on pinned Hindi and English PUD samples and seal the report.
+
+    Both snapshots are byte-checked first, the seed-40 split gives both languages
+    the same sentence ids, and unused sentences are counted, not dropped. Sample
+    counts must be in [1, 20].
+    """
     for count in (train_count, validation_count):
         if type(count) is not int or not 1 <= count <= 20:
             raise TokenizerError("public comparison sample counts must be in [1, 20]")
@@ -109,6 +126,10 @@ def run_public_comparison(
 
 
 def main(argv=None):
+    """Run and publish the public comparison; errors go to stderr and return 2.
+
+    The output may not alias either snapshot or the protocol.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("hindi", "english", "protocol", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)

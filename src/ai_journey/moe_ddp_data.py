@@ -8,6 +8,13 @@ from .moe_ddp_plan import MAX_SAMPLES, SAMPLER_V2, source_admission
 
 
 def public_moe_ddp_schedule(plan, source_bytes, *, rank, update_index):
+    """Sample IDs one rank consumes for one optimizer update, without data.
+
+    The epoch and offset follow from the update index. V1 truncates the
+    original IDs to complete global windows before shuffling, kept so existing
+    checkpoints replay; v2 shuffles all IDs. Raises ValueError for a cursor or
+    source size outside the declared schedule.
+    """
     run = plan.run
     if (
         type(source_bytes) is not int
@@ -47,6 +54,12 @@ def public_moe_ddp_schedule(plan, source_bytes, *, rank, update_index):
 
 
 def public_moe_ddp_window(plan, source, *, rank, update_index):
+    """Materialize only one rank's microbatches for one optimizer update.
+
+    The source is first re-admitted against its declared digest. Each sample
+    is a next-byte input/target pair with every position eligible. Returns
+    the batches and their schedule.
+    """
     source_admission(plan, source)
     schedule = public_moe_ddp_schedule(
         plan, len(source), rank=rank, update_index=update_index

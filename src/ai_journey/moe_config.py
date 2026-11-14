@@ -61,6 +61,11 @@ class MoEConfig(DecoderVariantConfig):
         return payload
 
     def fingerprint(self) -> str:
+        """Domain-separated architecture digest with the SwiGLU width resolved.
+
+        Resolving the default width gives configs that build identical experts
+        one digest; model fingerprints mix this value in.
+        """
         payload = self.to_mapping()
         payload["swiglu_hidden_dim"] = self.resolved_swiglu_hidden_dim
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -128,6 +133,10 @@ def expected_decoder_parameter_tensors(config: DecoderVariantConfig) -> int:
 
 
 def expected_moe_parameter_tensors(config: MoEConfig) -> int:
+    """Unique parameter tensors of a MoE model, counted without building it.
+
+    The tied output head is counted once. Raises TypeError for a non-MoE config.
+    """
     if not isinstance(config, MoEConfig):
         raise TypeError("config must be MoEConfig")
     return expected_decoder_parameter_tensors(config)

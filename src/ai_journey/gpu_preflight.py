@@ -30,14 +30,20 @@ class GpuTopology:
 
     @property
     def world_size(self):
+        """Number of requested ranks, one per listed device."""
         return len(self.devices)
 
     def device_for_rank(self, local_rank: int) -> int:
+        """CUDA ordinal, after CUDA_VISIBLE_DEVICES, that ``local_rank`` must use.
+
+        Raises ValueError for a rank outside the requested topology.
+        """
         if type(local_rank) is not int or not 0 <= local_rank < self.world_size:
             raise ValueError("local rank is outside the requested topology")
         return self.devices[local_rank]
 
     def to_mapping(self) -> dict:
+        """JSON form recorded in, and compared across, rank and run records."""
         return {
             "devices": list(self.devices),
             "backend": self.backend,
@@ -46,6 +52,10 @@ class GpuTopology:
 
     @classmethod
     def from_mapping(cls, payload: Mapping):
+        """Rebuild a topology from a record with exactly its three fields.
+
+        Raises ValueError for missing or extra fields or invalid values.
+        """
         if (
             not isinstance(payload, Mapping)
             or set(payload) != {"devices", "backend", "dtype"}

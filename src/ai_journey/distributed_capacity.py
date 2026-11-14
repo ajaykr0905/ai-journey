@@ -79,10 +79,14 @@ class ClusterTopology:
 
     @property
     def node_count(self) -> int:
+        """Whole nodes in the world; construction requires an exact division."""
+
         return self.world_size // self.workers_per_node
 
     @property
     def crosses_nodes(self) -> bool:
+        """True when ranks span nodes, so flat collectives use the inter-node link."""
+
         return self.node_count > 1
 
     @property

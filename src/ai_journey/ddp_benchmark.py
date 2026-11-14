@@ -12,6 +12,11 @@ from .ddp_service import GenerationRequest
 
 
 def percentile(samples, quantile: float) -> float:
+    """Nearest-rank percentile, sorted samples[ceil(q * n) - 1].
+
+    Raises ValueError for no samples, a negative or non-finite sample, or a
+    quantile outside (0, 1].
+    """
     samples = sorted(samples)
     if (
         not samples
@@ -30,6 +35,13 @@ def benchmark_service(
     warmup: int = 1,
     clock=time.perf_counter,
 ) -> dict:
+    """Time repeated generations of one request through the real service.
+
+    Every attempt gets a fresh request ID so the response cache cannot answer
+    it, warmup runs are excluded, every measured output must be identical and
+    the clock must be monotonic. Returns local CPU wall-clock latency
+    percentiles and tokens per second over the measured window.
+    """
     integer(repeats, "repeats", 1)
     integer(warmup, "warmup")
     if repeats > 100 or warmup > 10:

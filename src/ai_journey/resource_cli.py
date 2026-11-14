@@ -63,6 +63,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Build, seal and save an analytical resource report; print its digest line.
+
+    The output may not alias the config, and the line states measured=false.
+    """
+
     args = build_parser().parse_args(argv)
     if args.config.resolve() == args.output.resolve() or (
         args.config.exists()
@@ -94,6 +99,8 @@ def build_verify_parser() -> argparse.ArgumentParser:
 
 
 def verify_main(argv: Sequence[str] | None = None) -> int:
+    """Print a saved report's digest line only after every field recomputes."""
+
     args = build_verify_parser().parse_args(argv)
     report = load_resource_report(args.report)
     print(

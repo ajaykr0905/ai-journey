@@ -336,6 +336,10 @@ def verify_gqa_cache_evidence(report):
 
 
 def replay_gqa_cache_evidence(report, train_bytes, heldout_bytes):
+    """Verify cache evidence, then re-measure it from its source report and bytes.
+
+    Any canonical difference from the actual replay raises ValueError.
+    """
     plan = verify_gqa_cache_evidence(report)
     actual = run_gqa_cache_evidence(
         report["source_report"],

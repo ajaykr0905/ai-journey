@@ -8,6 +8,7 @@ from .hellaswag import HellaSwagError, probabilities_from_scores
 
 
 def require_scoring_digest(value, name):
+    """Raise HellaSwagError unless ``value`` is a lowercase SHA-256 hex digest."""
     if (
         not isinstance(value, str)
         or len(value) != 64

@@ -168,9 +168,11 @@ On the development host, importing torch alone took 1.3 to 2.0 s per process.
 That would dominate every measured restart. The lab server imports only the
 standard library and the lab's stdlib-only modules. On the same host it reached
 its readiness handshake in 72 to 102 ms in four of five measured starts; the
-first start, with cold file caches, took 343 ms. The package
-`__init__` imports torch eagerly. The supervisor therefore starts the server
-with `python -I` behind a package stub that loads only the needed submodules.
+first start, with cold file caches, took 343 ms. The supervisor starts the
+server with `python -I` behind a package stub that resolves `ai_journey` to
+the supervisor's own source tree and never runs the package `__init__`. That
+pins the child to the code the supervisor runs, never an `ai_journey` on
+`PYTHONPATH` or in site-packages, and keeps it stdlib-only.
 
 ## Evidence boundary
 

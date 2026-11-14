@@ -61,6 +61,8 @@ class TensorDistribution:
     overflow_count: int
 
     def to_dict(self) -> dict[str, Any]:
+        """Return the summary as JSON-ready data; raw tensor values are never kept."""
+
         return asdict(self)
 
 
@@ -80,6 +82,8 @@ class ParameterGradientSnapshot:
     missing_parameters: tuple[str, ...]
 
     def to_dict(self) -> dict[str, Any]:
+        """Return JSON-ready gradients in stable name order plus missing names."""
+
         return {
             "gradients": [
                 {
@@ -101,6 +105,8 @@ class TrainingSnapshot:
     parameter_gradients: ParameterGradientSnapshot
 
     def to_dict(self) -> dict[str, Any]:
+        """Return the loss, activations and gradients as JSON-ready evidence."""
+
         return {
             "loss": self.loss,
             "activations": [
@@ -148,6 +154,12 @@ class HealthThresholds:
 
 @dataclass(frozen=True)
 class HealthCheck:
+    """One tensor's verdict with the issue codes that failed it.
+
+    Codes are nonfinite_values, out_of_range_values, near_zero_values,
+    low_variance and missing_gradient.
+    """
+
     name: str
     passed: bool
     issues: tuple[str, ...]
@@ -155,13 +167,19 @@ class HealthCheck:
 
 @dataclass(frozen=True)
 class DiagnosticHealthReport:
+    """Every activation and gradient health check from one training snapshot."""
+
     checks: tuple[HealthCheck, ...]
 
     @property
     def passed(self) -> bool:
+        """Return True only if every check passed, so one bad tensor fails all."""
+
         return all(check.passed for check in self.checks)
 
     def to_dict(self) -> dict[str, Any]:
+        """Return the overall verdict with every check as JSON-ready evidence."""
+
         return {
             "passed": self.passed,
             "checks": [asdict(check) for check in self.checks],
@@ -193,6 +211,12 @@ class ParameterUpdateTracker:
         self._used = False
 
     def measure(self, model: nn.Module) -> tuple[ParameterUpdate, ...]:
+        """Return each parameter's update RMS against its pre-step baseline, once.
+
+        The ratio is None for an all-zero baseline; a second call raises
+        RuntimeError, and renamed or reshaped parameters raise DiagnosticError.
+        """
+
         if self._used:
             raise RuntimeError("parameter update tracker has already been measured")
         current = dict(sorted(model.named_parameters()))
@@ -327,10 +351,14 @@ class ActivationCollector:
         return record
 
     def clear(self) -> None:
+        """Drop recorded summaries so the next forward is collected on its own."""
+
         for records in self._records.values():
             records.clear()
 
     def snapshot(self) -> dict[str, tuple[TensorDistribution, ...]]:
+        """Return each module's summaries in the order its forward calls ran."""
+
         return {name: tuple(records) for name, records in self._records.items()}
 
 

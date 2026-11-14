@@ -8,6 +8,12 @@ from .sft_dataset_record import DollyRecord, SFTDatasetError
 
 @dataclass(frozen=True)
 class SFTQualityPolicy:
+    """Day 67 admission bounds in UTF-8 bytes; the defaults equal the pinned config.
+
+    The prompt is instruction plus context. Out-of-range or inverted bounds
+    raise SFTDatasetError.
+    """
+
     min_response_bytes: int = 1
     max_prompt_bytes: int = 16 * 1024
     max_response_bytes: int = 16 * 1024
@@ -30,15 +36,24 @@ class SFTQualityPolicy:
 
 @dataclass(frozen=True)
 class SFTQualityResult:
+    """Accepted records plus a (source index, reason) pair for every rejection."""
+
     accepted: tuple[DollyRecord, ...]
     rejected: tuple[tuple[int, str], ...]
 
     @property
     def rejection_counts(self) -> dict[str, int]:
+        """Rejections per reason in reason order, as sealed into the manifest."""
         return dict(sorted(Counter(reason for _, reason in self.rejected).items()))
 
 
 def quality_rejection(record: DollyRecord, policy: SFTQualityPolicy) -> str | None:
+    """Return the first failed rule's reason, or None to admit the record.
+
+    Rules run in a fixed order (prompt_too_large, identity_answer,
+    response_too_small, response_too_large), so each rejection has one stable
+    reason. An identity answer repeats a context-free instruction, ignoring case.
+    """
     if not isinstance(record, DollyRecord) or not isinstance(policy, SFTQualityPolicy):
         raise TypeError("quality admission requires a DollyRecord and SFTQualityPolicy")
     prompt_bytes = len(record.instruction.encode("utf-8")) + len(
@@ -63,6 +78,11 @@ def quality_rejection(record: DollyRecord, policy: SFTQualityPolicy) -> str | No
 def filter_quality(
     records: tuple[DollyRecord, ...], policy: SFTQualityPolicy
 ) -> SFTQualityResult:
+    """Partition records into accepted and rejected, keeping source indexes.
+
+    A policy that rejects every record raises SFTDatasetError rather than
+    yielding an empty dataset.
+    """
     if (
         not isinstance(records, tuple)
         or not records

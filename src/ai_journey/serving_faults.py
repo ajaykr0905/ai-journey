@@ -53,6 +53,12 @@ class FaultEvent:
 
     @property
     def end_ns(self) -> int:
+        """End of the fault window: start_ns plus duration_ns.
+
+        The window is half-open for scheduling: a later fault on the same
+        target may start exactly here, and readiness may not precede it.
+        """
+
         return self.start_ns + self.duration_ns
 
 

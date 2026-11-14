@@ -11,6 +11,12 @@ from .moe_routing import MAX_ROUTER_ENTRIES, RoutingOutput
 
 @dataclass(frozen=True)
 class CapacityPlan:
+    """First-come admission decisions for the routes of one router call.
+
+    ``accepted`` mirrors the (tokens, 2) route matrix, the counts are per
+    expert, and ``capacity_applied`` is False for dropless evaluation.
+    """
+
     accepted: Tensor
     capacity: int
     attempted_counts: Tensor
@@ -20,6 +26,12 @@ class CapacityPlan:
 
 
 def validate_routes(routes: RoutingOutput) -> None:
+    """Reject malformed routes before any capacity decision is made.
+
+    Token indices must be unique, sorted and in range, each token must name
+    two distinct in-range experts, and weights and probabilities must be
+    finite, non-negative and normalized. Raises TypeError or ValueError.
+    """
     if not isinstance(routes, RoutingOutput):
         raise TypeError("routes must be RoutingOutput")
     ids, indices = routes.expert_indices, routes.token_indices
