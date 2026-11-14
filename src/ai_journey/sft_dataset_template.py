@@ -10,6 +10,12 @@ from .sft_dataset_record import SFTDatasetError
 
 @dataclass(frozen=True)
 class RenderedChat:
+    """ChatML text plus the character spans that carry training loss.
+
+    Construction requires the <|end|> terminator and ordered, nonempty,
+    in-bounds spans; render_chatml spans exactly the quoted assistant reply.
+    """
+
     example_id: str
     text: str
     assistant_spans: tuple[tuple[int, int], ...]
@@ -32,6 +38,7 @@ class RenderedChat:
 
     @property
     def sha256(self) -> str:
+        """Digest of the exact rendered text a model would be trained on."""
         return sha256(self.text.encode("utf-8")).hexdigest()
 
 
@@ -56,6 +63,7 @@ def render_chatml(example: ChatExample) -> RenderedChat:
 
 
 def assistant_character_mask(rendered: RenderedChat) -> tuple[bool, ...]:
+    """Per-character mask, True only in assistant spans, so prompts get no loss."""
     if not isinstance(rendered, RenderedChat):
         raise TypeError("rendered must be RenderedChat")
     mask = [False] * len(rendered.text)

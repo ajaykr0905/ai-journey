@@ -22,6 +22,11 @@ def _unique_object(pairs):
 
 
 def load_build_config(path: Path) -> tuple[SFTSourceSpec, SFTDatasetPolicy]:
+    """Load the pinned source spec and build policy from one regular file.
+
+    The file must hold at most 64 KiB of strict JSON with exactly the source and
+    policy objects; duplicate keys raise SFTDatasetError.
+    """
     if not isinstance(path, Path) or not path.is_file() or path.is_symlink():
         raise SFTDatasetError("SFT config must be a regular file")
     payload = path.read_bytes()
@@ -72,6 +77,10 @@ def _summary(manifest: dict) -> str:
 
 
 def main(argv=None) -> int:
+    """Run build, verify or replay and print the sealed summary; errors exit 2.
+
+    build refuses an output path that aliases the source or config.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
