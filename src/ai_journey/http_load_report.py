@@ -266,6 +266,8 @@ def validate_http_measurement(raw):
     if raw["profile_sha256"] != profile.fingerprint():
         raise ValueError("HTTP workload profile digest differs")
     loopback_address(raw["endpoint"])
+    if type(raw["created_at_utc"]) is not str:
+        raise ValueError("HTTP measurement creation time must use UTC")
     created = datetime.fromisoformat(raw["created_at_utc"])
     if created.tzinfo is None or created.utcoffset().total_seconds() != 0:
         raise ValueError("HTTP measurement creation time must use UTC")
