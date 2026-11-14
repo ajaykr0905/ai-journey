@@ -17,8 +17,9 @@ from .scaling_laws import ScalingLawError
 class PowerLawFit:
     """A log-space least-squares fit of y = coefficient * x ** exponent.
 
-    It keeps the observed x range and log-space R-squared so later gates can
-    tell interpolation from extrapolation and reject weak fits.
+    It records the observed x range and log-space R-squared; extrapolation
+    checks compare a target with maximum_x only, and acceptance gates use the
+    R-squared to reject weak fits.
     """
 
     coefficient: float

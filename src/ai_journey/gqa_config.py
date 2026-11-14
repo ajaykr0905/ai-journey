@@ -12,11 +12,12 @@ from .moe_config import MoEConfig, expected_moe_parameter_count
 
 @dataclass(frozen=True)
 class GQAConfig:
-    """A RoPE dense or MoE decoder whose query heads share fewer K/V heads.
+    """A RoPE dense or MoE decoder whose query heads share kv_heads K/V heads.
 
-    kv_heads must divide the query head count, and only rotary decoders
-    qualify because grouped attention applies RoPE; violations raise TypeError
-    or ValueError.
+    kv_heads must divide the query head count, from one shared head up to one
+    per query head (full MHA, the experiments' control arm), and only rotary
+    decoders qualify because grouped attention applies RoPE; violations raise
+    TypeError or ValueError.
     """
 
     decoder: DecoderVariantConfig | MoEConfig

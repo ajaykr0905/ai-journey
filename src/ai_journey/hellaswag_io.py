@@ -32,8 +32,8 @@ def read_evaluation_bytes(path: Path, *, maximum: int, name: str) -> bytes:
 def parse_evaluation_json(raw: bytes, *, name: str) -> dict:
     """Parse benchmark JSON that must be one object with unique keys.
 
-    Duplicate keys, NaN or infinity, invalid UTF-8 and non-object roots raise
-    HellaSwagError naming the input.
+    Duplicate keys, NaN or Infinity literals, undecodable bytes and non-object
+    roots raise HellaSwagError naming the input.
     """
 
     def unique_object(pairs):

@@ -12,9 +12,9 @@ from .inference_kv import InferenceCapacityError, _positive_integer
 class PagedAllocation:
     """Whole-page KV allocation for a set of live sequences.
 
-    Each sequence rounds up to whole ``block_tokens`` pages on its own, so every
-    partial last page is internal waste, and bytes are charged for allocated
-    rather than requested tokens.
+    Each sequence rounds up to whole ``block_tokens`` pages on its own, so the
+    unused tail of each partial last page is internal waste, and bytes are
+    charged for allocated rather than requested tokens.
     """
 
     requested_tokens: int

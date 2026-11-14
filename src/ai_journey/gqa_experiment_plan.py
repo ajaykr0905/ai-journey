@@ -20,7 +20,7 @@ class GQAExperimentPlan:
     """A controlled KV-grouping comparison on one small zero-dropout RoPE decoder.
 
     Arms list full MHA first and then strictly fewer kv_heads, so each grouped
-    arm pairs with the same dense control; size, seed, step and optimizer
+    arm pairs with the same full-MHA control; size, seed, step and optimizer
     bounds keep the job CPU-sized, and violations raise ValueError.
     """
 

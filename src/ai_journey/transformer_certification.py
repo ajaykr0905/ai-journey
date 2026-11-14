@@ -27,8 +27,8 @@ class TransformerCertificationConfig:
     """Small CPU model, seed and tolerance for the attention and cache audits.
 
     Only layer-norm models with block_size of at least 2 and small dimensions
-    (width and context up to 64, four layers, 1024 tokens) qualify; violations
-    raise TransformerLabError.
+    (width and context up to 64, four layers and a 1024-token vocabulary)
+    qualify; violations raise TransformerLabError.
     """
 
     model: TransformerConfig = TransformerConfig(
