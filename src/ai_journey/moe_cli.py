@@ -39,6 +39,13 @@ MAX_REPORT_BYTES = 4 * 1024 * 1024
 
 
 def default_moe_plan():
+    """The checked plan: a dense RMSNorm/SwiGLU/RoPE baseline and a top-2 arm.
+
+    Both arms share every dense control of a tiny zero-dropout byte decoder,
+    so the comparison isolates the expert FFN; the MoE arm adds a 0.01
+    balance weight.
+    """
+
     base = GPT2Config(
         256,
         8,
@@ -84,6 +91,13 @@ def run_public_moe_comparison(
     split_seed=53,
     progress_directory=None,
 ):
+    """Train and score a plan on an exact offline public snapshot.
+
+    Documents are partitioned from the pinned source by a recorded split
+    seed, and the sealed report is verified before it is returned. Raises
+    ValueError for an unpinned source or an inconsistent result.
+    """
+
     if type(source_name) is not str or source_name not in PUBLIC_SOURCES:
         raise ValueError("unsupported pinned MoE public source")
     train, heldout, evidence = public_decoder_partitions(
@@ -105,6 +119,13 @@ def run_public_moe_comparison(
 
 
 def verify_public_moe_report(report):
+    """Check a public report offline, without running a model; return its plan.
+
+    The source must match its immutable pin and license, train and held-out
+    document identities must not overlap, and their counts must match the
+    measured exposure. Raises ValueError otherwise.
+    """
+
     if (
         type(report) is not dict
         or set(report)
@@ -174,6 +195,13 @@ def verify_public_moe_report(report):
 
 
 def replay_public_moe_report(report, snapshot):
+    """Re-partition the snapshot and rerun every recorded measurement.
+
+    The report is verified first, and the snapshot must reproduce its exact
+    document partitions before the comparison is replayed. Raises ValueError
+    on any difference; returns the plan.
+    """
+
     plan = verify_public_moe_report(report)
     evidence = report["public_corpus"]
     train, heldout, expected = public_decoder_partitions(
