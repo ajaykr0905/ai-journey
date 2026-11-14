@@ -10,6 +10,13 @@ class StreamProtocolError(ValueError):
 
 
 def strict_json(payload):
+    """Parse protocol JSON, rejecting duplicate keys, NaN and Infinity.
+
+    Python's json module silently keeps the last duplicate key and accepts
+    those non-JSON constants; refusing both gives every frame one meaning.
+    Raises StreamProtocolError.
+    """
+
     def unique(pairs):
         output = {}
         for name, value in pairs:
@@ -28,6 +35,13 @@ def strict_json(payload):
 
 
 def validate_generation_output(payload, *, request_id, prompt_tokens, max_tokens):
+    """Check a terminal generation payload against the request it answers.
+
+    The exact field set, request ID, prompt length, model digest, token IDs,
+    token budget and finish reason must all agree, and a "length" finish must
+    use the whole budget. Returns the payload; raises StreamProtocolError.
+    """
+
     fields = {"request_id", "model_sha256", "prompt_tokens", "tokens", "finish_reason"}
     if type(payload) is not dict or set(payload) != fields:
         raise StreamProtocolError("generation output fields differ from the protocol")
@@ -207,6 +221,13 @@ class GenerationEventDecoder:
         return list(self.iter_events(payload))
 
     def finish(self):
+        """Close the stream at EOF and return its terminal generation output.
+
+        A stream that ends inside a UTF-8 sequence or before one complete
+        terminal event raises StreamProtocolError rather than passing as a
+        response. Returns None when the terminal event was an error event.
+        """
+
         if self._feeding:
             raise StreamProtocolError("consume or close the event iterator before EOF")
         try:

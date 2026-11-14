@@ -66,6 +66,11 @@ class BoundedHTTPServer(ThreadingHTTPServer):
         super().__init__(address, handler)
 
     def process_request(self, request, client_address):
+        """Take a connection slot, or answer 503 with Retry-After and close.
+
+        Refusing before a handler thread exists keeps a connection flood from
+        creating unbounded threads; the slot is returned if thread start fails.
+        """
         if not self._slots.acquire(blocking=False):
             body = b'{"error":"connection limit reached"}'
             response = (
@@ -90,6 +95,7 @@ class BoundedHTTPServer(ThreadingHTTPServer):
             raise
 
     def process_request_thread(self, request, client_address):
+        """Serve one connection, then return its slot even if handling fails."""
         try:
             super().process_request_thread(request, client_address)
         finally:
@@ -99,6 +105,13 @@ class BoundedHTTPServer(ThreadingHTTPServer):
 def make_server(
     service, *, host="127.0.0.1", port=0, max_connections=8, receive_timeout_seconds=5.0
 ):
+    """Build the loopback HTTP front end of one generation service.
+
+    The server is unauthenticated, so it binds only to 127.0.0.1, admits at
+    most 64 connections and bounds each request's receive time to at most 30
+    seconds. It serves /health, /ready, /metrics, /generate and /stream.
+    Raises ValueError for another host or an out-of-range limit.
+    """
     if host != "127.0.0.1":
         raise ValueError("the unauthenticated lab server binds only to loopback")
     integer(max_connections, "max_connections", 1)
