@@ -133,6 +133,11 @@ def _validate_payload(payload) -> None:
 
 
 def optimizer_contract(model, optimizer) -> list[dict]:
+    """Parameter names and hyperparameters of every optimizer group, in order.
+
+    Checkpoints record it and restore compares it, so an optimizer whose
+    groups, parameter order or controls differ cannot load the saved state.
+    """
     names = {id(parameter): name for name, parameter in model.named_parameters()}
     return [
         {
@@ -313,6 +318,12 @@ def load_moe_checkpoint(
     source_sha256: str,
     max_checkpoint_bytes: int = 64 * 1024 * 1024,
 ) -> int:
+    """Read a bounded checkpoint file and restore it; return the optimizer step.
+
+    State loads only after the seal, provenance, architecture and optimizer
+    binding all match, and a failed restore leaves model and optimizer as
+    they were.
+    """
     return restore_moe_payload(
         read_moe_checkpoint(path, max_checkpoint_bytes=max_checkpoint_bytes),
         model=model,

@@ -12,6 +12,12 @@ from .moe_layer import MoEFeedForward
 
 @dataclass(frozen=True)
 class MoEModelOutput:
+    """Logits with layer-averaged auxiliary losses and per-layer routing stats.
+
+    ``idle_expert_parameters`` names the parameters of experts that accepted
+    no route in this pass, which therefore receive no gradient from it.
+    """
+
     logits: Tensor
     balance_loss: Tensor
     router_z_loss: Tensor
@@ -35,11 +41,18 @@ class MoEDecoderModel(DecoderVariantModel):
             self.h[index].mlp = MoEFeedForward(config, layer_index=index)
 
     def forward(self, token_ids: Tensor, *, token_mask: Tensor | None = None) -> Tensor:
+        """Logits only; forward_training also returns losses and routing stats."""
         return self.forward_training(token_ids, token_mask=token_mask).logits
 
     def forward_training(
         self, token_ids: Tensor, *, token_mask: Tensor | None = None
     ) -> MoEModelOutput:
+        """Full forward returning logits, auxiliary losses and routing evidence.
+
+        Tokens must be CPU long IDs within the vocabulary and context length.
+        The mask limits routing and loss eligibility only; attention still sees
+        every position. Raises ValueError for invalid tokens or mask.
+        """
         if (
             not isinstance(token_ids, Tensor)
             or token_ids.dtype != torch.long
@@ -91,6 +104,11 @@ class MoEDecoderModel(DecoderVariantModel):
         )
 
     def forward_with_cache(self, token_ids: Tensor, *, past_key_values=None):
+        """Cached decoding, refused in training mode with ValueError.
+
+        Training capacity depends on which tokens share a chunk, so cached
+        steps could route differently from a full pass; dropless eval cannot.
+        """
         if self.training:
             raise ValueError("cached MoE decoding requires dropless eval mode")
         return super().forward_with_cache(token_ids, past_key_values=past_key_values)
