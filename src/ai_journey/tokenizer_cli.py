@@ -14,6 +14,11 @@ from .tokenizer_training import train_documents
 
 
 def read_documents(path: Path):
+    """Read UTF-8 text as one document per nonempty line, capped at 1 MiB.
+
+    Every BPE command shares this reader, so they all see the same document
+    boundaries; an oversized or empty corpus raises TokenizerError.
+    """
     with path.open("rb") as stream:
         payload = stream.read(1024 * 1024 + 1)
     if len(payload) > 1024 * 1024:
@@ -56,6 +61,11 @@ def build_parser():
 
 
 def main(argv=None):
+    """Run one tokenizer command; invalid inputs exit with status 2.
+
+    Outputs may not alias the corpus or tokenizer they were derived from, so a
+    mistyped path cannot overwrite source evidence.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
