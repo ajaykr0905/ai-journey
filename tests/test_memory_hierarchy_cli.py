@@ -147,6 +147,25 @@ def test_invalid_inputs_refused_outputs_and_failed_runs_exit_two(tmp_path, capsy
     capsys.readouterr()
 
 
+def test_unusable_outputs_are_refused_before_anything_is_measured(tmp_path, capsys):
+    config = write_config(tmp_path / "config.json")
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    target = tmp_path / "target.json"
+    target.write_bytes(b"keep\n")
+    link = tmp_path / "link.json"
+    link.symlink_to(target)
+
+    def unused_clock():
+        raise AssertionError("the run started measuring")
+
+    for output in (directory, link):
+        argv = ["run", "--config", str(config), "--output", str(output)]
+        assert main(argv, clock=unused_clock) == EXIT_INVALID
+        assert "regular non-symlink file" in capsys.readouterr().err
+    assert target.read_bytes() == b"keep\n"
+
+
 def test_symlink_loops_exit_two_without_a_traceback(tmp_path, capsys):
     config = write_config(tmp_path / "config.json")
     loop = tmp_path / "loop.json"

@@ -60,6 +60,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _refuse_unusable_output(output: Path, config: Path) -> None:
+    """Refuse an output path the atomic writer would refuse, before measuring.
+
+    A run costs seconds and hundreds of MiB, so an output that aliases the
+    config or is a symlink, directory or other non-regular file fails first.
+    """
+
+    if paths_alias(output, config):
+        raise MemoryHierarchyError("report output must not alias the config")
+    if output.is_symlink() or (output.exists() and not output.is_file()):
+        raise MemoryHierarchyError("report output must be a regular non-symlink file")
+
+
 def _label(report: dict[str, object]) -> str:
     return "cpu_host_measurement" if report["measured"] else "synthetic_timing"
 
@@ -140,8 +153,7 @@ def main(
             _, summary = load_report(args.report, config=config)
             print(_summary_line("verified_memory_hierarchy", summary))
             return EXIT_OK
-        if paths_alias(args.output, args.config):
-            raise MemoryHierarchyError("report output must not alias the config")
+        _refuse_unusable_output(args.output, args.config)
         config = load_config(args.config)
         report = measure_report(config, clock=clock or time.perf_counter_ns)
         summary = save_report(
