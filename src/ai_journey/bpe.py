@@ -33,30 +33,57 @@ def merge_pair(
     token_ids(list(pair) + [replacement])
     if replacement in pair:
         raise TokenizerError("replacement must be a new token id")
+    return _merge_known_pair(values, pair, replacement)
+
+
+def _merge_known_pair(values, pair, replacement):
+    """Merge already-validated ids, jumping between C-level searches for pair[0].
+
+    Equivalent to scanning one position at a time: a match consumes both ids,
+    and a first id without its partner is copied before the search resumes.
+    """
+    first, second = pair
     output = []
-    index = 0
-    while index < len(values):
-        if values[index : index + 2] == pair:
+    start = 0
+    last = len(values) - 1
+    while True:
+        try:
+            index = values.index(first, start, last)
+        except ValueError:
+            break
+        if values[index + 1] == second:
+            output.extend(values[start:index])
             output.append(replacement)
-            index += 2
+            start = index + 2
         else:
-            output.append(values[index])
-            index += 1
+            output.extend(values[start : index + 1])
+            start = index + 1
+    output.extend(values[start:])
     return tuple(output)
 
 
 def _weighted_pair_counts(streams):
+    """Count pairs of trusted training streams, each weighted by multiplicity.
+
+    Most corpus segments are unique, so weight-one streams are counted by
+    Counter.update in C; repeated streams multiply their own pair counts.
+    """
     counts = Counter()
     for stream, weight in streams.items():
-        for pair, frequency in pair_counts(stream).items():
-            counts[pair] += frequency * weight
+        pairs = zip(stream, stream[1:])
+        if weight == 1:
+            counts.update(pairs)
+        else:
+            for pair, frequency in Counter(pairs).items():
+                counts[pair] += frequency * weight
     return counts
 
 
 def _merge_weighted_streams(streams, pair, replacement):
+    """Apply one merge to trusted streams, adding weights of streams that converge."""
     merged = Counter()
     for stream, weight in streams.items():
-        merged[merge_pair(stream, pair, replacement)] += weight
+        merged[_merge_known_pair(stream, pair, replacement)] += weight
     return merged
 
 
