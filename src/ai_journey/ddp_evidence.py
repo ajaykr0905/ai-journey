@@ -29,6 +29,7 @@ LIMITATIONS = [
 
 
 def digest(payload):
+    """SHA-256 of sorted, compact, NaN-free JSON: the seal and the comparator."""
     return sha256(
         json.dumps(
             payload, sort_keys=True, separators=(",", ":"), allow_nan=False
@@ -39,6 +40,13 @@ def digest(payload):
 def build_evidence(
     source: bytes, spec, ranks: list[dict], *, sampler=SAMPLER_V1
 ) -> dict:
+    """Seal agreeing rank receipts into one measured CPU/Gloo training report.
+
+    Every rank must report the same metrics and model fingerprint, and v2
+    sampler runs must carry the recomputed data contract, so one deviating
+    worker cannot be summarized away. The sealed report is verified before it
+    is returned. Raises ValueError otherwise.
+    """
     validate_sampler(sampler)
     if not ranks or any(
         rank["metrics"] != ranks[0]["metrics"]
@@ -93,6 +101,14 @@ def build_evidence(
 
 
 def verify_evidence(payload: dict) -> dict:
+    """Recompute the seal and every accounting identity of a training report.
+
+    Steps, tokens, micro-batches, clipping flags, loss sums and learning rates
+    must follow from the recorded spec, ranks must be distinct processes that
+    agree on the final model, and the runtime must be single-threaded CPU
+    float64 Gloo with at most four ranks. Returns the payload; raises
+    ValueError.
+    """
     fields = {
         "schema_version",
         "world_size",
@@ -241,6 +257,12 @@ def verify_evidence(payload: dict) -> dict:
 
 
 def write_evidence(path: Path, payload: dict):
+    """Verify, then atomically publish a report as canonical JSON.
+
+    The report is written to a temporary sibling, fsynced and renamed, so a
+    reader never sees a partial file; a symlinked destination raises
+    ValueError.
+    """
     verify_evidence(payload)
     if path.is_symlink():
         raise ValueError("evidence output must not be a symlink")
@@ -269,6 +291,7 @@ def write_evidence(path: Path, payload: dict):
 
 
 def read_evidence(path: Path):
+    """Read a regular, non-symlink report of at most 4 MiB and verify it."""
     if (
         path.is_symlink()
         or not path.is_file()
