@@ -174,12 +174,13 @@ def save_checkpoint(
     journal_directory: Path | None = None,
     sampler=SAMPLER_V1,
 ) -> str:
-    """Collectively publish one replicated training boundary; return its digest.
+    """Collectively publish one replicated training boundary.
 
     Every rank must pass state validation and agree on model and optimizer
     fingerprints before rank 0 atomically replaces the latest file and, with
     a journal, records an immutable version that must advance recorded
-    progress. A failure on any rank raises RuntimeError on every rank.
+    progress. Returns the agreed model fingerprint, not a digest of the file.
+    A failure on any rank raises RuntimeError on every rank.
     """
     validate_sampler(sampler)
     integer(step, "step")

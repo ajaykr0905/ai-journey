@@ -41,9 +41,11 @@ def strict_json(payload):
 def validate_generation_output(payload, *, request_id, prompt_tokens, max_tokens):
     """Check a terminal generation payload against the request it answers.
 
-    The exact field set, request ID, prompt length, model digest, token IDs,
-    token budget and finish reason must all agree, and a "length" finish must
-    use the whole budget. Returns the payload; raises StreamProtocolError.
+    The field set must be exact, the request ID and prompt length must match
+    the request, token IDs must be in range and within the budget, and a
+    "length" finish must use the whole budget. The model digest is only
+    checked to be lowercase SHA-256 hex, not compared with any model.
+    Returns the payload; raises StreamProtocolError.
     """
 
     fields = {"request_id", "model_sha256", "prompt_tokens", "tokens", "finish_reason"}

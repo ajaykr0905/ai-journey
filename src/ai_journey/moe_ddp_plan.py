@@ -191,9 +191,9 @@ def public_moe_ddp_plan_from_mapping(value):
 
 
 def source_admission(plan, source):
-    """Check source bytes against the plan digest and size its sample windows.
+    """Check source bytes against ``plan.source.sha256`` and size its windows.
 
-    The bytes (at most 1 MiB) must match the declared SHA-256 and supply at
+    The bytes (at most 1 MiB) must match that declared digest and supply at
     least one global optimizer window and at most 65536 samples. Returns the
     counts the plan command reports; raises ValueError otherwise.
     """
@@ -224,7 +224,7 @@ def read_public_moe_ddp_plan(config_path: Path, source_path: Path):
 
     Reads refuse a symlinked final path and a file that changes while read;
     duplicate JSON keys, a plan over 64 KiB, a source over 1 MiB or a source
-    that differs from the plan's digest raise ValueError. Returns both.
+    that differs from its declared digest raise ValueError. Returns both.
     """
     value = json.loads(
         _read_bytes(config_path, MAX_PLAN_BYTES), object_pairs_hook=unique_fields

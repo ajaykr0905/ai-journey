@@ -23,7 +23,7 @@ from .moe_route_audit import validate_moe_routing
 
 
 def canonical_moe_json(value):
-    """Canonical JSON bytes by which MoE evidence is compared.
+    """Canonical JSON text by which MoE evidence is compared.
 
     Comparing these strings rather than Python values keeps 1 and 1.0
     distinct and refuses NaN; anything json cannot encode raises ValueError.

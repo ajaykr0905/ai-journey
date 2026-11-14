@@ -56,9 +56,9 @@ def public_moe_ddp_schedule(plan, source_bytes, *, rank, update_index):
 def public_moe_ddp_window(plan, source, *, rank, update_index):
     """Materialize only one rank's microbatches for one optimizer update.
 
-    The source is re-admitted against the plan digest first. Each sample is a
-    next-byte input/target pair with every position eligible. Returns the
-    batches and their schedule.
+    The source is first re-admitted against its declared digest. Each sample
+    is a next-byte input/target pair with every position eligible. Returns
+    the batches and their schedule.
     """
     source_admission(plan, source)
     schedule = public_moe_ddp_schedule(

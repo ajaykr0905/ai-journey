@@ -133,8 +133,10 @@ class GenerationRequest:
     def fingerprint(self):
         """SHA-256 of the whole request, which a reused request_id must match.
 
-        The service replays a cached completion for a repeated ID only when
-        this digest is unchanged, and refuses different input under that ID.
+        While the ID's completed response is still in the bounded response
+        cache, the service replays it only if this digest is unchanged and
+        refuses different input under that ID. Evicted IDs, and requests that
+        were cancelled or hit their deadline, are not remembered.
         """
         return sha256(
             json.dumps(asdict(self), sort_keys=True, separators=(",", ":")).encode()
