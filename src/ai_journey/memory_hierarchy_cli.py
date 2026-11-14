@@ -17,6 +17,7 @@ a kernel check or exceeded their budget.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -64,13 +65,24 @@ def _refuse_unusable_output(output: Path, config: Path) -> None:
     """Refuse an output path the atomic writer would refuse, before measuring.
 
     A run costs seconds and hundreds of MiB, so an output that aliases the
-    config or is a symlink, directory or other non-regular file fails first.
+    config or is a symlink, directory or other non-regular file fails first,
+    and so does one whose nearest existing ancestor is not a writable
+    directory, where the writer could neither create the missing parents nor
+    place its temporary file.
     """
 
     if paths_alias(output, config):
         raise MemoryHierarchyError("report output must not alias the config")
     if output.is_symlink() or (output.exists() and not output.is_file()):
         raise MemoryHierarchyError("report output must be a regular non-symlink file")
+    ancestor = output.parent
+    # A dangling or looping link stops the walk too, then fails is_dir.
+    while not (ancestor.exists() or ancestor.is_symlink()):
+        if ancestor.parent == ancestor:
+            break
+        ancestor = ancestor.parent
+    if not ancestor.is_dir() or not os.access(ancestor, os.W_OK | os.X_OK):
+        raise MemoryHierarchyError("report output must be inside a writable directory")
 
 
 def _label(report: dict[str, object]) -> str:

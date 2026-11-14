@@ -166,6 +166,40 @@ def test_unusable_outputs_are_refused_before_anything_is_measured(tmp_path, caps
     assert target.read_bytes() == b"keep\n"
 
 
+def test_outputs_the_writer_cannot_create_are_refused_before_measuring(
+    tmp_path, capsys
+):
+    config = write_config(tmp_path / "config.json")
+    blocker = tmp_path / "blocker.json"
+    blocker.write_bytes(b"keep\n")
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop)
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    outputs = [
+        blocker / "report.json",
+        blocker / "nested" / "report.json",
+        loop / "report.json",
+    ]
+    # Root can write into a read-only directory, so only users check it.
+    if hasattr(os, "geteuid") and os.geteuid() != 0:
+        outputs.append(locked / "report.json")
+
+    def unused_clock():
+        raise AssertionError("the run started measuring")
+
+    locked.chmod(0o500)
+    try:
+        for output in outputs:
+            argv = ["run", "--config", str(config), "--output", str(output)]
+            assert main(argv, clock=unused_clock) == EXIT_INVALID
+            assert "writable directory" in capsys.readouterr().err
+    finally:
+        locked.chmod(0o700)
+    assert blocker.read_bytes() == b"keep\n"
+    assert not list(locked.iterdir())
+
+
 def test_symlink_loops_exit_two_without_a_traceback(tmp_path, capsys):
     config = write_config(tmp_path / "config.json")
     loop = tmp_path / "loop.json"
