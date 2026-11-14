@@ -46,6 +46,13 @@ def _strict_json_object(value: str) -> dict:
 
 @dataclass(frozen=True)
 class ToolCall:
+    """One assistant tool request with strict JSON-object arguments.
+
+    The ``call_`` id lets a conversation match the tool result to its request;
+    duplicate keys, non-finite numbers or non-object arguments raise
+    SFTDataError.
+    """
+
     call_id: str
     name: str
     arguments: str
@@ -62,6 +69,7 @@ class ToolCall:
 
     @property
     def canonical_arguments(self) -> str:
+        """Return the arguments with sorted keys so equal calls encode identically."""
         return json.dumps(
             _strict_json_object(self.arguments),
             sort_keys=True,
@@ -72,6 +80,13 @@ class ToolCall:
 
 @dataclass(frozen=True)
 class ChatMessage:
+    """One chat turn whose role decides which tool metadata it may carry.
+
+    Only assistants request tools and only tool turns name a ``tool_call_id``;
+    content must be nonblank text up to 4096 characters without NUL or CR,
+    except an empty tool-calling assistant turn. Violations raise SFTDataError.
+    """
+
     role: str
     content: str
     tool_call: ToolCall | None = None
@@ -113,6 +128,13 @@ class ChatMessage:
 
 @dataclass(frozen=True)
 class Conversation:
+    """A dialogue whose turn order and tool round trips are well formed.
+
+    One optional leading system turn, then alternating user and assistant
+    turns where each tool call is answered by its matching result, unique call
+    ids, and a final plain assistant reply; anything else raises SFTDataError.
+    """
+
     conversation_id: str
     messages: tuple[ChatMessage, ...]
 
@@ -169,6 +191,13 @@ class Conversation:
 
 @dataclass(frozen=True)
 class RenderedConversation:
+    """Canonical JSON Lines text with the character spans of assistant lines.
+
+    Training masks and validation targets are derived from these spans, so
+    they must be ordered nonempty intervals inside the text; violations raise
+    SFTDataError.
+    """
+
     conversation_id: str
     text: str
     assistant_spans: tuple[tuple[int, int], ...]
@@ -189,6 +218,7 @@ class RenderedConversation:
 
     @property
     def sha256(self):
+        """Return the SHA-256 of the exact rendered UTF-8 training text."""
         return sha256(self.text.encode("utf-8")).hexdigest()
 
 
@@ -237,6 +267,7 @@ def render_conversation(conversation: Conversation) -> RenderedConversation:
 
 
 def canonical_digest(value) -> str:
+    """Hash JSON evidence with sorted keys, compact separators and no NaN."""
     return sha256(
         json.dumps(
             value,
@@ -250,6 +281,13 @@ def canonical_digest(value) -> str:
 
 @dataclass(frozen=True)
 class ConversationSplit:
+    """Train and validation chats checked to be distinct and encodable.
+
+    Ids and rendered texts are unique across both partitions, and validation
+    may only use characters seen in training because the codec is built from
+    training alone; violations raise SFTDataError.
+    """
+
     train: tuple[Conversation, ...]
     validation: tuple[Conversation, ...]
 
@@ -277,11 +315,13 @@ class ConversationSplit:
                 ) from exc
 
     def codec(self) -> CharacterCodec:
+        """Return the character codec built from rendered training chats only."""
         return CharacterCodec.from_text(
             "".join(render_conversation(row).text for row in self.train)
         )
 
     def evidence(self) -> dict:
+        """Return per-partition ids, digests and character counts plus the codec."""
         result = {}
         for name in ("train", "validation"):
             rendered = tuple(render_conversation(row) for row in getattr(self, name))
@@ -361,6 +401,10 @@ def authored_chat_fixture() -> ConversationSplit:
 
 
 def bounded_integer(value, name, minimum, maximum):
+    """Return ``value`` only if it is a plain int within the inclusive bounds.
+
+    The exact type check rejects bools; violations raise SFTDataError.
+    """
     if type(value) is not int or not minimum <= value <= maximum:
         raise SFTDataError(f"{name} must be an integer in [{minimum}, {maximum}]")
     return value
@@ -368,6 +412,12 @@ def bounded_integer(value, name, minimum, maximum):
 
 @dataclass(frozen=True)
 class SFTWindow:
+    """One training window whose loss counts only assistant-span targets.
+
+    ``target_mask`` marks targets inside assistant lines, and a window needs at
+    least one; misaligned fields raise SFTDataError.
+    """
+
     conversation_id: str
     start: int
     inputs: tuple[int, ...]
@@ -391,6 +441,7 @@ class SFTWindow:
 
     @property
     def supervised_tokens(self):
+        """Return how many of the window's targets contribute to the loss."""
         return sum(self.target_mask)
 
 
@@ -448,6 +499,10 @@ def sft_training_batches(conversations, codec, *, block_size, batch_size, steps,
 
 
 def sft_schedule_evidence(batches):
+    """Return window and token counts plus a digest of the exact schedule.
+
+    Empty batches or rows that are not SFTWindow raise SFTDataError.
+    """
     if (
         not isinstance(batches, tuple)
         or not batches
@@ -486,6 +541,11 @@ def sft_schedule_evidence(batches):
 
 @dataclass(frozen=True)
 class SFTTarget:
+    """One held-out assistant character with its bounded causal context.
+
+    A nonpositive index or empty context raises SFTDataError.
+    """
+
     conversation_id: str
     target_index: int
     context: tuple[int, ...]
@@ -537,6 +597,10 @@ def sft_validation_targets(conversations, codec, *, block_size):
 
 
 def sft_validation_evidence(conversations, codec, *, block_size):
+    """Return per-conversation target counts and a digest of every target.
+
+    The ``policy`` string names the assistant-only scoring rule it binds.
+    """
     targets = sft_validation_targets(conversations, codec, block_size=block_size)
     per_conversation = []
     for conversation in conversations:
