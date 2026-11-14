@@ -10,6 +10,7 @@ from .resource_report import verify_resource_report
 
 
 def gpu_record_digest(payload: dict) -> str:
+    """SHA-256 of canonical JSON, sealing and comparing preflight records."""
     return sha256(
         json.dumps(
             payload, sort_keys=True, separators=(",", ":"), allow_nan=False
