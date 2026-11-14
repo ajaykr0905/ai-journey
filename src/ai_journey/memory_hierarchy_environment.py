@@ -4,9 +4,11 @@ The record names the interpreter, the NumPy build and the BLAS library it was
 built against, the operating system, the machine architecture and the
 logical CPU count: enough to explain why two hosts' rates differ, and nothing
 that names a host. Host names, user names, paths, serial numbers, network
-addresses and environment variables are never read. Any value that is not a
-short version or platform token is recorded as ``unknown``, so the record
-cannot smuggle free text into a report.
+addresses and environment variables are never recorded, although
+``platform.uname`` reads the host name and NumPy's build record lists build
+paths: only the fields above are copied out. Any value that is not a short
+version or platform token is recorded as ``unknown``, so the record cannot
+smuggle free text into a report.
 """
 
 from __future__ import annotations

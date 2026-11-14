@@ -15,8 +15,10 @@ float64 reference, one block of rows at a time. Each must lie within
 unit roundoff and ``gamma_K(u) = K u / (1 - K u)`` is the classical
 inner-product rounding bound (N. J. Higham, Accuracy and Stability of
 Numerical Algorithms, 2nd ed., SIAM, 2002, section 3.1). The bound holds for
-any summation order, so a correct BLAS cannot fail it while a wrong product
-does.
+any summation order, so a correct BLAS cannot fail it. A product fails when
+an element is non-finite, unwritten or off by more than the bound, but a
+smaller error passes: for float32 standard-normal operands at K = 1024 the
+bound is about 0.04, so 1e-3 added to one element goes unnoticed.
 """
 
 from __future__ import annotations

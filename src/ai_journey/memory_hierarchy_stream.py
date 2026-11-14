@@ -228,8 +228,8 @@ class StreamBuffers:
         """Return a no-argument callable that runs one kernel on a prefix.
 
         Operands are bound up front with ``functools.partial`` and a positional
-        ``out``, which keeps per-call Python overhead, the dominant cost at
-        cache-sized points, as low as NumPy allows.
+        ``out``, so a call does no operand lookup or keyword parsing; the
+        per-call overhead that remains still dominates cache-sized points.
         """
 
         kernel = stream_kernel(name)

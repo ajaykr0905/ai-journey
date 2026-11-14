@@ -147,9 +147,10 @@ in-cache working set would see. `roofline.RooflineHardware` computes each
 ridge point and `roofline.analyze_roofline` places scale, add and triad at
 the largest point, and the matmul, at their arithmetic intensities, using
 medians on both axes. Triad and the matmul sit on the ceilings they define,
-so their `fraction_of_attainable` is 1 by construction; another kernel can
-exceed 1 when it streams faster than triad did. Copy and the gathers perform
-no FLOPs and have no roofline position.
+so their `fraction_of_attainable` is 1 by construction, up to floating-point
+rounding (triad's can read 1.0000000000000002); another kernel can exceed 1
+when it streams faster than triad did. Copy and the gathers perform no FLOPs
+and have no roofline position.
 
 The matmul runs on NumPy's BLAS, which may use several threads, while the
 STREAM kernels and gathers run on one; the ridge describes these NumPy
@@ -158,7 +159,9 @@ product is checked against a float64 reference within
 (gamma_K(u) + gamma_K(2^-53)) (|A| |B|), the classical inner-product rounding
 bound, where u is the dtype's unit roundoff. For float64 the reference uses
 the same BLAS, so the recorded `max_bound_ratio` is usually exactly 0; the
-check still rejects a wrong, non-finite, or unwritten product.
+check still rejects a non-finite or unwritten product and any element off by
+more than the bound, though not a smaller error (with the lab's
+standard-normal operands the float32 bound at K = 1024 is about 0.04).
 
 ## Little's law
 
