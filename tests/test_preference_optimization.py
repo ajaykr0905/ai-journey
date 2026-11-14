@@ -274,33 +274,42 @@ def test_shared_reference_scores_match_fresh_scoring_for_every_arm():
         ) == evaluate_preferences(fresh_policy, reference, pairs[:4], codec, beta=0.2)
 
 
+def _assert_reference_scores_rejected(policy, reference, pair, codec, scores):
+    batches = preference_training_batches((pair,), batch_size=1, steps=1, seed=44)
+    with pytest.raises(PreferenceDataError, match="reference scores"):
+        train_preference_batches(
+            policy,
+            reference,
+            batches,
+            codec,
+            learning_rate=0.01,
+            beta=0.2,
+            reference_scores=scores,
+        )
+    with pytest.raises(PreferenceDataError, match="reference scores"):
+        evaluate_preferences(
+            policy, reference, (pair,), codec, beta=0.2, reference_scores=scores
+        )
+
+
 def test_reference_scores_reject_another_changed_or_recoded_reference():
     policy, pair, codec = decoder_and_data()
     reference = copy.deepcopy(policy).requires_grad_(False)
-    batches = preference_training_batches((pair,), batch_size=1, steps=1, seed=44)
     policy_before = model_fingerprint(policy)
-    other = ReferenceScores(copy.deepcopy(reference), codec)
-    recoded = ReferenceScores(
-        reference,
-        preference_codec(authored_preference_fixture(), extra_text="~"),
-    )
+    recoded = preference_codec(authored_preference_fixture(), extra_text="~")
     stale = ReferenceScores(reference, codec)
+
+    # Each cache breaks exactly one binding, so no guard is masked by another.
+    _assert_reference_scores_rejected(
+        policy, reference, pair, codec, ReferenceScores(copy.deepcopy(reference), codec)
+    )
+    _assert_reference_scores_rejected(
+        policy, reference, pair, codec, ReferenceScores(reference, recoded)
+    )
+    evaluate_preferences(
+        policy, reference, (pair,), codec, beta=0.2, reference_scores=stale
+    )
     with torch.no_grad():
         next(reference.parameters()).add_(0.5)
-
-    for scores in (other, recoded, stale):
-        with pytest.raises(PreferenceDataError, match="reference scores"):
-            train_preference_batches(
-                policy,
-                reference,
-                batches,
-                codec,
-                learning_rate=0.01,
-                beta=0.2,
-                reference_scores=scores,
-            )
-        with pytest.raises(PreferenceDataError, match="reference scores"):
-            evaluate_preferences(
-                policy, reference, (pair,), codec, beta=0.2, reference_scores=scores
-            )
+    _assert_reference_scores_rejected(policy, reference, pair, codec, stale)
     assert model_fingerprint(policy) == policy_before
