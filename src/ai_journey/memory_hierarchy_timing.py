@@ -147,8 +147,10 @@ def time_batches(
 ) -> BatchTiming:
     """Time ``repeats`` batches of calls after ``warmup`` untimed batches.
 
-    Warmup batches are the same batches, so a cache-sized working set is
-    resident and every page has been touched before the first timed sample.
+    Warmup batches are the same batches, so with ``warmup`` of at least 1 a
+    cache-sized working set is resident and every page has been touched
+    before the first timed sample. ``warmup=0`` gives neither guarantee: the
+    first timed sample can then include cold-cache and first-touch costs.
     Clock contract violations surface as ``MemoryHierarchyError``.
     """
 
