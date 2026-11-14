@@ -14,6 +14,8 @@ from .scaling_laws import _positive_integer
 
 @dataclass(frozen=True)
 class ExperimentBudget:
+    """Analytical FLOPs for every seed at every grid coordinate, and the largest run."""
+
     run_count: int
     total_training_flops: int
     maximum_run_flops: int

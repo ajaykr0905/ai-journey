@@ -15,6 +15,12 @@ from .scaling_laws import ScalingLawError
 
 @dataclass(frozen=True)
 class PowerLawFit:
+    """A log-space least-squares fit of y = coefficient * x ** exponent.
+
+    It keeps the observed x range and log-space R-squared so later gates can
+    tell interpolation from extrapolation and reject weak fits.
+    """
+
     coefficient: float
     exponent: float
     r_squared_log_space: float
@@ -23,6 +29,12 @@ class PowerLawFit:
     maximum_x: float
 
     def predict(self, x: float) -> float:
+        """Return the fitted y at a positive finite x, without any range check.
+
+        classify_extrapolation judges distance beyond maximum_x; non-numeric x
+        raises TypeError and nonpositive x raises ScalingLawError.
+        """
+
         if isinstance(x, bool) or not isinstance(x, (int, float)):
             raise TypeError("x must be numeric")
         if not math.isfinite(x) or x <= 0:
