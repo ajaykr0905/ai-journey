@@ -86,6 +86,54 @@ def evaluate_candidate_logprob(model, pair, label, codec) -> float:
     return value
 
 
+class ReferenceScores:
+    """Score each branch of one unchanged reference decoder at most once.
+
+    Every policy arm of a fold is compared with the same immutable reference, so
+    its branch scores repeat across arms, steps and resampled pairs. Scores are
+    bound to the reference object, the codec and the fingerprint taken here;
+    training and evaluation reject a cache whose reference has since changed.
+    """
+
+    def __init__(self, reference: DecoderLanguageModel, codec: CharacterCodec):
+        _finite_cpu_decoder(reference)
+        self.reference = reference
+        self.codec = codec
+        self.sha256 = model_fingerprint(reference)
+        self._scores: dict[tuple[PreferencePair, str], torch.Tensor] = {}
+
+    def score(self, pair: PreferencePair, label: str) -> torch.Tensor:
+        """Return the gradient-free eval-mode score, computing it only once."""
+        key = (pair, label)
+        if key not in self._scores:
+            modes = [(module, module.training) for module in self.reference.modules()]
+            try:
+                self.reference.eval()
+                with torch.no_grad():
+                    self._scores[key] = candidate_mean_logprob(
+                        self.reference, pair, label, self.codec
+                    )
+            finally:
+                for module, mode in modes:
+                    module.training = mode
+        return self._scores[key]
+
+
+def _bound_reference_scores(reference, codec, reference_scores):
+    if reference_scores is None:
+        return ReferenceScores(reference, codec)
+    if (
+        not isinstance(reference_scores, ReferenceScores)
+        or reference_scores.reference is not reference
+        or reference_scores.codec != codec
+        or reference_scores.sha256 != model_fingerprint(reference)
+    ):
+        raise PreferenceDataError(
+            "reference scores must belong to this unchanged reference and codec"
+        )
+    return reference_scores
+
+
 @dataclass(frozen=True)
 class PreferenceObjective:
     loss: torch.Tensor
@@ -160,6 +208,7 @@ def train_preference_batches(
     *,
     learning_rate: float,
     beta: float,
+    reference_scores: ReferenceScores | None = None,
 ) -> dict:
     """Optimize exactly one fixed pair schedule against an immutable reference."""
     _finite_cpu_decoder(policy)
@@ -189,25 +238,19 @@ def train_preference_batches(
         else None
     )
     policy_modes = [(module, module.training) for module in policy.modules()]
-    reference_modes = [(module, module.training) for module in reference.modules()]
     reference_before = model_fingerprint(reference)
+    scores = _bound_reference_scores(reference, codec, reference_scores)
     trace = []
     try:
         policy.train()
-        reference.eval()
         for batch in batches:
             if optimizer is not None:
                 optimizer.zero_grad(set_to_none=True)
             losses = []
             margins = []
             for pair in batch:
-                with torch.no_grad():
-                    reference_chosen = candidate_mean_logprob(
-                        reference, pair, "chosen", codec
-                    )
-                    reference_rejected = candidate_mean_logprob(
-                        reference, pair, "rejected", codec
-                    )
+                reference_chosen = scores.score(pair, "chosen")
+                reference_rejected = scores.score(pair, "rejected")
                 with nullcontext() if optimizer is not None else torch.no_grad():
                     policy_chosen = candidate_mean_logprob(
                         policy, pair, "chosen", codec
@@ -269,8 +312,6 @@ def train_preference_batches(
     finally:
         for module, mode in policy_modes:
             module.training = mode
-        for module, mode in reference_modes:
-            module.training = mode
     reference_after = model_fingerprint(reference)
     if reference_after != reference_before:
         raise PreferenceDataError("reference model changed during preference training")
@@ -291,6 +332,7 @@ def evaluate_preferences(
     codec: CharacterCodec,
     *,
     beta: float,
+    reference_scores: ReferenceScores | None = None,
 ) -> dict:
     """Evaluate every held-out pair once with response-only normalized scores."""
     _finite_cpu_decoder(policy)
@@ -302,14 +344,13 @@ def evaluate_preferences(
         or len({pair.pair_id for pair in pairs}) != len(pairs)
     ):
         raise PreferenceDataError("evaluation requires unique preference pairs")
+    scores = _bound_reference_scores(reference, codec, reference_scores)
     rows = []
     for pair in pairs:
         policy_chosen = evaluate_candidate_logprob(policy, pair, "chosen", codec)
         policy_rejected = evaluate_candidate_logprob(policy, pair, "rejected", codec)
-        reference_chosen = evaluate_candidate_logprob(reference, pair, "chosen", codec)
-        reference_rejected = evaluate_candidate_logprob(
-            reference, pair, "rejected", codec
-        )
+        reference_chosen = float(scores.score(pair, "chosen"))
+        reference_rejected = float(scores.score(pair, "rejected"))
         objective = direct_preference_objective(
             torch.tensor(policy_chosen, dtype=torch.float64),
             torch.tensor(policy_rejected, dtype=torch.float64),

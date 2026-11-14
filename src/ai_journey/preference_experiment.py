@@ -30,6 +30,7 @@ from .preference_data import (
     preference_training_batches,
 )
 from .preference_optimization import (
+    ReferenceScores,
     evaluate_candidate_logprob,
     evaluate_preferences,
     train_preference_batches,
@@ -265,6 +266,7 @@ def run_preference_fold(
         raise TypeError("fold and context must use preference experiment types")
     source_before = model_fingerprint(base)
     reference = copy.deepcopy(base).requires_grad_(False)
+    reference_scores = ReferenceScores(reference, context.codec)
     schedule = preference_training_batches(
         fold.train,
         batch_size=config.preference_batch_size,
@@ -272,6 +274,10 @@ def run_preference_fold(
         seed=seed ^ (fold.index + 1) ^ 0xD90,
     )
     probe_pair = fold.train[0]
+    base_probe = {
+        label: evaluate_candidate_logprob(base, probe_pair, label, context.codec)
+        for label in ("chosen", "rejected")
+    }
     trials = []
     for name in PREFERENCE_ARMS:
         policy, adapter = _arm_model(base, name, config, seed)
@@ -279,7 +285,7 @@ def run_preference_fold(
         initial_errors = [
             abs(
                 evaluate_candidate_logprob(policy, probe_pair, label, context.codec)
-                - evaluate_candidate_logprob(base, probe_pair, label, context.codec)
+                - base_probe[label]
             )
             for label in ("chosen", "rejected")
         ]
@@ -295,12 +301,18 @@ def run_preference_fold(
             context.codec,
             learning_rate=config.preference_learning_rate,
             beta=config.beta,
+            reference_scores=reference_scores,
         )
         frozen_after = frozen_fingerprint(policy)
         if frozen_before != frozen_after:
             raise PreferenceDataError("frozen preference state changed during training")
         heldout = evaluate_preferences(
-            policy, reference, fold.heldout, context.codec, beta=config.beta
+            policy,
+            reference,
+            fold.heldout,
+            context.codec,
+            beta=config.beta,
+            reference_scores=reference_scores,
         )
         merge = None
         if adapter is not None:

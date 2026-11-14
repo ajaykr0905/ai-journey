@@ -12,6 +12,7 @@ from ai_journey.preference_data import (
     preference_training_batches,
 )
 from ai_journey.preference_optimization import (
+    ReferenceScores,
     candidate_mean_logprob,
     direct_preference_objective,
     evaluate_candidate_logprob,
@@ -219,3 +220,87 @@ def test_preference_evaluation_restores_modes():
     )
 
     assert [module.training for module in modules] == before
+
+
+def test_reference_scores_reuse_one_eval_mode_score_per_branch():
+    model, pair, codec = decoder_and_data()
+    reference = model.requires_grad_(False)
+    reference.train()
+    scores = ReferenceScores(reference, codec)
+
+    first = scores.score(pair, "chosen")
+
+    assert scores.score(pair, "chosen") is first
+    assert not first.requires_grad
+    assert float(first) == evaluate_candidate_logprob(reference, pair, "chosen", codec)
+    assert float(scores.score(pair, "rejected")) == evaluate_candidate_logprob(
+        reference, pair, "rejected", codec
+    )
+    assert all(module.training for module in reference.modules())
+
+
+def test_shared_reference_scores_match_fresh_scoring_for_every_arm():
+    source, _, codec = decoder_and_data()
+    reference = copy.deepcopy(source).requires_grad_(False)
+    pairs = authored_preference_fixture().pairs
+    batches = preference_training_batches(pairs, batch_size=3, steps=3, seed=44)
+    shared = ReferenceScores(reference, codec)
+
+    for trainable in (True, False, True):
+        fresh_policy = copy.deepcopy(source).requires_grad_(trainable)
+        cached_policy = copy.deepcopy(source).requires_grad_(trainable)
+        fresh = train_preference_batches(
+            fresh_policy, reference, batches, codec, learning_rate=0.01, beta=0.2
+        )
+        cached = train_preference_batches(
+            cached_policy,
+            reference,
+            batches,
+            codec,
+            learning_rate=0.01,
+            beta=0.2,
+            reference_scores=shared,
+        )
+
+        assert cached == fresh
+        assert model_fingerprint(cached_policy) == model_fingerprint(fresh_policy)
+        assert evaluate_preferences(
+            cached_policy,
+            reference,
+            pairs[:4],
+            codec,
+            beta=0.2,
+            reference_scores=shared,
+        ) == evaluate_preferences(fresh_policy, reference, pairs[:4], codec, beta=0.2)
+
+
+def test_reference_scores_reject_another_changed_or_recoded_reference():
+    policy, pair, codec = decoder_and_data()
+    reference = copy.deepcopy(policy).requires_grad_(False)
+    batches = preference_training_batches((pair,), batch_size=1, steps=1, seed=44)
+    policy_before = model_fingerprint(policy)
+    other = ReferenceScores(copy.deepcopy(reference), codec)
+    recoded = ReferenceScores(
+        reference,
+        preference_codec(authored_preference_fixture(), extra_text="~"),
+    )
+    stale = ReferenceScores(reference, codec)
+    with torch.no_grad():
+        next(reference.parameters()).add_(0.5)
+
+    for scores in (other, recoded, stale):
+        with pytest.raises(PreferenceDataError, match="reference scores"):
+            train_preference_batches(
+                policy,
+                reference,
+                batches,
+                codec,
+                learning_rate=0.01,
+                beta=0.2,
+                reference_scores=scores,
+            )
+        with pytest.raises(PreferenceDataError, match="reference scores"):
+            evaluate_preferences(
+                policy, reference, (pair,), codec, beta=0.2, reference_scores=scores
+            )
+    assert model_fingerprint(policy) == policy_before
