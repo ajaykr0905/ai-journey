@@ -26,6 +26,13 @@ from .transformer_lab import (
 
 @dataclass(frozen=True)
 class VocabularyProtocol:
+    """Predeclared Day 41 design: three BPE budgets, matched seeds, fixed controls.
+
+    The 256-token byte baseline comes first so every larger budget pairs with a
+    same-seed byte run, and the hypothesis is fixed before any trial runs.
+    Out-of-bounds budgets, seeds or CPU controls raise TokenizerError.
+    """
+
     vocab_sizes: tuple[int, ...] = (256, 272, 304)
     seeds: tuple[int, ...] = (41, 42, 43)
     steps: int = 20
@@ -76,6 +83,7 @@ class VocabularyProtocol:
 
 
 def protocol_fingerprint(protocol: VocabularyProtocol) -> str:
+    """SHA-256 of the protocol fields; summaries reject reports it does not match."""
     return sha256(json.dumps(asdict(protocol), sort_keys=True).encode()).hexdigest()
 
 
