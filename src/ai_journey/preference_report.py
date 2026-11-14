@@ -248,6 +248,7 @@ PREFERENCE_REPORT_SCHEMA = "ai-journey-preference-comparison-v1"
 
 
 def preference_report_digest(report):
+    """Return the canonical digest of every report field except ``sha256``."""
     if not isinstance(report, dict):
         raise PreferenceDataError("preference report must be an object")
     return canonical_digest(
@@ -607,6 +608,10 @@ def validate_preference_report(report):
 
 
 def render_preference_report(report):
+    """Return the sorted, indented JSON text that is written to disk.
+
+    Validation runs first, so an inconsistent report is never rendered.
+    """
     validate_preference_report(report)
     return json.dumps(report, sort_keys=True, indent=2, allow_nan=False) + "\n"
 

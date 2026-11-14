@@ -54,6 +54,13 @@ from .transformer_lab import (
 
 @dataclass(frozen=True)
 class PreferenceComparisonConfig:
+    """Bounded controls for the paired-seed, grouped-fold preference comparison.
+
+    Every control has a range and the total is capped at 80M work units, so any
+    accepted protocol stays a replayable CPU run; violations raise
+    PreferenceDataError.
+    """
+
     seeds: tuple[int, ...] = (44, 45)
     fold_count: int = 3
     fold_seed: int = 4403
@@ -115,6 +122,10 @@ class PreferenceComparisonConfig:
 
     @property
     def work_units(self):
+        """Return the coarse compute proxy capped by the CPU work budget.
+
+        It counts every warmup step and the four arms trained on each fold.
+        """
         return (
             len(self.seeds)
             * (self.sft_steps + self.fold_count * 4 * self.preference_steps)
@@ -124,6 +135,7 @@ class PreferenceComparisonConfig:
         )
 
     def model_config(self, vocab_size):
+        """Return the one-layer, dropout-free decoder shared by every arm."""
         return TransformerConfig(
             vocab_size=vocab_size,
             block_size=self.block_size,
@@ -136,12 +148,18 @@ class PreferenceComparisonConfig:
 
 
 def preference_config_dict(config):
+    """Return the JSON form, with seeds as a list, that reports store."""
     if not isinstance(config, PreferenceComparisonConfig):
         raise TypeError("config must be PreferenceComparisonConfig")
     return {**asdict(config), "seeds": list(config.seeds)}
 
 
 def preference_config_from_dict(value):
+    """Rebuild a config from exactly the declared controls and a seeds list.
+
+    Missing or extra fields raise PreferenceDataError, so a protocol or report
+    cannot carry controls that replay would ignore.
+    """
     if (
         not isinstance(value, dict)
         or set(value) != {field.name for field in fields(PreferenceComparisonConfig)}
@@ -155,12 +173,15 @@ def preference_config_from_dict(value):
 
 @dataclass(frozen=True)
 class PreferenceContext:
+    """Fixed pairs, folds, warmup chats and the one codec every arm shares."""
+
     dataset: PreferenceDataset
     folds: tuple[PreferenceFold, ...]
     sft_split: ConversationSplit
     codec: CharacterCodec
 
     def evidence(self) -> dict:
+        """Return the data, fold and vocabulary evidence validation recomputes."""
         return {
             "preference_fixture": self.dataset.evidence(),
             "folds": fold_evidence(self.folds),

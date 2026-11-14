@@ -136,6 +136,12 @@ def _bound_reference_scores(reference, codec, reference_scores):
 
 @dataclass(frozen=True)
 class PreferenceObjective:
+    """One pair's DPO-style loss with the margins that produced it.
+
+    ``reward_margin`` is beta times the policy margin minus the detached
+    reference margin, and training traces average all three margins.
+    """
+
     loss: torch.Tensor
     policy_margin: torch.Tensor
     reference_margin: torch.Tensor
