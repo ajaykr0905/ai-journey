@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import pytest
 from ai_journey.ddp_cli import main
-from ai_journey.ddp_evidence import read_evidence
+from ai_journey.ddp_evidence import digest, read_evidence
 
 
 def test_cli_trains_verifies_and_prints_measured_rank_evidence(tmp_path, capsys):
@@ -42,6 +42,22 @@ def test_cli_trains_verifies_and_prints_measured_rank_evidence(tmp_path, capsys)
 def test_cli_invalid_report_exits_with_an_actionable_error(tmp_path):
     with pytest.raises(SystemExit) as result:
         main(["verify", "--report", str(tmp_path / "missing.json")])
+    assert result.value.code == 2
+
+
+def test_cli_resealed_report_with_a_malformed_rank_exits_with_an_error(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    report = json.loads(
+        (root / "artifacts/ddp-lab-2026-10-22/comparison.json").read_text()
+    )["arms"][1]["evidence"]
+    report["ranks"][0] = {"pid": 1, "model_sha256": report["model_sha256"]}
+    report["evidence_sha256"] = digest(
+        {key: value for key, value in report.items() if key != "evidence_sha256"}
+    )
+    path = tmp_path / "evidence.json"
+    path.write_text(json.dumps(report))
+    with pytest.raises(SystemExit) as result:
+        main(["verify", "--report", str(path)])
     assert result.value.code == 2
 
 

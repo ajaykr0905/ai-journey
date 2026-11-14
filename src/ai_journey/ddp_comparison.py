@@ -96,6 +96,17 @@ def verify_comparison(report):
     parameter error must stay within the fixed 1e-10 tolerance. Returns the
     report; raises ValueError.
     """
+    if not isinstance(report, dict):
+        raise ValueError("comparison schema or digest does not match")
+    try:
+        return _verify_comparison(report)
+    except (KeyError, TypeError, OverflowError) as error:
+        # Like verify_evidence: a resealed comparison with a missing field or a
+        # wrongly typed value is invalid, not a crash of the verifier.
+        raise ValueError("comparison fields are malformed") from error
+
+
+def _verify_comparison(report):
     if (
         type(report.get("schema_version")) is not int
         or report["schema_version"] not in (1, 2)

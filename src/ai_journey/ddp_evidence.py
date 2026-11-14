@@ -109,6 +109,15 @@ def verify_evidence(payload: dict) -> dict:
     float64 Gloo with at most four ranks. Returns the payload; raises
     ValueError.
     """
+    try:
+        return _verify_evidence(payload)
+    except (KeyError, TypeError, OverflowError) as error:
+        # A resealed report can hold any JSON shape. A missing field or a value
+        # of the wrong type is invalid evidence, not a crash of the verifier.
+        raise ValueError("distributed evidence fields are malformed") from error
+
+
+def _verify_evidence(payload):
     fields = {
         "schema_version",
         "world_size",
