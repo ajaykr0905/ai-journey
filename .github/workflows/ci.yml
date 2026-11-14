@@ -1136,3 +1136,142 @@ jobs:
             ${{ runner.temp }}/recovery-run/
             ${{ runner.temp }}/recovery-dist/
           if-no-files-found: error
+  serving-recovery-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install serving recovery verification tools
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2" "matplotlib>=3.7,<4"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check serving recovery contracts
+        run: |
+          ruff check src/ai_journey/serving_recovery_*.py tests/test_serving_recovery_*.py
+          ruff format --check src/ai_journey/serving_recovery_*.py tests/test_serving_recovery_*.py
+          python -m compileall -q src/ai_journey/serving_recovery_*.py tests/test_serving_recovery_*.py
+          python -m pytest -q tests/test_serving_recovery_*.py
+      - name: Build and install isolated serving recovery wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/serving-recovery-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/serving-recovery-installed" "$RUNNER_TEMP"/serving-recovery-dist/*.whl
+      - name: Kill, restart and verify the installed loopback server
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/serving-recovery-installed
+        run: |
+          export PATH="$RUNNER_TEMP/serving-recovery-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/serving-recovery-installed/")'
+          ai-journey-serving-recovery run --source "$GITHUB_WORKSPACE/data/day-19-demo-names.txt" --config "$GITHUB_WORKSPACE/config/day-70-serving-recovery.json" --run-dir "$RUNNER_TEMP/serving-recovery-run"
+          ai-journey-serving-recovery verify --run-dir "$RUNNER_TEMP/serving-recovery-run"
+      - name: Retain serving recovery evidence and package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: serving-recovery-evidence
+          path: |
+            ${{ runner.temp }}/serving-recovery-run/
+            ${{ runner.temp }}/serving-recovery-dist/
+          if-no-files-found: error
+  simt-model-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install SIMT model verification tools
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check analytical SIMT execution model contracts
+        run: |
+          ruff check src/ai_journey/simt_*.py tests/test_simt_*.py
+          ruff format --check src/ai_journey/simt_*.py tests/test_simt_*.py
+          python -m compileall -q src/ai_journey/simt_*.py tests/test_simt_*.py
+          python -m pytest -q tests/test_simt_*.py
+      - name: Build and install isolated SIMT model wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/simt-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/simt-installed" "$RUNNER_TEMP"/simt-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/simt-evidence"
+      - name: Build and independently verify the installed SIMT report
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/simt-installed
+        run: |
+          export PATH="$RUNNER_TEMP/simt-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/simt-installed/")'
+          ai-journey-simt build --config "$GITHUB_WORKSPACE/config/day-71-simt-execution-plan.json" --output "$RUNNER_TEMP/simt-evidence/report.json"
+          ai-journey-simt verify --report "$RUNNER_TEMP/simt-evidence/report.json"
+      - name: Retain analytical SIMT evidence and package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simt-model-evidence
+          path: |
+            ${{ runner.temp }}/simt-evidence/
+            ${{ runner.temp }}/simt-dist/
+          if-no-files-found: error
+  memory-access-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install memory-access verification tools
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check memory-access model and CPU baseline contracts
+        run: |
+          ruff check src/ai_journey/memory_access_*.py tests/test_memory_access_*.py
+          ruff format --check src/ai_journey/memory_access_*.py tests/test_memory_access_*.py
+          python -m compileall -q src/ai_journey/memory_access_*.py tests/test_memory_access_*.py
+          python -m pytest -q tests/test_memory_access_*.py
+      - name: Build and install isolated memory-access wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/memory-access-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/memory-access-installed" "$RUNNER_TEMP"/memory-access-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/memory-access-evidence"
+      - name: Analyze, benchmark and verify with the installed command
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/memory-access-installed
+        run: |
+          export PATH="$RUNNER_TEMP/memory-access-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/memory-access-installed/")'
+          ai-journey-memory-access analyze --config "$GITHUB_WORKSPACE/config/day-74-memory-access-plan.json" --output "$RUNNER_TEMP/memory-access-evidence/analysis.json"
+          ai-journey-memory-access verify --report "$RUNNER_TEMP/memory-access-evidence/analysis.json" --config "$GITHUB_WORKSPACE/config/day-74-memory-access-plan.json"
+          ai-journey-memory-access benchmark --config "$GITHUB_WORKSPACE/config/day-74-memory-access-ci-smoke.json" --output "$RUNNER_TEMP/memory-access-evidence/cpu-measurement.json"
+          ai-journey-memory-access verify --report "$RUNNER_TEMP/memory-access-evidence/cpu-measurement.json" --config "$GITHUB_WORKSPACE/config/day-74-memory-access-ci-smoke.json"
+      - name: Retain memory-access evidence and package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-access-evidence
+          path: |
+            ${{ runner.temp }}/memory-access-evidence/
+            ${{ runner.temp }}/memory-access-dist/
+          if-no-files-found: error

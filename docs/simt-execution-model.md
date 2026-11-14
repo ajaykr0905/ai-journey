@@ -17,8 +17,8 @@ ai-journey-simt verify \
   --report /tmp/day-71-simt-report.json
 ```
 
-Until the console script is installed, `PYTHONPATH=src python -m
-ai_journey.simt_cli` accepts the same arguments. Both commands print one line
+From a source checkout without installing the package, `PYTHONPATH=src python
+-m ai_journey.simt_cli` accepts the same arguments. Both commands print one line
 with the same SHA-256 digest, `devices=3 sweep_cells=40 memory_rows=18
 arithmetic_rows=12`, and `measured=false gpu_executed=false`. They return 0 on
 success, 1 for an invalid plan, report, or path, and 2 for usage errors.

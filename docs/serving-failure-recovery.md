@@ -11,20 +11,22 @@ built from the checked-in public fixture `data/day-19-demo-names.txt`.
 Use a new run directory. The runner refuses to reuse one or overwrite evidence.
 
 ```bash
-PYTHONPATH=src python -m ai_journey.serving_recovery_cli run \
+ai-journey-serving-recovery run \
   --source data/day-19-demo-names.txt \
   --config config/day-70-serving-recovery.json \
   --run-dir /tmp/day-70-serving-recovery
 
-PYTHONPATH=src python -m ai_journey.serving_recovery_cli verify \
+ai-journey-serving-recovery verify \
   --run-dir /tmp/day-70-serving-recovery
 ```
 
-The module form works from a source checkout, as shown, or from an installed
-package without `PYTHONPATH`. Both commands print one JSON receipt with the run
-identity, report seal, request count, duplicate executions and millisecond
-summary. `run` writes the report and then verifies it with the same code
-`verify` uses.
+From a source checkout, the module form takes the same arguments:
+`PYTHONPATH=src python -m ai_journey.serving_recovery_cli run` and
+`PYTHONPATH=src python -m ai_journey.serving_recovery_cli verify`. It also works
+from an installed package without `PYTHONPATH`. Both commands print one JSON
+receipt with the run identity, report seal, request count, duplicate executions
+and millisecond summary. `run` writes the report and then verifies it with the
+same code `verify` uses.
 
 | Exit code | Meaning |
 | --- | --- |

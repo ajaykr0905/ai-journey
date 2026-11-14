@@ -149,6 +149,12 @@ digests, and the runtime: Python, NumPy and torch versions, platform system and
 machine, `os.cpu_count()`, torch threads, and torch float32 matmul precision.
 No host name, user name, path, or serial number is recorded.
 
+CI runs the installed `benchmark` on
+`config/day-74-memory-access-ci-smoke.json` to keep the job short. That plan
+equals the pinned plan except for its name and a benchmark of one 32^3 case per
+backend with 1 warmup and 3 repeats, so its timings are a smoke check, not a
+baseline.
+
 Every timing is a wall-clock CPU measurement on the host that produced the
 report. Timings vary with load, threads, and BLAS builds, and they say nothing
 about GPU performance. Verification cannot recompute them; it checks schemas,

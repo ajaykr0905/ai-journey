@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "name": "day-74-memory-access-ci-smoke",
+  "geometry": {
+    "warp_size": 32,
+    "sector_bytes": 32,
+    "line_bytes": 128,
+    "shared_memory_banks": 32,
+    "bank_width_bytes": 4
+  },
+  "patterns": [
+    {"name": "contiguous-float32", "kind": "contiguous", "access_bytes": 4},
+    {"name": "offset-4-bytes-float32", "kind": "contiguous", "access_bytes": 4, "base_bytes": 4},
+    {"name": "stride-2-float32", "kind": "strided", "access_bytes": 4, "stride_elements": 2},
+    {"name": "stride-8-float32", "kind": "strided", "access_bytes": 4, "stride_elements": 8},
+    {"name": "stride-32-float32", "kind": "strided", "access_bytes": 4, "stride_elements": 32},
+    {"name": "stride-33-float32", "kind": "strided", "access_bytes": 4, "stride_elements": 33},
+    {"name": "broadcast-float32", "kind": "broadcast", "access_bytes": 4, "address_bytes": 64},
+    {"name": "permutation-float32", "kind": "permutation", "access_bytes": 4, "seed": 74},
+    {"name": "half-warp-float32", "kind": "contiguous", "access_bytes": 4, "active_mask": 65535},
+    {
+      "name": "row-walk-unpadded-float32",
+      "kind": "row",
+      "access_bytes": 4,
+      "rows": 64,
+      "columns": 33,
+      "leading_dimension": 33,
+      "row": 1
+    },
+    {
+      "name": "row-walk-padded-float32",
+      "kind": "row",
+      "access_bytes": 4,
+      "rows": 64,
+      "columns": 33,
+      "leading_dimension": 64,
+      "row": 1
+    },
+    {
+      "name": "column-walk-float32",
+      "kind": "column",
+      "access_bytes": 4,
+      "rows": 1024,
+      "columns": 1024,
+      "leading_dimension": 1024,
+      "column": 5
+    },
+    {"name": "contiguous-uint8", "kind": "contiguous", "access_bytes": 1},
+    {"name": "contiguous-float16", "kind": "contiguous", "access_bytes": 2},
+    {"name": "contiguous-float64", "kind": "contiguous", "access_bytes": 8},
+    {"name": "contiguous-float4-vector", "kind": "contiguous", "access_bytes": 16}
+  ],
+  "transposes": [
+    {"name": "float32-tile-unpadded", "leading_dimension": 32, "element_bytes": 4, "matrix_size": 4096},
+    {"name": "float32-tile-padded", "leading_dimension": 33, "element_bytes": 4, "matrix_size": 4096},
+    {"name": "float16-tile-one-element-pad", "leading_dimension": 33, "element_bytes": 2, "matrix_size": 4096},
+    {"name": "float16-tile-one-word-pad", "leading_dimension": 34, "element_bytes": 2, "matrix_size": 4096}
+  ],
+  "matmul": {
+    "dtype": "float32",
+    "shapes": [
+      {"m": 1024, "n": 1024, "k": 1024},
+      {"m": 1000, "n": 1000, "k": 1000},
+      {"m": 4096, "n": 4096, "k": 4096}
+    ],
+    "tiles": [8, 16, 32]
+  },
+  "roofline": {
+    "name": "nvidia-a100-80gb-sxm-fp32",
+    "declared": true,
+    "peak_flops_per_second": 19500000000000,
+    "memory_bandwidth_bytes_per_second": 2039000000000,
+    "source_url": "https://www.nvidia.com/en-us/data-center/a100/",
+    "source_note": "Declared from the NVIDIA A100 specifications table, A100 80GB SXM column: FP32 19.5 TFLOPS and GPU Memory Bandwidth 2,039 GB/s, read as decimal units (accessed 2026-11-13). Datasheet peaks for non-tensor-core FP32 math; not measured or detected on this host."
+  },
+  "benchmark": {
+    "backends": ["numpy", "torch"],
+    "dtype": "float32",
+    "shapes": [
+      {"m": 32, "n": 32, "k": 32}
+    ],
+    "warmup": 1,
+    "repeats": 3,
+    "seed": 74
+  }
+}

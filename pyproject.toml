@@ -70,6 +70,9 @@ ai-journey-sft-dataset = "ai_journey.sft_dataset_cli:main"
 ai-journey-sft-finetune = "ai_journey.sft_finetune_cli:main"
 ai-journey-verifiable-rewards = "ai_journey.verifiable_reward_cli:main"
 ai-journey-recovery = "ai_journey.recovery_cli:main"
+ai-journey-serving-recovery = "ai_journey.serving_recovery_cli:main"
+ai-journey-simt = "ai_journey.simt_cli:main"
+ai-journey-memory-access = "ai_journey.memory_access_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

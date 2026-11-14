@@ -460,6 +460,109 @@ remote storage, or claim measured throughput. Change bandwidth, latency,
 topology, dtype, and storage values only when recording a new explicit scenario;
 do not reinterpret the pinned assumptions as observations of local hardware.
 
+## Inject serving failures and measure recovery
+
+Kill a real loopback inference server under bounded client load, restart it,
+and verify what the clients observed. Use a run directory that does not exist
+yet; the runner refuses to reuse one or overwrite evidence:
+
+```bash
+ai-journey-serving-recovery run \
+  --source data/day-19-demo-names.txt \
+  --config config/day-70-serving-recovery.json \
+  --run-dir /tmp/day-70-serving-recovery
+ai-journey-serving-recovery verify \
+  --run-dir /tmp/day-70-serving-recovery
+```
+
+Both commands print the same JSON receipt. `verify` recomputes every identity,
+digest and derived metric from the raw attempts, per-lifetime journals and
+hash-chained trace. The wall-clock run duration has no independent raw record,
+so `verify` only checks that it covers the traced lifecycle and stays within
+`max_run_ms`. Exit code 0 means verified and recovered, 1 rejected evidence,
+2 invalid input or an incomplete run, and 3 verified but not recovered within
+the declared bounds.
+
+Detection, restart, client-observed unavailability, time to SLO recovery and
+nearest-rank p50/p95/p99 latency are real measurements from one monotonic clock
+on the host that runs `run`, so they change with that host and its load. The
+SLO, timeout, retry and backoff values are declared lab controls, not external
+targets. Evidence boundary: one CPU host, 127.0.0.1 loopback, and a tiny
+deterministic character-bigram model. This is not GPU, CUDA, distributed,
+multi-host or production serving evidence and makes no model-quality, capacity
+or cost claim. See the
+[serving failure recovery guide](docs/serving-failure-recovery.md) for the run
+directory, metrics, reconciliation and limitations.
+
+## Model SIMT execution limits analytically
+
+Build the pinned SIMT execution-model report from declared NVIDIA inputs, then
+recompute every field independently:
+
+```bash
+ai-journey-simt build \
+  --config config/day-71-simt-execution-plan.json \
+  --output /tmp/day-71-simt-report.json
+ai-journey-simt verify \
+  --report /tmp/day-71-simt-report.json
+```
+
+Both commands print the same SHA-256 digest with the counts `devices=3`,
+`sweep_cells=40`, `memory_rows=18` and `arithmetic_rows=12` and the flags
+`measured=false gpu_executed=false`. They return 0 on success and 1 for an
+invalid plan, report or path; `build` refuses to write over its plan. The report
+covers CUDA launch limits, 1D and 2D index coverage with masked lanes,
+theoretical occupancy under the `cuda_occupancy.h` allocation rules,
+Little's-law latency hiding, wave quantization, and FP32/DRAM roofline balance
+for the V100 SXM2, T4 and A100 SXM4 80GB.
+
+Everything in the report is analytical. Architecture limits, device specs,
+latencies, register budgets and kernel byte and FLOP counts are declared inputs
+cited from the CUDA C++ Programming Guide v12.6, CUDA 12.6 `cuda_occupancy.h`,
+and NVIDIA datasheets and whitepapers; each device must reproduce its datasheet
+FP32 peak. No GPU, CUDA kernel, or latency was executed or measured, so no
+number in it is achieved occupancy, bandwidth or run time. See the
+[SIMT execution model guide](docs/simt-execution-model.md).
+
+## Model GPU memory access and time CPU matmul baselines
+
+Seal the analytical report, measure the CPU baseline into a separate report,
+and verify each against the pinned plan:
+
+```bash
+ai-journey-memory-access analyze \
+  --config config/day-74-memory-access-plan.json \
+  --output /tmp/day-74-memory-access-analysis.json
+ai-journey-memory-access verify \
+  --report /tmp/day-74-memory-access-analysis.json \
+  --config config/day-74-memory-access-plan.json
+ai-journey-memory-access benchmark \
+  --config config/day-74-memory-access-plan.json \
+  --output /tmp/day-74-memory-access-measurement.json
+ai-journey-memory-access verify \
+  --report /tmp/day-74-memory-access-measurement.json \
+  --config config/day-74-memory-access-plan.json
+```
+
+`analyze` is analytical and prints `measured=false gpu_executed=false`: per-warp
+32-byte sectors, 128-byte lines and coalescing efficiency, shared-memory bank
+conflicts for 1-, 2- and 4-byte lanes, a 32 x 32 transpose tile with and
+without padding, and naive versus shared-tiled matmul traffic on a roofline
+whose A100 80GB SXM FP32 ceilings are declared from NVIDIA's specifications
+table. `benchmark` is the only measurement: wall-clock float32 NumPy and torch
+matmuls on the CPU of the host that runs it, each checked against a float64
+rounding bound and sealed in a separate report with scope
+`cpu_wall_clock_this_host`. `verify` recomputes every analytical number
+independently and checks the measurement accounting, but cannot re-observe a
+timing. Exit code 0 means success, 1 a report that failed verification, and 2
+invalid input or a refused output.
+
+No GPU, CUDA kernel, cache, or device timing was executed or measured for the
+analytical report, and the CPU timings do not measure or predict GPU, CUDA,
+tensor-core, distributed, or production performance. CI benchmarks
+`config/day-74-memory-access-ci-smoke.json`, the pinned plan with a single
+32^3 shape. See the [memory-access model guide](docs/memory-access-model.md).
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with
@@ -479,9 +582,10 @@ Recorded external cloud and GPU spend for the checked-in CPU fixtures is **₹0*
 Host electricity, engineering time, and employer-provided compute were not
 metered, so total INR cost is unavailable. What went wrong: this environment
 still lacks the required real NVIDIA multi-GPU run, GPU utilization and memory
-measurements, verified vLLM or SGLang deployment, and a distributed or serving
-failure trace. The local recovery measurement is useful process evidence, not a
-GPU, distributed-scale, production-readiness, or model-quality claim.
+measurements, verified vLLM or SGLang deployment, and a distributed or GPU
+serving failure trace. The local recovery measurement is useful process
+evidence, not a GPU, distributed-scale, production-readiness, or model-quality
+claim.
 
 ## Daily map
 
