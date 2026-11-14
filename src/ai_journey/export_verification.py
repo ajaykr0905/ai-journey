@@ -14,10 +14,11 @@ def verify_export(
 ):
     """Prove exported partitions match their manifest, and optionally their source.
 
-    Checks the pinned source and license, split seed 40, unique disjoint ids,
-    exact sizes and digests, and one line per id. With source_path every line
-    must equal the snapshot text for its id and every sentence must be counted.
-    Mismatches raise TokenizerError.
+    Checks the pinned source and license, that the manifest declares split seed
+    40, unique disjoint ids, exact sizes and digests, and one line per id. With
+    source_path every line must equal the snapshot text for its id and every
+    sentence must be counted. Which ids landed in which partition is trusted as
+    declared, not re-derived from the seed. Mismatches raise TokenizerError.
     """
 
     def unique(pairs):
