@@ -85,7 +85,9 @@ class SFTDatasetBuild:
     """Every stage of one build, checked to reconcile from stage to stage.
 
     Quality, dedup, selection and metric counts must agree and the metrics must
-    validate, so a build cannot silently lose or invent records.
+    validate, so a stage cannot silently change how many records reach the
+    split. Only counts are compared, not record identities or artifact bytes;
+    replay rebuilds those from the source.
     """
 
     quality: SFTQualityResult

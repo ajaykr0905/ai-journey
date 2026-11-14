@@ -11,9 +11,10 @@ from .sft_dataset_record import DollyRecord, SFTDatasetError
 class SFTDedupResult:
     """Unique records sorted by identity, with counts that must reconcile.
 
-    input_records is kept plus duplicate records, and each duplicate_counts
-    entry is (record_id, occurrences); construction raises SFTDatasetError
-    otherwise.
+    duplicate_counts holds (record_id, occurrences) pairs. Construction raises
+    SFTDatasetError unless input_records is kept plus duplicate records and the
+    repeats, occurrences minus one per pair, sum to duplicate_records; pair ids
+    are not matched against the records.
     """
 
     records: tuple[DollyRecord, ...]

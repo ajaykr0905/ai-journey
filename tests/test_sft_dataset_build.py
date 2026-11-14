@@ -49,6 +49,13 @@ def test_build_reports_quality_and_duplicate_removals_before_selection():
     assert result.selection.candidate_records == len(rows)
 
 
+def test_build_rejects_stages_whose_record_counts_disagree():
+    result = build_sft_dataset(records(), policy())
+    other = build_sft_dataset(records(61), policy())
+    with pytest.raises(SFTDatasetError, match="selection counts do not reconcile"):
+        replace(result, selection=other.selection)
+
+
 def test_policy_round_trips_all_explicit_controls():
     value = SFTDatasetPolicy(
         example_count=30,
