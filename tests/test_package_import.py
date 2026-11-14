@@ -128,6 +128,15 @@ for name in [name for name in dir(ai_journey) if not name.startswith("_")]:
         resolved[name] = f"{module}:{value.__qualname__}"
 print(json.dumps({"all": ai_journey.__all__, "resolved": resolved}))
 """
+# Touches every public name in reverse order first, so the renamed exports
+# (TransformerTrainingConfig, TransformerModelConfig) load before the public
+# names their submodule attributes share (TrainingConfig, TransformerConfig).
+LOAD_IN_REVERSE = """
+import ai_journey
+for name in sorted(dir(ai_journey), reverse=True):
+    if not name.startswith("_"):
+        getattr(ai_journey, name)
+"""
 
 
 def run_fresh(code):
@@ -170,6 +179,12 @@ class PackageImportTests(unittest.TestCase):
         expected = EXPECTED_EXPORTS | {name: name for name in EXPECTED_SUBMODULES}
 
         self.assertEqual(sorted(observed["all"]), sorted(EXPECTED_EXPORTS))
+        self.assertEqual(observed["resolved"], expected)
+
+    def test_public_names_resolve_the_same_whichever_loads_first(self) -> None:
+        observed = run_fresh(LOAD_IN_REVERSE + RESOLVED_NAMES)
+        expected = EXPECTED_EXPORTS | {name: name for name in EXPECTED_SUBMODULES}
+
         self.assertEqual(observed["resolved"], expected)
 
     def test_unknown_package_names_still_raise_attribute_error(self) -> None:
