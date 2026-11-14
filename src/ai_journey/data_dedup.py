@@ -9,6 +9,8 @@ from .data_cleaning import CleanedDocument
 
 @dataclass(frozen=True)
 class DuplicateRecord:
+    """One removed exact duplicate and the kept document with the same text."""
+
     duplicate_id: str
     canonical_id: str
     content_sha256: str
@@ -16,6 +18,8 @@ class DuplicateRecord:
 
 @dataclass(frozen=True)
 class DeduplicationResult:
+    """Kept documents in id order and a record for every removed duplicate."""
+
     documents: tuple[CleanedDocument, ...]
     duplicates: tuple[DuplicateRecord, ...]
 
