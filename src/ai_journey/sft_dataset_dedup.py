@@ -9,6 +9,13 @@ from .sft_dataset_record import DollyRecord, SFTDatasetError
 
 @dataclass(frozen=True)
 class SFTDedupResult:
+    """Unique records sorted by identity, with counts that must reconcile.
+
+    input_records is kept plus duplicate records, and each duplicate_counts
+    entry is (record_id, occurrences); construction raises SFTDatasetError
+    otherwise.
+    """
+
     records: tuple[DollyRecord, ...]
     input_records: int
     duplicate_records: int
@@ -35,6 +42,11 @@ class SFTDedupResult:
 
 
 def deduplicate_records(records: tuple[DollyRecord, ...]) -> SFTDedupResult:
+    """Drop exact duplicates by content identity, independently of input order.
+
+    Records whose normalized fields hash alike are duplicates; one per digest is
+    kept, sorted by record_id.
+    """
     if (
         not isinstance(records, tuple)
         or not records

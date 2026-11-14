@@ -13,6 +13,12 @@ from .sft_dataset_split import SFTDatasetSplit, split_records
 
 @dataclass(frozen=True)
 class SFTDatasetPolicy:
+    """Day 67 build policy; defaults equal config/day-67-sft-dataset.json.
+
+    Sizes, 32-bit seeds and the quality policy are validated on construction
+    and raise SFTDatasetError.
+    """
+
     example_count: int = 500
     validation_count: int = 50
     selection_seed: int = 67
@@ -35,6 +41,7 @@ class SFTDatasetPolicy:
             raise SFTDatasetError("quality must be an SFTQualityPolicy")
 
     def as_mapping(self) -> dict:
+        """JSON form sealed into the manifest, which replay turns back into a policy."""
         return {
             "example_count": self.example_count,
             "quality": asdict(self.quality),
@@ -45,6 +52,7 @@ class SFTDatasetPolicy:
 
     @classmethod
     def from_mapping(cls, value: object) -> "SFTDatasetPolicy":
+        """Rebuild a policy from config or manifest JSON with the exact field sets."""
         fields = {
             "example_count",
             "validation_count",
@@ -74,6 +82,12 @@ class SFTDatasetPolicy:
 
 @dataclass(frozen=True)
 class SFTDatasetBuild:
+    """Every stage of one build, checked to reconcile from stage to stage.
+
+    Quality, dedup, selection and metric counts must agree and the metrics must
+    validate, so a build cannot silently lose or invent records.
+    """
+
     quality: SFTQualityResult
     dedup: SFTDedupResult
     selection: SFTSelectionResult
@@ -94,6 +108,11 @@ class SFTDatasetBuild:
 def build_sft_dataset(
     records: tuple[DollyRecord, ...], policy: SFTDatasetPolicy
 ) -> SFTDatasetBuild:
+    """Run quality, dedup, selection, split, metrics and export in fixed order.
+
+    Every stage is deterministic, so replay from the same snapshot and policy
+    reproduces identical artifact bytes.
+    """
     if not isinstance(policy, SFTDatasetPolicy):
         raise TypeError("policy must be SFTDatasetPolicy")
     quality = filter_quality(records, policy.quality)

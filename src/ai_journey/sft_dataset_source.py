@@ -24,6 +24,12 @@ def _unique_object(pairs):
 
 @dataclass(frozen=True)
 class SFTSourceSpec:
+    """Pinned Dolly snapshot identity: revision, file, size, SHA-256 and license.
+
+    Only the CC-BY-SA-3.0 Databricks Dolly 15k file at a full commit revision is
+    accepted, so evidence cannot quietly switch sources.
+    """
+
     dataset_id: str
     revision: str
     filename: str
@@ -63,6 +69,7 @@ class SFTSourceSpec:
 
     @classmethod
     def from_mapping(cls, value: object) -> "SFTSourceSpec":
+        """Build the spec from config or manifest JSON with exactly its eight fields."""
         fields = {
             "dataset_id",
             "revision",
@@ -79,6 +86,10 @@ class SFTSourceSpec:
 
 
 def load_source_spec(path: Path) -> SFTSourceSpec:
+    """Load a spec from a regular, non-symlink JSON file of at most 16 KiB.
+
+    Duplicate fields and invalid UTF-8 JSON raise SFTDatasetError.
+    """
     if not isinstance(path, Path) or not path.is_file() or path.is_symlink():
         raise SFTDatasetError("source policy must be a regular file")
     try:

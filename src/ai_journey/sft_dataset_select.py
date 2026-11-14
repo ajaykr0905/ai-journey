@@ -11,6 +11,12 @@ from .sft_dataset_record import DollyRecord, SFTDatasetError
 
 @dataclass(frozen=True)
 class SFTSelectionResult:
+    """Selected records sorted by identity and the category quotas behind them.
+
+    Counts that do not reconcile, quotas that differ from the records'
+    categories, or unsorted or repeated identities raise SFTDatasetError.
+    """
+
     records: tuple[DollyRecord, ...]
     candidate_records: int
     quotas: tuple[tuple[str, int], ...]
@@ -33,6 +39,11 @@ def _selection_rank(digest: str, seed: int) -> str:
 def select_records(
     records: tuple[DollyRecord, ...], *, target: int, seed: int
 ) -> SFTSelectionResult:
+    """Pick exactly target records using largest-remainder category quotas.
+
+    The lowest seeded SHA-256 ranks win within each category, so the choice is
+    independent of input order; candidates must already be deduplicated.
+    """
     if (
         not isinstance(records, tuple)
         or not records

@@ -8,6 +8,10 @@ from .sft_dataset_record import DollyRecord, SFTDatasetError
 
 
 def canonical_json_bytes(value: object) -> bytes:
+    """The one JSON encoding behind SFT identities, artifacts and the manifest seal.
+
+    Values JSON cannot represent exactly, such as NaN, raise SFTDatasetError.
+    """
     try:
         return (
             json.dumps(
@@ -24,6 +28,10 @@ def canonical_json_bytes(value: object) -> bytes:
 
 
 def record_sha256(record: DollyRecord) -> str:
+    """Content identity: SHA-256 of a normalized record's canonical JSON fields.
+
+    Equal content gives equal digests whatever its source position.
+    """
     if not isinstance(record, DollyRecord):
         raise TypeError("record must be DollyRecord")
     return sha256(canonical_json_bytes(asdict(record))).hexdigest()

@@ -64,6 +64,11 @@ class DollyRecord:
 
     @classmethod
     def from_mapping(cls, value: object) -> "DollyRecord":
+        """Build a record from one source row with exactly the four Dolly fields.
+
+        Extra or missing keys raise SFTDatasetError instead of being dropped or
+        defaulted.
+        """
         if not isinstance(value, dict) or set(value) != {
             "instruction",
             "context",
