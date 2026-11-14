@@ -11,6 +11,13 @@ from .moe_config import MoEConfig, moe_config_from_mapping
 
 @dataclass(frozen=True)
 class MoEDDPConfig:
+    """Exact run contract for the float64 CPU/Gloo replicated expert lab.
+
+    It bounds the world to at most two ranks, the batch shape, sequence length
+    and step count, requires rank-microbatch capacity and finite controls, and
+    admits the whole job's resource budget at construction. Raises ValueError.
+    """
+
     model: MoEConfig
     world_size: int = 2
     micro_batch_size: int = 1
@@ -71,6 +78,7 @@ class MoEDDPConfig:
         require_moe_ddp_budget(self)
 
     def to_mapping(self):
+        """Versioned JSON form that checkpoints and the plan digest bind to."""
         return {
             "schema": "ai-journey-moe-ddp-v1",
             **asdict(self),
@@ -78,6 +86,7 @@ class MoEDDPConfig:
         }
 
     def fingerprint(self):
+        """SHA-256 of the canonical mapping; all ranks must agree on it."""
         return sha256(
             json.dumps(
                 self.to_mapping(),
@@ -89,6 +98,12 @@ class MoEDDPConfig:
 
 
 def moe_ddp_config_from_mapping(value):
+    """Rebuild a run contract from JSON with exactly the v1 field set.
+
+    Optimizer numerics must lie in [0, 1] before conversion, so an oversized
+    or non-numeric value never reaches the optimizer contract. Raises
+    ValueError for a field set or bound mismatch.
+    """
     expected = {item.name for item in fields(MoEDDPConfig)} | {"schema"}
     if (
         type(value) is not dict
