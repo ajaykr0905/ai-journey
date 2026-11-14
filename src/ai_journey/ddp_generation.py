@@ -13,6 +13,13 @@ from .training_models import base_model_config
 
 @dataclass(frozen=True)
 class SamplingConfig:
+    """Per-request sampling controls; a temperature of 0 means greedy decoding.
+
+    The seed initializes a request-local generator, so identical requests
+    sample identically without touching global RNG state. Raises ValueError
+    for out-of-range or non-finite controls.
+    """
+
     max_new_tokens: int = 16
     temperature: float = 1.0
     top_k: int | None = None
@@ -113,15 +120,25 @@ class TokenSampler:
         self.generator = torch.Generator(device="cpu").manual_seed(config.seed)
 
     def sample(self, logits: torch.Tensor) -> torch.Tensor:
+        """Draw one token per row after top-k and nucleus filtering.
+
+        Temperature 0 takes the argmax; otherwise the draw uses only this
+        sampler's own generator.
+        """
         values = filter_logits(logits, self.config).cpu()
         if self.config.temperature == 0:
             return values.argmax(-1, keepdim=True)
         return torch.multinomial(values.softmax(-1), 1, generator=self.generator)
 
     def state(self) -> torch.Tensor:
+        """Copy of the request generator's state, so sampling can resume exactly."""
         return self.generator.get_state().clone()
 
     def restore(self, state: torch.Tensor) -> None:
+        """Resume sampling from a saved state.
+
+        An invalid state raises ValueError and leaves the generator unchanged.
+        """
         before = self.state()
         try:
             self.generator.set_state(state.clone())
