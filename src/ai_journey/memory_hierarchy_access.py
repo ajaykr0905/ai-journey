@@ -165,8 +165,11 @@ class AccessBuffers:
         if name == "sequential":
             return numpy.arange(count, dtype=numpy.int64)
         if name == "strided":
-            passes = numpy.arange(count, dtype=numpy.int64).reshape(-1, stride)
-            return numpy.ascontiguousarray(passes.T).reshape(-1)
+            # Broadcasting j + S * i allocates only the order itself; a
+            # transposed arange would hold two full index arrays at once.
+            passes = numpy.arange(stride, dtype=numpy.int64)[:, None]
+            offsets = stride * numpy.arange(count // stride, dtype=numpy.int64)
+            return (passes + offsets).reshape(-1)
         order = numpy.random.default_rng((self.seed, 1)).permutation(count)
         return order.astype(numpy.int64, copy=False)
 

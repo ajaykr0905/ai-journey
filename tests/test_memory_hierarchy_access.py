@@ -56,6 +56,21 @@ def test_orders_visit_every_element_once_and_differ_only_in_order():
     assert not numpy.array_equal(random, sequential)
 
 
+@pytest.mark.parametrize("name", ["sequential", "strided", "random"])
+def test_building_an_order_holds_no_second_full_index_array(name):
+    buffers = AccessBuffers(1 << 18, 16, "float64", seed=71)
+    tracemalloc.start()
+    try:
+        before = tracemalloc.get_traced_memory()[0]
+        order = buffers.indices(name)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+    # The order itself is 2 MiB; a second full copy would double the peak.
+    assert peak - before < 1.5 * order.nbytes
+
+
 def test_gathers_account_for_the_same_bytes_and_copy_skips_the_index():
     sizes = {
         name: pattern.bytes_per_call(1000, "float64")
