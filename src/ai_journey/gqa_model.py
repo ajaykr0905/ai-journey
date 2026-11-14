@@ -55,12 +55,20 @@ class GroupedQueryModel(nn.Module):
 
     @property
     def parameter_count(self):
+        """Return the unique parameter count expected_gqa_parameter_count predicts."""
         return sum(parameter.numel() for parameter in self.parameters())
 
     def forward(self, token_ids, *, token_mask=None):
+        """Return logits only, dropping forward_training's auxiliary outputs."""
         return self.forward_training(token_ids, token_mask=token_mask).logits
 
     def forward_training(self, token_ids, *, token_mask=None):
+        """Return logits with MoE-style auxiliary losses and routing for training.
+
+        Dense decoders report zero auxiliary losses still tied to the logits, so
+        one training step serves dense and expert arms. Inputs are admitted
+        against the execution budget first; bad tokens or masks raise ValueError.
+        """
         if (
             not isinstance(token_ids, torch.Tensor)
             or token_ids.dtype != torch.long
