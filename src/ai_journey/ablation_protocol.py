@@ -222,9 +222,17 @@ class ControlledAblation:
 
     @property
     def baseline_arm(self) -> AblationArm:
+        """The arm named by ``baseline_label``; every contrast pairs against it."""
+
         return next(arm for arm in self.arms if arm.label == self.baseline_label)
 
     def fixed_controls(self) -> dict[str, Any]:
+        """Every baseline setting except the independent variable, plus seeds.
+
+        Construction already proved that each other arm changes only that
+        variable, so these are the controls the whole protocol holds fixed.
+        """
+
         controls = _flatten_config(
             self.baseline_arm.model_config, self.baseline_arm.training_config
         )
@@ -248,6 +256,8 @@ class ControlledAblation:
         }
 
     def fingerprint(self) -> str:
+        """SHA-256 of the canonical protocol, recorded in every result payload."""
+
         payload = json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
         return sha256(payload.encode()).hexdigest()
 
@@ -267,6 +277,11 @@ class AblationTrial:
     final_model_fingerprint: str
 
     def metric(self, name: str) -> float:
+        """Return the trial's ``train_nll`` or ``validation_nll`` by name.
+
+        Raises TransformerLabError for any other metric name.
+        """
+
         if name == "train_nll":
             return self.train_nll
         if name == "validation_nll":
@@ -348,12 +363,20 @@ class AblationResult:
         }
 
     def evidence_fingerprint(self) -> str:
+        """SHA-256 over the canonical result payload, which excludes itself.
+
+        It covers the protocol and its fingerprint, the corpus fingerprint,
+        every trial, summary and contrast, and the runtime provenance.
+        """
+
         payload = json.dumps(
             self._payload(), sort_keys=True, separators=(",", ":")
         ).encode()
         return sha256(payload).hexdigest()
 
     def to_dict(self) -> dict[str, Any]:
+        """Result payload with its evidence fingerprint appended."""
+
         payload = self._payload()
         payload["evidence_fingerprint"] = self.evidence_fingerprint()
         return payload
