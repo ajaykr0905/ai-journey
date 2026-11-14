@@ -33,6 +33,7 @@
     "tests/test_memory_hierarchy_guide.py",
     "tests/test_memory_hierarchy_package.py",
     "tests/test_memory_hierarchy_readiness.py",
+    "tests/test_memory_hierarchy_delivery.py",
     "config/day-74-memory-access-plan.json",
     "config/day-74-memory-access-ci-smoke.json",
     "docs/memory-access-model.md",

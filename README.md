@@ -565,6 +565,44 @@ except for its name and a benchmark of one 32^3 case per backend with 1 warmup
 and 3 repeats instead of 2 and 7. See the
 [memory-access model guide](docs/memory-access-model.md).
 
+## Measure the CPU memory hierarchy
+
+Measure STREAM bandwidth across working-set sizes, access-pattern costs and a
+NumPy roofline on the CPU of the host that runs the command, then verify the
+sealed report against the pinned config:
+
+```bash
+ai-journey-memory-hierarchy run \
+  --config config/day-71-memory-hierarchy.json \
+  --output /tmp/day-71-memory-hierarchy.json
+ai-journey-memory-hierarchy verify \
+  --report /tmp/day-71-memory-hierarchy.json \
+  --config config/day-71-memory-hierarchy.json
+```
+
+`run` times STREAM copy, scale, add and triad at 12 sweep points (triad's
+working set grows from 24 KiB to 192 MiB), copy and sequential, strided and
+random `take` gathers over one 64 MiB source, and a 1024^3 float64 NumPy
+matmul as the compute ceiling, within a 20-second budget and a 256 MiB
+allocation bound. It derives a measured roofline through `roofline.py` and a
+Little's-law view from a stated, unmeasured 100 ns latency, prints lines
+labeled `cpu_host_measurement`, and ends with the report digest,
+`scope=cpu_wall_clock_this_host` and `gpu_executed=false`. `verify`
+recomputes every statistic, rate, ceiling and Little's-law product from the
+raw samples, but cannot re-observe a timing. Exit code 0 means success, 1 a
+report that failed verification, and 2 usage errors, invalid inputs, refused
+outputs or failed runs.
+
+Bandwidths count the operand bytes each NumPy call reads and writes, not
+hardware traffic, and include NumPy call overhead. The matmul may use several
+BLAS threads; the other kernels use one. No cache size is detected or claimed,
+and nothing here measures or predicts GPU, CUDA, distributed, or production
+performance. CI runs the installed command on
+`config/day-71-memory-hierarchy-ci-smoke.json`, the pinned config with fewer
+sweep points, smaller arrays and fewer, shorter samples, so its timings are a
+smoke check, not a baseline. See the
+[memory-hierarchy lab guide](docs/memory-hierarchy-lab.md).
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with
