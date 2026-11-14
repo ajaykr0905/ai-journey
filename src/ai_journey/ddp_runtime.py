@@ -17,6 +17,12 @@ from .ddp_contracts import Topology, integer
 
 @contextmanager
 def process_group(topology: Topology, *, rendezvous: str, timeout_seconds: int = 30):
+    """Own one Gloo process group for the duration of the ``with`` block.
+
+    Collectives time out after ``timeout_seconds``, an existing caller-owned
+    group is refused rather than reused, and the group is destroyed on exit,
+    also after an error. Raises TypeError, ValueError or RuntimeError.
+    """
     integer(timeout_seconds, "timeout_seconds", 1)
     if not isinstance(topology, Topology):
         raise TypeError("topology must be Topology")

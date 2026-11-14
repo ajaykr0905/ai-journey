@@ -174,6 +174,13 @@ def save_checkpoint(
     journal_directory: Path | None = None,
     sampler=SAMPLER_V1,
 ) -> str:
+    """Collectively publish one replicated training boundary; return its digest.
+
+    Every rank must pass state validation and agree on model and optimizer
+    fingerprints before rank 0 atomically replaces the latest file and, with
+    a journal, records an immutable version that must advance recorded
+    progress. A failure on any rank raises RuntimeError on every rank.
+    """
     validate_sampler(sampler)
     integer(step, "step")
     if step > config.optimizer_steps:
@@ -390,6 +397,13 @@ def load_checkpoint(
 
 @dataclass(frozen=True)
 class JournalRecovery:
+    """Which journal version a resume restored, and the progress it recorded.
+
+    ``step`` is below ``recorded_step`` when newer versions failed validation
+    and an older intact one was restored; ``checkpoint_sha256`` names the
+    restored bytes. Workers report it in their receipts.
+    """
+
     step: int
     recorded_step: int
     checkpoint_sha256: str
