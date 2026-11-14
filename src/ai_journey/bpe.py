@@ -349,9 +349,10 @@ class SpecialTokenizer:
     def encode(self, text: str, *, allowed: frozenset[str] = frozenset()):
         """Encode text, mapping only markers named in allowed to their reserved ids.
 
-        Any other registered marker in text raises TokenizerError, so untrusted
-        input cannot inject control tokens; the longest marker wins an overlap.
-        allowed must be a frozenset of registered names.
+        Markers match left to right, longest first at each position. A matched
+        marker outside allowed raises TokenizerError, so untrusted input cannot
+        inject control tokens; one that overlaps an earlier match stays ordinary
+        text. allowed must be a frozenset of registered names.
         """
         if not isinstance(text, str):
             raise TypeError("text must be a string")

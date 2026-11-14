@@ -165,6 +165,14 @@ class SpecialTokenizerTests(unittest.TestCase):
         ordinary = tokenizer.tokenizer.encode(text)
         self.assertNotIn(256, ordinary)
 
+    def test_markers_match_leftmost_first_then_longest(self):
+        tokenizer = SpecialTokenizer(ByteTokenizer(), ("ab", "bcd"))
+        for allowed in (frozenset(tokenizer.names), frozenset({"ab"})):
+            # The earlier "ab" beats the longer "bcd", whose rest stays ordinary.
+            self.assertEqual(tokenizer.encode("abcd", allowed=allowed), (256, 99, 100))
+        with self.assertRaisesRegex(TokenizerError, "authorization"):
+            tokenizer.encode("bcd", allowed=frozenset({"ab"}))
+
     def test_registered_ids_do_not_collide_with_merged_tokens(self):
         base = ByteTokenizer.train("abab" * 20)
         tokenizer = SpecialTokenizer(base, ("<end>",))
