@@ -1,5 +1,6 @@
 import itertools
 import json
+import time
 from copy import deepcopy
 
 import pytest
@@ -24,8 +25,10 @@ def make_plan():
     return plan_from_mapping(make_plan_mapping())
 
 
-def make_measurements(plan, step=500):
-    clock = itertools.count(10_000, step).__next__
+def make_measurements(plan, step=500, *, host_timer=False):
+    clock = (
+        time.perf_counter_ns if host_timer else itertools.count(10_000, step).__next__
+    )
     benchmark = plan.benchmark
     return tuple(
         measure_matmul(
@@ -113,10 +116,11 @@ def test_seal_is_deterministic_detects_drift_and_does_not_mutate():
 
 def test_measurement_report_records_cpu_samples_for_every_planned_case():
     plan = make_plan()
-    measurements = make_measurements(plan)
+    measurements = make_measurements(plan, host_timer=True)
     report = build_measurement_report(plan, measurements, cpu_environment())
 
     assert report["kind"] == MEASUREMENT_KIND
+    assert report["timer"] == "time.perf_counter_ns"
     assert report["measured"] is True
     assert report["measurement_scope"] == "cpu_wall_clock_this_host"
     assert report["evidence_boundary"] == MEASUREMENT_BOUNDARY
@@ -131,11 +135,32 @@ def test_measurement_report_records_cpu_samples_for_every_planned_case():
         ("torch", 16, 12, 8),
     ]
     assert all(item["device"] == "cpu" for item in report["results"])
-    assert all(item["samples_ns"] == [500] * 3 for item in report["results"])
+    assert all(
+        len(item["samples_ns"]) == 3 and min(item["samples_ns"]) > 0
+        for item in report["results"]
+    )
     assert report["summary"]["cases"] == 4
     assert report["summary"]["checked_results"] == 16
     assert report["summary"]["max_bound_ratio"] < 1
     assert json.loads(canonical_json_bytes(report)) == report
+
+
+def test_injected_clock_samples_are_labeled_synthetic_not_measured():
+    plan = make_plan()
+    report = build_measurement_report(plan, make_measurements(plan), cpu_environment())
+    boundary = report["evidence_boundary"]
+
+    assert report["kind"] == MEASUREMENT_KIND
+    assert (report["timer"], report["measured"]) == ("injected", False)
+    assert report["measurement_scope"] == "synthetic_injected_clock"
+    assert boundary["cpu_measurement_this_host"] is False
+    assert boundary["synthetic_timing"] is True
+    assert boundary["gpu_executed"] is False
+    assert "not a measurement" in boundary["statement"]
+    assert all(item["samples_ns"] == [500] * 3 for item in report["results"])
+    mixed = make_measurements(plan, host_timer=True)[:2] + make_measurements(plan)[2:]
+    with pytest.raises(MemoryAccessError, match="one timer"):
+        build_measurement_report(plan, mixed, cpu_environment())
 
 
 def test_measurement_report_refuses_evidence_that_does_not_match_the_plan():

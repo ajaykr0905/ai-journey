@@ -1,16 +1,20 @@
 """Bounded loopback generation attempts with exhaustive outcome classes.
 
 Each attempt derives every socket timeout from one absolute monotonic deadline
-and ends in exactly one class: ``ok``, ``connection_refused``,
+and ends in exactly one class: ``ok``, ``connection_refused`` (the connect was
+refused, ECONNREFUSED), ``connect_error`` (any other connect error, such as a
+local EMFILE or EADDRNOTAVAIL, which says nothing about the server),
 ``connection_reset`` (including a peer close before a complete response),
-``timeout``, ``http_error`` (a complete non-200 response) or
-``invalid_response`` (a complete 200 that breaks the protocol). A record keeps
+``timeout`` (including a connect that ran out of time, ``connect_timeout``),
+``http_error`` (a complete non-200 response) or ``invalid_response`` (a
+complete 200 that breaks the protocol). A record keeps
 monotonic start and finish times, the lifetime that answered and the SHA-256
 of the exact response body, so later reconciliation can byte-compare retries.
 """
 
 from __future__ import annotations
 
+import errno
 import re
 import socket
 import time
@@ -40,6 +44,7 @@ from .serving_recovery_server import ATTEMPT_HEADER, KEY_HEADER, LIFETIME_HEADER
 ATTEMPT_OUTCOMES = (
     "ok",
     "connection_refused",
+    "connect_error",
     "connection_reset",
     "timeout",
     "http_error",
@@ -140,6 +145,15 @@ class AttemptRecord:
     def latency_ns(self) -> int:
         return self.finished_ns - self.started_ns
 
+    @property
+    def connected(self) -> bool:
+        """False when the connect itself failed, so no server could run it."""
+
+        return self.outcome not in ("connection_refused", "connect_error") and (
+            self.outcome,
+            self.error,
+        ) != ("timeout", "connect_timeout")
+
     def to_mapping(self) -> dict[str, Any]:
         return {field.name: getattr(self, field.name) for field in fields(self)}
 
@@ -171,8 +185,10 @@ def _exchange(
         )
     except TimeoutError:
         return "timeout", "connect_timeout", b""
-    except OSError as exc:
+    except ConnectionRefusedError as exc:
         return "connection_refused", type(exc).__name__, b""
+    except OSError as exc:
+        return "connect_error", errno.errorcode.get(exc.errno, type(exc).__name__), b""
     chunks: list[bytes] = []
     size = 0
     try:

@@ -12,8 +12,10 @@ Measurement reports hold timings that cannot be recomputed. They get
 structural and accounting checks instead: exact schemas, the plan binding,
 the CPU-only evidence boundary, nearest-rank statistics recomputed from the
 raw samples, FLOP and GFLOP/s arithmetic, correctness bounds, and summaries.
-A matching digest shows internal consistency; it cannot prove that a timing
-was observed.
+The timer, ``measured`` flag, scope and boundary must agree: only a
+``time.perf_counter_ns`` report verifies as a host measurement, and an
+``injected`` report verifies only as synthetic timing. A matching digest
+shows internal consistency; it cannot prove that a timing was observed.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ import math
 import re
 from hashlib import sha256
 
-from .memory_access_benchmark import PERCENTILE_METHOD, TIMER
+from .memory_access_benchmark import INJECTED_TIMER, PERCENTILE_METHOD, TIMER
 from .memory_access_pattern import MemoryAccessError
 from .memory_access_plan import (
     BenchmarkSpec,
@@ -38,6 +40,8 @@ from .memory_access_report import (
     MEASUREMENT_BOUNDARY,
     MEASUREMENT_KIND,
     MEASUREMENT_SCOPE,
+    SYNTHETIC_BOUNDARY,
+    SYNTHETIC_SCOPE,
     build_analysis_report,
     report_digest,
     seal_report,
@@ -722,17 +726,28 @@ def _verify_measurement(
     report: object, plan: MemoryAccessPlan | None
 ) -> dict[str, object]:
     report = _seal_and_contract(report, _MEASUREMENT_FIELDS, MEASUREMENT_KIND)
-    _require(report["measured"] is True, "measurement report must be measured")
     _require(
-        report["measurement_scope"] == MEASUREMENT_SCOPE
-        and report["evidence_boundary"] == MEASUREMENT_BOUNDARY,
-        "measurement evidence boundary was weakened",
-    )
-    _require(
-        report["timer"] == TIMER
+        report["timer"] in (TIMER, INJECTED_TIMER)
         and report["percentile_method"] == PERCENTILE_METHOD
         and report["correctness_source"] == CORRECTNESS_SOURCE,
         "measurement method fields were changed",
+    )
+    measured = report["timer"] == TIMER
+    _require(
+        report["measured"] is measured,
+        "measurement report must be measured"
+        if measured
+        else "an injected-clock report must not claim a measurement",
+    )
+    scope, boundary = (
+        (MEASUREMENT_SCOPE, MEASUREMENT_BOUNDARY)
+        if measured
+        else (SYNTHETIC_SCOPE, SYNTHETIC_BOUNDARY)
+    )
+    _require(
+        report["measurement_scope"] == scope
+        and report["evidence_boundary"] == boundary,
+        "measurement evidence boundary was weakened",
     )
     _require(
         isinstance(report["plan_sha256"], str)
@@ -787,8 +802,8 @@ def _verify_measurement(
         "report_sha256": report[DIGEST_FIELD],
         "plan_sha256": report["plan_sha256"],
         "cases": len(results),
-        "measured": True,
-        "scope": MEASUREMENT_SCOPE,
+        "measured": measured,
+        "scope": scope,
     }
 
 

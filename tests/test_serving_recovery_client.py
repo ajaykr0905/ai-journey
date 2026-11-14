@@ -1,3 +1,5 @@
+import errno
+import os
 import re
 import socket
 import struct
@@ -9,6 +11,7 @@ from pathlib import Path
 import pytest
 from test_serving_recovery_config import valid_config
 
+import ai_journey.serving_recovery_client as serving_recovery_client
 from ai_journey.serving_recovery_client import (
     AttemptRecord,
     attempt_from_mapping,
@@ -199,6 +202,56 @@ def test_refused_connections_are_classified_before_any_exchange():
         "connection_refused",
         "ConnectionRefusedError",
     )
+
+
+@pytest.mark.parametrize(
+    "code",
+    [errno.EMFILE, errno.ENFILE, errno.EADDRNOTAVAIL, errno.ENOBUFS],
+    ids=errno.errorcode.get,
+)
+def test_local_connect_errors_are_not_classified_as_refusals(monkeypatch, code):
+    def fail(address, timeout):
+        raise OSError(code, os.strerror(code))
+
+    monkeypatch.setattr(serving_recovery_client.socket, "create_connection", fail)
+    record = attempt(closed_port())
+    assert (record.outcome, record.error) == ("connect_error", errno.errorcode[code])
+    assert (record.http_status, record.lifetime_id, record.response_sha256) == (
+        None,
+        None,
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "error", "connected"),
+    [
+        ("connection_refused", "ConnectionRefusedError", False),
+        ("connect_error", "EMFILE", False),
+        ("timeout", "connect_timeout", False),
+        ("timeout", "receive_timeout", True),
+        ("timeout", "deadline_elapsed", True),
+        ("connection_reset", "closed_before_response", True),
+        ("invalid_response", "response_body", True),
+    ],
+)
+def test_only_attempts_whose_connect_succeeded_count_as_connected(
+    outcome, error, connected
+):
+    record = AttemptRecord(
+        request_index=0,
+        idempotency_key=PLAN[0].idempotency_key,
+        attempt=1,
+        port=8080,
+        started_ns=0,
+        finished_ns=1,
+        outcome=outcome,
+        error=error,
+        http_status=None,
+        lifetime_id=None,
+        response_sha256=None,
+    )
+    assert record.connected is connected
 
 
 def test_attempt_records_round_trip_and_reject_incoherent_evidence(tmp_path):

@@ -5,7 +5,10 @@ Two report kinds share one sealing scheme and never mix evidence:
 - the analytical report recomputes every pattern, transpose, tile-traffic and
   roofline number from the declared plan; nothing in it was measured;
 - the measurement report records real wall-clock CPU matmul samples taken on
-  the host that built it, with the checks that make them interpretable.
+  the host that built it, with the checks that make them interpretable. When
+  an injected clock produced the samples, the same report is labeled
+  synthetic instead: timer ``injected``, ``measured: false`` and a boundary
+  that denies any host measurement.
 
 Each report carries an explicit evidence boundary. The SHA-256 seal covers
 canonical JSON (sorted keys, compact separators, ASCII escapes) of every other
@@ -18,7 +21,7 @@ from hashlib import sha256
 
 from .memory_access_banks import MODELED_BANK_ACCESS_BYTES, analyze_banks
 from .memory_access_baseline import MatmulMeasurement, cpu_environment
-from .memory_access_benchmark import PERCENTILE_METHOD, TIMER
+from .memory_access_benchmark import INJECTED_TIMER, PERCENTILE_METHOD, TIMER
 from .memory_access_coalescing import analyze_coalescing
 from .memory_access_pattern import MemoryAccessError
 from .memory_access_plan import MemoryAccessPlan, PatternSpec, canonical_json_bytes
@@ -34,6 +37,7 @@ REPORT_SCHEMA_VERSION = 1
 ANALYSIS_KIND = "memory_access_analysis"
 MEASUREMENT_KIND = "memory_access_cpu_measurement"
 MEASUREMENT_SCOPE = "cpu_wall_clock_this_host"
+SYNTHETIC_SCOPE = "synthetic_injected_clock"
 DIGEST_FIELD = "report_sha256"
 
 ANALYSIS_BOUNDARY = {
@@ -58,6 +62,19 @@ MEASUREMENT_BOUNDARY = {
         "Wall-clock float32 CPU matmul measurements taken on the host that built "
         "this report. They do not measure or predict GPU, CUDA, tensor-core, "
         "distributed, or production performance."
+    ),
+}
+SYNTHETIC_BOUNDARY = {
+    "cpu_measurement_this_host": False,
+    "synthetic_timing": True,
+    "gpu_executed": False,
+    "cuda_kernel_executed": False,
+    "portable_performance_claim": False,
+    "statement": (
+        "Durations came from a clock injected by the caller instead of "
+        "time.perf_counter_ns, so they are synthetic values and not a "
+        "measurement of this or any host. The float32 CPU matmuls and their "
+        "float64 checks did run; no GPU or CUDA kernel was executed."
     ),
 }
 MODEL_SOURCES = (
@@ -228,7 +245,11 @@ def build_measurement_report(
     measurements: tuple[MatmulMeasurement, ...],
     environment: dict[str, object],
 ) -> dict[str, object]:
-    """Record real CPU samples for exactly the plan's benchmark cases."""
+    """Record CPU samples for exactly the plan's benchmark cases.
+
+    Only samples taken with the host timer are labeled a measurement; samples
+    from an injected clock get the synthetic timer, scope and boundary.
+    """
 
     if not isinstance(plan, MemoryAccessPlan):
         raise TypeError("plan must be a MemoryAccessPlan")
@@ -247,17 +268,26 @@ def build_measurement_report(
         raise MemoryAccessError("measurements must use the plan's benchmark budget")
     if type(environment) is not dict or set(environment) != set(cpu_environment()):
         raise MemoryAccessError("environment fields do not match the CPU record")
+    timers = {item.timer for item in measurements}
+    if len(timers) != 1:
+        raise MemoryAccessError("measurements must share one timer")
+    timer = timers.pop()
+    if timer not in (TIMER, INJECTED_TIMER):
+        raise MemoryAccessError("measurement timer is not recognized")
+    measured = timer == TIMER
     results = [item.to_mapping() for item in measurements]
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "kind": MEASUREMENT_KIND,
-        "measured": True,
-        "measurement_scope": MEASUREMENT_SCOPE,
-        "evidence_boundary": dict(MEASUREMENT_BOUNDARY),
+        "measured": measured,
+        "measurement_scope": MEASUREMENT_SCOPE if measured else SYNTHETIC_SCOPE,
+        "evidence_boundary": dict(
+            MEASUREMENT_BOUNDARY if measured else SYNTHETIC_BOUNDARY
+        ),
         "plan_name": plan.name,
         "plan_sha256": plan.fingerprint(),
         "benchmark": benchmark.to_mapping(),
-        "timer": TIMER,
+        "timer": timer,
         "percentile_method": PERCENTILE_METHOD,
         "correctness_source": CORRECTNESS_SOURCE,
         "environment": dict(environment),

@@ -45,17 +45,27 @@ def test_save_refuses_unverified_reports_and_keeps_the_existing_file(tmp_path: P
 def test_save_never_overwrites_a_protected_input_through_any_alias(tmp_path: Path):
     plan = tmp_path / "plan.json"
     plan.write_bytes(b"protected plan\n")
+    (tmp_path / "subdir").mkdir()
+    linked_dir = tmp_path / "linked-dir"
+    os.symlink(tmp_path, linked_dir, target_is_directory=True)
     symlink = tmp_path / "symlink.json"
     os.symlink(plan, symlink)
     hardlink = tmp_path / "hardlink.json"
     os.link(plan, hardlink)
     report = sealed()
+    aliases = (
+        tmp_path / "subdir" / ".." / "plan.json",
+        linked_dir / "plan.json",
+        symlink,
+        hardlink,
+    )
 
-    for target in (plan, tmp_path / "." / "plan.json", hardlink):
+    # Each alias is a distinct path spelling that still names the plan file.
+    assert len({plan, *aliases}) == len(aliases) + 1
+    assert all(alias.samefile(plan) for alias in aliases)
+    for target in (plan, *aliases):
         with pytest.raises(SimtError, match="must not alias a protected input"):
             save_simt_report(target, report, protected=(plan,))
-    with pytest.raises(SimtError, match="must not alias a protected input"):
-        save_simt_report(symlink, report, protected=(plan,))
     assert plan.read_bytes() == b"protected plan\n"
     with pytest.raises(SimtError, match="regular non-symlink file"):
         save_simt_report(symlink, report)

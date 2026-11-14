@@ -1,6 +1,8 @@
 import signal
+import subprocess
 import sys
 
+import pytest
 from test_serving_recovery_supervisor import (
     MODEL,
     exited,
@@ -156,6 +158,37 @@ def test_a_replacement_that_fails_to_spawn_spends_only_one_restart(tmp_path):
         "lifetime-1.stderr",
         "lifetime-2.stderr",
     ]
+
+
+def test_an_unexpected_restart_error_is_recorded_instead_of_ending_the_monitor(
+    tmp_path, monkeypatch
+):
+    owner = supervisor(tmp_path, failing_after_first(tmp_path))
+    terminate = owner._terminate
+
+    def reap_then_time_out(lifetime):
+        terminate(lifetime)
+        raise subprocess.TimeoutExpired("server", 10)
+
+    with owner:
+        owner.start()
+        monkeypatch.setattr(owner, "_terminate", reap_then_time_out)
+        kill_current(owner)
+        assert owner.wait_until(lambda: owner.failure is not None, timeout_ms=10_000)
+        with pytest.raises(ValueError, match="monitor failed: TimeoutExpired"):
+            owner.endpoint()
+
+    assert "monitor failed: TimeoutExpired" in str(owner.failure)
+    assert isinstance(owner.failure.__cause__, subprocess.TimeoutExpired)
+    assert kinds(owner) == [
+        "spawn",
+        "ready",
+        "exit_observed",
+        "restart",
+        "exit_observed",
+    ]
+    assert owner.restarts_used == 1
+    assert all(exited(o.pid) for o in owner.observations())
 
 
 def test_stop_interrupts_a_pending_restart_backoff(tmp_path):
