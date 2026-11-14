@@ -5,6 +5,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import ai_journey
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # Every public name a bare ``import ai_journey`` exposes: each export with the
@@ -101,6 +103,18 @@ EXPECTED_SUBMODULES = (
     "wavenet_rebuild",
     "xor",
 )
+# Command-line modules of torch-free labs; importing one must not load torch.
+TORCH_FREE_CLIS = (
+    "ai_journey.simt_cli",
+    "ai_journey.serving_recovery_cli",
+    "ai_journey.resource_cli",
+)
+NEWLY_IMPORTED = """
+import json, sys
+before = set(sys.modules)
+import {module}
+print(json.dumps(sorted(set(sys.modules) - before)))
+"""
 RESOLVED_NAMES = """
 import json, sys, types
 import ai_journey
@@ -135,9 +149,30 @@ def run_fresh(code):
 class PackageImportTests(unittest.TestCase):
     maxDiff = None
 
+    def test_bare_package_import_loads_no_submodule_torch_or_numpy(self) -> None:
+        loaded = run_fresh(NEWLY_IMPORTED.format(module="ai_journey"))
+        submodules = [name for name in loaded if name.startswith("ai_journey.")]
+
+        self.assertIn("ai_journey", loaded)
+        self.assertEqual(submodules, [])
+        self.assertEqual(sorted({"numpy", "torch"} & set(loaded)), [])
+
+    def test_torch_free_cli_imports_do_not_load_torch(self) -> None:
+        for module in TORCH_FREE_CLIS:
+            with self.subTest(module=module):
+                loaded = run_fresh(NEWLY_IMPORTED.format(module=module))
+
+                self.assertIn(module, loaded)
+                self.assertEqual(sorted({"torch"} & set(loaded)), [])
+
     def test_public_names_resolve_to_the_objects_their_submodules_define(self) -> None:
         observed = run_fresh(RESOLVED_NAMES)
         expected = EXPECTED_EXPORTS | {name: name for name in EXPECTED_SUBMODULES}
 
         self.assertEqual(sorted(observed["all"]), sorted(EXPECTED_EXPORTS))
         self.assertEqual(observed["resolved"], expected)
+
+    def test_unknown_package_names_still_raise_attribute_error(self) -> None:
+        with self.assertRaisesRegex(AttributeError, "no attribute 'no_such_export'"):
+            ai_journey.no_such_export
+        self.assertFalse(hasattr(ai_journey, "no_such_export"))
