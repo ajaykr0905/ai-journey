@@ -10,34 +10,59 @@ from .inference_kv import KVCacheLayout, _positive_integer
 
 @dataclass(frozen=True)
 class PrefillWork:
+    """Analytical prefill FLOPs, keeping linear and quadratic terms apart.
+
+    Projections grow with prompt tokens while attention grows with their
+    square, so the split shows which term a long context is paying for.
+    """
+
     projection_flops: int
     attention_flops: int
 
     @property
     def total_flops(self) -> int:
+        """Return forward FLOPs, counting each multiply-add as two."""
+
         return self.projection_flops + self.attention_flops
 
 
 @dataclass(frozen=True)
 class DecodeStepWork:
+    """Analytical FLOPs for one cached decode step across the batch.
+
+    Each new token attends to the cached context once, so attention is linear
+    in ``context_tokens`` here, not quadratic as in prefill.
+    """
+
     projection_flops: int
     attention_flops: int
 
     @property
     def total_flops(self) -> int:
+        """Return the step's FLOPs, counting each multiply-add as two."""
+
         return self.projection_flops + self.attention_flops
 
 
 @dataclass(frozen=True)
 class DecodeMemoryTraffic:
+    """Compulsory bytes one decode step reads: every weight and the KV cache."""
+
     weight_bytes: int
     kv_read_bytes: int
 
     @property
     def total_bytes(self) -> int:
+        """Return weight plus resident KV bytes read by one decode step."""
+
         return self.weight_bytes + self.kv_read_bytes
 
     def arithmetic_intensity(self, work: DecodeStepWork) -> Fraction:
+        """Return exact FLOPs per byte so a decode step can be placed on a roofline.
+
+        Raises TypeError unless ``work`` is a DecodeStepWork.
+        """
+
         if not isinstance(work, DecodeStepWork):
             raise TypeError("work must be DecodeStepWork")
         return Fraction(work.total_flops, self.total_bytes)

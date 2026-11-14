@@ -30,6 +30,8 @@ class DeviceMemoryBudget:
 
     @property
     def kv_bytes(self) -> int:
+        """Return bytes left for KV state; construction keeps this positive."""
+
         return self.total_bytes - self.model_bytes - self.runtime_reserve_bytes
 
 
@@ -48,6 +50,12 @@ def maximum_resident_sequences(
 
 @dataclass(frozen=True)
 class CapacityDecision:
+    """Admission verdict for a ragged batch charged by its resident tokens.
+
+    Rows are charged for their actual lengths instead of full context, and the
+    verdict keeps the request and capacity bytes that produced it.
+    """
+
     requested_tokens: int
     requested_bytes: int
     capacity_bytes: int
@@ -55,6 +63,8 @@ class CapacityDecision:
 
     @property
     def remaining_bytes(self) -> int:
+        """Return KV bytes left after an admitted batch, or zero when rejected."""
+
         return self.capacity_bytes - self.requested_bytes if self.admitted else 0
 
 
