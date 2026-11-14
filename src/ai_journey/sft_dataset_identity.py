@@ -31,4 +31,13 @@ def record_sha256(record: DollyRecord) -> str:
 
 def record_id(record: DollyRecord) -> str:
     """Return a stable public identifier without exposing source row positions."""
-    return f"dolly-{record_sha256(record)[:24]}"
+    return record_id_from_sha256(record_sha256(record))
+
+
+def record_id_from_sha256(digest: str) -> str:
+    """Derive record_id from a record_sha256 digest the caller already holds.
+
+    Ranking and sorting thousands of records would otherwise rehash every
+    record for each key it needs.
+    """
+    return f"dolly-{digest[:24]}"
