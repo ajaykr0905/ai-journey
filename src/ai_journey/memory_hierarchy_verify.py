@@ -4,15 +4,15 @@ Timings cannot be re-observed, so verification recomputes everything that
 follows from them. The embedded config is parsed strictly and must match its
 digest, and a supplied config if one is given. From the config alone the
 verifier rebuilds the measurement list, the byte and FLOP accounting of every
-kernel and access pattern from its own tables, and every batch size. From the
-raw samples it recomputes nearest-rank statistics and every rate, the curves
-and their summaries, the access contrast, both roofline ceilings, the ridge
-points and placements, the Little's-law products, the run totals, the
-planned byte, call and FLOP totals and the summary, and each section must
-match byte for byte as canonical JSON, so ``1``, ``1.0`` and ``true`` stay
-distinct. No measuring module is called to recompute anything (the shared
-config parser only validates bounds), so a bug in one of them cannot vouch
-for itself.
+kernel and access pattern from its own tables, every batch size and the
+planned peak allocation. From the raw samples it recomputes nearest-rank
+statistics and every rate, the curves and their summaries, the access
+contrast, both roofline ceilings, the ridge points and placements, the
+Little's-law products, the run totals, the planned byte, call and FLOP totals
+and the summary, and each section must match byte for byte as canonical
+JSON, so ``1``, ``1.0`` and ``true`` stay distinct. No measuring module is
+called to recompute anything (the shared config parser only validates
+bounds), so a bug in one of them cannot vouch for itself.
 
 The timer, ``measured`` flag, scope and boundary must agree: only a
 ``time.perf_counter_ns`` report verifies as a host measurement, and an
@@ -44,6 +44,8 @@ _MAX_CALLS = 1 << 16
 _WIDTH = {"float32": 4, "float64": 8}
 _UNIT = {"float32": 2.0**-24, "float64": 2.0**-53}
 _INDEX_BYTES = 8
+_CHECK_CHUNK = 1 << 20
+_CHECK_ROW_BLOCK = 64
 _SCALAR = 3.0
 # name: (calls, arrays, reads per element, writes per element, FLOPs per element)
 _KERNELS = {
@@ -182,6 +184,36 @@ def _batch(
         "samples_ns": samples,
         "timing": _timing(samples),
     }
+
+
+def planned_peak_allocation(config: MemoryHierarchyConfig) -> int:
+    """Rebuild the planned peak allocation without ``planned_work``.
+
+    The largest section wins: the sweep's three arrays at its largest point
+    plus two output-check chunks; the access source, output and one index
+    order plus the larger of two check chunks and one pass of strided
+    offsets; or the matmul operands and product, the check's float64 right
+    operand and its absolute values, and one row block of float64
+    temporaries.
+    """
+
+    if not isinstance(config, MemoryHierarchyConfig):
+        raise TypeError("config must be a MemoryHierarchyConfig")
+    width = _WIDTH[config.dtype]
+
+    def check(elements: int) -> int:
+        return 2 * min(_CHECK_CHUNK, elements) * width
+
+    largest = config.stream.elements[-1]
+    source, stride = config.access.elements, config.access.stride_elements
+    m, n, k = config.matmul.m, config.matmul.n, config.matmul.k
+    block = min(m, _CHECK_ROW_BLOCK) * (2 * k + 4 * n) * 8
+    return max(
+        3 * largest * width + check(largest),
+        source * (2 * width + _INDEX_BYTES)
+        + max(check(source), _INDEX_BYTES * (source // stride)),
+        (m * k + k * n + m * n) * width + 2 * k * n * 8 + block,
+    )
 
 
 def _calls(bytes_per_call: int, config: MemoryHierarchyConfig) -> int:
@@ -618,7 +650,7 @@ def _verify(
     measurements = [*stream, *access, matmul]
     samples = config.timing.warmup + config.timing.repeats
     planned = {
-        "peak_allocation_bytes": config.planned_work().peak_allocation_bytes,
+        "peak_allocation_bytes": planned_peak_allocation(config),
         "accounted_bytes": sum(
             samples * item["bytes_per_call"] * item["calls_per_sample"]
             for item in (*stream, *access)

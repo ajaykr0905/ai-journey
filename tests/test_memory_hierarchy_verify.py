@@ -4,11 +4,13 @@ from copy import deepcopy
 
 import pytest
 
+from ai_journey import memory_hierarchy_config
 from ai_journey.memory_access_report import seal_report
 from ai_journey.memory_hierarchy_config import config_from_mapping
 from ai_journey.memory_hierarchy_report import REPORT_DIGEST_FIELD, measure_report
 from ai_journey.memory_hierarchy_verify import (
     MemoryHierarchyVerificationError,
+    planned_peak_allocation,
     verify_report,
 )
 from test_memory_hierarchy_config import make_config_mapping
@@ -199,6 +201,36 @@ def test_a_consistent_config_change_still_fails_on_the_measurements():
 
     with pytest.raises(MemoryHierarchyVerificationError, match="stream copy at 256"):
         verify_report(reseal(report))
+
+
+def test_a_wrong_allocation_model_cannot_vouch_for_its_planned_peak(monkeypatch):
+    # The run plans its peak through the measuring modules; a verifier that
+    # asked the same code would accept the same mistake.
+    monkeypatch.setattr(
+        memory_hierarchy_config, "matmul_allocation_bytes", lambda *_: 1 << 27
+    )
+    report = measure_report(CONFIG, clock=varied_clock())
+    assert report["planned_work"]["peak_allocation_bytes"] == 1 << 27
+
+    with pytest.raises(MemoryHierarchyVerificationError, match="planned work"):
+        verify_report(report)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {},
+        {"dtype": "float32", "access": {"elements": 1 << 22, "stride_elements": 2}},
+        {"matmul": {"m": 200, "n": 2048, "k": 16}},
+        {"stream": {"kernels": ["triad"], "elements": [64, 1 << 22]}},
+    ],
+)
+def test_the_verifier_rebuilds_the_planned_peak_of_any_config(changes):
+    config = config_from_mapping({**make_config_mapping(), **changes})
+
+    assert planned_peak_allocation(config) == (
+        config.planned_work().peak_allocation_bytes
+    )
 
 
 def test_unsealed_edits_fail_on_the_digest():

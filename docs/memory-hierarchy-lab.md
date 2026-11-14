@@ -198,14 +198,14 @@ flag, scope and boundary disagree.
 `verify` never calls the measuring modules to recompute a number; the config
 parser it shares only validates bounds. It parses the embedded config
 strictly and checks its digest, rebuilds the list of measurements, each
-kernel's and pattern's byte and FLOP accounting and every batch size from its
-own tables, and recomputes from the raw samples the statistics and rates,
-the curves and their summaries, the access ratios, both ceilings, the ridge
-points and placements, the Little's-law products, the planned byte, call and
-FLOP totals, the run totals (timed nanoseconds must fit inside the elapsed
-run, which must fit the budget) and the summary. Each section must match as
-canonical JSON, so `1`, `1.0` and `true` stay distinct. It cannot re-observe
-a timing.
+kernel's and pattern's byte and FLOP accounting, every batch size and the
+planned peak allocation from its own tables, and recomputes from the raw
+samples the statistics and rates, the curves and their summaries, the access
+ratios, both ceilings, the ridge points and placements, the Little's-law
+products, the planned byte, call and FLOP totals, the run totals (timed
+nanoseconds must fit inside the elapsed run, which must fit the budget) and
+the summary. Each section must match as canonical JSON, so `1`, `1.0` and
+`true` stay distinct. It cannot re-observe a timing.
 
 ## One run on the development host
 
