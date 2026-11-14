@@ -10,6 +10,10 @@ from .web_corpus import ExtractionPolicy, WebCorpusResult
 
 
 def canonical_json_bytes(value) -> bytes:
+    """The one encoding of corpus rows, the manifest and its seal.
+
+    Values JSON cannot represent exactly, such as NaN, raise TokenizerError.
+    """
     try:
         return (
             json.dumps(
@@ -26,6 +30,7 @@ def canonical_json_bytes(value) -> bytes:
 
 
 def corpus_payload(result: WebCorpusResult) -> bytes:
+    """Accepted documents as canonical JSONL with text digests: the hashed bytes."""
     if not isinstance(result, WebCorpusResult):
         raise TypeError("corpus payload requires a WebCorpusResult")
     return b"".join(

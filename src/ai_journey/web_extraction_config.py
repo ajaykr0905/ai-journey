@@ -17,6 +17,11 @@ def _unique_object(pairs):
 
 
 def load_extraction_policy(path: Path) -> ExtractionPolicy:
+    """Load the extraction policy from a regular, non-symlink file up to 64 KiB.
+
+    Exact fields, version 1 and unique keys are required, so the thresholds
+    sealed into evidence are the ones reviewed; violations raise TokenizerError.
+    """
     if not isinstance(path, Path):
         raise TypeError("HTML extraction config path must be pathlib.Path")
     if not path.is_file() or path.is_symlink():

@@ -12,6 +12,13 @@ from .web_source import WebPage
 
 @dataclass(frozen=True)
 class ExtractionPolicy:
+    """Page-count and per-page quality thresholds for one extraction run.
+
+    config/html_extraction_100_pages.json pins 100 pages, 200 characters and a
+    0.005 replacement fraction; the fraction must be a float in [0, 1].
+    Invalid values raise TokenizerError.
+    """
+
     minimum_pages: int = 100
     minimum_text_characters: int = 80
     maximum_replacement_fraction: float = 0.01
@@ -33,6 +40,12 @@ class ExtractionPolicy:
 
 @dataclass(frozen=True)
 class PageExtraction:
+    """Outcome for every input page, so rejections stay in the denominator.
+
+    extraction_ratio is extracted characters per payload byte; pages that fail
+    to decode or parse record their reason with zero counts.
+    """
+
     url: str
     payload_sha256: str
     payload_bytes: int
@@ -47,11 +60,14 @@ class PageExtraction:
 
 @dataclass(frozen=True)
 class WebCorpusResult:
+    """Accepted documents with URL-derived ids and one observation per input page."""
+
     documents: tuple[DataDocument, ...]
     observations: tuple[PageExtraction, ...]
 
     @property
     def rejected_pages(self) -> int:
+        """Pages observed and reported but kept out of the corpus."""
         return sum(not row.accepted for row in self.observations)
 
 

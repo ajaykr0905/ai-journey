@@ -16,6 +16,12 @@ _META_CHARSET = re.compile(
 
 @dataclass(frozen=True)
 class DecodedPage:
+    """Decoded HTML, the canonical codec chosen, and its U+FFFD count.
+
+    Decoding replaces bad bytes instead of failing, so the policy can reject a
+    lossy page by its replacement fraction rather than lose it.
+    """
+
     url: str
     html: str
     encoding: str

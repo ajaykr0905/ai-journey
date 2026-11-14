@@ -38,6 +38,10 @@ def _summary(report: dict) -> str:
 
 
 def main(argv=None) -> int:
+    """Build or verify extraction evidence and print sealed counts; errors exit 2.
+
+    build refuses an output path that aliases the snapshot or config.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
