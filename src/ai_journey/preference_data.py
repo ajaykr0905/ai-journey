@@ -177,8 +177,9 @@ PREFERENCE_FIXTURE_ID = "authored-grounded-readings-v1"
 class PreferenceDataset:
     """Six to 64 validated pairs that grouped folds can split by family.
 
-    Pair ids and rendered branches must be unique, and at least three groups
-    must hold two or more pairs each; violations raise PreferenceDataError.
+    Pair ids and rendered branches must be unique, and there must be at least
+    three groups, every one holding two or more pairs; violations raise
+    PreferenceDataError.
     """
 
     pairs: tuple[PreferencePair, ...]

@@ -49,7 +49,7 @@ class ToolCall:
     """One assistant tool request with strict JSON-object arguments.
 
     The ``call_`` id lets a conversation match the tool result to its request;
-    duplicate keys, non-finite numbers or non-object arguments raise
+    duplicate keys, NaN or Infinity literals or non-object arguments raise
     SFTDataError.
     """
 

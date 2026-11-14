@@ -135,7 +135,7 @@ class PreferenceComparisonConfig:
         )
 
     def model_config(self, vocab_size):
-        """Return the one-layer, dropout-free decoder shared by every arm."""
+        """Return the one-layer, dropout-free decoder config shared by every arm."""
         return TransformerConfig(
             vocab_size=vocab_size,
             block_size=self.block_size,
