@@ -30,7 +30,11 @@ def strict_json(payload):
 
     try:
         return json.loads(payload, object_pairs_hook=unique, parse_constant=constant)
-    except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+    except StreamProtocolError:
+        raise
+    except (ValueError, RecursionError) as exc:
+        # ValueError covers decode errors, invalid UTF-8 and an integer literal
+        # longer than Python's int conversion limit, which a frame can carry.
         raise StreamProtocolError("invalid bounded protocol JSON") from exc
 
 
