@@ -27,6 +27,12 @@ from .transformer_lab import (
 
 @dataclass(frozen=True)
 class BPEArtifact:
+    """A trained BPE decoder whose weights, codec, data and losses re-verified.
+
+    load_bpe_artifact is its intended constructor; the inference CLI and the
+    serving benchmark use only such artifacts, never unverified weights.
+    """
+
     model: DecoderLanguageModel
     corpus: TokenCorpus
     report: dict
@@ -39,6 +45,13 @@ def load_bpe_artifact(
     train_path: Path,
     validation_path: Path,
 ):
+    """Rebuild and verify a BPE training run before anything may serve from it.
+
+    Checks the report schema and CPU budget, the EOS-only tokenizer, the text
+    against corpus and codec fingerprints, the completed steps and model
+    fingerprint, and recomputes both final losses to 1e-6. Mismatches raise
+    TokenizerError; the caller's torch RNG state is left untouched.
+    """
     with report_path.open("rb") as stream:
         payload = stream.read(1024 * 1024 + 1)
     if len(payload) > 1024 * 1024:

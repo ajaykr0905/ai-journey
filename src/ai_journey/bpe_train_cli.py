@@ -17,6 +17,12 @@ from .transformer_lab import (
 
 
 def main(argv=None):
+    """Train a bounded CPU decoder on train-only BPE and publish codec and report.
+
+    --manifest (with optional --source-snapshot) verifies the exported split
+    first. Paths must be distinct; vocabulary 256-512, 1-100 steps, block 2-32,
+    64 KiB of text and 4096 tokens per partition. Errors exit with status 2.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("train", "validation", "checkpoint", "tokenizer", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
