@@ -44,6 +44,21 @@ class TokenizerCheckpointTests(unittest.TestCase):
             with self.assertRaisesRegex(TokenizerError, "duplicate"):
                 load_tokenizer(path)
 
+    def test_fingerprint_catches_state_edits_but_is_not_a_signature(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tokenizer.json"
+            save_tokenizer(path, ByteTokenizer.train("abab" * 20))
+            payload = json.loads(path.read_text())
+            payload["state"]["merges"] = payload["state"]["merges"][:1]
+            path.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(TokenizerError, "fingerprint mismatch"):
+                load_tokenizer(path)
+            # An unkeyed digest cannot tell a re-sealed edit from a saved state.
+            edited = ByteTokenizer(tuple(map(tuple, payload["state"]["merges"])))
+            payload["sha256"] = tokenizer_fingerprint(edited)
+            path.write_text(json.dumps(payload))
+            self.assertEqual(load_tokenizer(path).merges, edited.merges)
+
     def test_regex_identity_cannot_drift_from_compiled_behavior(self):
         tokenizer = RegexTokenizer()
         with self.assertRaises(AttributeError):

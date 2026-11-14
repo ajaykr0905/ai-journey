@@ -102,9 +102,9 @@ def save_tokenizer(path: Path, tokenizer) -> None:
 def load_tokenizer(path: Path):
     """Load a checkpoint only if its state is canonical and matches its fingerprint.
 
-    Files over 2 MiB, duplicate JSON fields, other schema versions and edited
-    states raise TokenizerError rather than return a tokenizer that differs from
-    the one saved.
+    Files over 2 MiB, duplicate JSON fields, other schema versions and a state
+    that no longer matches its sha256 raise TokenizerError. The fingerprint is an
+    unkeyed digest: it catches corruption, not an edit that also rewrites sha256.
     """
 
     def unique(pairs):
