@@ -58,10 +58,18 @@ class FusionComparison:
 
     @property
     def intermediate_bytes_eliminated(self) -> int:
+        """Return the intermediate write and re-read bytes that fusion removes.
+
+        Each stage but the last stops writing its result, and each stage but the
+        first stops reading its predecessor's; auxiliary reads remain.
+        """
+
         return self.unfused.workload.total_bytes - self.fused.workload.total_bytes
 
     @property
     def traffic_reduction_fraction(self) -> float:
+        """Return the eliminated bytes as a share of unfused compulsory traffic."""
+
         return self.intermediate_bytes_eliminated / self.unfused.workload.total_bytes
 
     @property

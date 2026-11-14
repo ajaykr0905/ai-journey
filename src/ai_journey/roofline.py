@@ -49,6 +49,8 @@ class KernelWorkload:
 
     @property
     def total_bytes(self) -> int:
+        """Return compulsory bytes read plus written, the roofline memory term."""
+
         return self.bytes_read + self.bytes_written
 
     @property
