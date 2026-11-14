@@ -253,7 +253,11 @@ class WaveNetBatchCursor:
         return self.dataset.contexts[indexes], self.dataset.targets[indexes]
 
     def state_dict(self) -> dict[str, int]:
-        """Epoch and offset: everything needed to resume the batch sequence."""
+        """Epoch and offset, the cursor's only mutable state.
+
+        They resume the exact batch sequence only in a cursor built with the
+        same dataset, batch size and seed, none of which is recorded here.
+        """
 
         return {"epoch": self.epoch, "offset": self.offset}
 
@@ -422,8 +426,9 @@ class HierarchicalLanguageModel(nn.Module):
     ) -> tuple[Tensor, Tensor | None]:
         """Next-character logits per context, plus mean cross-entropy if given targets.
 
-        Invalid IDs or a wrong context size raise before any computation, and
-        the stages must reduce each context to one time step (RuntimeError).
+        Invalid token IDs or a wrong context size raise before any computation;
+        targets are checked after the logits are computed. The stages must
+        reduce each context to one time step (RuntimeError).
         """
 
         if not isinstance(token_ids, Tensor) or token_ids.ndim != 2:

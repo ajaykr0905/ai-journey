@@ -68,9 +68,11 @@ class TrainingResult:
 
 @dataclass(frozen=True)
 class TrainingStep:
-    """One update's pre-update loss, clipped gradient norm and learning rate.
+    """One update's pre-update loss, applied gradient norm and learning rate.
 
-    ``step`` counts from ``start_step``, so a resumed run keeps one numbering.
+    The norm is measured after clipping when ``max_gradient_norm`` is set and
+    is the raw norm otherwise. ``step`` counts from ``start_step``, so a
+    resumed run keeps one numbering.
     """
 
     step: int
@@ -81,7 +83,11 @@ class TrainingStep:
 
 @dataclass(frozen=True)
 class CorpusSplit:
-    """Whole records split into train and validation; none appears in both."""
+    """Whole records split into train and validation by corpus position.
+
+    Each input record lands in exactly one split; duplicates are not merged,
+    so a record repeated in the corpus can appear in both.
+    """
 
     train: tuple[str, ...]
     validation: tuple[str, ...]
