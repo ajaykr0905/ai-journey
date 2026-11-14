@@ -16,6 +16,11 @@ from .lambada_evidence import read_evidence, write_evidence
 
 
 def main(argv=None) -> int:
+    """Evaluate, verify or compare LAMBADA evidence and print a JSON receipt.
+
+    Outputs may not alias an input and compare refuses evidence from different
+    rows; failures exit through argparse with status 2.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     evaluate = commands.add_parser("evaluate")
