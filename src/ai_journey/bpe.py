@@ -155,13 +155,19 @@ class ByteTokenizer:
         return cls(tuple(merges))
 
     def _encode_bytes(self, payload: bytes) -> tuple[int, ...]:
+        """Apply the lowest-ranked present merge until no ranked pair remains.
+
+        Byte values and merge ids are valid by construction, so each round skips
+        the public helpers' revalidation without changing which merge applies.
+        """
         values = tuple(payload)
+        ranks = self._ranks
         while len(values) > 1:
-            available = set(pair_counts(values)) & self._ranks.keys()
+            available = set(zip(values, values[1:])) & ranks.keys()
             if not available:
                 break
-            pair = min(available, key=self._ranks.__getitem__)
-            values = merge_pair(values, pair, 256 + self._ranks[pair])
+            pair = min(available, key=ranks.__getitem__)
+            values = _merge_known_pair(values, pair, 256 + ranks[pair])
         return values
 
     def encode_bytes(self, payload: bytes) -> tuple[int, ...]:

@@ -111,6 +111,24 @@ class ByteTokenizerTests(unittest.TestCase):
             tokenizer.encode_bytes(text.encode("utf-8")), tokenizer.encode(text)
         )
 
+    def test_encoding_applies_the_lowest_ranked_present_pair_first(self):
+        rng = random.Random(73)
+        for _ in range(20):
+            text = "".join(rng.choice("aab नम🙂 ") for _ in range(60))
+            tokenizer = ByteTokenizer.train(text * 2, vocab_size=290)
+            ranks = {pair: rank for rank, pair in enumerate(tokenizer.merges)}
+            for sample in ("", "a", text, text[::-1]):
+                values = tuple(sample.encode("utf-8"))
+                while True:
+                    present = [
+                        pair for pair in zip(values, values[1:]) if pair in ranks
+                    ]
+                    if not present:
+                        break
+                    pair = min(present, key=ranks.__getitem__)
+                    values = scan_merge(values, pair, 256 + ranks[pair])
+                self.assertEqual(tokenizer.encode(sample), values)
+
 
 class RegexTokenizerTests(unittest.TestCase):
     def test_training_respects_piece_boundaries(self):
