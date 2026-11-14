@@ -11,6 +11,10 @@ from .minhash_dedup import MinHashDedupPolicy, MinHashDedupResult
 
 
 def canonical_json_bytes(value) -> bytes:
+    """The one encoding of corpus rows, the manifest and its seal.
+
+    Values JSON cannot represent exactly, such as NaN, raise TokenizerError.
+    """
     try:
         return (
             json.dumps(
@@ -27,6 +31,7 @@ def canonical_json_bytes(value) -> bytes:
 
 
 def deduplicated_corpus_payload(result: MinHashDedupResult) -> bytes:
+    """Kept documents as canonical JSONL in id order: the bytes the manifest hashes."""
     if not isinstance(result, MinHashDedupResult):
         raise TypeError("deduplicated corpus payload requires a MinHash result")
     return b"".join(

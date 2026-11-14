@@ -7,6 +7,8 @@ from .bpe import TokenizerError
 
 @dataclass(frozen=True)
 class ClusterDecision:
+    """The document a duplicate cluster keeps (its smallest id) and those removed."""
+
     canonical_id: str
     duplicate_ids: tuple[str, ...]
 

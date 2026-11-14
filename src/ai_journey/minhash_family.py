@@ -13,6 +13,12 @@ _DOMAIN = b"ai-journey-minhash-family-v1\0"
 
 @dataclass(frozen=True)
 class MinHashFamily:
+    """Seeded affine hashes (a * x + b) mod 2**61 - 1, one per signature slot.
+
+    Coefficients come from SHA-256 of the seed rather than a runtime PRNG, so
+    signatures match across processes; 16-512 hashes and a 64-bit seed.
+    """
+
     num_hashes: int
     seed: int
 
