@@ -98,17 +98,42 @@ def check_matmul(
     worst = 0.0
     for start in range(0, left.shape[0], CHECK_ROW_BLOCK):
         rows = slice(start, start + CHECK_ROW_BLOCK)
-        observed = product[rows].astype(numpy.float64)
-        if not numpy.isfinite(observed).all():
-            raise MemoryHierarchyError("matmul product is not finite")
-        left64 = left[rows].astype(numpy.float64)
-        error = numpy.abs(observed - left64 @ right64)
-        bound = tolerance * (numpy.abs(left64) @ magnitude)
-        if bool((error > bound).any()):
-            raise MemoryHierarchyError("matmul product exceeds its rounding bound")
-        positive = bound > 0
-        worst = max(worst, float((error[positive] / bound[positive]).max(initial=0.0)))
+        ratio = _block_bound_ratio(
+            left[rows], product[rows], right64, magnitude, tolerance
+        )
+        worst = max(worst, ratio)
     return worst
+
+
+def _block_bound_ratio(
+    left: numpy.ndarray,
+    product: numpy.ndarray,
+    right64: numpy.ndarray,
+    magnitude: numpy.ndarray,
+    tolerance: float,
+) -> float:
+    """Check one row block and return its worst ``|error| / bound`` ratio.
+
+    Running each block in its own frame frees its float64 temporaries before
+    the next block starts, which keeps the check within
+    ``matmul_allocation_bytes``. The ratio is divided in place instead of
+    through masked copies: where the bound is zero a passing error is zero
+    too, so the ``0 / 0`` there is a NaN that ``fmax`` skips, and an error
+    above a zero bound divides to ``inf`` and fails.
+    """
+
+    observed = product.astype(numpy.float64)
+    if not numpy.isfinite(observed).all():
+        raise MemoryHierarchyError("matmul product is not finite")
+    left64 = left.astype(numpy.float64)
+    error = numpy.abs(observed - left64 @ right64)
+    bound = tolerance * (numpy.abs(left64) @ magnitude)
+    with numpy.errstate(divide="ignore", invalid="ignore"):
+        numpy.divide(error, bound, out=error)
+    ratio = float(numpy.fmax.reduce(error, axis=None, initial=0.0))
+    if ratio > 1.0:
+        raise MemoryHierarchyError("matmul product exceeds its rounding bound")
+    return ratio
 
 
 def matmul_allocation_bytes(m: int, n: int, k: int, dtype: str) -> int:

@@ -1,6 +1,7 @@
 import itertools
 import math
 import time
+import tracemalloc
 
 import numpy
 import pytest
@@ -118,6 +119,23 @@ def test_allocation_counts_operands_product_and_check_temporaries():
     )
     with pytest.raises(MemoryHierarchyError, match="dtype"):
         matmul_allocation_bytes(64, 48, 32, "int8")
+
+
+@pytest.mark.parametrize(
+    ("m", "n", "k", "dtype"), [(256, 1024, 16, "float32"), (200, 2048, 16, "float64")]
+)
+def test_a_measurement_stays_within_its_planned_allocation(m, n, k, dtype):
+    # Several row blocks and a wide, shallow product: a block's temporaries
+    # outliving it, or masked copies of a block, would exceed the plan.
+    tracemalloc.start()
+    try:
+        measure(m=m, n=n, k=k, dtype=dtype)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+    # 64 KiB covers Python objects and iterator buffers outside the model.
+    assert peak <= matmul_allocation_bytes(m, n, k, dtype) + (1 << 16)
 
 
 def test_host_timer_matmul_reports_a_positive_finite_rate():
