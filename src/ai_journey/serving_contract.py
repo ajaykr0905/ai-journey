@@ -72,6 +72,8 @@ class HardwareManifest:
 
     @property
     def total_device_memory_bytes(self) -> int:
+        """Declared accelerator memory across all devices, not a measurement."""
+
         return self.device_count * self.memory_bytes_per_device
 
 

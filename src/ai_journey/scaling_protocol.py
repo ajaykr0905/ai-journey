@@ -32,6 +32,13 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 @dataclass(frozen=True)
 class ScalingProtocol:
+    """A preregistered analytical scaling plan, checked end to end when built.
+
+    Construction runs every derived calculation, so excess batch overshoot or
+    an unfundable IsoFLOP size fails before a report exists; corpus admission
+    is evaluated but may still be negative.
+    """
+
     name: str
     parameter_count: int
     tokens_per_parameter: str

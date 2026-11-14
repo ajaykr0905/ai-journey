@@ -17,6 +17,13 @@ MAX_EXPERIMENT_WORK_UNITS = 100_000_000
 
 @dataclass(frozen=True)
 class GQAExperimentPlan:
+    """A controlled KV-grouping comparison on one small zero-dropout RoPE decoder.
+
+    Arms list full MHA first and then strictly fewer kv_heads, so each grouped
+    arm pairs with the same full-MHA control; size, seed, step and optimizer
+    bounds keep the job CPU-sized, and violations raise ValueError.
+    """
+
     decoder: DecoderVariantConfig
     kv_heads: tuple[int, ...]
     seeds: tuple[int, ...] = (53,)
@@ -90,9 +97,11 @@ class GQAExperimentPlan:
 
     @property
     def arms(self):
+        """Return one GQAConfig per declared kv_heads value, full MHA first."""
         return tuple(GQAConfig(self.decoder, value) for value in self.kv_heads)
 
     def to_mapping(self):
+        """Return the JSON plan with the decoder in its tagged mapping form."""
         return {
             **asdict(self),
             "decoder": model_config_mapping(self.decoder),
@@ -101,6 +110,7 @@ class GQAExperimentPlan:
         }
 
     def fingerprint(self):
+        """Return the SHA-256 of the canonical plan mapping."""
         return sha256(
             json.dumps(
                 self.to_mapping(), sort_keys=True, separators=(",", ":")
@@ -109,6 +119,11 @@ class GQAExperimentPlan:
 
 
 def gqa_experiment_plan_from_mapping(payload):
+    """Rebuild a plan from exactly its fields, JSON arrays and optimizer controls.
+
+    Missing or extra fields, non-list arrays or unknown optimizer keys raise
+    ValueError before the plan validates itself.
+    """
     if type(payload) is not dict or set(payload) != {
         field.name for field in fields(GQAExperimentPlan)
     }:

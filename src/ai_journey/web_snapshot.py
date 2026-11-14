@@ -17,6 +17,11 @@ MAX_SNAPSHOT_PAGES = 1_000
 
 @dataclass(frozen=True)
 class WebSnapshot:
+    """Verified pages with the size and SHA-256 of the exact snapshot file.
+
+    The digest is sealed into extraction evidence, binding it to its input.
+    """
+
     pages: tuple[WebPage, ...]
     artifact_bytes: int
     sha256: str

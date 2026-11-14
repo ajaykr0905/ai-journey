@@ -9,6 +9,13 @@ from .bpe import ByteTokenizer, SpecialTokenizer, TokenizerError
 
 @dataclass(frozen=True)
 class CompressionMetrics:
+    """Compression evidence that keeps byte, character and token counts explicit.
+
+    Ratios pool all documents; token_entropy_bits is the Shannon entropy of the
+    token distribution in bits per token; byte_fallback_tokens counts every
+    occurrence of an id below 256.
+    """
+
     documents: int
     utf8_bytes: int
     characters: int
@@ -20,6 +27,7 @@ class CompressionMetrics:
     token_entropy_bits: float
 
     def as_dict(self):
+        """Plain dict that replays compare with sealed reports, so keys are schema."""
         return asdict(self)
 
 

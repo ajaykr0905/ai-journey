@@ -173,12 +173,18 @@ def _sha(value, name):
 
 
 def sft_report_digest(report):
+    """Return the canonical digest of every report field except ``sha256``."""
     return canonical_digest(
         {key: value for key, value in report.items() if key != "sha256"}
     )
 
 
 def build_sft_report(result):
+    """Own, summarize, digest and validate one complete comparison result.
+
+    The result is copied through strict JSON first, so later caller mutation
+    cannot change the sealed report; failures raise SFTDataError.
+    """
     try:
         owned = json.loads(json.dumps(result, allow_nan=False))
         report = {
@@ -387,6 +393,10 @@ def validate_sft_report(report):
 
 
 def render_sft_report(report):
+    """Return the sorted, indented JSON text that is written to disk.
+
+    Validation runs first, so an inconsistent report is never rendered.
+    """
     validate_sft_report(report)
     return json.dumps(report, sort_keys=True, indent=2, allow_nan=False) + "\n"
 

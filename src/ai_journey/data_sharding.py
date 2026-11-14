@@ -9,6 +9,8 @@ from .data_cleaning import CleanedDocument
 
 @dataclass(frozen=True)
 class DataShard:
+    """One published shard; utf8_bytes counts document text, not JSONL framing."""
+
     index: int
     documents: tuple[CleanedDocument, ...]
     utf8_bytes: int

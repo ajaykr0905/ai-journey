@@ -21,10 +21,16 @@ MAX_SAMPLES = 65536
 
 
 def canonical(value):
+    """Sorted, compact, NaN-free JSON used for plan digests and byte budgets."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def unique_fields(pairs):
+    """JSON object hook that rejects a duplicate key instead of keeping the last.
+
+    A plan or report with two values for one field must not be read
+    differently by different parsers. Raises ValueError.
+    """
     result = {}
     for key, value in pairs:
         if key in result:
@@ -35,6 +41,14 @@ def unique_fields(pairs):
 
 @dataclass(frozen=True)
 class PublicMoEDDPPlan:
+    """One replicated MoE run bound to its public byte source and sampler.
+
+    Construction requires the 256-byte vocabulary, a supported sampler,
+    bounded credential-free HTTPS provenance and a canonical form within
+    64 KiB, and charges the run's compute and retained-evidence budgets, so
+    an oversized plan fails before any worker starts. Raises ValueError.
+    """
+
     run: MoEDDPConfig
     source: GPT2TrainingSource
     sampler: str = SAMPLER_V1
@@ -97,6 +111,11 @@ class PublicMoEDDPPlan:
             )
 
     def to_mapping(self):
+        """Canonical wire form; v1 plans keep exactly schema, run and source.
+
+        Leaving the sampler out of v1 preserves the bytes and digests of plans
+        recorded before v2 existed; v2 plans carry their explicit selector.
+        """
         mapping = {
             "schema": SCHEMA if self.sampler == SAMPLER_V1 else SCHEMA_V2,
             "run": self.run.to_mapping(),
@@ -107,9 +126,16 @@ class PublicMoEDDPPlan:
         return mapping
 
     def fingerprint(self):
+        """SHA-256 of the canonical form: the plan identity launches check."""
         return sha256(canonical(self.to_mapping()).encode()).hexdigest()
 
     def data_contract(self):
+        """Data-order contract that every replicated checkpoint records.
+
+        Restore and archive verification compare it with the current plan's
+        contract, so a run cannot resume or verify under another plan, sampler
+        or tail policy.
+        """
         return {
             "schema": (
                 "ai-journey-public-byte-window-v1"
@@ -125,6 +151,12 @@ class PublicMoEDDPPlan:
 
 
 def public_moe_ddp_plan_from_mapping(value):
+    """Rebuild a plan from JSON, accepting only the exact v1 or v2 field set.
+
+    A v2 plan must name the v2 sampler and a v1 plan may not name one, so a
+    plan cannot change its data order without changing its schema. Raises
+    ValueError, including for any error raised while constructing the plan.
+    """
     if type(value) is not dict:
         raise ValueError("public MoE DDP plan fields differ")
     if value.get("schema") == SCHEMA:
@@ -159,6 +191,12 @@ def public_moe_ddp_plan_from_mapping(value):
 
 
 def source_admission(plan, source):
+    """Check source bytes against ``plan.source.sha256`` and size its windows.
+
+    The bytes (at most 1 MiB) must match that declared digest and supply at
+    least one global optimizer window and at most 65536 samples. Returns the
+    counts the plan command reports; raises ValueError otherwise.
+    """
     if (
         type(source) is not bytes
         or not 1 < len(source) <= 1024 * 1024
@@ -182,6 +220,12 @@ def source_admission(plan, source):
 
 
 def read_public_moe_ddp_plan(config_path: Path, source_path: Path):
+    """Read and admit a plan and its source through bounded regular-file reads.
+
+    Reads refuse a symlinked final path and a file that changes while read;
+    duplicate JSON keys, a plan over 64 KiB, a source over 1 MiB or a source
+    that differs from its declared digest raise ValueError. Returns both.
+    """
     value = json.loads(
         _read_bytes(config_path, MAX_PLAN_BYTES), object_pairs_hook=unique_fields
     )

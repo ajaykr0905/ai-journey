@@ -5,6 +5,7 @@ import pytest
 from ai_journey.sft_dataset_identity import (
     canonical_json_bytes,
     record_id,
+    record_id_from_sha256,
     record_sha256,
 )
 from ai_journey.sft_dataset_record import DollyRecord, SFTDatasetError
@@ -25,6 +26,7 @@ def test_record_identity_is_stable_canonical_and_bounded():
     value = record()
     assert record_sha256(value) == record_sha256(value)
     assert record_id(value) == f"dolly-{record_sha256(value)[:24]}"
+    assert record_id_from_sha256(record_sha256(value)) == record_id(value)
     assert len(record_sha256(value)) == 64
 
 

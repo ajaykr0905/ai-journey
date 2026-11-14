@@ -1,6 +1,7 @@
 """Strict source records for public supervised fine-tuning datasets."""
 
 from dataclasses import dataclass
+import re
 import unicodedata
 
 
@@ -20,6 +21,8 @@ _CATEGORIES = frozenset(
         "summarization",
     }
 )
+# Every C0 control except tab and newline; one regex scan checks a whole field.
+_UNSUPPORTED_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f]")
 
 
 def normalized_text(value: str, field: str, *, allow_empty: bool = False) -> str:
@@ -32,7 +35,7 @@ def normalized_text(value: str, field: str, *, allow_empty: bool = False) -> str
         raise SFTDatasetError(f"{field} must not be empty")
     if len(text.encode("utf-8")) > 64 * 1024:
         raise SFTDatasetError(f"{field} exceeds the UTF-8 byte limit")
-    if any(ord(character) < 32 and character not in "\n\t" for character in text):
+    if _UNSUPPORTED_CONTROL.search(text):
         raise SFTDatasetError(f"{field} contains an unsupported control character")
     return text
 
@@ -61,6 +64,11 @@ class DollyRecord:
 
     @classmethod
     def from_mapping(cls, value: object) -> "DollyRecord":
+        """Build a record from one source row with exactly the four Dolly fields.
+
+        Extra or missing keys raise SFTDatasetError instead of being dropped or
+        defaulted.
+        """
         if not isinstance(value, dict) or set(value) != {
             "instruction",
             "context",

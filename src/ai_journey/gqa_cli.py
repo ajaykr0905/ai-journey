@@ -30,6 +30,11 @@ from .moe_report import canonical_moe_json
 
 
 def default_gqa_plan():
+    """Return the default CLI plan comparing 4, 2 and 1 KV heads.
+
+    The decoder is a one-layer, four-head, zero-dropout RMSNorm/SwiGLU/RoPE
+    byte model with an 8-token context.
+    """
     base = GPT2Config(
         256,
         8,
@@ -116,6 +121,12 @@ def _cache_inputs(source_report, args):
 
 
 def main(argv=None):
+    """Dispatch the plan, run, public, verify, replay and cache commands.
+
+    Outputs never replace an existing path, verify checks reports offline
+    while replays re-run training, and failures exit through argparse with
+    status 2.
+    """
     parser = _parser()
     args = parser.parse_args(argv)
     try:

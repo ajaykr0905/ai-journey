@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "name": "day-71-memory-hierarchy",
+  "dtype": "float64",
+  "seed": 71,
+  "timing": {
+    "warmup": 2,
+    "repeats": 11,
+    "target_bytes_per_sample": 33554432,
+    "max_runtime_seconds": 20
+  },
+  "stream": {
+    "kernels": ["copy", "scale", "add", "triad"],
+    "elements": [1024, 4096, 16384, 65536, 262144, 524288, 786432, 1048576, 1572864, 2097152, 4194304, 8388608]
+  },
+  "access": {
+    "elements": 8388608,
+    "stride_elements": 16
+  },
+  "matmul": {"m": 1024, "n": 1024, "k": 1024},
+  "littles_law": {
+    "latency_ns": 100,
+    "latency_note": "Stated round figure of 100 ns for one load that misses every cache level on a current client CPU, used only to illustrate Little's law. This lab does not measure latency, and the figure is not a datasheet value for this host."
+  }
+}

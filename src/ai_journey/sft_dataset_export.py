@@ -12,6 +12,11 @@ from .sft_dataset_template import render_chatml
 
 @dataclass(frozen=True)
 class SFTDatasetArtifacts:
+    """The two published payloads: message rows and ChatML rows with loss spans.
+
+    Each must be nonempty, newline-terminated, NUL-free and at most 64 MiB.
+    """
+
     dataset_jsonl: bytes
     chatml_jsonl: bytes
 
@@ -30,6 +35,7 @@ class SFTDatasetArtifacts:
                 raise SFTDatasetError(f"{name} is not bounded newline-terminated bytes")
 
     def descriptors(self) -> dict[str, dict[str, int | str]]:
+        """File name to byte count and SHA-256: the inventory the manifest seals."""
         return {
             name: {
                 "bytes": len(payload),
@@ -43,6 +49,11 @@ class SFTDatasetArtifacts:
 
 
 def export_split(split: SFTDatasetSplit) -> SFTDatasetArtifacts:
+    """Render train then validation records into both JSONL artifacts.
+
+    Rows are canonical JSON tagged with their split, so the bytes depend only on
+    the split and can be rebuilt exactly on replay.
+    """
     if not isinstance(split, SFTDatasetSplit):
         raise TypeError("split must be SFTDatasetSplit")
     dataset_rows = []

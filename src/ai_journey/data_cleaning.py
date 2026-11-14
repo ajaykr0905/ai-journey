@@ -10,6 +10,12 @@ from .data_documents import DataDocument
 
 @dataclass(frozen=True)
 class CleanedDocument:
+    """A normalized document that keeps the SHA-256 of its original text.
+
+    changed records whether normalization rewrote it, so reports count edits
+    instead of hiding them.
+    """
+
     document_id: str
     text: str
     source: str
@@ -41,6 +47,7 @@ def clean_document(document: DataDocument) -> CleanedDocument:
 def clean_documents(
     documents: tuple[DataDocument, ...],
 ) -> tuple[CleanedDocument, ...]:
+    """Clean every document or fail the batch, so no input vanishes silently."""
     if not isinstance(documents, tuple) or not documents:
         raise TokenizerError("cleaning requires nonempty document input")
     return tuple(clean_document(document) for document in documents)

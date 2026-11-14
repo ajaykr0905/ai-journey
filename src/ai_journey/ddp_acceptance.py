@@ -80,6 +80,10 @@ def _digest(value):
 
 
 def crash_recovery_digest(report):
+    """SHA-256 seal over every crash report field except ``report_sha256``.
+
+    verify_crash_recovery recomputes it, so edits made after sealing fail.
+    """
     return sha256(
         _canonical({k: v for k, v in report.items() if k != "report_sha256"}).encode()
     ).hexdigest()
@@ -505,6 +509,12 @@ def _read_json(path: Path, *, max_bytes=128 * 1024):
 
 
 def read_crash_recovery(path: Path, *, directory: Path | None = None):
+    """Read a crash report through a bounded strict JSON read and verify it.
+
+    Duplicate keys and NaN are refused, and with ``directory`` the retained
+    checkpoints and boundary witnesses are rechecked as well. Raises
+    ValueError for a malformed or inconsistent report.
+    """
     return verify_crash_recovery(_read_json(path), directory=directory)
 
 
@@ -680,6 +690,12 @@ def certify_crash_recovery(
 
 
 def exact_state(left, right) -> bool:
+    """Exact recursive equality for checkpoint state, tensors included.
+
+    Tensors must match in dtype, shape and every element, every other value
+    in exact type, dicts in keys and sequences in length and order, so restart
+    parity cannot pass on approximate or reinterpreted values.
+    """
     if isinstance(left, torch.Tensor):
         return (
             isinstance(right, torch.Tensor)

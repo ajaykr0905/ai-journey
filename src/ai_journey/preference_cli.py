@@ -49,6 +49,7 @@ def read_json(path, *, limit):
 
 
 def load_config(path):
+    """Read a protocol within CONFIG_BYTES and rebuild its validated config."""
     return preference_config_from_dict(read_json(path, limit=CONFIG_BYTES))
 
 
@@ -60,6 +61,11 @@ def _preserve_config(config, output):
 
 
 def main(argv=None):
+    """Run the configured comparison and atomically write its sealed report.
+
+    The output may not alias the config, and an invalid report never replaces
+    it; failures print ``error:`` and return 2.
+    """
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -83,6 +89,10 @@ def main(argv=None):
 
 
 def verify_main(argv=None):
+    """Exactly replay a saved report, ignoring only runtime versions.
+
+    A malformed report or any replay mismatch prints ``error:`` and returns 2.
+    """
     parser = argparse.ArgumentParser(
         description="Exactly replay a bounded CPU preference comparison.",
         allow_abbrev=False,

@@ -56,10 +56,12 @@ class LayerKV:
 
     @property
     def keys(self) -> Tensor:
+        """Return a fresh copy, so callers can never mutate the cached keys."""
         return self._keys.clone()
 
     @property
     def values(self) -> Tensor:
+        """Return a fresh copy, so callers can never mutate the cached values."""
         return self._values.clone()
 
 
@@ -112,18 +114,22 @@ class DecoderCache:
 
     @property
     def tokens(self) -> Tensor:
+        """Return a copy of the token history the cached state was built from."""
         return self._tokens.clone()
 
     @property
     def layers(self) -> tuple[LayerKV, ...]:
+        """Return independent per-layer copies; the cache's own state stays private."""
         return tuple(LayerKV(layer._keys, layer._values) for layer in self._layers)
 
     @property
     def config_digest(self) -> str:
+        """Return the config fingerprint a model must match before reusing the cache."""
         return self._config_digest
 
     @property
     def model_digest(self) -> str:
+        """Return the weight digest that rejects reuse after any parameter change."""
         return self._model_digest
 
 

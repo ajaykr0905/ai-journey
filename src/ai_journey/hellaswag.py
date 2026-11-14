@@ -53,6 +53,12 @@ class HellaSwagExample:
 
     @classmethod
     def from_mapping(cls, payload: dict) -> "HellaSwagExample":
+        """Validate one raw dataset row so no malformed row reaches scoring.
+
+        Fields must match exactly, ctx must equal ctx_a joined to ctx_b, the
+        four endings must differ, labels may be 0-3 or "0"-"3", and the row must
+        come from a validation split; violations raise HellaSwagError.
+        """
         if not isinstance(payload, dict) or set(payload) != _EXAMPLE_FIELDS:
             raise HellaSwagError("HellaSwag example fields do not match")
         index = payload["ind"]
@@ -115,10 +121,12 @@ class HellaSwagExample:
 
     @property
     def canonical_context(self) -> str:
+        """Return ctx_a and ctx_b joined by one space, the prompt before endings."""
         return f"{self.context_a.rstrip()} {self.context_b.lstrip()}"
 
     @property
     def digest(self) -> str:
+        """Return the SHA-256 of every validated field, the row's content identity."""
         payload = {
             "index": self.index,
             "activity_label": self.activity_label,
@@ -153,6 +161,11 @@ class HellaSwagSource:
 
     @classmethod
     def from_mapping(cls, payload: dict) -> "HellaSwagSource":
+        """Validate the pinned source identity or raise HellaSwagError.
+
+        Fields must match exactly, digests must be lowercase hex, sizes positive
+        and the license MIT.
+        """
         fields = {
             "repository",
             "revision",
@@ -188,6 +201,11 @@ class HellaSwagSource:
         return cls(**payload)
 
     def verify_sample(self, source: bytes) -> None:
+        """Reject a dataset response whose size or SHA-256 differs from the pin.
+
+        Evaluation checks this before parsing, so a changed upstream response
+        cannot silently change the scored rows.
+        """
         if not isinstance(source, bytes):
             raise TypeError("sample response must be bytes")
         if (
@@ -212,6 +230,11 @@ class HellaSwagProtocol:
 
     @classmethod
     def from_mapping(cls, payload: dict) -> "HellaSwagProtocol":
+        """Validate a schema-1 protocol whose slice fits the validation set.
+
+        Each control has a budget (up to 1000 rows, 16 shards and 100 to 10000
+        bootstrap samples); violations raise HellaSwagError.
+        """
         fields = {
             "schema_version",
             "source",
@@ -259,6 +282,7 @@ class HellaSwagProtocol:
 
     @property
     def fingerprint(self) -> str:
+        """Return the SHA-256 of the canonical protocol mapping that runs record."""
         payload = protocol_mapping(self)
         return sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -266,6 +290,7 @@ class HellaSwagProtocol:
 
 
 def protocol_mapping(protocol: HellaSwagProtocol) -> dict:
+    """Return the schema-1 JSON form that fingerprints and sealed evidence use."""
     if not isinstance(protocol, HellaSwagProtocol):
         raise TypeError("protocol must be HellaSwagProtocol")
     return {
@@ -362,6 +387,10 @@ def select_records(
 
 
 def records_digest(records) -> str:
+    """Return one digest over each selected row's index and example digest.
+
+    Evidence records it, so the scored slice cannot be swapped unnoticed.
+    """
     records = tuple(records)
     if not records or any(
         not isinstance(record, HellaSwagRecord) for record in records

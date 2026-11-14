@@ -3,12 +3,20 @@
 from collections import Counter
 from dataclasses import dataclass
 
-from .sft_dataset_identity import record_id, record_sha256
+from .sft_dataset_identity import record_id, record_id_from_sha256, record_sha256
 from .sft_dataset_record import DollyRecord, SFTDatasetError
 
 
 @dataclass(frozen=True)
 class SFTDedupResult:
+    """Unique records sorted by identity, with counts that must reconcile.
+
+    duplicate_counts holds (record_id, occurrences) pairs. Construction raises
+    SFTDatasetError unless input_records is kept plus duplicate records and the
+    repeats, occurrences minus one per pair, sum to duplicate_records; pair ids
+    are not matched against the records.
+    """
+
     records: tuple[DollyRecord, ...]
     input_records: int
     duplicate_records: int
@@ -35,6 +43,11 @@ class SFTDedupResult:
 
 
 def deduplicate_records(records: tuple[DollyRecord, ...]) -> SFTDedupResult:
+    """Drop exact duplicates by content identity, independently of input order.
+
+    Records whose normalized fields hash alike are duplicates; one per digest is
+    kept, sorted by record_id.
+    """
     if (
         not isinstance(records, tuple)
         or not records
@@ -47,10 +60,12 @@ def deduplicate_records(records: tuple[DollyRecord, ...]) -> SFTDedupResult:
         digest = record_sha256(record)
         counts[digest] += 1
         by_digest.setdefault(digest, record)
-    unique = tuple(sorted(by_digest.values(), key=record_id))
+    unique = tuple(
+        by_digest[digest] for digest in sorted(by_digest, key=record_id_from_sha256)
+    )
     duplicate_counts = tuple(
         sorted(
-            (record_id(by_digest[digest]), count)
+            (record_id_from_sha256(digest), count)
             for digest, count in counts.items()
             if count > 1
         )

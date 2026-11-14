@@ -16,6 +16,12 @@ from .transformer_lab import DecoderLanguageModel
 
 @dataclass(frozen=True)
 class DocumentLikelihood:
+    """One document's natural-log losses, with content and closing EOS kept apart.
+
+    utf8_bytes and codepoints describe the text itself, so EOS never inflates
+    the bits-per-byte denominators that summaries compute.
+    """
+
     text_sha256: str
     utf8_bytes: int
     codepoints: int

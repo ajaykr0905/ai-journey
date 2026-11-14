@@ -117,6 +117,15 @@ def launch_training(
     journal_directory: Path | None = None,
     sampler=SAMPLER_V1,
 ) -> list[dict]:
+    """Run one supervised CPU/Gloo training job in owned worker processes.
+
+    Inputs pass preflight first, and worker outputs, the checkpoint and the
+    journal may not alias inputs or each other. Failure injection can make a
+    chosen rank exit, crash, stall, or break gradient finiteness or schedule
+    agreement. A failed rank or the deadline raises WorkerFailure or
+    WorkerTimeout carrying when each worker exited and was reaped. Returns
+    each rank's receipt.
+    """
     import json
 
     validate_sampler(sampler)

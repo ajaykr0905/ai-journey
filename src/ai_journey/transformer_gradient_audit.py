@@ -14,6 +14,12 @@ from .transformer_lab import DecoderLanguageModel, TransformerConfig
 
 @dataclass(frozen=True)
 class TransformerGradientAudit:
+    """Largest gaps between manual-dlogit and native autograd for one seed.
+
+    ``passed`` is True only when the loss and every parameter error are finite
+    and within tolerance.
+    """
+
     seed: int
     loss_error: float
     parameter_errors: dict[str, float]
@@ -21,6 +27,7 @@ class TransformerGradientAudit:
     passed: bool
 
     def to_dict(self) -> dict:
+        """Return the audit as JSON-ready data for evidence."""
         return asdict(self)
 
 

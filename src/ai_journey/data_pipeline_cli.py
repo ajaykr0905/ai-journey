@@ -46,6 +46,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    """Run build, verify or accept and print token totals; errors exit with 2.
+
+    build refuses an output path that aliases the snapshot or config.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

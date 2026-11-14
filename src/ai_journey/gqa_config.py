@@ -12,6 +12,14 @@ from .moe_config import MoEConfig, expected_moe_parameter_count
 
 @dataclass(frozen=True)
 class GQAConfig:
+    """A RoPE dense or MoE decoder whose query heads share kv_heads K/V heads.
+
+    kv_heads must divide the query head count, from one shared head up to one
+    per query head (full MHA, the experiments' control arm), and only rotary
+    decoders qualify because grouped attention applies RoPE; violations raise
+    TypeError or ValueError.
+    """
+
     decoder: DecoderVariantConfig | MoEConfig
     kv_heads: int
 
@@ -41,9 +49,11 @@ class GQAConfig:
 
     @property
     def expert_count(self):
+        """Return the MoE expert count, or 0 for a dense decoder."""
         return self.decoder.expert_count if isinstance(self.decoder, MoEConfig) else 0
 
     def to_mapping(self):
+        """Return the schema-1 mapping whose decoder kind tells dense from MoE."""
         return {
             "schema_version": 1,
             "decoder": {
@@ -58,6 +68,7 @@ class GQAConfig:
         }
 
     def fingerprint(self):
+        """Return a domain-separated digest of the decoder identity and kv_heads."""
         payload = {"decoder": self.decoder.fingerprint(), "kv_heads": self.kv_heads}
         return sha256(
             b"grouped-query-v1\0"
@@ -66,6 +77,11 @@ class GQAConfig:
 
 
 def gqa_config_from_mapping(payload: Mapping) -> GQAConfig:
+    """Rebuild a config from exactly its schema-1 fields and tagged decoder.
+
+    Extra or missing fields, another schema or an unknown decoder kind raise
+    ValueError.
+    """
     if (
         not isinstance(payload, Mapping)
         or set(payload) != {"schema_version", "decoder", "kv_heads"}
@@ -85,6 +101,11 @@ def gqa_config_from_mapping(payload: Mapping) -> GQAConfig:
 
 
 def expected_gqa_parameter_count(config: GQAConfig) -> int:
+    """Return the exact parameter count without allocating a model.
+
+    It adjusts the wrapped decoder's count for K and V projections, weights
+    and biases, that are kv_heads wide instead of full width.
+    """
     if not isinstance(config, GQAConfig):
         raise TypeError("config must be GQAConfig")
     base = (

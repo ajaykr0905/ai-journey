@@ -37,6 +37,19 @@ def test_record_rejects_unknown_fields_categories_controls_and_oversize_text():
         record(response="x" * (64 * 1024 + 1))
 
 
+def test_only_tab_and_newline_controls_survive_normalization():
+    for code in range(32):
+        character = chr(code)
+        if character in "\t\n\r":
+            assert normalized_text(f"a{character}b", "value") == (
+                "a\nb" if character == "\r" else f"a{character}b"
+            )
+        else:
+            with pytest.raises(SFTDatasetError, match="control"):
+                normalized_text(f"a{character}b", "value")
+    assert normalized_text("a\x7f\x85b", "value") == "a\x7f\x85b"
+
+
 def test_mapping_constructor_preserves_the_strict_schema():
     value = record()
     assert DollyRecord.from_mapping(value.__dict__) == value

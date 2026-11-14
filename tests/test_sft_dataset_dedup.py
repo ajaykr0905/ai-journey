@@ -43,3 +43,9 @@ def test_deduplication_rejects_empty_or_unvalidated_inputs():
 def test_dedup_result_rejects_inconsistent_metrics():
     with pytest.raises(SFTDatasetError, match="reconcile"):
         SFTDedupResult((record(1),), 2, 0, ())
+
+
+def test_dedup_result_requires_repeats_to_sum_to_removed_records():
+    value = record(1)
+    with pytest.raises(SFTDatasetError, match="duplicate evidence"):
+        SFTDedupResult((value,), 3, 2, ((record_id(value), 2),))

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import gc
 import sys
 import unittest
+import weakref
 from dataclasses import replace
 from math import exp, tanh
 from pathlib import Path
@@ -160,6 +162,22 @@ class GraphTests(unittest.TestCase):
         value._parents = (value,)
         with self.assertRaises(GraphCycleError):
             topological_sort(value)
+
+    def test_dropped_graph_is_freed_without_the_cycle_collector(self) -> None:
+        leaf = Value(0.5)
+        output = ((leaf * 2.0 + 1.0) ** 2.0 / 3.0 - leaf).exp().tanh().relu()
+        output.backward()
+        nodes = [weakref.ref(node) for node in topological_sort(output)]
+        enabled = gc.isenabled()
+        gc.disable()
+        try:
+            del output
+            alive = [ref() for ref in nodes if ref() is not None]
+        finally:
+            if enabled:
+                gc.enable()
+        self.assertEqual(alive, [leaf])
+        self.assertNotEqual(leaf.grad, 0.0)
 
     def test_zero_grad_clears_the_whole_reachable_graph(self) -> None:
         value = Value(2.0)

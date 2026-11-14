@@ -43,6 +43,7 @@ def test_even_resealed_tampering_cannot_change_derived_results_or_work_coverage(
             "token_received_ns"
         ].__setitem__(0, 0),
         lambda changed: changed["measurement"]["measured"].pop(),
+        lambda changed: changed["measurement"].update(created_at_utc=0),
     ):
         changed = copy.deepcopy(evidence)
         mutate(changed)

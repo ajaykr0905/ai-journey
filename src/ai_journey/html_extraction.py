@@ -69,6 +69,12 @@ _VOID_TAGS = {
 
 @dataclass(frozen=True)
 class ExtractedPage:
+    """Visible text as normalized lines, plus the page title collected on its own.
+
+    text_characters and text_lines measure the normalized text that extraction
+    policies threshold.
+    """
+
     url: str
     title: str | None
     text: str

@@ -17,6 +17,13 @@ UNCERTAINTY_POLICY = (
 
 
 def training_route_pressure(arm, config):
+    """Sum attempted, accepted and dropped routes over one arm's training trace.
+
+    The dropped fraction divides by attempted routes and is None when no
+    route was attempted, rather than a misleading zero. Each routing row is
+    validated first (ValueError).
+    """
+
     rows = [stats for step in arm["trace"] for stats in step["routing"]]
     totals = [
         validate_moe_routing(row, expert_count=config.expert_count) for row in rows
@@ -34,6 +41,13 @@ def training_route_pressure(arm, config):
 
 
 def summarize_moe_trials(plan, trials):
+    """Describe held-out NLL and paired per-seed deltas against the baseline.
+
+    Every declared seed must appear in order with the same plan, document
+    exposure and held-out coverage, so each delta compares like with like;
+    the deltas stay descriptive (UNCERTAINTY_POLICY). Raises ValueError.
+    """
+
     if type(trials) is not list or [row.get("seed") for row in trials] != list(
         plan.seeds
     ):
@@ -105,6 +119,12 @@ def summarize_moe_trials(plan, trials):
 
 
 def assemble_moe_comparison(plan, trials):
+    """Seal the trials, their summary and the CPU runtime into one report.
+
+    The digest shows internal consistency only; exact replay against the
+    source bytes is a separate check.
+    """
+
     report = {
         "schema": MOE_REPORT_SCHEMA,
         "plan": plan.to_mapping(),
@@ -124,6 +144,8 @@ def assemble_moe_comparison(plan, trials):
 
 
 def run_moe_document_comparison(plan, train_bytes, heldout_bytes):
+    """Train and score every arm once per declared seed, then seal the report."""
+
     trials = [
         run_moe_document_trial(plan, train_bytes, heldout_bytes, seed=seed)
         for seed in plan.seeds

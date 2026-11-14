@@ -48,6 +48,11 @@ class LoRAConfig:
 
     @property
     def scaling(self):
+        """Return alpha / rank, the multiplier on every low-rank update.
+
+        The comparison labs set alpha to rank times adapter_scale, which holds
+        this multiplier fixed across ranks.
+        """
         return self.alpha / self.rank
 
 
@@ -93,12 +98,19 @@ class LoRALinear(nn.Module):
 
     @property
     def bias(self):
+        """Expose the frozen base bias so the adapter keeps nn.Linear's surface."""
         return self.base.bias
 
     def delta_weight(self):
+        """Return the scaled dense update B @ A that merging folds into the base."""
         return (self.lora_b @ self.lora_a) * self.config.scaling
 
     def forward(self, inputs):
+        """Add the scaled low-rank update to the frozen projection's output.
+
+        Dropout applies only to the adapter branch, and the dense update is
+        never materialized here.
+        """
         update = F.linear(F.linear(self.dropout(inputs), self.lora_a), self.lora_b)
         return self.base(inputs) + update * self.config.scaling
 

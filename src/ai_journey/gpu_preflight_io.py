@@ -23,6 +23,11 @@ def _invalid_constant(value):
 
 
 def read_gpu_json(path: Path) -> dict:
+    """Read one preflight JSON object through a bounded non-symlink file read.
+
+    Duplicate keys, NaN or Infinity, files over 1 MiB and non-object payloads
+    raise ValueError.
+    """
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     descriptor = os.open(path, flags)
     with os.fdopen(descriptor, "rb") as stream:
@@ -44,6 +49,12 @@ def read_gpu_json(path: Path) -> dict:
 
 
 def write_gpu_json(path: Path, payload: dict):
+    """Atomically publish a preflight record as sorted, indented JSON.
+
+    The record is fsynced to a temporary sibling, renamed into place and its
+    directory fsynced. Payloads over 1 MiB and non-regular or symlinked
+    destinations raise ValueError.
+    """
     raw = (
         json.dumps(payload, sort_keys=True, indent=2, allow_nan=False) + "\n"
     ).encode()

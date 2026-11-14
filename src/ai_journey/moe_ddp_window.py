@@ -10,6 +10,13 @@ from .moe_ddp_resources import require_moe_ddp_budget
 
 
 def validate_moe_ddp_window(window, config):
+    """Admit one rank's whole optimizer window and count its eligible targets.
+
+    Every declared microbatch must be a CPU (inputs, targets, mask) triple of
+    the run's shape and dtypes, with inputs and eligible targets inside the
+    vocabulary. Summed over ranks, the count is the global loss denominator.
+    Raises ValueError otherwise.
+    """
     require_moe_ddp_budget(config)
     if type(window) is not tuple or len(window) != config.accumulation_steps:
         raise ValueError("MoE DDP window must contain every declared microbatch")
@@ -43,6 +50,13 @@ def validate_moe_ddp_window(window, config):
 
 
 class MoEOptimizerWindow(nn.Module):
+    """DDP-wrapped module whose single forward runs a whole optimizer window.
+
+    Running every microbatch inside one forward gives the DDP reducer one
+    iteration per update, so gradients are reduced once over the complete
+    window rather than once per microbatch.
+    """
+
     def __init__(self, decoder, config):
         super().__init__()
         if type(decoder) is not MoEDecoderModel or decoder.config != config.model:
@@ -50,6 +64,12 @@ class MoEOptimizerWindow(nn.Module):
         self.decoder, self.config = decoder, config
 
     def forward(self, window):
+        """Return the window's CE sum, router statistics and expert counts.
+
+        Forward hooks must observe every live router call, so the caller can
+        weight balance and router z losses by the global token count. Raises
+        ValueError for an inadmissible window or a missed router forward.
+        """
         count = validate_moe_ddp_window(window, self.config)
         layers = self.config.model.moe_layers
         captured = {layer: [] for layer in layers}

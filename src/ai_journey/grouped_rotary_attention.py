@@ -48,6 +48,11 @@ class GroupedRotarySelfAttention(nn.Module):
         self.resid_dropout = nn.Dropout(config.residual_dropout)
 
     def forward(self, inputs: Tensor) -> Tensor:
+        """Return attention output for a whole sequence, discarding K/V state.
+
+        Non-finite inputs, projections, scores or outputs, or work beyond the
+        score and cache budgets, raise ValueError.
+        """
         return self._forward(inputs)[0]
 
     def forward_with_cache(
@@ -57,6 +62,12 @@ class GroupedRotarySelfAttention(nn.Module):
         past_key: Tensor | None = None,
         past_value: Tensor | None = None,
     ):
+        """Return output plus compact K/V caches for incremental decoding.
+
+        New keys are rotated at the cached offset and appended; returned caches
+        keep only the kv_heads heads, never expanded per query head, in their
+        own storage. Training mode raises ValueError.
+        """
         if any(module.training for module in self.modules()):
             raise ValueError("cached grouped attention requires evaluation mode")
         return self._forward(

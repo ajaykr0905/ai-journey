@@ -10,6 +10,12 @@ from .minhash_similarity import exact_jaccard
 
 @dataclass(frozen=True)
 class CandidateAssessment:
+    """One LSH candidate pair with its MinHash estimate and exact shingle Jaccard.
+
+    duplicate compares the exact Jaccard with the threshold, never the estimate,
+    so LSH only proposes pairs and cannot remove a document by itself.
+    """
+
     left_id: str
     right_id: str
     minhash_similarity: float

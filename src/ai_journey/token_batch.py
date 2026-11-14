@@ -9,6 +9,12 @@ from .bpe import SpecialTokenizer, TokenizerError
 
 @dataclass(frozen=True)
 class EncodedBatch:
+    """Right-padded ids with true lengths and the validity mask they imply.
+
+    Padding reuses a real vocabulary id, so lengths, not pad values, mark where
+    each row ends and a genuine zero-byte token is never taken for padding.
+    """
+
     token_ids: torch.Tensor
     lengths: torch.Tensor
     valid: torch.Tensor
@@ -23,6 +29,12 @@ def encode_batch(
     truncation="error",
     allowed=frozenset(),
 ) -> EncodedBatch:
+    """Encode 1 to 64 texts into one right-padded decoder batch.
+
+    Over-long rows raise TokenizerError unless truncation is "left" (keep the
+    last tokens) or "right"; empty encodings, a pad_id outside the vocabulary
+    and max_tokens outside [1, 4096] raise too. Special markers need allowed.
+    """
     if not isinstance(texts, tuple) or not 1 <= len(texts) <= 64:
         raise TokenizerError("batch must contain 1..64 texts")
     if type(pad_id) is not int or not 0 <= pad_id < tokenizer.vocab_size:
@@ -58,6 +70,11 @@ def encode_batch(
 
 
 def decode_batch(tokenizer, batch: EncodedBatch) -> tuple[str, ...]:
+    """Decode each row up to its length once the batch proves self-consistent.
+
+    Wrong dtypes, shapes or devices, out-of-range lengths and a mask that
+    disagrees with lengths raise TokenizerError, so padding never decodes.
+    """
     if not isinstance(batch, EncodedBatch):
         raise TypeError("batch must be EncodedBatch")
     values, lengths, valid = batch.token_ids, batch.lengths, batch.valid

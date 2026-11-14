@@ -11,6 +11,12 @@ from .sft_dataset_record import DollyRecord, SFTDatasetError
 
 @dataclass(frozen=True)
 class SFTDatasetSplit:
+    """Disjoint train and validation records, each sorted by identity.
+
+    An empty partition, unsorted ids or a shared content identity raise
+    SFTDatasetError.
+    """
+
     train: tuple[DollyRecord, ...]
     validation: tuple[DollyRecord, ...]
 
@@ -36,6 +42,11 @@ def _split_rank(record: DollyRecord, seed: int) -> str:
 def split_records(
     records: tuple[DollyRecord, ...], *, validation_count: int, seed: int
 ) -> SFTDatasetSplit:
+    """Hold out validation_count records by category quota and seeded rank.
+
+    Every category keeps a validation record; ranks hash in a "split:" domain,
+    so they stay independent of selection ranks even if the seeds match.
+    """
     if (
         not isinstance(records, tuple)
         or not records

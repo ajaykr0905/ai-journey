@@ -1,3 +1,5 @@
+from collections import Counter
+import random
 import unittest
 
 from ai_journey.bpe import (
@@ -7,7 +9,23 @@ from ai_journey.bpe import (
     ByteTokenizer,
     RegexTokenizer,
     SpecialTokenizer,
+    _merge_weighted_streams,
+    _weighted_pair_counts,
 )
+
+
+def scan_merge(values, pair, replacement):
+    """Reference merge that inspects one position at a time, left to right."""
+    output = []
+    index = 0
+    while index < len(values):
+        if tuple(values[index : index + 2]) == pair:
+            output.append(replacement)
+            index += 2
+        else:
+            output.append(values[index])
+            index += 1
+    return tuple(output)
 
 
 class PairPrimitiveTests(unittest.TestCase):
@@ -23,6 +41,43 @@ class PairPrimitiveTests(unittest.TestCase):
         for values in ([True], [-1], [1.0]):
             with self.assertRaises(TokenizerError):
                 pair_counts(values)
+
+    def test_merge_matches_one_position_scan_on_random_and_edge_streams(self):
+        rng = random.Random(71)
+        streams = [(), (1,), (1, 2), (2, 1), (1, 1, 1), (1, 1, 1, 1), (3, 1)]
+        streams += [(1, 3, 1), (2, 1, 2, 1, 1)]
+        streams += [
+            tuple(rng.choice((1, 1, 2, 3)) for _ in range(rng.randrange(40)))
+            for _ in range(300)
+        ]
+        for stream in streams:
+            for pair in ((1, 1), (1, 2), (2, 1), (1, 3), (1, 4)):
+                self.assertEqual(
+                    merge_pair(stream, pair, 256), scan_merge(stream, pair, 256)
+                )
+
+    def test_weighted_helpers_match_explicitly_expanded_streams(self):
+        rng = random.Random(72)
+        for _ in range(100):
+            streams = Counter(
+                {
+                    tuple(rng.choice((1, 2, 3)) for _ in range(rng.randrange(12))): (
+                        rng.randint(1, 4)
+                    )
+                    for _ in range(rng.randint(1, 8))
+                }
+            )
+            pair = (rng.choice((1, 2, 3)), rng.choice((1, 2, 3)))
+            counts = Counter()
+            merged = Counter()
+            for stream, weight in streams.items():
+                for _ in range(weight):
+                    counts.update(zip(stream, stream[1:]))
+                    merged[scan_merge(stream, pair, 256)] += 1
+            self.assertEqual(dict(_weighted_pair_counts(streams)), dict(counts))
+            self.assertEqual(
+                dict(_merge_weighted_streams(streams, pair, 256)), dict(merged)
+            )
 
 
 class ByteTokenizerTests(unittest.TestCase):
@@ -55,6 +110,24 @@ class ByteTokenizerTests(unittest.TestCase):
         self.assertEqual(
             tokenizer.encode_bytes(text.encode("utf-8")), tokenizer.encode(text)
         )
+
+    def test_encoding_applies_the_lowest_ranked_present_pair_first(self):
+        rng = random.Random(73)
+        for _ in range(20):
+            text = "".join(rng.choice("aab नम🙂 ") for _ in range(60))
+            tokenizer = ByteTokenizer.train(text * 2, vocab_size=290)
+            ranks = {pair: rank for rank, pair in enumerate(tokenizer.merges)}
+            for sample in ("", "a", text, text[::-1]):
+                values = tuple(sample.encode("utf-8"))
+                while True:
+                    present = [
+                        pair for pair in zip(values, values[1:]) if pair in ranks
+                    ]
+                    if not present:
+                        break
+                    pair = min(present, key=ranks.__getitem__)
+                    values = scan_merge(values, pair, 256 + ranks[pair])
+                self.assertEqual(tokenizer.encode(sample), values)
 
 
 class RegexTokenizerTests(unittest.TestCase):
@@ -91,6 +164,14 @@ class SpecialTokenizerTests(unittest.TestCase):
         self.assertEqual(tokenizer.decode(values), text)
         ordinary = tokenizer.tokenizer.encode(text)
         self.assertNotIn(256, ordinary)
+
+    def test_markers_match_leftmost_first_then_longest(self):
+        tokenizer = SpecialTokenizer(ByteTokenizer(), ("ab", "bcd"))
+        for allowed in (frozenset(tokenizer.names), frozenset({"ab"})):
+            # The earlier "ab" beats the longer "bcd", whose rest stays ordinary.
+            self.assertEqual(tokenizer.encode("abcd", allowed=allowed), (256, 99, 100))
+        with self.assertRaisesRegex(TokenizerError, "authorization"):
+            tokenizer.encode("bcd", allowed=frozenset({"ab"}))
 
     def test_registered_ids_do_not_collide_with_merged_tokens(self):
         base = ByteTokenizer.train("abab" * 20)

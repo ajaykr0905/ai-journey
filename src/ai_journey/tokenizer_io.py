@@ -8,6 +8,11 @@ from .bpe import ByteTokenizer, RegexTokenizer, SpecialTokenizer, TokenizerError
 
 
 def tokenizer_state(tokenizer) -> dict:
+    """Canonical JSON-safe description that fingerprints and checkpoints cover.
+
+    Records the kind, merges, regex pattern and special names, which together
+    fix every id; unsupported tokenizer types raise TypeError.
+    """
     if isinstance(tokenizer, SpecialTokenizer):
         return {
             "kind": "special",
@@ -26,6 +31,7 @@ def tokenizer_state(tokenizer) -> dict:
 
 
 def tokenizer_fingerprint(tokenizer) -> str:
+    """SHA-256 of the canonical state, binding reports and streams to one vocabulary."""
     return sha256(
         json.dumps(
             tokenizer_state(tokenizer),
@@ -73,6 +79,11 @@ def tokenizer_from_state(state):
 
 
 def save_tokenizer(path: Path, tokenizer) -> None:
+    """Write a versioned checkpoint with its fingerprint via an atomic replace.
+
+    The temporary file and directory are fsynced, so a crash leaves the old or
+    the new checkpoint, never a truncated one.
+    """
     # Publication uses the shared durable writer; identity does not load models.
     from .serving_benchmark import _publish
 
@@ -89,6 +100,13 @@ def save_tokenizer(path: Path, tokenizer) -> None:
 
 
 def load_tokenizer(path: Path):
+    """Load a checkpoint only if its state is canonical and matches its fingerprint.
+
+    Files over 2 MiB, duplicate JSON fields, other schema versions and a state
+    that no longer matches its sha256 raise TokenizerError. The fingerprint is an
+    unkeyed digest: it catches corruption, not an edit that also rewrites sha256.
+    """
+
     def unique(pairs):
         result = {}
         for key, value in pairs:

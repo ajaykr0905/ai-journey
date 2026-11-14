@@ -19,6 +19,11 @@ SAMPLERS = (SAMPLER_V1, SAMPLER_V2)
 
 
 def validate_sampler(sampler):
+    """Return a supported dense sampler name, or raise ValueError.
+
+    The sampler is part of a run's replay identity, so an unknown name is
+    refused rather than falling back to a default order.
+    """
     if type(sampler) is not str or sampler not in SAMPLERS:
         raise ValueError("unsupported dense DDP sampler")
     return sampler
@@ -105,6 +110,12 @@ def shard_indices(
 
 @dataclass(frozen=True)
 class BatchPlan:
+    """Global-batch arithmetic for one epoch of complete optimizer updates.
+
+    Only complete global batches are trained; the remainder is discarded and
+    reported. Raises ValueError when the samples cannot supply one update.
+    """
+
     sample_count: int
     world_size: int
     micro_batch_size: int

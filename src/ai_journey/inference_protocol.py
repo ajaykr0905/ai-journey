@@ -12,6 +12,14 @@ from .inference_speculative import SpeculativePlan
 
 @dataclass(frozen=True)
 class InferenceProtocol:
+    """Preregistered serving plan from which every report field is derived.
+
+    Construction validates the whole plan, including kv_heads dividing
+    query_heads and every request fitting the context, so a bad protocol
+    fails before a report exists; violations raise InferenceCapacityError or
+    TypeError.
+    """
+
     name: str
     parameter_count: int
     layers: int
@@ -52,6 +60,8 @@ class InferenceProtocol:
 
     @property
     def kv_layout(self) -> KVCacheLayout:
+        """Return the dense kv_heads cache with one full-context row per request."""
+
         return KVCacheLayout(
             self.layers,
             self.kv_heads,
@@ -63,6 +73,8 @@ class InferenceProtocol:
 
     @property
     def device_budget(self) -> DeviceMemoryBudget:
+        """Return the declared device split that admission is charged against."""
+
         return DeviceMemoryBudget(
             self.total_device_bytes,
             self.model_bytes,

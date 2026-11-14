@@ -171,6 +171,7 @@ def verify_certification_report(report: dict) -> None:
 
 
 def build_certification_report(result: dict) -> dict:
+    """Seal a certification result with its digest, then verify the report."""
     # Canonical roundtrip owns nested data instead of aliasing the caller's dict.
     core = json.loads(json.dumps({"schema": SCHEMA, "result": result}, allow_nan=False))
     report = {**core, "report_sha256": _fingerprint(core)}
@@ -179,6 +180,11 @@ def build_certification_report(result: dict) -> dict:
 
 
 def write_certification_report(path: Path, report: dict) -> None:
+    """Verify, then atomically replace the report at ``path``.
+
+    A failed directory flush still raises after the replace, so callers learn
+    that durability is uncertain.
+    """
     verify_certification_report(report)
     rendered = json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -208,6 +214,8 @@ def write_certification_report(path: Path, report: dict) -> None:
 
 
 def load_certification_report(path: Path) -> dict:
+    """Read at most 4,000,000 bytes, reject duplicate keys, then verify the report."""
+
     def reject_duplicates(pairs):
         result = {}
         for key, value in pairs:

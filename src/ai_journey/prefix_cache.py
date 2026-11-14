@@ -31,6 +31,14 @@ CONTEXT_POLICY = "left-truncate-reset-positions-v1"
 
 @dataclass(frozen=True)
 class PrefixIdentity:
+    """Everything a cached prefix must share with the model that reuses it.
+
+    Entries are keyed by this identity plus their tokens, so a snapshot is
+    reused only under the same namespace, weights, architecture, dtype, KV
+    geometry and context policy. Raises ValueError for invalid or unbounded
+    fields.
+    """
+
     namespace: str
     model_sha256: str
     architecture_sha256: str
@@ -69,6 +77,11 @@ class PrefixIdentity:
                 raise ValueError("prefix dimensions exceed their bounded contract")
 
     def bytes_for(self, length, *, logits=True):
+        """Exact snapshot bytes for ``length`` positions, optionally with logits.
+
+        The store reserves this amount before copying and checks the copy's
+        storage against it. Raises ValueError for a length outside the context.
+        """
         if type(length) is not int or not 1 <= length <= self.context_length:
             raise ValueError("prefix length must fit the model context")
         element_size = 8 if self.dtype == torch.float64 else 4
@@ -104,6 +117,12 @@ def prefix_identity(model, *, namespace="default"):
 
 @dataclass(frozen=True)
 class PrefixMatch:
+    """An isolated, charged copy of the longest usable cached prefix.
+
+    ``last_logits`` is present only when a cached entry equals the request's
+    tokens exactly, because no logits are kept for interior positions.
+    """
+
     cache: KVCache
     last_logits: torch.Tensor | None
     prefix_length: int
@@ -323,6 +342,7 @@ class PrefixKVStore:
             self._resident = 0
 
     def snapshot(self):
+        """Point-in-time counters and byte accounting for metrics and reports."""
         with self._lock:
             return {
                 **self._counts,

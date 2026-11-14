@@ -5,6 +5,11 @@ from .moe_training import build_moe_optimizer, train_moe_step
 
 
 def build_gqa_optimizer(model, *, learning_rate, config=None, weight_decay=0.01):
+    """Build the dense comparison's AdamW groups for a GQA model.
+
+    Matrices decay and vectors do not, as in the dense and expert arms;
+    passing both ``config`` and a non-default ``weight_decay`` raises ValueError.
+    """
     if not isinstance(model, GroupedQueryModel):
         raise TypeError("model must be GroupedQueryModel")
     return build_moe_optimizer(

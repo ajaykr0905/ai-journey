@@ -15,6 +15,12 @@ from .tokenizer_io import load_tokenizer, tokenizer_fingerprint
 
 
 def benchmark_encoding(tokenizer, documents, *, repeats=3):
+    """Time the reference and heap encoders on identical inputs after proving parity.
+
+    Every document must round-trip and both encoders must emit the same ids in
+    every timed run; the order alternates per repeat. Accepts 1-64 documents up
+    to 128 KiB and 1-20 repeats; timings are local CPU observations, not a gate.
+    """
     if not isinstance(tokenizer, ByteTokenizer):
         raise TypeError("encoder benchmark requires a byte or regex tokenizer")
     if type(repeats) is not int or not 1 <= repeats <= 20:
@@ -68,6 +74,10 @@ def benchmark_encoding(tokenizer, documents, *, repeats=3):
 
 
 def main(argv=None):
+    """Benchmark a saved codec on the first --limit corpus lines and publish it.
+
+    The output may not alias the corpus or tokenizer; errors exit with status 2.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tokenizer", type=Path, required=True)
     parser.add_argument("--corpus", type=Path, required=True)

@@ -233,6 +233,14 @@ def _validate_observation(observation, spec, profile):
 
 
 def validate_http_measurement(raw):
+    """Check a raw load run against its own profile and schedule.
+
+    Every scheduled attempt must appear in order, measured requests must stay
+    inside the work window and the declared concurrency, warmup must finish
+    before it starts, one model identity must serve them all, and the totals
+    must recompute exactly. Returns the profile; raises ValueError otherwise.
+    """
+
     fields = {
         "schema",
         "scope",
@@ -258,6 +266,8 @@ def validate_http_measurement(raw):
     if raw["profile_sha256"] != profile.fingerprint():
         raise ValueError("HTTP workload profile digest differs")
     loopback_address(raw["endpoint"])
+    if type(raw["created_at_utc"]) is not str:
+        raise ValueError("HTTP measurement creation time must use UTC")
     created = datetime.fromisoformat(raw["created_at_utc"])
     if created.tzinfo is None or created.utcoffset().total_seconds() != 0:
         raise ValueError("HTTP measurement creation time must use UTC")
@@ -315,6 +325,13 @@ def validate_http_measurement(raw):
 
 
 def http_latency_summary(raw):
+    """Recompute nearest-rank latency distributions from a validated run.
+
+    Request durations are summarized for every measured attempt and for the
+    completed ones; time to first token and inter-token gaps come from
+    completed requests only.
+    """
+
     validate_http_measurement(raw)
     observations = [row["observation"] for row in raw["measured"]]
     completed = [row for row in observations if row["outcome"] == "completed"]
@@ -346,6 +363,12 @@ def http_latency_summary(raw):
 
 
 def http_report_digest(report):
+    """SHA-256 over every report field except ``report_sha256`` itself.
+
+    The seal detects edits to recorded evidence; it cannot show that the
+    timings were measured.
+    """
+
     return sha256(
         _canonical(
             {name: value for name, value in report.items() if name != "report_sha256"}
@@ -354,6 +377,12 @@ def http_report_digest(report):
 
 
 def build_http_load_report(raw):
+    """Seal a validated raw run together with its recomputed latencies.
+
+    The measurement is deep-copied, so later changes to ``raw`` cannot alter
+    the sealed report. Raises ValueError when the raw run is inconsistent.
+    """
+
     report = {
         "schema": REPORT_SCHEMA,
         "measurement": copy.deepcopy(raw),
@@ -365,6 +394,12 @@ def build_http_load_report(raw):
 
 
 def verify_http_load_report(report):
+    """Recheck the seal, the declared scope and every recomputed latency.
+
+    Passing establishes internal consistency only, not that the run happened.
+    Returns the report unchanged; raises ValueError on any difference.
+    """
+
     if (
         type(report) is not dict
         or set(report)

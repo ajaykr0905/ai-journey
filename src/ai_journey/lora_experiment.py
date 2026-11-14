@@ -36,6 +36,13 @@ from .transformer_lab import DecoderLanguageModel, TransformerConfig, model_fing
 
 @dataclass(frozen=True)
 class ComparisonConfig:
+    """Bounded controls for the paired-seed adapter versus dense comparison.
+
+    Every control has a range and the total is capped at 10M work units, so any
+    accepted protocol stays a replayable CPU run; violations raise
+    LoRAExperimentError.
+    """
+
     seeds: tuple[int, ...] = (11, 29)
     block_size: int = 8
     embedding_dim: int = 16
@@ -85,6 +92,10 @@ class ComparisonConfig:
 
     @property
     def work_units(self):
+        """Return the coarse compute proxy capped by the CPU work budget.
+
+        It counts pretraining plus three finetune schedules for every seed.
+        """
         return (
             len(self.seeds)
             * (self.pretrain_steps + 3 * self.finetune_steps)
@@ -94,6 +105,7 @@ class ComparisonConfig:
         )
 
     def model_config(self, vocab_size):
+        """Return the one-layer, dropout-free decoder config shared by every arm."""
         return TransformerConfig(
             vocab_size=vocab_size,
             block_size=self.block_size,
@@ -263,6 +275,7 @@ COMPARISON_ARMS = ("frozen", "full", "lora-rank-1", "lora-rank-2")
 
 
 def config_dict(config):
+    """Return the JSON form, with seeds as a list, that reports store."""
     return {**asdict(config), "seeds": list(config.seeds)}
 
 

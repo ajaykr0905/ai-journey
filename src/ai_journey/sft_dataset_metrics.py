@@ -23,6 +23,10 @@ def _distribution(values: list[int]) -> dict[str, int | float]:
 
 
 def dataset_metrics(split: SFTDatasetSplit) -> dict:
+    """Counts and UTF-8 size distributions over both partitions, for the manifest.
+
+    Prompt sizes measure the formatted user turn, context included.
+    """
     if not isinstance(split, SFTDatasetSplit):
         raise TypeError("split must be SFTDatasetSplit")
     rows = split.train + split.validation
@@ -45,6 +49,12 @@ def dataset_metrics(split: SFTDatasetSplit) -> dict:
 
 
 def validate_dataset_metrics(metrics: object) -> dict:
+    """Reject metrics whose counts or size distributions do not reconcile.
+
+    examples must equal train plus validation and the category total; each
+    distribution needs 0 < min <= max <= total and mean == total / examples.
+    Raises SFTDatasetError.
+    """
     fields = {
         "examples",
         "train_examples",

@@ -10,6 +10,13 @@ class StreamProtocolError(ValueError):
 
 
 def strict_json(payload):
+    """Parse protocol JSON, rejecting duplicate keys, NaN and Infinity.
+
+    Python's json module silently keeps the last duplicate key and accepts
+    those non-JSON constants; refusing both gives every frame one meaning.
+    Raises StreamProtocolError.
+    """
+
     def unique(pairs):
         output = {}
         for name, value in pairs:
@@ -23,11 +30,24 @@ def strict_json(payload):
 
     try:
         return json.loads(payload, object_pairs_hook=unique, parse_constant=constant)
-    except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+    except StreamProtocolError:
+        raise
+    except (ValueError, RecursionError) as exc:
+        # ValueError covers decode errors, invalid UTF-8 and an integer literal
+        # longer than Python's int conversion limit, which a frame can carry.
         raise StreamProtocolError("invalid bounded protocol JSON") from exc
 
 
 def validate_generation_output(payload, *, request_id, prompt_tokens, max_tokens):
+    """Check a terminal generation payload against the request it answers.
+
+    The field set must be exact, the request ID and prompt length must match
+    the request, token IDs must be in range and within the budget, and a
+    "length" finish must use the whole budget. The model digest is only
+    checked to be lowercase SHA-256 hex, not compared with any model.
+    Returns the payload; raises StreamProtocolError.
+    """
+
     fields = {"request_id", "model_sha256", "prompt_tokens", "tokens", "finish_reason"}
     if type(payload) is not dict or set(payload) != fields:
         raise StreamProtocolError("generation output fields differ from the protocol")
@@ -207,6 +227,13 @@ class GenerationEventDecoder:
         return list(self.iter_events(payload))
 
     def finish(self):
+        """Close the stream at EOF and return its terminal generation output.
+
+        A stream that ends inside a UTF-8 sequence or before one complete
+        terminal event raises StreamProtocolError rather than passing as a
+        response. Returns None when the terminal event was an error event.
+        """
+
         if self._feeding:
             raise StreamProtocolError("consume or close the event iterator before EOF")
         try:

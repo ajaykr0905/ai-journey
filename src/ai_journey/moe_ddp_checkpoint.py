@@ -32,11 +32,22 @@ MAX_BYTES = 64 * 1024 * 1024
 
 @dataclass(frozen=True)
 class MoEDDPCheckpointIdentity:
+    """Seal of a checkpoint's decoded payload and SHA-256 of its archive bytes.
+
+    The payload seal covers the restored contents, while the archive digest
+    pins the exact file bytes that a report or restore must load.
+    """
+
     payload_sha256: str
     archive_sha256: str
 
 
 def moe_ddp_training_contract(config, data_contract):
+    """Training contract sealed into the inner expert checkpoint.
+
+    It binds the exact run config and data contract, so restoring refuses an
+    inner payload written by another run or under another data order.
+    """
     return _contract(
         {
             "schema": "ai-journey-replicated-moe-run-v1",

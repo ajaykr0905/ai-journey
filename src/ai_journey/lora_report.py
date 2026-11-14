@@ -184,6 +184,7 @@ def _sha(value, name):
 
 
 def report_digest(report):
+    """Return the canonical digest of every report field except ``sha256``."""
     return canonical_digest(
         {key: value for key, value in report.items() if key != "sha256"}
     )
@@ -441,6 +442,10 @@ def build_report(result):
 
 
 def render_report(report):
+    """Return the sorted, indented JSON text that is written to disk.
+
+    Validation runs first, so an inconsistent report is never rendered.
+    """
     validate_report(report)
     return json.dumps(report, sort_keys=True, indent=2, allow_nan=False) + "\n"
 

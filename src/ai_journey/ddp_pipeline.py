@@ -143,6 +143,13 @@ def run_pipeline(
     steps=2,
     sampler=SAMPLER_V1,
 ):
+    """Train on a document-isolated split, score held-out documents, then serve.
+
+    Whole documents are split before training, so no held-out document
+    reaches the training bytes. The trained checkpoint is reloaded through
+    the serving path, scored against the untrained model, generated from and
+    benchmarked. Returns the acceptance report with its distributed evidence.
+    """
     options = sampler_options(sampler)
     original_spec = preflight(source, spec_path, world_size=world_size, steps=steps)
     original = source.read_bytes()

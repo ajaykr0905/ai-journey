@@ -14,6 +14,12 @@ from .bpe import (
 
 
 def training_segments(documents: tuple[str, ...], *, pattern: str | None = None):
+    """Check the corpus budget and return the streams that training keeps apart.
+
+    Each document, or each regex piece of one, is its own stream, so no merge
+    spans a boundary. An empty corpus, empty or non-text documents, more than
+    100,000 documents or more than 1 MiB of UTF-8 raise TokenizerError.
+    """
     if (
         not isinstance(documents, tuple)
         or not documents
@@ -59,6 +65,7 @@ class BPETrainingSession:
 
     @property
     def tokenizer(self):
+        """A byte or regex tokenizer, matching the session, for the merges so far."""
         merges = tuple(self._merges)
         return (
             ByteTokenizer(merges)
@@ -67,6 +74,11 @@ class BPETrainingSession:
         )
 
     def advance(self, merge_count):
+        """Learn up to merge_count more merges and return the updated tokenizer.
+
+        Stops early when pairs run out or fall below min_frequency; a count that
+        would pass 3840 merges raises TokenizerError before any work.
+        """
         if type(merge_count) is not int or not 0 <= merge_count <= 3840 - len(
             self._merges
         ):
@@ -84,6 +96,10 @@ class BPETrainingSession:
         return self.tokenizer
 
     def snapshot(self):
+        """Checkpoint the corpus digest, training policy and merges, not pair counts.
+
+        restore() recomputes the counts from the exact corpus instead.
+        """
         return {
             "schema_version": 1,
             "corpus_sha256": self._identity,
@@ -94,6 +110,12 @@ class BPETrainingSession:
 
     @classmethod
     def restore(cls, documents, state):
+        """Rebuild a session by replaying a snapshot's merges on the same corpus.
+
+        A wrong version or field set, another corpus digest, or merges that are
+        not the canonical prefix training would choose raise TokenizerError, so
+        an edited merge table cannot resume as if it had been learned.
+        """
         if (
             not isinstance(state, dict)
             or set(state)

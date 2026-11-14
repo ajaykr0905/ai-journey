@@ -102,6 +102,13 @@ def _message_line(message: ChatMessage) -> str:
 
 @dataclass(frozen=True)
 class RenderedCandidate:
+    """One branch rendered as prompt JSON lines plus a single response line.
+
+    The response span lets targets and scores cover response characters only.
+    Unknown labels, empty sections or a section without its trailing newline
+    raise PreferenceDataError.
+    """
+
     pair_id: str
     label: str
     prompt_text: str
@@ -117,14 +124,17 @@ class RenderedCandidate:
 
     @property
     def text(self):
+        """Return the prompt-then-response text that the decoder scores."""
         return self.prompt_text + self.response_text
 
     @property
     def response_span(self):
+        """Return the half-open character range of the response within text."""
         return (len(self.prompt_text), len(self.text))
 
     @property
     def sha256(self):
+        """Return the SHA-256 of the UTF-8 text that pair evidence binds."""
         return sha256(self.text.encode("utf-8")).hexdigest()
 
 
@@ -165,6 +175,13 @@ PREFERENCE_FIXTURE_ID = "authored-grounded-readings-v1"
 
 @dataclass(frozen=True)
 class PreferenceDataset:
+    """Six to 64 validated pairs that grouped folds can split by family.
+
+    Pair ids and rendered branches must be unique, and there must be at least
+    three groups, every one holding two or more pairs; violations raise
+    PreferenceDataError.
+    """
+
     pairs: tuple[PreferencePair, ...]
 
     def __post_init__(self):
@@ -193,6 +210,7 @@ class PreferenceDataset:
             raise PreferenceDataError("rendered preference branches must be unique")
 
     def evidence(self) -> dict:
+        """Return per-pair branch digests and groups for the sealed context."""
         rows = [pair_evidence(pair) for pair in self.pairs]
         return {
             "id": PREFERENCE_FIXTURE_ID,
@@ -254,6 +272,12 @@ def authored_preference_fixture() -> PreferenceDataset:
 
 @dataclass(frozen=True)
 class PreferenceFold:
+    """One cross-validation fold whose train and held-out families never mix.
+
+    Shared pair ids or group ids would leak related prompts into held-out
+    scores, so either overlap or an empty partition raises PreferenceDataError.
+    """
+
     index: int
     train: tuple[PreferencePair, ...]
     heldout: tuple[PreferencePair, ...]
@@ -276,6 +300,7 @@ class PreferenceFold:
             raise PreferenceDataError("fold train and heldout groups must be disjoint")
 
     def evidence(self) -> dict:
+        """Return the fold's pair ids and groups so a report binds its split."""
         return {
             "index": self.index,
             "train_pair_ids": [pair.pair_id for pair in self.train],
@@ -315,6 +340,11 @@ def grouped_preference_folds(
 
 
 def fold_evidence(folds: tuple[PreferenceFold, ...]) -> dict:
+    """Return every fold's evidence plus one digest over the ordered split.
+
+    Fewer than two folds, or folds not numbered 0..n-1 in order, raise
+    PreferenceDataError.
+    """
     if (
         not isinstance(folds, tuple)
         or len(folds) < 2
@@ -342,6 +372,13 @@ def preference_codec(dataset: PreferenceDataset, *, extra_text: str = ""):
 
 @dataclass(frozen=True)
 class CandidateTargets:
+    """Response-only next-character targets with their bounded causal contexts.
+
+    Each response character is scored once from up to block_size preceding
+    tokens, which may reach into the prompt; misaligned or empty contexts
+    raise PreferenceDataError.
+    """
+
     pair_id: str
     label: str
     contexts: tuple[tuple[int, ...], ...]
@@ -367,6 +404,7 @@ class CandidateTargets:
 
     @property
     def target_tokens(self):
+        """Return how many response characters the length-normalized mean covers."""
         return len(self.targets)
 
 
@@ -391,6 +429,7 @@ def candidate_targets(
 def target_evidence(
     pairs: tuple[PreferencePair, ...], codec: CharacterCodec, *, block_size: int
 ) -> dict:
+    """Digest both branches' scoring targets under the declared context policy."""
     if (
         not isinstance(pairs, tuple)
         or not pairs
@@ -446,6 +485,11 @@ def preference_training_batches(
 def preference_schedule_evidence(
     batches: tuple[tuple[PreferencePair, ...], ...],
 ) -> dict:
+    """Return each step's sampled pair ids and their digest for replay checks.
+
+    Report validation rebuilds the schedule from its seed and compares this
+    evidence; empty or ragged batches raise PreferenceDataError.
+    """
     if (
         not isinstance(batches, tuple)
         or not batches

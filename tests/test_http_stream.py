@@ -67,6 +67,14 @@ def test_decoder_rejects_order_duplicates_parity_and_terminal_violations(payload
         decoder.feed(payload)
 
 
+def test_integer_literal_beyond_the_int_conversion_limit_is_a_protocol_error():
+    # About 5 KB of digits fits one event's 16 KiB budget but not int().
+    decoder = GenerationEventDecoder("request", prompt_tokens=2)
+    oversized = b'event: token\ndata: {"index":0,"token":' + b"9" * 5000 + b"}\n\n"
+    with pytest.raises(StreamProtocolError, match="protocol JSON"):
+        decoder.feed(oversized)
+
+
 def test_decoder_bounds_unterminated_events_and_requires_terminal():
     decoder = GenerationEventDecoder("request", prompt_tokens=2, max_event_bytes=8)
     with pytest.raises(StreamProtocolError, match="budget"):

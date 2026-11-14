@@ -34,6 +34,12 @@ def _unique(pairs):
 
 
 def load_acceptance_contract(path: Path) -> dict:
+    """Load the pinned expected Day 59 digests and counts, and nothing else.
+
+    Exact fields, 64-character digests and nonnegative integer counts are
+    required, so a malformed contract cannot accept a dataset; files over
+    64 KiB raise TokenizerError.
+    """
     try:
         payload = path.read_bytes()
         if len(payload) > 64 * 1024:

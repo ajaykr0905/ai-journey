@@ -10,6 +10,13 @@ from .inference_kv import InferenceCapacityError, _positive_integer
 
 @dataclass(frozen=True)
 class InferenceRequest:
+    """One queued request whose prompt and whole generation budget are reserved.
+
+    Admission charges prompt plus ``max_new_tokens`` up front, so an admitted row
+    cannot outgrow the resident-token budget mid-decode. Bad ids, negative
+    arrivals or nonpositive token counts raise InferenceCapacityError.
+    """
+
     request_id: str
     arrival_tick: int
     prompt_tokens: int
@@ -28,11 +35,19 @@ class InferenceRequest:
 
     @property
     def reserved_tokens(self) -> int:
+        """Return the prompt plus full generation tokens charged at admission."""
+
         return self.prompt_tokens + self.max_new_tokens
 
 
 @dataclass(frozen=True)
 class BatchStep:
+    """One scheduler tick: rows admitted, rows decoded and rows finished.
+
+    ``reserved_tokens`` is the reservation held while the tick decodes: counted
+    after admission and before finished rows release their budget.
+    """
+
     tick: int
     admitted: tuple[str, ...]
     decode: tuple[str, ...]
@@ -42,6 +57,8 @@ class BatchStep:
 
 @dataclass(frozen=True)
 class RequestTiming:
+    """Per-request latency in scheduler ticks, splitting queueing from service."""
+
     request_id: str
     arrival_tick: int
     admitted_tick: int
@@ -49,10 +66,18 @@ class RequestTiming:
 
     @property
     def queue_ticks(self) -> int:
+        """Return ticks spent waiting for a batch slot and token budget."""
+
         return self.admitted_tick - self.arrival_tick
 
     @property
     def service_ticks(self) -> int:
+        """Return ticks from admission to completion, counting both ends.
+
+        Admitted rows decode once per tick until done, so this equals the
+        request's ``max_new_tokens``.
+        """
+
         return self.completed_tick - self.admitted_tick + 1
 
 

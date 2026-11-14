@@ -1275,3 +1275,49 @@ jobs:
             ${{ runner.temp }}/memory-access-evidence/
             ${{ runner.temp }}/memory-access-dist/
           if-no-files-found: error
+  memory-hierarchy-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install memory-hierarchy verification tools
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check CPU memory-hierarchy lab contracts
+        run: |
+          ruff check src/ai_journey/memory_hierarchy_*.py tests/test_memory_hierarchy_*.py
+          ruff format --check src/ai_journey/memory_hierarchy_*.py tests/test_memory_hierarchy_*.py
+          python -m compileall -q src/ai_journey/memory_hierarchy_*.py tests/test_memory_hierarchy_*.py
+          python -m pytest -q tests/test_memory_hierarchy_*.py
+      - name: Build and install isolated memory-hierarchy wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/memory-hierarchy-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/memory-hierarchy-installed" "$RUNNER_TEMP"/memory-hierarchy-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/memory-hierarchy-evidence"
+      - name: Run and verify the CI smoke config with the installed command
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/memory-hierarchy-installed
+        run: |
+          export PATH="$RUNNER_TEMP/memory-hierarchy-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/memory-hierarchy-installed/")'
+          ai-journey-memory-hierarchy run --config "$GITHUB_WORKSPACE/config/day-71-memory-hierarchy-ci-smoke.json" --output "$RUNNER_TEMP/memory-hierarchy-evidence/cpu-measurement.json"
+          ai-journey-memory-hierarchy verify --report "$RUNNER_TEMP/memory-hierarchy-evidence/cpu-measurement.json" --config "$GITHUB_WORKSPACE/config/day-71-memory-hierarchy-ci-smoke.json"
+      - name: Retain memory-hierarchy evidence and package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-hierarchy-evidence
+          path: |
+            ${{ runner.temp }}/memory-hierarchy-evidence/
+            ${{ runner.temp }}/memory-hierarchy-dist/
+          if-no-files-found: error

@@ -45,6 +45,8 @@ class DecoderVariantBlock(nn.Module):
         )
 
     def forward(self, inputs: Tensor) -> Tensor:
+        """Apply pre-norm attention then MLP residual updates, as GPT-2 does."""
+
         hidden = inputs + self.attn(self.ln_1(inputs))
         return hidden + self.mlp(self.ln_2(hidden))
 
@@ -82,6 +84,12 @@ class DecoderVariantModel(nn.Module):
         self.lm_head.weight = self.wte.weight
 
     def forward(self, token_ids: Tensor) -> Tensor:
+        """Return logits, adding learned positions only for that variant.
+
+        Wrong types, empty or overlong sequences, another device or
+        out-of-range ids raise TypeError or GPT2ConfigError.
+        """
+
         if not isinstance(token_ids, Tensor):
             raise TypeError("token_ids must be a torch.Tensor")
         if token_ids.dtype != torch.long or token_ids.ndim != 2:

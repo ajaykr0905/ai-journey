@@ -8,6 +8,12 @@ from .bpe import TokenizerError
 
 @dataclass(frozen=True)
 class Sentence:
+    """One CoNLL-U sentence: its sent_id and the raw "# text" line.
+
+    Parallel treebanks share sent_ids across languages, which is what keeps
+    splits translation-aligned; ids may not contain whitespace.
+    """
+
     sentence_id: str
     text: str
 
@@ -70,6 +76,12 @@ def extract_sentences(payload: bytes) -> tuple[Sentence, ...]:
 
 @dataclass(frozen=True)
 class ParallelSplit:
+    """Train and held-out sentences of two languages over the same ids.
+
+    Index i of each first_* tuple translates index i of its second_* partner,
+    so no held-out sentence has its translation in training.
+    """
+
     first_train: tuple[Sentence, ...]
     second_train: tuple[Sentence, ...]
     first_validation: tuple[Sentence, ...]
