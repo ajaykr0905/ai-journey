@@ -21,6 +21,8 @@ class RankCheckpointFile:
 
     @property
     def payload_bytes(self) -> int:
+        """Bytes in this rank's file: the sum of its named components."""
+
         return sum(size for _, size in self.components)
 
 
@@ -34,6 +36,8 @@ class CheckpointImage:
 
     @property
     def total_bytes(self) -> int:
+        """Bytes in the whole image: every rank file plus coordinator metadata."""
+
         return sum(file.payload_bytes for file in self.rank_files) + self.metadata_bytes
 
 
@@ -105,6 +109,13 @@ class CheckpointIntervalPlan:
 
     @property
     def feasible(self) -> bool:
+        """True when some interval satisfies both bounds at once.
+
+        The minimum keeps write overhead within its fraction and the maximum
+        keeps replay within the recovery objective; when the minimum exceeds
+        the maximum there is no recommendation.
+        """
+
         return self.recommended_interval_steps is not None
 
 
