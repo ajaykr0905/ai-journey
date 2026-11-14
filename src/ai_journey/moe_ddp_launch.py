@@ -29,6 +29,14 @@ def launch_moe_ddp(
     timeout_seconds: int = 60,
     expected_plan_sha256: str | None = None,
 ):
+    """Run each rank of one admitted plan as an owned subprocess; return receipts.
+
+    Ranks read a private snapshot of the admitted plan and source, the
+    checkpoint and worker directory stay leased until every child is reaped,
+    and a failed rank or the deadline raises WorkerFailure or WorkerTimeout.
+    The checkpoint must exist exactly when resuming, and the worker directory
+    must be empty, so earlier logs are never overwritten.
+    """
     plan, source_bytes = read_public_moe_ddp_plan(config, source)
     if expected_plan_sha256 is not None and (
         type(expected_plan_sha256) is not str

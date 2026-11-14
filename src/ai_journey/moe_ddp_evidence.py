@@ -251,6 +251,12 @@ def _global_rows(plan, source_bytes, workers):
 
 
 def build_moe_ddp_evidence(plan, source, workers):
+    """Seal agreeing rank receipts into one replicated MoE evidence report.
+
+    Global rows are recomputed from the rank receipts rather than copied, and
+    the sealed result is validated before it is returned. Raises ValueError
+    for receipts that disagree or do not match the plan.
+    """
     source_admission(plan, source)
     workers = json.loads(canonical(workers))
     metrics = _global_rows(plan, len(source), workers)
@@ -283,6 +289,12 @@ def build_moe_ddp_evidence(plan, source, workers):
 
 
 def validate_moe_ddp_evidence(report):
+    """Recheck a report's seal, plan, runtime scope and recomputed global rows.
+
+    This is static internal consistency within a 4 MiB budget, not training
+    replay or authentication; verify_moe_ddp_archive restores the checkpoint
+    separately. Returns the report; raises ValueError on any mismatch.
+    """
     fields = {
         "schema",
         "plan",
@@ -439,6 +451,10 @@ def verify_moe_ddp_archive(report, path):
 
 
 def read_moe_ddp_evidence(path):
+    """Read one report through a bounded regular-file read, then validate it.
+
+    Duplicate JSON keys are rejected like any other mismatch (ValueError).
+    """
     return validate_moe_ddp_evidence(
         json.loads(_read_bytes(path, MAX_REPORT_BYTES), object_pairs_hook=unique_fields)
     )
