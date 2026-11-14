@@ -16,8 +16,10 @@ from .tokenizer_training import train_documents
 def read_documents(path: Path):
     """Read UTF-8 text as one document per nonempty line, capped at 1 MiB.
 
-    Every BPE command shares this reader, so they all see the same document
-    boundaries; an oversized or empty corpus raises TokenizerError.
+    Lines follow str.splitlines, so form feeds and U+2028 also end a document.
+    Every BPE command that takes a plain-text corpus shares this reader, so
+    they see the same document boundaries; an oversized or empty corpus raises
+    TokenizerError.
     """
     with path.open("rb") as stream:
         payload = stream.read(1024 * 1024 + 1)

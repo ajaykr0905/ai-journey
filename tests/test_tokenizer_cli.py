@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from ai_journey.bpe_conformance_io import load_training_audit
-from ai_journey.tokenizer_cli import main
+from ai_journey.tokenizer_cli import main, read_documents
 
 
 class TokenizerCliTests(unittest.TestCase):
@@ -123,3 +123,9 @@ class TokenizerCliTests(unittest.TestCase):
             with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 main(["train", "--corpus", str(path), "--output", str(path)])
             self.assertEqual(path.read_text(), "hello hello")
+
+    def test_documents_end_at_every_splitlines_boundary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "corpus"
+            path.write_bytes("a\x0cb\u2028c\r\n\nd\n".encode("utf-8"))
+            self.assertEqual(read_documents(path), ("a", "b", "c", "d"))
