@@ -139,6 +139,8 @@ class TokenSampler:
 
         An invalid state raises ValueError and leaves the generator unchanged.
         """
+        if not isinstance(state, torch.Tensor):
+            raise ValueError("invalid request RNG state")
         before = self.state()
         try:
             self.generator.set_state(state.clone())

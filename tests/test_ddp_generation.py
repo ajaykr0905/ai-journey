@@ -105,3 +105,12 @@ def test_request_sampling_restarts_exactly_without_global_rng_changes():
         .item()
         == 1
     )
+
+
+@pytest.mark.parametrize("state", [None, [0, 1], torch.zeros(4)])
+def test_invalid_request_rng_state_is_rejected_and_leaves_sampling_unchanged(state):
+    sampler = TokenSampler(SamplingConfig(seed=48))
+    before = sampler.state()
+    with pytest.raises(ValueError, match="RNG state"):
+        sampler.restore(state)
+    assert torch.equal(sampler.state(), before)
