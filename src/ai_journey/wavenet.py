@@ -204,6 +204,12 @@ class WaveNetDatasetSplit:
             raise WaveNetError("train and validation context sizes must match")
 
     def fingerprint(self) -> str:
+        """SHA-256 over both split fingerprints, train then validation.
+
+        Experiments record it, so a change to either split's vocabulary order,
+        contexts or targets is visible in the results.
+        """
+
         payload = f"{self.train.fingerprint()}:{self.validation.fingerprint()}"
         return sha256(payload.encode()).hexdigest()
 
@@ -233,6 +239,12 @@ class WaveNetBatchCursor:
         return torch.randperm(self.dataset.sample_count, generator=generator)
 
     def next(self) -> tuple[Tensor, Tensor]:
+        """Return the next shuffled batch, starting a new epoch when one ends.
+
+        Each epoch's order comes from ``seed + epoch``, so a saved cursor
+        resumes the exact sequence; an epoch's last batch may be short.
+        """
+
         if self.offset >= self.dataset.sample_count:
             self.epoch += 1
             self.offset = 0
@@ -241,9 +253,17 @@ class WaveNetBatchCursor:
         return self.dataset.contexts[indexes], self.dataset.targets[indexes]
 
     def state_dict(self) -> dict[str, int]:
+        """Epoch and offset: everything needed to resume the batch sequence."""
+
         return {"epoch": self.epoch, "offset": self.offset}
 
     def load_state_dict(self, state: dict[str, int]) -> None:
+        """Restore a saved epoch and offset, rejecting extra or invalid fields.
+
+        Raises TypeError for non-integer values and WaveNetError for missing,
+        extra or out-of-range ones.
+        """
+
         if not isinstance(state, dict) or set(state) != {"epoch", "offset"}:
             raise WaveNetError("batch cursor state has invalid fields")
         if any(
@@ -313,6 +333,12 @@ class FlattenConsecutive(nn.Module):
         return batch, time // self.factor, channels * self.factor
 
     def forward(self, inputs: Tensor) -> Tensor:
+        """Reshape (batch, time, channels) to (batch, time/factor, channels*factor).
+
+        Adjacent steps are concatenated in order; a time length that the factor
+        does not divide raises WaveNetError.
+        """
+
         if not isinstance(inputs, Tensor) or inputs.ndim != 3:
             raise TypeError("inputs must be a three-dimensional tensor")
         output_shape = self.output_shape(tuple(inputs.shape))
@@ -355,6 +381,11 @@ class HierarchicalStage(nn.Module):
         )
 
     def forward(self, inputs: Tensor) -> Tensor:
+        """Merge adjacent steps, then project, LayerNorm, tanh and dropout.
+
+        Raises WaveNetError when the feature width does not match the stage.
+        """
+
         if not isinstance(inputs, Tensor) or inputs.ndim != 3:
             raise TypeError("inputs must be a three-dimensional tensor")
         if inputs.shape[-1] != self.input_dim:
@@ -389,6 +420,12 @@ class HierarchicalLanguageModel(nn.Module):
     def forward(
         self, token_ids: Tensor, targets: Tensor | None = None
     ) -> tuple[Tensor, Tensor | None]:
+        """Next-character logits per context, plus mean cross-entropy if given targets.
+
+        Invalid IDs or a wrong context size raise before any computation, and
+        the stages must reduce each context to one time step (RuntimeError).
+        """
+
         if not isinstance(token_ids, Tensor) or token_ids.ndim != 2:
             raise TypeError("token_ids must be a two-dimensional tensor")
         if token_ids.dtype != torch.long:
@@ -422,6 +459,8 @@ class HierarchicalLanguageModel(nn.Module):
 
     @property
     def parameter_count(self) -> int:
+        """Total scalar parameters, as recorded in experiment results."""
+
         return sum(parameter.numel() for parameter in self.parameters())
 
 
