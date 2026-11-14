@@ -7,9 +7,9 @@ it, so each sample is sized to move a target number of accounted bytes: the
 fewest whole calls that reach it. ``memory_access_benchmark.time_repeats``
 runs the untimed warmups and the timed repeats, and its nearest-rank
 statistics summarize them. This module adds the batching, a run budget
-checked after every warmup and timed sample (outside the timed region, so a
-run overruns its budget by at most one sample), and rates divided once from
-exact integers.
+checked after every warmup and timed sample (never inside a timed region,
+so a run stops at the first check after its budget runs out), and rates
+divided once from exact integers.
 
 Durations describe whatever host runs them; nothing here measures a GPU.
 """

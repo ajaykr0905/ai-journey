@@ -7,10 +7,12 @@ verifier rebuilds the measurement list, the byte and FLOP accounting of every
 kernel and access pattern from its own tables, and every batch size. From the
 raw samples it recomputes nearest-rank statistics and every rate, the curves
 and their summaries, the access contrast, both roofline ceilings, the ridge
-points and placements, the Little's-law products, the run totals, the planned
-work and the summary, and each section must match byte for byte as canonical
-JSON, so ``1``, ``1.0`` and ``true`` stay distinct. None of the measuring
-modules is imported, so a bug in one of them cannot vouch for itself.
+points and placements, the Little's-law products, the run totals, the
+planned byte, call and FLOP totals and the summary, and each section must
+match byte for byte as canonical JSON, so ``1``, ``1.0`` and ``true`` stay
+distinct. No measuring module is called to recompute anything (the shared
+config parser only validates bounds), so a bug in one of them cannot vouch
+for itself.
 
 The timer, ``measured`` flag, scope and boundary must agree: only a
 ``time.perf_counter_ns`` report verifies as a host measurement, and an
