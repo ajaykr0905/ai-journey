@@ -24,6 +24,12 @@ class CorpusShiftError(ValueError):
 
 @dataclass(frozen=True)
 class Evaluation:
+    """One cell of the 2x2 train/evaluate grid, scored per bigram transition.
+
+    Transitions include each word's start and end boundaries; mean_nll is in
+    nats and perplexity is exp(mean_nll).
+    """
+
     trained_on: str
     evaluated_on: str
     transitions: int
@@ -33,6 +39,12 @@ class Evaluation:
 
 @dataclass(frozen=True)
 class ShiftReport:
+    """Character and bigram drift between two corpora on one shared vocabulary.
+
+    transition_js_divergence uses smoothed bigram distributions in nats; the
+    boundary leak counts are bigrams that concatenating records would invent.
+    """
+
     baseline_records: int
     shifted_records: int
     vocabulary_size: int
@@ -48,6 +60,12 @@ class ShiftReport:
 
 @dataclass(frozen=True)
 class ShiftPolicy:
+    """Drift limits for CI; both must be finite and positive.
+
+    max_perplexity_ratio bounds shifted over baseline perplexity under the
+    baseline-trained model.
+    """
+
     max_js_divergence: float
     max_perplexity_ratio: float
 
@@ -64,12 +82,15 @@ class ShiftPolicy:
 
 @dataclass(frozen=True)
 class ShiftAssessment:
+    """Drift-gate outcome: the measured perplexity ratio and every limit broken."""
+
     policy: ShiftPolicy
     baseline_to_shifted_perplexity_ratio: float
     violations: tuple[str, ...]
 
     @property
     def passed(self) -> bool:
+        """True when no limit was exceeded; assessment_payload exports it for CI."""
         return not self.violations
 
 
