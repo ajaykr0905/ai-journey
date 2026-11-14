@@ -9,6 +9,12 @@ from .scaling_laws import ScalingLawError, _positive_integer
 
 @dataclass(frozen=True)
 class TrainingBatchGeometry:
+    """Sequence, micro-batch, accumulation and data-parallel sizes of one update.
+
+    All four must be positive integers; together they set the token granularity
+    that token targets are rounded to.
+    """
+
     sequence_length: int
     micro_batch_size: int
     gradient_accumulation_steps: int
@@ -25,6 +31,8 @@ class TrainingBatchGeometry:
 
     @property
     def tokens_per_optimizer_step(self) -> int:
+        """Return tokens consumed by one globally synchronized optimizer step."""
+
         return (
             self.sequence_length
             * self.micro_batch_size
@@ -35,6 +43,8 @@ class TrainingBatchGeometry:
 
 @dataclass(frozen=True)
 class TokenSchedule:
+    """A token target rounded up to whole optimizer steps, overshoot explicit."""
+
     target_tokens: int
     optimizer_steps: int
     scheduled_tokens: int
@@ -43,6 +53,8 @@ class TokenSchedule:
 
     @property
     def exact(self) -> bool:
+        """Return True when the target is a whole number of optimizer steps."""
+
         return self.overshoot_tokens == 0
 
 
