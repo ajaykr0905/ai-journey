@@ -34,6 +34,12 @@ SNAPSHOT_FIELDS = (
 
 
 def control_config():
+    """The fixed untrained grouped-query control that readiness must serve.
+
+    Its two layers, one native KV head, head width of four and 256-entry
+    vocabulary make every snapshot size in the report exactly recomputable;
+    verification refuses any other model.
+    """
     return GQAConfig(
         DecoderVariantConfig(
             GPT2Config(
@@ -53,6 +59,12 @@ def control_config():
 
 
 def schedule():
+    """The fixed six-request workload and how many prompt tokens each reuses.
+
+    Cold, warm, branch, interior, miss and seeded requests cover exact,
+    partial and interior prefix reuse; the verifier derives each row's
+    expected metric deltas from ``reused``.
+    """
     for label, prompt, temperature, reused in (
         ("cold", [1, 2, 3, 4], 0, 0),
         ("warm", [1, 2, 3, 4], 0, 4),
@@ -77,6 +89,10 @@ def schedule():
 
 
 def seal_prefix_report(report):
+    """Return a copy with ``report_sha256`` recomputed over all other fields.
+
+    The seal shows consistency, not measurement authenticity or a speedup.
+    """
     result = copy.deepcopy(report)
     result.pop("report_sha256", None)
     result["report_sha256"] = sha256(
@@ -120,6 +136,14 @@ def _snapshot(value):
 
 
 def verify_prefix_report(report, *, directory=None):
+    """Recheck a readiness report against the fixed control, workload and budget.
+
+    Every row must match its scheduled request, its uncached control output
+    and exact metric deltas, and resident bytes must equal the recomputed
+    compact snapshots. With ``directory`` the retained checkpoint is reloaded
+    and must reproduce each control output. Returns the report; raises
+    ValueError.
+    """
     fields = {
         "schema",
         "scope",
