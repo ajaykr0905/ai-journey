@@ -306,9 +306,13 @@ class MemoryHierarchyConfig:
         calls += samples
         flops += samples * 2 * matmul.m * matmul.n * matmul.k
         largest = self.stream.elements[-1]
+        # Building the strided order holds one pass of offsets, an index per
+        # pass element, beside it; at small strides that outweighs the check.
+        offsets = INDEX_BYTES * (source // self.access.stride_elements)
         peak = max(
             len(ARRAY_NAMES) * largest * width + _check_bytes(largest, width),
-            source * (2 * width + INDEX_BYTES) + _check_bytes(source, width),
+            source * (2 * width + INDEX_BYTES)
+            + max(_check_bytes(source, width), offsets),
             matmul_allocation_bytes(matmul.m, matmul.n, matmul.k, self.dtype),
         )
         return PlannedWork(

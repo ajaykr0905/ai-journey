@@ -165,8 +165,9 @@ class AccessBuffers:
         if name == "sequential":
             return numpy.arange(count, dtype=numpy.int64)
         if name == "strided":
-            # Broadcasting j + S * i allocates only the order itself; a
-            # transposed arange would hold two full index arrays at once.
+            # Broadcasting j + S * i holds the order plus one pass of offsets
+            # (n / S indices, which planned_work counts); a transposed arange
+            # would hold two full index arrays at once.
             passes = numpy.arange(stride, dtype=numpy.int64)[:, None]
             offsets = stride * numpy.arange(count // stride, dtype=numpy.int64)
             return (passes + offsets).reshape(-1)

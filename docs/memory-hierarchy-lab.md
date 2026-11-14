@@ -66,12 +66,14 @@ the config through a resolved path, symlink, or hardlink.
 | `littles_law.latency_note` | where the figure comes from | single-spaced ASCII, at most 400 characters |
 
 Before any array is allocated, the whole config must fit a 256 MiB peak
-allocation (the largest section's arrays plus check temporaries), and the
-run must fit 2^38 accounted bytes, 2^22 kernel calls and 2^38 FLOPs, counted
-with the batch sizes the run will use. The report records these counts as
-`planned_work`. The time budget is read from the run's clock after every
-warmup and timed batch and once at the end, never inside a timed region, so
-a run stops at the first check after its budget runs out.
+allocation (the largest section's arrays plus check temporaries, or for the
+access section the strided order's pass offsets when a small stride makes
+them larger), and the run must fit 2^38 accounted bytes, 2^22 kernel calls
+and 2^38 FLOPs, counted with the batch sizes the run will use. The report
+records these counts as `planned_work`. The time budget is read from the
+run's clock after every warmup and timed batch and once at the end, never
+inside a timed region, so a run stops at the first check after its budget
+runs out.
 
 ## STREAM kernels and byte accounting
 

@@ -1,9 +1,12 @@
+import itertools
 import json
+import tracemalloc
 from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
+from ai_journey.memory_hierarchy_access import measure_access_patterns
 from ai_journey.memory_hierarchy_config import (
     MAX_ALLOCATION_BYTES,
     MAX_CONFIG_BYTES,
@@ -167,6 +170,38 @@ def test_bounds_admit_the_largest_float32_sweep_and_reject_non_objects():
     assert config.planned_work().peak_allocation_bytes <= MAX_ALLOCATION_BYTES
     with pytest.raises(MemoryHierarchyError, match="config fields"):
         config_from_mapping([make_config_mapping()])
+
+
+def test_planned_peak_covers_the_strided_order_of_a_small_stride():
+    # At stride 2 the strided order's pass offsets (one index per pass
+    # element) outweigh the chunked output check, so the access section
+    # sets the peak only if the plan counts them.
+    elements = 3 << 20
+    mapping = make_config_mapping()
+    mapping["dtype"] = "float32"
+    mapping["access"] = {"elements": elements, "stride_elements": 2}
+    config = config_from_mapping(mapping)
+    planned = config.planned_work().peak_allocation_bytes
+    tracemalloc.start()
+    try:
+        measure_access_patterns(
+            elements=elements,
+            stride_elements=2,
+            dtype="float32",
+            seed=config.seed,
+            warmup=config.timing.warmup,
+            repeats=config.timing.repeats,
+            target_bytes_per_sample=config.timing.target_bytes_per_sample,
+            clock=itertools.count(0, 1_000).__next__,
+        )
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+    # One MiB covers NumPy iterator buffers and Python objects, which the
+    # array model leaves out.
+    assert peak <= planned + (1 << 20)
+    assert planned == elements * (2 * 4 + 8) + 8 * (elements // 2)
 
 
 def test_files_are_bounded_strict_json_without_duplicate_keys(tmp_path: Path):
