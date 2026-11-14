@@ -12,6 +12,14 @@ from .tokenizer_sources import HINDI, ENGLISH, load_public_corpus
 def verify_export(
     manifest_path: Path, train_path: Path, validation_path: Path, *, source_path=None
 ):
+    """Prove exported partitions match their manifest, and optionally their source.
+
+    Checks the pinned source and license, split seed 40, unique disjoint ids,
+    exact sizes and digests, and one line per id. With source_path every line
+    must equal the snapshot text for its id and every sentence must be counted.
+    Mismatches raise TokenizerError.
+    """
+
     def unique(pairs):
         result = {}
         for key, value in pairs:
