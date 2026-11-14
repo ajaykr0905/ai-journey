@@ -1,8 +1,6 @@
-import getpass
 import json
 import os
 import platform
-from pathlib import Path
 
 import numpy
 
@@ -27,13 +25,19 @@ def test_record_holds_only_version_and_platform_tokens():
 
 def test_record_never_carries_host_user_or_path_identifiers():
     record = host_environment()
-    values = [value for value in record.values() if isinstance(value, str)]
-    identifiers = {platform.node(), getpass.getuser(), str(Path.home())}
+    serialized = json.dumps(record)
+    # Read identifiers from the environment: getpass and Path.home() raise
+    # in containers whose user has no passwd entry.
+    identifiers = {
+        platform.node(),
+        *(os.environ.get(name, "") for name in ("USER", "LOGNAME", "HOME")),
+    }
 
-    for identifier in identifiers - {"", "unknown"}:
-        assert identifier not in values
-    assert not any(os.sep in value for value in values)
-    assert json.loads(json.dumps(record)) == record
+    for identifier in identifiers:
+        if len(identifier) >= 4:
+            assert identifier not in serialized, identifier
+    assert os.sep not in serialized
+    assert json.loads(serialized) == record
 
 
 def test_missing_or_odd_build_metadata_becomes_unknown(monkeypatch):
