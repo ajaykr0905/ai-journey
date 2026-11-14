@@ -15,6 +15,14 @@ class PollableProcess(Protocol):
     def poll(self) -> int | None: ...
 
 
+def _progress_in_state(progress_path: Path, state: str) -> WorkerProgress | None:
+    if progress_path.is_file() and not progress_path.is_symlink():
+        progress = load_worker_progress(progress_path)
+        if progress.state == state:
+            return progress
+    return None
+
+
 def wait_for_progress_state(
     process: PollableProcess,
     progress_path: Path,
@@ -25,7 +33,12 @@ def wait_for_progress_state(
     sleep: Callable[[float], None] = time.sleep,
     poll_interval_ms: int = 5,
 ) -> WorkerProgress:
-    """Wait for one declared state while failing fast on worker exit."""
+    """Wait for one declared state while failing fast on worker exit.
+
+    A worker can publish ``expected_state`` and exit between a progress read
+    and ``poll()``, so progress is read once more after an observed exit; the
+    exit is an error only if that read does not show ``expected_state`` either.
+    """
 
     if expected_state not in {"running", "fault_ready", "completed"}:
         raise RecoveryExperimentError("expected_state is unsupported")
@@ -40,12 +53,15 @@ def wait_for_progress_state(
     started_ns = clock_ns()
     deadline_ns = started_ns + timeout_ms * 1_000_000
     while clock_ns() <= deadline_ns:
-        if progress_path.is_file() and not progress_path.is_symlink():
-            progress = load_worker_progress(progress_path)
-            if progress.state == expected_state:
-                return progress
+        progress = _progress_in_state(progress_path, expected_state)
+        if progress is not None:
+            return progress
         exit_code = process.poll()
         if exit_code is not None:
+            # Every write the worker made before exiting is visible now.
+            progress = _progress_in_state(progress_path, expected_state)
+            if progress is not None:
+                return progress
             raise RecoveryExperimentError(
                 f"worker exited with code {exit_code} before {expected_state}"
             )
