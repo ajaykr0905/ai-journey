@@ -9,6 +9,13 @@ from .tokenizer_io import tokenizer_fingerprint
 
 
 class TokenTextStream:
+    """Strict incremental UTF-8 decoding of generated ids, one token at a time.
+
+    A character split across tokens is held until complete, and snapshots keep
+    that partial prefix so generation can restart without losing or repeating
+    text.
+    """
+
     def __init__(self, tokenizer):
         self.tokenizer = tokenizer
         self.identity = tokenizer_fingerprint(tokenizer)
@@ -16,6 +23,11 @@ class TokenTextStream:
         self._closed = False
 
     def feed(self, values, *, final=False):
+        """Decode the next ids and return only the characters they complete.
+
+        Invalid UTF-8 raises and keeps the buffered prefix; final=True flushes and
+        closes the stream. A changed tokenizer identity raises TokenizerError.
+        """
         if not isinstance(final, bool):
             raise TypeError("final must be boolean")
         if self._closed:
@@ -33,6 +45,7 @@ class TokenTextStream:
         return text
 
     def snapshot(self):
+        """Checkpoint the pending partial character and the tokenizer identity."""
         buffered, _ = self._decoder.getstate()
         return {
             "schema_version": 1,
@@ -42,6 +55,11 @@ class TokenTextStream:
         }
 
     def restore(self, state):
+        """Resume only from this tokenizer's snapshot of an unfinished UTF-8 prefix.
+
+        A buffer that would already emit text, or bytes in a finalized stream,
+        raise TokenizerError and leave the live decoder unchanged.
+        """
         if not isinstance(state, dict) or set(state) != {
             "schema_version",
             "tokenizer_fingerprint",

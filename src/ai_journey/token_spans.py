@@ -8,6 +8,11 @@ from .bpe import ByteTokenizer, SpecialTokenizer, TokenizerError
 
 @dataclass(frozen=True)
 class TokenSpan:
+    """One token's UTF-8 byte offsets and the half-open character range it covers.
+
+    Tokens that split a multi-byte character all cover that whole character.
+    """
+
     token_id: int
     byte_start: int
     byte_end: int
@@ -17,6 +22,8 @@ class TokenSpan:
 
 @dataclass(frozen=True)
 class ByteTokenSpan:
+    """One token's byte offsets in a raw payload that need not be valid UTF-8."""
+
     token_id: int
     byte_start: int
     byte_end: int
@@ -25,6 +32,11 @@ class ByteTokenSpan:
 def encode_bytes_with_spans(
     tokenizer: ByteTokenizer, payload: bytes
 ) -> tuple[ByteTokenSpan, ...]:
+    """Encode raw bytes and prove every token's bytes sit at its offsets.
+
+    Spans must tile the payload exactly or TokenizerError is raised; other
+    tokenizer types raise TypeError, as regex and special ones need text.
+    """
     if type(tokenizer) is not ByteTokenizer:
         raise TypeError("byte spans require a plain byte tokenizer")
     if not isinstance(payload, bytes):
