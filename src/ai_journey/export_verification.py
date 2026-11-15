@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from .bpe import TokenizerError
+from .parallel_corpus import split_rank
 from .tokenizer_sources import HINDI, ENGLISH, load_public_corpus
 
 
@@ -15,10 +16,12 @@ def verify_export(
     """Prove exported partitions match their manifest, and optionally their source.
 
     Checks the pinned source and license, that the manifest declares split seed
-    40, unique disjoint ids, exact sizes and digests, and one line per id. With
-    source_path every line must equal the snapshot text for its id and every
-    sentence must be counted. Which ids landed in which partition is trusted as
-    declared, not re-derived from the seed. Mismatches raise TokenizerError.
+    40, unique disjoint ids, exact sizes and digests, and one line per id. The
+    declared ids, train then held out, must be in strictly increasing seed-40
+    rank. With source_path every line must equal the snapshot text for its id,
+    every sentence must be counted, and membership is re-derived: train must be
+    the first len(train) snapshot ids in seed-40 rank and held out the next
+    len(validation). Mismatches raise TokenizerError.
     """
 
     def unique(pairs):
@@ -113,6 +116,18 @@ def verify_export(
                 "export text must contain exactly one line per sentence id"
             )
         texts.update(zip(ids, lines[:-1], strict=True))
+    declared = {
+        name: partitions[name]["sentence_ids"] for name in ("train", "validation")
+    }
+    ranks = [
+        split_rank(value, 40) for value in declared["train"] + declared["validation"]
+    ]
+    for index in range(1, len(ranks)):
+        if ranks[index - 1] >= ranks[index]:
+            name = "train" if index < len(declared["train"]) else "validation"
+            raise TokenizerError(
+                f"export {name} ids are not in increasing split seed 40 rank"
+            )
     if source_path is not None:
         original = {
             row.sentence_id: row.text for row in load_public_corpus(source_path, source)
@@ -123,4 +138,15 @@ def verify_export(
             raise TokenizerError(
                 "export text or ids do not match the pinned source snapshot"
             )
+        ranked = sorted(original, key=lambda value: split_rank(value, 40))
+        boundary = len(declared["train"])
+        expected = {
+            "train": ranked[:boundary],
+            "validation": ranked[boundary : boundary + len(declared["validation"])],
+        }
+        for name in ("train", "validation"):
+            if declared[name] != expected[name]:
+                raise TokenizerError(
+                    f"export {name} ids do not match the split seed 40 partition"
+                )
     return manifest

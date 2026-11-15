@@ -88,6 +88,11 @@ class ParallelSplit:
     second_validation: tuple[Sentence, ...]
 
 
+def split_rank(sentence_id: str, seed: int) -> tuple[bytes, str]:
+    """Rank key for seeded splits: SHA-256 of "<seed>:<id>", ties broken by id."""
+    return sha256(f"{seed}:{sentence_id}".encode()).digest(), sentence_id
+
+
 def align_and_split(
     first: tuple[Sentence, ...],
     second: tuple[Sentence, ...],
@@ -113,9 +118,7 @@ def align_and_split(
         raise TokenizerError("parallel corpora must contain the same sentence ids")
     if type(train_count) is not int or not 1 <= train_count < len(left):
         raise TokenizerError("split must leave nonempty train and held-out sets")
-    ids = sorted(
-        left, key=lambda value: (sha256(f"{seed}:{value}".encode()).digest(), value)
-    )
+    ids = sorted(left, key=lambda value: split_rank(value, seed))
     train, heldout = ids[:train_count], ids[train_count:]
     return ParallelSplit(
         tuple(left[value] for value in train),

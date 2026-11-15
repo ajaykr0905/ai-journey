@@ -52,11 +52,14 @@ ai-journey-bpe-infer \
   --top-k 1 --cached --output artifacts/bpe/sample.json
 ```
 
-Manifest-only validation detects corrupted partition bytes and overlapping IDs;
-it is not proof of authorship or provenance. Providing the pinned source snapshot
-also verifies every exported ID and exact sentence text. The trainer fits BPE on
-training text only and reserves EOS explicitly. Artifact loading rechecks data,
-codec, model, completed steps, and final train/held-out losses before serving.
+Manifest-only validation detects corrupted partition bytes, overlapping IDs and
+IDs listed out of seed-40 rank order (train, then held out); it is not proof of
+authorship or provenance. Providing the pinned source snapshot also verifies
+exact sentence text and re-derives the split: train must be the first ranked
+snapshot IDs and held out the next ones, so a reassigned sentence fails. The
+trainer fits BPE on training text only and reserves EOS explicitly. Artifact
+loading rechecks data, codec, model, completed steps, and final train/held-out
+losses before serving.
 
 Rerun the identical model-training command with `--resume` to restore its exact
 saved state. A completed run performs no further updates. Changing the declared
