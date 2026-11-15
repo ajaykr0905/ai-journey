@@ -42,7 +42,11 @@ def test_ci_gates_the_lab_and_verifies_the_installed_analytical_report():
     job = ci_job("simt-model-cpu")
 
     assert 'python-version: "3.11"' in job
-    assert "python -m pip install torch --index-url" in job
+    installs = [line.lower() for line in job.splitlines() if "pip install" in line]
+    assert installs, "the job must install the package and its tools"
+    for dependency in ("torch", "numpy", "matplotlib"):
+        assert not [line for line in installs if dependency in line], dependency
+    assert "python -m pip install -e . --no-deps" in job
     assert "ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1" in job
     for command in (
         f"ruff check {SOURCES} {TESTS}",
