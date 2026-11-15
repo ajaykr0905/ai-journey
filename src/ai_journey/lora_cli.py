@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -17,7 +18,11 @@ REPORT_BYTES = 256 * 1024
 
 
 def read_json(path, *, limit):
-    """Read bounded UTF-8 JSON, rejecting duplicate fields and nonfinite literals."""
+    """Read bounded UTF-8 JSON, rejecting duplicate fields and nonfinite numbers.
+
+    NaN and Infinity literals and number literals such as 1e400 that overflow
+    to infinity raise the lab's error naming the literal.
+    """
 
     def unique(pairs):
         result = {}
@@ -30,13 +35,22 @@ def read_json(path, *, limit):
     def nonfinite(value):
         raise LoRAExperimentError(f"nonfinite JSON literal: {value}")
 
+    def finite_float(literal):
+        number = float(literal)
+        if not math.isfinite(number):
+            nonfinite(literal)
+        return number
+
     with Path(path).open("rb") as stream:
         raw = stream.read(limit + 1)
     if len(raw) > limit:
         raise LoRAExperimentError(f"JSON exceeds its {limit}-byte budget")
     try:
         return json.loads(
-            raw.decode("utf-8"), object_pairs_hook=unique, parse_constant=nonfinite
+            raw.decode("utf-8"),
+            object_pairs_hook=unique,
+            parse_float=finite_float,
+            parse_constant=nonfinite,
         )
     except (UnicodeError, ValueError, RecursionError) as exc:
         raise LoRAExperimentError(f"invalid comparison JSON: {exc}") from exc

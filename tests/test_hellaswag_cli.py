@@ -57,6 +57,24 @@ def test_cli_rejects_missing_or_invalid_reports(tmp_path):
     assert result.value.code == 2
 
 
+@pytest.mark.parametrize("literal", ["1e400", "Infinity"])
+def test_cli_verify_rejects_overflowing_evidence_numbers(tmp_path, capsys, literal):
+    report = tmp_path / "evidence.json"
+    write_evidence(report, evidence_fixture())
+    raw = report.read_text()
+    accuracy = '"accuracy":' if '"accuracy":' in raw else '"accuracy": '
+    start = raw.index(accuracy) + len(accuracy)
+    end = start + len(raw[start:]) - len(raw[start:].lstrip("-+.0123456789eE"))
+    report.write_text(raw[:start] + literal + raw[end:])
+
+    with pytest.raises(SystemExit) as result:
+        main(["verify", "--report", str(report)])
+
+    assert result.value.code == 2
+    error = capsys.readouterr().err
+    assert f"evidence input must contain finite JSON numbers: {literal}" in error
+
+
 def test_package_installs_hellaswag_command():
     root = Path(__file__).resolve().parents[1]
     project = tomllib.loads((root / "pyproject.toml").read_text())

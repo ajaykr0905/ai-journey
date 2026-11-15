@@ -106,6 +106,36 @@ class ConversationSchemaTests(unittest.TestCase):
         with self.assertRaises(SFTDataError):
             ChatMessage("tool", "result")
 
+    def test_rejects_overflowing_tool_arguments_at_construction(self):
+        with self.assertRaisesRegex(SFTDataError, "1e400"):
+            ToolCall(call_id="call_1", name="weather.lookup", arguments='{"x": 1e400}')
+        for arguments, literal in (
+            ('{"x": -1e400}', "-1e400"),
+            ('{"x": [1, [2.5, 1e400]]}', "1e400"),
+            ('{"x": {"y": {"z": -1e400}}}', "-1e400"),
+            ('{"x": NaN}', "NaN"),
+            ('{"x": Infinity}', "Infinity"),
+            ('{"x": -Infinity}', "-Infinity"),
+        ):
+            with (
+                self.subTest(arguments=arguments),
+                self.assertRaisesRegex(
+                    SFTDataError, f"nonfinite tool argument: {literal}$"
+                ),
+            ):
+                ToolCall("call_1", "weather.lookup", arguments)
+
+    def test_finite_edge_tool_arguments_parse_unchanged(self):
+        call = ToolCall(
+            "call_1",
+            "weather.lookup",
+            '{"tiny": 5e-324, "huge": 1.7976931348623157e308, "zero": -0.0}',
+        )
+        self.assertEqual(
+            call.canonical_arguments,
+            '{"huge":1.7976931348623157e+308,"tiny":5e-324,"zero":-0.0}',
+        )
+
     def test_rejects_unmatched_reused_and_unfinished_tool_calls(self):
         call = ToolCall("call_one", "lookup", "{}")
         cases = (

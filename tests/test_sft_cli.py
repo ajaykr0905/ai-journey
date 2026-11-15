@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import tempfile
 import unittest
@@ -63,6 +64,36 @@ class SFTCLITests(unittest.TestCase):
                     main(["--config", str(self.config), "--output", str(alias)]), 2
                 )
             self.assertEqual(before, self.config.read_bytes())
+
+    def test_overflowing_and_nonfinite_numbers_are_rejected_by_literal(self):
+        for value, literal in (
+            ('{"value": 1e400}', "1e400"),
+            ('{"value": -1e400}', "-1e400"),
+            ('{"value": [1, [2.5, 1e400]]}', "1e400"),
+            ('{"value": {"inner": {"deep": -1e400}}}', "-1e400"),
+            ('{"value": NaN}', "NaN"),
+            ('{"value": Infinity}', "Infinity"),
+            ('{"value": -Infinity}', "-Infinity"),
+        ):
+            self.config.write_text(value, encoding="utf-8")
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(
+                    SFTDataError, f"nonfinite JSON literal: {literal}$"
+                ),
+            ):
+                read_json(self.config, limit=CONFIG_BYTES)
+
+    def test_finite_edge_numbers_read_unchanged(self):
+        self.config.write_text(
+            '{"tiny": 5e-324, "huge": 1.7976931348623157e308, "zero": -0.0}',
+            encoding="utf-8",
+        )
+        payload = read_json(self.config, limit=CONFIG_BYTES)
+        self.assertEqual(
+            payload, {"tiny": 5e-324, "huge": 1.7976931348623157e308, "zero": 0.0}
+        )
+        self.assertEqual(math.copysign(1.0, payload["zero"]), -1.0)
 
     def test_malformed_duplicate_nonfinite_and_oversized_json_are_rejected(self):
         for value in (

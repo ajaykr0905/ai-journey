@@ -1,6 +1,7 @@
 """Bounded input reads and collision checks for benchmark operations."""
 
 import json
+import math
 import os
 from pathlib import Path
 import stat
@@ -32,8 +33,9 @@ def read_evaluation_bytes(path: Path, *, maximum: int, name: str) -> bytes:
 def parse_evaluation_json(raw: bytes, *, name: str) -> dict:
     """Parse benchmark JSON that must be one object with unique keys.
 
-    Duplicate keys, NaN or Infinity literals, undecodable bytes and non-object
-    roots raise HellaSwagError naming the input.
+    Duplicate keys, NaN or Infinity literals, number literals such as 1e400
+    that overflow to infinity, undecodable bytes and non-object roots raise
+    HellaSwagError naming the input.
     """
 
     def unique_object(pairs):
@@ -45,11 +47,20 @@ def parse_evaluation_json(raw: bytes, *, name: str) -> dict:
         return result
 
     def invalid_constant(value):
-        raise HellaSwagError(f"{name} must contain finite JSON numbers")
+        raise HellaSwagError(f"{name} must contain finite JSON numbers: {value}")
+
+    def finite_float(literal):
+        value = float(literal)
+        if not math.isfinite(value):
+            invalid_constant(literal)
+        return value
 
     try:
         payload = json.loads(
-            raw, object_pairs_hook=unique_object, parse_constant=invalid_constant
+            raw,
+            object_pairs_hook=unique_object,
+            parse_float=finite_float,
+            parse_constant=invalid_constant,
         )
     except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
         raise HellaSwagError(f"{name} must be valid bounded UTF-8 JSON") from error
