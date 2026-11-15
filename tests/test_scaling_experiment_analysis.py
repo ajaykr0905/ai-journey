@@ -188,6 +188,33 @@ def test_holdout_evaluation_scores_unseen_largest_model_rows():
     assert result.holdout_count == 2
 
 
+@pytest.mark.parametrize("convention", [2, 6, 8])
+def test_residual_and_holdout_use_the_fit_flops_convention(convention):
+    points = tuple(
+        aggregate_point(
+            parameters,
+            tokens,
+            loss=50 * (convention * parameters * tokens) ** -0.1,
+        )
+        for parameters in (100_000, 200_000, 400_000)
+        for tokens in (1_000_000, 2_000_000)
+    )
+    split = largest_model_holdout(points)
+    fit = fit_compute_loss(split.training, flops_per_parameter_token=convention)
+    residuals = evaluate_fit_residuals(
+        split.training, fit, flops_per_parameter_token=convention
+    )
+
+    result = evaluate_holdout(
+        fit, residuals, split.holdout, flops_per_parameter_token=convention
+    )
+
+    assert fit.exponent == pytest.approx(-0.1)
+    assert residuals.mean_absolute_percentage_error < 1e-12
+    assert result.mean_absolute_percentage_error < 1e-12
+    assert result.within_residual_band_fraction == 1.0
+
+
 def test_holdout_evaluation_rejects_empty_holdouts():
     points = tuple(aggregate_point(parameters, 10) for parameters in (10, 20, 40))
     fit = fit_compute_loss(points)

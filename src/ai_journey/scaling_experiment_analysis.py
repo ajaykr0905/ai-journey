@@ -184,6 +184,15 @@ def largest_model_holdout(points: tuple[AggregatedPoint, ...]) -> FitSplit:
     return FitSplit(training=training, holdout=holdout)
 
 
+def _aggregate_compute(row: AggregatedPoint, flops_per_parameter_token: int) -> float:
+    return float(
+        point_training_flops(
+            ExperimentPoint(row.parameter_count, row.train_tokens, 0),
+            flops_per_parameter_token=flops_per_parameter_token,
+        )
+    )
+
+
 def fit_compute_loss(
     training: tuple[AggregatedPoint, ...],
     *,
@@ -194,22 +203,22 @@ def fit_compute_loss(
     if not isinstance(training, tuple) or len(training) < 3:
         raise ScalingLawError("training must contain at least three points")
     compute = tuple(
-        float(
-            point_training_flops(
-                ExperimentPoint(row.parameter_count, row.train_tokens, 0),
-                flops_per_parameter_token=flops_per_parameter_token,
-            )
-        )
-        for row in training
+        _aggregate_compute(row, flops_per_parameter_token) for row in training
     )
     losses = tuple(row.mean_validation_loss for row in training)
     return fit_power_law(compute, losses)
 
 
 def evaluate_fit_residuals(
-    points: tuple[AggregatedPoint, ...], fit: PowerLawFit
+    points: tuple[AggregatedPoint, ...],
+    fit: PowerLawFit,
+    *,
+    flops_per_parameter_token: int = 6,
 ) -> FitResiduals:
-    """Report absolute, relative, and log-space error on supplied points."""
+    """Report absolute, relative, and log-space error on supplied points.
+
+    Pass the FLOPs-per-parameter-token convention the fit was made with.
+    """
 
     if not isinstance(points, tuple) or not points:
         raise ScalingLawError("points must be a nonempty tuple")
@@ -217,7 +226,8 @@ def evaluate_fit_residuals(
         raise TypeError("fit must be PowerLawFit")
     actual = tuple(row.mean_validation_loss for row in points)
     predicted = tuple(
-        fit.predict(float(row.parameter_count * row.train_tokens * 6)) for row in points
+        fit.predict(_aggregate_compute(row, flops_per_parameter_token))
+        for row in points
     )
     absolute = tuple(
         abs(left - right) for left, right in zip(actual, predicted, strict=True)
@@ -300,15 +310,20 @@ def evaluate_holdout(
     fit: PowerLawFit,
     residuals: FitResiduals,
     holdout: tuple[AggregatedPoint, ...],
+    *,
+    flops_per_parameter_token: int = 6,
 ) -> HoldoutEvaluation:
-    """Evaluate predeclared holdout error without refitting on held-out rows."""
+    """Evaluate predeclared holdout error without refitting on held-out rows.
+
+    Pass the FLOPs-per-parameter-token convention the fit was made with.
+    """
 
     if not isinstance(holdout, tuple) or not holdout:
         raise ScalingLawError("holdout must be a nonempty tuple")
     errors = []
     within = 0
     for row in holdout:
-        compute = float(row.parameter_count * row.train_tokens * 6)
+        compute = _aggregate_compute(row, flops_per_parameter_token)
         band = residual_prediction_band(fit, residuals, compute)
         errors.append(
             abs(row.mean_validation_loss - band.estimate) / row.mean_validation_loss
