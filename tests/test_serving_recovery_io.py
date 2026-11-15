@@ -56,9 +56,9 @@ def test_attempt_logs_round_trip_and_reject_edited_evidence(tmp_path):
         (lambda p: json.dumps(p, indent=1), "canonical"),
         (
             lambda p: json.dumps(
-                p | {"schema_version": 2}, sort_keys=True, separators=(",", ":")
+                p | {"schema_version": 1}, sort_keys=True, separators=(",", ":")
             ),
-            "schema",
+            "schema_version 1 is not supported; expected 2",
         ),
         (
             lambda p: path.read_text().replace(

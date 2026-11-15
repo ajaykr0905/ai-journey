@@ -84,6 +84,14 @@ same code `verify` uses.
 | `report.json` | Sealed summary with the evidence digests, measurements and evidence boundary |
 | `lifetime-N.stderr` | Server diagnostics; normally empty and not part of the verified evidence |
 
+`report.json` and `attempts.json` carry `schema_version: 2`. Version 2 added
+the `connect_error` attempt outcome, narrowed `connection_refused` to
+ECONNREFUSED and added `connect_error` to `reconciliation.attempt_outcomes`.
+The verifier accepts only version 2 and rejects a version-1 report or attempt
+log with a message naming the found and expected versions. Version-1 runs are
+not verified. `config.json` and journal records stay at version 1, and the
+trace has no version field.
+
 The server writes each journal line with an unbuffered append *before* it
 sends the response. A trailing newline commits a line. The reader tolerates
 exactly one torn final line in a killed lifetime's journal and rejects any

@@ -57,6 +57,7 @@ from .serving_recovery_report import (
     EVIDENCE_BOUNDARY,
     REPORT_FILE,
     REPORT_KIND,
+    REPORT_SCHEMA_VERSION,
     load_serving_report,
     summary_milliseconds,
 )
@@ -290,11 +291,15 @@ def verify_serving_recovery_run(run_dir: Path) -> dict[str, Any]:
     _require(run_dir.is_dir() and not run_dir.is_symlink(), "run_dir is invalid")
     report = load_serving_report(run_dir / REPORT_FILE)
     _require(set(report) == _REPORT_FIELDS, "report fields do not match schema")
+    version = report["schema_version"]
     _require(
-        type(report["schema_version"]) is int
-        and report["schema_version"] == 1
-        and report["kind"] == REPORT_KIND,
+        type(version) is int and report["kind"] == REPORT_KIND,
         "report schema is unsupported",
+    )
+    _require(
+        version == REPORT_SCHEMA_VERSION,
+        f"report schema_version {version} is not supported; "
+        f"expected {REPORT_SCHEMA_VERSION}",
     )
     _require(report["evidence_boundary"] == EVIDENCE_BOUNDARY, "boundary changed")
     _require(report["clock"] == CLOCK, "report clock statement changed")

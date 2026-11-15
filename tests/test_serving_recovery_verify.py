@@ -490,3 +490,35 @@ def test_verifier_rejects_attempts_the_lifecycle_makes_impossible(
     forge(run_dir)
     with pytest.raises(ValueError, match=message):
         verify_serving_recovery_run(run_dir)
+
+
+def test_new_runs_write_version_2_reports_and_attempt_logs(sealed_run):
+    report = json.loads((sealed_run / "report.json").read_bytes())
+    attempts = json.loads((sealed_run / "attempts.json").read_bytes())
+
+    assert (report["schema_version"], attempts["schema_version"]) == (2, 2)
+
+
+@pytest.mark.parametrize(
+    ("downgrade", "message"),
+    [
+        (
+            lambda d: reseal(d, lambda r: r.update(schema_version=1)),
+            "report schema_version 1 is not supported; expected 2",
+        ),
+        (
+            lambda d: (
+                edit_json(d / "attempts.json", lambda p: p.update(schema_version=1)),
+                reseal(d, refresh=["attempts.json"]),
+            ),
+            "attempt log schema_version 1 is not supported; expected 2",
+        ),
+    ],
+)
+def test_verifier_names_unsupported_schema_versions(
+    sealed_run, tmp_path, downgrade, message
+):
+    run_dir = copy_run(sealed_run, tmp_path)
+    downgrade(run_dir)
+    with pytest.raises(ValueError, match=message):
+        verify_serving_recovery_run(run_dir)
