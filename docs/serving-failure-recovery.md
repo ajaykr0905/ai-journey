@@ -207,8 +207,10 @@ host and its load.
   consistently and reseals it is caught only when a derived value stops
   matching or the evidence breaks physical order: an acknowledgement or a
   journal execution of an attempt that started after the serving lifetime's
-  exit was observed, or a journal execution of an attempt that never
-  connected (refused, `connect_error` or `connect_timeout`). Retain the run
+  exit was observed, a journal execution of an attempt that never
+  connected (refused, `connect_error` or `connect_timeout`), or a journal
+  execution of an attempt sent to a port that its lifetime did not publish
+  when it became ready. Retain the run
   directory and compare it with independent runs.
 - The idempotency key identifies and reconciles retries. It does not make the
   server exactly-once.

@@ -8,8 +8,8 @@ lifetime's journal, recomputes each expected response body, then recomputes
 reconciliation and every timing metric and requires the sealed report to match
 them exactly. Evidence that the lifecycle makes impossible is rejected too: an
 acknowledgement or a journal execution of an attempt that started after the
-serving lifetime's exit was observed, or a journal execution of an attempt that
-never connected.
+serving lifetime's exit was observed, a journal execution of an attempt that
+never connected, or one sent to a port its lifetime did not publish.
 """
 
 from __future__ import annotations
@@ -384,6 +384,7 @@ def verify_serving_recovery_run(run_dir: Path) -> dict[str, Any]:
         )
     sent = {(a.idempotency_key, a.attempt): a for a in attempts}
     ends = _lifetime_ends(events)
+    ports = {e.lifetime_id: e.payload["port"] for e in events if e.kind == "ready"}
     for journal in journals:
         for record in journal.records:
             _require(
@@ -402,6 +403,11 @@ def verify_serving_recovery_run(run_dir: Path) -> dict[str, Any]:
                 attempt.started_ns <= ends.get(journal.lifetime_id, -1),
                 "a journal executed an attempt sent after its lifetime's exit "
                 "was observed",
+            )
+            # Only the lifetime that published a port can receive attempts to it.
+            _require(
+                ports.get(journal.lifetime_id) == attempt.port,
+                "a journal executed an attempt sent to another lifetime's port",
             )
 
     reconciliation = reconcile_serving_run(

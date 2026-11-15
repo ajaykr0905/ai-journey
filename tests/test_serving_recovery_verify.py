@@ -522,3 +522,54 @@ def test_verifier_names_unsupported_schema_versions(
     downgrade(run_dir)
     with pytest.raises(ValueError, match=message):
         verify_serving_recovery_run(run_dir)
+
+
+def an_unexecuted_reset_and_the_ready_ports(run_dir):
+    """Return a reset sent to the killed lifetime's port, unexecuted, with ports."""
+
+    _, events = load_trace(run_dir / "trace.json")
+    ports = {e.lifetime_id: e.payload["port"] for e in events if e.kind == "ready"}
+    fault = next(e for e in events if e.kind == "fault")
+    report = json.loads((run_dir / "report.json").read_bytes())
+    executed = {
+        (record.idempotency_key, record.attempt)
+        for entry in report["evidence"]["journals"]
+        for record in read_execution_journal(
+            run_dir / entry["file"],
+            lifetime_id=entry["lifetime_id"],
+            max_records=journal_capacity(experiment_config()),
+            allow_torn_tail=True,
+        ).records
+    }
+    reset = next(
+        a
+        for a in load_attempt_log(run_dir / "attempts.json")
+        if a.outcome == "connection_reset"
+        and a.port == ports[fault.lifetime_id]
+        and (a.idempotency_key, a.attempt) not in executed
+    )
+    return reset, ports, fault.lifetime_id
+
+
+def test_a_lost_response_executed_by_the_lifetime_owning_its_port_verifies(
+    sealed_run, tmp_path
+):
+    run_dir = copy_run(sealed_run, tmp_path)
+    reset, _, owner = an_unexecuted_reset_and_the_ready_ports(run_dir)
+    credit_execution(run_dir, reset, owner)
+
+    receipt = verify_serving_recovery_run(run_dir)
+    assert receipt["verified"] is True and receipt["duplicate_executions"] == 1
+
+
+def test_verifier_rejects_an_execution_by_a_lifetime_that_did_not_own_the_port(
+    sealed_run, tmp_path
+):
+    run_dir = copy_run(sealed_run, tmp_path)
+    reset, ports, owner = an_unexecuted_reset_and_the_ready_ports(run_dir)
+    (replacement,) = (lifetime for lifetime in ports if lifetime != owner)
+    assert ports[replacement] != reset.port
+    credit_execution(run_dir, reset, replacement)
+
+    with pytest.raises(ValueError, match="executed an attempt sent to another"):
+        verify_serving_recovery_run(run_dir)
