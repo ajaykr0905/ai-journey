@@ -1,9 +1,10 @@
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import torch
 from torch import nn
@@ -48,6 +49,53 @@ class ArtifactWriterTests(unittest.TestCase):
                 with self.assertRaises(OSError):
                     write_adapter_artifact(path, self.model)
             self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(list(Path(directory).iterdir()), [path])
+
+    def test_writer_syncs_parent_directory_after_replacement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "adapter.json"
+            events = []
+            directories = set()
+            real_open, real_fsync, real_replace = os.open, os.fsync, os.replace
+
+            def opened(target, flags, *args, **kwargs):
+                descriptor = real_open(target, flags, *args, **kwargs)
+                if Path(target) == path.parent:
+                    directories.add(descriptor)
+                    events.append(("open", flags))
+                return descriptor
+
+            def synced(descriptor):
+                events.append(
+                    ("fsync", "directory" if descriptor in directories else "file")
+                )
+                return real_fsync(descriptor)
+
+            def replaced(source, target):
+                events.append(("replace", Path(target)))
+                return real_replace(source, target)
+
+            with (
+                patch(
+                    "ai_journey.lora_artifact.os.open", side_effect=opened
+                ) as open_mock,
+                patch(
+                    "ai_journey.lora_artifact.os.fsync", side_effect=synced
+                ) as fsync_mock,
+                patch("ai_journey.lora_artifact.os.replace", side_effect=replaced),
+            ):
+                write_adapter_artifact(path, self.model)
+            self.assertIn(call(path.parent, os.O_RDONLY), open_mock.call_args_list)
+            self.assertEqual(fsync_mock.call_count, 2)
+            self.assertEqual(
+                events,
+                [
+                    ("fsync", "file"),
+                    ("replace", path),
+                    ("open", os.O_RDONLY),
+                    ("fsync", "directory"),
+                ],
+            )
             self.assertEqual(list(Path(directory).iterdir()), [path])
 
     def test_serialization_budget_is_checked_before_publishing(self):

@@ -451,7 +451,7 @@ def render_report(report):
 
 
 def write_report(path, report):
-    """Validate before atomically replacing a report; clean failed temp files."""
+    """Validate, durably replace a report and sync its directory; clean temp files."""
     rendered = render_report(report)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -470,6 +470,11 @@ def write_report(path, report):
             os.fsync(stream.fileno())
         os.replace(temporary, path)
         temporary = None
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
