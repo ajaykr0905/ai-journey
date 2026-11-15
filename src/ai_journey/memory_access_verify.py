@@ -25,6 +25,7 @@ import re
 from hashlib import sha256
 
 from .memory_access_benchmark import INJECTED_TIMER, PERCENTILE_METHOD, TIMER
+from .memory_access_measurement import CPU_ENVIRONMENT_FIELDS
 from .memory_access_pattern import MemoryAccessError
 from .memory_access_plan import (
     BenchmarkSpec,
@@ -106,17 +107,6 @@ _RESULT_FIELDS = {
     "median_gflops_per_second",
     "best_gflops_per_second",
     "correctness",
-}
-_ENVIRONMENT_FIELDS = {
-    "python_version",
-    "python_implementation",
-    "numpy_version",
-    "torch_version",
-    "platform_system",
-    "platform_machine",
-    "cpu_count",
-    "torch_threads",
-    "torch_float32_matmul_precision",
 }
 
 
@@ -627,10 +617,10 @@ def _tolerance(inner: int) -> float:
 
 def _check_environment(environment: object) -> None:
     _require(
-        type(environment) is dict and set(environment) == _ENVIRONMENT_FIELDS,
+        type(environment) is dict and set(environment) == CPU_ENVIRONMENT_FIELDS,
         "environment fields do not match the CPU record",
     )
-    for name in _ENVIRONMENT_FIELDS - {"cpu_count", "torch_threads"}:
+    for name in CPU_ENVIRONMENT_FIELDS - {"cpu_count", "torch_threads"}:
         value = environment[name]
         _require(
             isinstance(value, str) and _TOKEN.fullmatch(value) is not None,

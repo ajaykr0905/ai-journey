@@ -45,6 +45,7 @@
     "src/ai_journey/memory_access_roofline.py",
     "src/ai_journey/memory_access_tile_banks.py",
     "src/ai_journey/memory_access_benchmark.py",
+    "src/ai_journey/memory_access_measurement.py",
     "src/ai_journey/memory_access_baseline.py",
     "src/ai_journey/memory_access_plan.py",
     "src/ai_journey/memory_access_report.py",

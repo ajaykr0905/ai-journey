@@ -7,6 +7,7 @@ import numpy
 import pytest
 import torch
 
+from ai_journey import memory_access_baseline, memory_access_measurement
 from ai_journey.memory_access_baseline import (
     MatmulCase,
     MatmulChecker,
@@ -135,6 +136,7 @@ def test_environment_record_names_runtime_versions_without_host_identity():
         "torch_threads",
         "torch_float32_matmul_precision",
     }
+    assert set(environment) == memory_access_measurement.CPU_ENVIRONMENT_FIELDS
     assert environment["numpy_version"] == numpy.__version__
     assert environment["torch_threads"] == torch.get_num_threads()
     serialized = json.dumps(environment)
@@ -176,3 +178,18 @@ def test_environment_record_names_runtime_versions_without_host_identity():
 def test_baseline_contracts_are_bounded(call, error, message):
     with pytest.raises(error, match=message):
         call()
+
+
+def test_torch_free_names_stay_importable_from_the_baseline():
+    for name in (
+        "BACKENDS",
+        "BASELINE_DTYPE",
+        "MAX_BASELINE_DIMENSION",
+        "MAX_BASELINE_SEED",
+        "MatmulCase",
+        "MatmulMeasurement",
+        "CorrectnessCheck",
+    ):
+        assert getattr(memory_access_baseline, name) is getattr(
+            memory_access_measurement, name
+        ), name
