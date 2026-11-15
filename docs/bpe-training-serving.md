@@ -52,8 +52,9 @@ ai-journey-bpe-infer \
   --top-k 1 --cached --output artifacts/bpe/sample.json
 ```
 
-Manifest-only validation detects corrupted partition bytes, overlapping IDs and
-IDs listed out of seed-40 rank order (train, then held out); it is not proof of
+Manifest-only validation detects corrupted partition bytes, overlapping IDs,
+lines with a document boundary other than `\n` (such as `\r` or U+2028) and IDs
+listed out of seed-40 rank order (train, then held out); it is not proof of
 authorship or provenance. Providing the pinned source snapshot also verifies
 exact sentence text and re-derives the split: train must be the first ranked
 snapshot IDs and held out the next ones, so a reassigned sentence fails. The

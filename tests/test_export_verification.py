@@ -12,6 +12,7 @@ from ai_journey.bpe import TokenizerError
 from ai_journey.export_verification import verify_export
 from ai_journey.parallel_corpus import Sentence
 from ai_journey.parallel_export import main as export_main
+from ai_journey.tokenizer_cli import read_documents
 from ai_journey.tokenizer_sources import ENGLISH, HINDI
 
 
@@ -68,6 +69,30 @@ class ExportVerificationTests(unittest.TestCase):
         self.paths[0].write_text(json.dumps(self.manifest))
         with self.assertRaisesRegex(TokenizerError, "disjoint"):
             verify_export(*self.paths)
+
+    def test_lines_with_other_splitlines_boundaries_are_rejected(self):
+        boundaries = "\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"
+        self.assertEqual(
+            {
+                char
+                for char in map(chr, range(0x110000))
+                if len(f"a{char}b".splitlines()) == 2
+            },
+            set(boundaries) | {"\n"},
+        )
+        for char in boundaries:
+            for text in (f"नम{char}स्ते\n", f"नमस्ते{char}\n"):
+                data = text.encode()
+                self.paths[1].write_bytes(data)
+                self.manifest["partitions"]["train"].update(
+                    sha256=sha256(data).hexdigest(), size_bytes=len(data)
+                )
+                self.paths[0].write_text(json.dumps(self.manifest))
+                with (
+                    self.subTest(char=hex(ord(char)), text=text),
+                    self.assertRaisesRegex(TokenizerError, "line boundary"),
+                ):
+                    verify_export(*self.paths)
 
     def test_manifest_must_declare_split_seed_40(self):
         self.manifest["split_seed"] = 41
@@ -209,3 +234,10 @@ class ExporterRoundTripTests(unittest.TestCase):
                         len(manifest["partitions"]["train"]["sentence_ids"]), 10
                     )
                     self.assertEqual(manifest["unused_sentences"], 10)
+                    for name, path in (("train", paths[1]), ("validation", paths[2])):
+                        lines = path.read_text(encoding="utf-8").split("\n")[:-1]
+                        self.assertEqual(
+                            len(lines),
+                            len(manifest["partitions"][name]["sentence_ids"]),
+                        )
+                        self.assertEqual(read_documents(path), tuple(lines))

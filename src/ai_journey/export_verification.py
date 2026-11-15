@@ -16,9 +16,10 @@ def verify_export(
     """Prove exported partitions match their manifest, and optionally their source.
 
     Checks the pinned source and license, that the manifest declares split seed
-    40, unique disjoint ids, exact sizes and digests, and one line per id. The
-    declared ids, train then held out, must be in strictly increasing seed-40
-    rank. With source_path every line must equal the snapshot text for its id,
+    40, unique disjoint ids, exact sizes and digests, and one line per id with
+    no other str.splitlines boundary (such as \\r, \\f or U+2028), so
+    read_documents yields exactly the verified lines. The declared ids, train
+    then held out, must be in strictly increasing seed-40 rank. With source_path every line must equal the snapshot text for its id,
     every sentence must be counted, and membership is re-derived: train must be
     the first len(train) snapshot ids in seed-40 rank and held out the next
     len(validation). Mismatches raise TokenizerError.
@@ -114,6 +115,10 @@ def verify_export(
         ):
             raise TokenizerError(
                 "export text must contain exactly one line per sentence id"
+            )
+        if any(line.splitlines() != [line] for line in lines[:-1]):
+            raise TokenizerError(
+                "export text lines must not contain a str.splitlines line boundary"
             )
         texts.update(zip(ids, lines[:-1], strict=True))
     declared = {
