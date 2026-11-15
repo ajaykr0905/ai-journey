@@ -1,4 +1,10 @@
+import functools
+import json
+import os
+import subprocess
+import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +18,16 @@ from ai_journey.memory_access_benchmark import (
     timer_name,
 )
 from ai_journey.memory_access_pattern import MemoryAccessError
+
+ROOT = Path(__file__).resolve().parents[1]
+# Replaces the time module's timer before the timing core is first imported.
+PATCHED_BEFORE_IMPORT = """
+import itertools, json, time
+host = time.perf_counter_ns
+time.perf_counter_ns = itertools.count(0, 1_000).__next__
+from ai_journey.memory_access_benchmark import timer_name
+print(json.dumps([timer_name(time.perf_counter_ns), timer_name(host)]))
+"""
 
 
 class FakeClock:
@@ -112,6 +128,16 @@ def test_only_the_host_timer_is_named_as_a_measurement_clock(monkeypatch):
     assert timer_name(time.perf_counter_ns) == "injected"
 
 
+def test_only_the_genuine_builtin_perf_counter_ns_is_the_host_timer(monkeypatch):
+    host = time.perf_counter_ns
+
+    assert timer_name(functools.partial(host)) == "injected"
+    assert timer_name(time.monotonic_ns) == "injected"
+    assert timer_name(time.perf_counter) == "injected"
+    monkeypatch.setattr(time, "perf_counter_ns", lambda: 5)
+    assert timer_name(host) == "time.perf_counter_ns"
+
+
 def test_inspection_failures_propagate_instead_of_being_timed():
     def reject(result):
         raise RuntimeError(f"bad result {result}")
@@ -146,3 +172,17 @@ def test_gflops_divides_flops_by_nanoseconds():
         gflops_per_second(10, 0)
     with pytest.raises(TypeError, match="flops"):
         gflops_per_second(1.0, 10)
+
+
+def test_a_timer_patched_in_before_import_is_still_injected():
+    completed = subprocess.run(
+        [sys.executable, "-c", PATCHED_BEFORE_IMPORT],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == ["injected", "time.perf_counter_ns"]
