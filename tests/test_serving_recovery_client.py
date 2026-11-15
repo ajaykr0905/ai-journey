@@ -223,6 +223,30 @@ def test_local_connect_errors_are_not_classified_as_refusals(monkeypatch, code):
     )
 
 
+def resolver_failure(monkeypatch, code):
+    def fail(*args, **kwargs):
+        raise socket.gaierror(code, "resolver failed")
+
+    monkeypatch.setattr(serving_recovery_client.socket, "getaddrinfo", fail)
+    return attempt(closed_port())
+
+
+@pytest.mark.parametrize("name", ["EAI_AGAIN", "EAI_FAIL", "EAI_MEMORY", "EAI_NONAME"])
+def test_resolver_failures_record_the_resolver_code_name(monkeypatch, name):
+    record = resolver_failure(monkeypatch, getattr(socket, name))
+    assert (record.outcome, record.error) == ("connect_error", name)
+
+
+def test_resolver_failures_with_unknown_codes_record_gaierror(monkeypatch):
+    codes = {getattr(socket, name) for name in dir(socket) if name.startswith("EAI_")}
+    unknown = [next(code for code in range(-10_000, 10_000) if code not in codes)]
+    # EAI_MAX is a sentinel, not a resolver error.
+    sentinel = [socket.EAI_MAX] if hasattr(socket, "EAI_MAX") else []
+    for code in unknown + sentinel:
+        record = resolver_failure(monkeypatch, code)
+        assert (record.outcome, record.error) == ("connect_error", "gaierror")
+
+
 @pytest.mark.parametrize(
     ("outcome", "error", "connected"),
     [
