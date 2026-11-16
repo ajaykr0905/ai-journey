@@ -132,6 +132,40 @@ def test_selectors_without_a_metric_name_cannot_escape_the_allowed_series(
         check_promql(expression, allowed_metrics={"ai_journey_serving_attempts_total"})
 
 
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "sum by (job,) (up)",
+        "sum by () (up)",
+        "a / ignoring (job, instance) b",
+        "max(up)[5m:]",
+        "(up)[1h:1m]",
+        'up{job="a"}[5m]',
+    ],
+)
+def test_label_lists_and_subqueries_that_prometheus_parses_pass(expression):
+    assert isinstance(check_promql(expression), PromqlSummary)
+
+
+@pytest.mark.parametrize(
+    ("expression", "message"),
+    [
+        ("sum by (job instance) (up)", "malformed label list"),
+        ("sum by (job, ,) (up)", "malformed label list"),
+        ("sum by (,) (up)", "malformed label list"),
+        ("a / on (job job) b", "malformed label list"),
+        # Prometheus: ranges are only allowed for vector selectors.
+        ("max(up)[5m]", "subquery"),
+        ("(up)[1h]", "subquery"),
+    ],
+)
+def test_label_lists_need_commas_and_expression_ranges_need_a_step_colon(
+    expression, message
+):
+    with pytest.raises(PromqlSyntaxError, match=message):
+        check_promql(expression)
+
+
 def test_a_selector_cannot_set_its_metric_name_twice():
     # Prometheus rejects this as "metric name must not be set twice".
     for allowed in (None, {"up"}):

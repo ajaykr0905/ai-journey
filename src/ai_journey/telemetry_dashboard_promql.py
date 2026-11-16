@@ -4,10 +4,11 @@ This is not a PromQL parser and does not check types, arity or precedence. It
 tokenizes an expression and checks what a dashboard generator gets wrong most
 often: parentheses, braces and brackets balance and nest; string literals end;
 every name called like a function is a known PromQL function or aggregation
-operator; ``by``, ``without``, ``on`` and ``ignoring`` take a parenthesized
-label list; braces hold ``label op "value"`` matchers; range brackets follow a
-selector and hold a duration or a Grafana interval variable, with an optional
-subquery step; durations appear only in ranges or after ``offset``; and a
+operator; ``by``, ``without``, ``on`` and ``ignoring`` take a parenthesized,
+comma-separated label list; braces hold ``label op "value"`` matchers; range
+brackets follow a selector and hold a duration or a Grafana interval
+variable, with an optional subquery step that a range after a parenthesized
+expression requires; durations appear only in ranges or after ``offset``; and a
 selector that names its metric does not match ``__name__`` as well, which
 Prometheus rejects. When the caller passes the allowed series names, every
 selector must name its metric before any braces and every referenced metric
@@ -194,7 +195,10 @@ class _Checker:
         self.argument_openers: set[int] = set()
         self.matcher_state = "name"
         self.selector_named = False
+        self.label_state = "start"
         self.range_state = "start"
+        # Prometheus allows a range after an expression only as a subquery.
+        self.subquery_only = False
 
     def context(self) -> str:
         return self.stack[-1][2] if self.stack else "expression"
@@ -245,6 +249,11 @@ class _Checker:
                 raise PromqlSyntaxError(f"incomplete label matcher at {token.offset}")
             if context == "range" and self.range_state == "start":
                 raise PromqlSyntaxError(f"range needs a duration at {token.offset}")
+            plain_range = context == "range" and self.range_state == "duration"
+            if plain_range and self.subquery_only:
+                raise PromqlSyntaxError(
+                    f"a range after an expression must be a subquery at {token.offset}"
+                )
             return
         if self.context() in ("labels", "matchers", "range"):
             raise PromqlSyntaxError(f"unexpected {text!r} at {token.offset}")
@@ -267,10 +276,11 @@ class _Checker:
                     f"range must follow a selector at {token.offset}"
                 )
             context, self.range_state = "range", "start"
+            self.subquery_only = name == ")"
         elif index in self.argument_openers:
             context = "call"
         elif name in _LABEL_LISTS or name in _OPTIONAL_LABEL_LISTS:
-            context = "labels"
+            context, self.label_state = "labels", "start"
         elif (
             previous is not None
             and previous.kind == "identifier"
@@ -286,6 +296,9 @@ class _Checker:
         following, previous = self.at(index + 1), self.at(index - 1)
         calls = following is not None and following.text == "("
         if context == "labels":
+            if self.label_state not in ("start", "name"):
+                raise PromqlSyntaxError(f"malformed label list at {token.offset}")
+            self.label_state = "separator"
             return
         if context == "matchers":
             if self.matcher_state != "name":
@@ -376,8 +389,10 @@ class _Checker:
                 raise PromqlSyntaxError(f"malformed range at {token.offset}")
             self.range_state = "colon"
         elif context == "labels":
-            if text != ",":
+            # A trailing comma is allowed, as in "by (job,)"; ",," is not.
+            if text != "," or self.label_state != "separator":
                 raise PromqlSyntaxError(f"malformed label list at {token.offset}")
+            self.label_state = "name"
         elif text == ":":
             raise PromqlSyntaxError(f"':' outside a range at {token.offset}")
         elif text == "," and context != "call":

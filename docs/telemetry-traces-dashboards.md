@@ -232,9 +232,11 @@ variable, unique uppercase `refId`s, the local CPU lab tag, title and header
 panel, and every PromQL expression. The PromQL check is a tokenizer, not a
 parser: brackets must balance and nest, strings must end, every called name
 must be a known PromQL function or aggregation, `by`, `without`, `on` and
-`ignoring` must take a label list, braces must hold `label op "value"`
-matchers, ranges must follow a selector and hold a duration or a Grafana
-interval variable, and every selected series must belong to the catalog.
+`ignoring` must take a comma-separated label list, braces must hold
+`label op "value"` matchers, ranges must follow a selector and hold a
+duration or a Grafana interval variable (after a parenthesized expression
+only a subquery such as `[5m:]` is allowed), and every selected series must
+belong to the catalog.
 A selector must name its series before any braces and may not also match
 `__name__`, so matchers alone, such as `{__name__=~".+"}`, cannot select
 series outside the catalog. Types, arity and operator precedence are not
