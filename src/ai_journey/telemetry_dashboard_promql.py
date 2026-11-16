@@ -7,9 +7,11 @@ every name called like a function is a known PromQL function or aggregation
 operator; ``by``, ``without``, ``on`` and ``ignoring`` take a parenthesized
 label list; braces hold ``label op "value"`` matchers; range brackets follow a
 selector and hold a duration or a Grafana interval variable, with an optional
-subquery step; and durations appear only in ranges or after ``offset``. When
-the caller passes the allowed series names, every referenced metric must be
-one of them.
+subquery step; durations appear only in ranges or after ``offset``; and a
+selector that names its metric does not match ``__name__`` as well, which
+Prometheus rejects. When the caller passes the allowed series names, every
+selector must name its metric before any braces and every referenced metric
+must be one of them, so ``{__name__=~".+"}`` cannot select around the list.
 
 The function list covers the Prometheus 2.x and 3.x query functions, including
 both ``holt_winters`` and its 3.0 name ``double_exponential_smoothing``.
@@ -191,6 +193,7 @@ class _Checker:
         # Indices of "(" that open an aggregation argument after "by (...)".
         self.argument_openers: set[int] = set()
         self.matcher_state = "name"
+        self.selector_named = False
         self.range_state = "start"
 
     def context(self) -> str:
@@ -247,7 +250,15 @@ class _Checker:
             raise PromqlSyntaxError(f"unexpected {text!r} at {token.offset}")
         name = previous.text if previous is not None else ""
         if text == "{":
+            named = previous is not None and previous.kind == "identifier"
+            named = named and name in self.metrics
+            # Matchers alone, such as {__name__=~".+"}, select any metric.
+            if not named and self.allowed is not None:
+                raise PromqlSyntaxError(
+                    f"selector at {token.offset} must name an allowed metric"
+                )
             context, self.matcher_state = "matchers", "name"
+            self.selector_named = named
         elif text == "[":
             if previous is None or not (
                 previous.kind == "identifier" or name in ("}", ")")
@@ -279,6 +290,10 @@ class _Checker:
         if context == "matchers":
             if self.matcher_state != "name":
                 raise PromqlSyntaxError(f"unexpected label name at {token.offset}")
+            if name == "__name__" and self.selector_named:
+                raise PromqlSyntaxError(
+                    f"selector sets its metric name twice at {token.offset}"
+                )
             self.matcher_state = "operator"
             return
         if context == "range":

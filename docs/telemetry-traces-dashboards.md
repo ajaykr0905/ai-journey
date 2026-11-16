@@ -235,7 +235,10 @@ must be a known PromQL function or aggregation, `by`, `without`, `on` and
 `ignoring` must take a label list, braces must hold `label op "value"`
 matchers, ranges must follow a selector and hold a duration or a Grafana
 interval variable, and every selected series must belong to the catalog.
-Types, arity and operator precedence are not checked.
+A selector must name its series before any braces and may not also match
+`__name__`, so matchers alone, such as `{__name__=~".+"}`, cannot select
+series outside the catalog. Types, arity and operator precedence are not
+checked.
 
 ## Sealed reports and verification
 

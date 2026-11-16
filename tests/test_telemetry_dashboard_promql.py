@@ -115,6 +115,30 @@ def test_allowed_series_restrict_metric_names_but_not_labels_or_functions():
         check_promql("sum(ai_journey_typo)", allowed_metrics=allowed)
 
 
+@pytest.mark.parametrize(
+    "expression",
+    [
+        '{__name__="node_cpu_seconds_total"}',
+        'sum({__name__=~".+"})',
+        'sum by (outcome) ({outcome="ok"})',
+        'ai_journey_serving_attempts_total and {job="other"}',
+    ],
+)
+def test_selectors_without_a_metric_name_cannot_escape_the_allowed_series(
+    expression,
+):
+    check_promql(expression)
+    with pytest.raises(PromqlSyntaxError, match="must name an allowed metric"):
+        check_promql(expression, allowed_metrics={"ai_journey_serving_attempts_total"})
+
+
+def test_a_selector_cannot_set_its_metric_name_twice():
+    # Prometheus rejects this as "metric name must not be set twice".
+    for allowed in (None, {"up"}):
+        with pytest.raises(PromqlSyntaxError, match="metric name twice"):
+            check_promql('sum(up{__name__="node_load1"})', allowed_metrics=allowed)
+
+
 def test_known_names_cover_query_functions_and_aggregations():
     assert {"rate", "increase", "histogram_quantile", "label_replace"} <= FUNCTIONS
     assert {"sum", "max", "topk", "count_values", "quantile"} <= AGGREGATIONS
