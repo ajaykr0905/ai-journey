@@ -96,7 +96,7 @@ def test_cli_exit_codes_separate_invalid_runs_and_rejected_evidence(
     copied.mkdir()
     for path in run_dir.iterdir():
         (copied / path.name).write_bytes(path.read_bytes())
-    (copied / "attempts.json").write_bytes(b'{"attempts":[],"schema_version":1}')
+    (copied / "attempts.json").write_bytes(b'{"attempts":[],"schema_version":2}')
     assert main(["verify", "--run-dir", str(copied)]) == 1
     assert "verification failed" in capsys.readouterr().err
 

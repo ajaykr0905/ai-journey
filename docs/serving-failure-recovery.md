@@ -55,7 +55,8 @@ same code `verify` uses.
    `connection_refused`, and a connect that runs out of time is a `timeout`
    with error `connect_timeout`. Any other connect error, such as a local
    `EMFILE` or `EADDRNOTAVAIL`, is a `connect_error` that records the errno
-   name and says nothing about the server. Failed attempts retry with capped
+   name, or the `EAI_*` name for a resolver failure, and says nothing about
+   the server. Failed attempts retry with capped
    exponential backoff against the currently published endpoint. That
    endpoint stays stale until a replacement is ready.
 5. When the shared attempt ledger records the K-th acknowledged response, it
@@ -83,6 +84,14 @@ same code `verify` uses.
 | `trace.json` | Hash-chained lifecycle: spawn, ready, fault, exit observed, restart, ready, recovered, finished |
 | `report.json` | Sealed summary with the evidence digests, measurements and evidence boundary |
 | `lifetime-N.stderr` | Server diagnostics; normally empty and not part of the verified evidence |
+
+`report.json` and `attempts.json` carry `schema_version: 2`. Version 2 added
+the `connect_error` attempt outcome, narrowed `connection_refused` to
+ECONNREFUSED and added `connect_error` to `reconciliation.attempt_outcomes`.
+The verifier accepts only version 2 and rejects a version-1 report or attempt
+log with a message naming the found and expected versions. Version-1 runs are
+not verified. `config.json` and journal records stay at version 1, and the
+trace has no version field.
 
 The server writes each journal line with an unbuffered append *before* it
 sends the response. A trailing newline commits a line. The reader tolerates
@@ -199,8 +208,10 @@ host and its load.
   consistently and reseals it is caught only when a derived value stops
   matching or the evidence breaks physical order: an acknowledgement or a
   journal execution of an attempt that started after the serving lifetime's
-  exit was observed, or a journal execution of an attempt that never
-  connected (refused, `connect_error` or `connect_timeout`). Retain the run
+  exit was observed, a journal execution of an attempt that never
+  connected (refused, `connect_error` or `connect_timeout`), or a journal
+  execution of an attempt sent to a port that its lifetime did not publish
+  when it became ready. Retain the run
   directory and compare it with independent runs.
 - The idempotency key identifies and reconciles retries. It does not make the
   server exactly-once.

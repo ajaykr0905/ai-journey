@@ -14,13 +14,13 @@ import re
 from dataclasses import dataclass
 from hashlib import sha256
 
-from .memory_access_baseline import (
+from .memory_access_benchmark import MAX_REPEATS, MAX_WARMUP
+from .memory_access_measurement import (
     BACKENDS,
     BASELINE_DTYPE,
     MAX_BASELINE_SEED,
     MatmulCase,
 )
-from .memory_access_benchmark import MAX_REPEATS, MAX_WARMUP
 from .memory_access_pattern import (
     MatrixLayout,
     MemoryAccessError,

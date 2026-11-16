@@ -68,7 +68,10 @@ def test_ci_gates_the_lab_and_operates_the_installed_command():
     job = ci_job("memory-hierarchy-cpu")
 
     assert 'python-version: "3.11"' in job
-    assert "python -m pip install torch --index-url" in job
+    installs = [line for line in job.splitlines() if "pip install" in line]
+    assert installs, "the job must install the package and its tools"
+    assert not [line for line in installs if "torch" in line]
+    assert "python -m pip install -e . --no-deps" in job
     assert "ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1" in job
     for command in (
         f"ruff check {SOURCES} {TESTS}",

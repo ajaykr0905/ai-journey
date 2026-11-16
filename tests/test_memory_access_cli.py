@@ -21,6 +21,26 @@ from test_memory_access_plan import make_plan_mapping
 ROOT = Path(__file__).resolve().parents[1]
 
 
+# Replaces the time module's timer before any lab module is imported.
+PATCHED_BEFORE_IMPORT = """
+import itertools, sys, time
+time.perf_counter_ns = itertools.count(0, 1_000).__next__
+from ai_journey.{module} import main
+sys.exit(main(sys.argv[1:]))
+"""
+
+
+def run_with_timer_patched_before_import(module, *arguments):
+    return subprocess.run(
+        [sys.executable, "-c", PATCHED_BEFORE_IMPORT.format(module=module), *arguments],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
+    )
+
+
 def write_plan(path: Path, **changes) -> Path:
     path.write_text(json.dumps({**make_plan_mapping(), **changes}), encoding="utf-8")
     return path
@@ -206,3 +226,24 @@ def test_symlink_loop_paths_exit_two_without_a_traceback(tmp_path, capsys):
         assert "non-symlink" in capsys.readouterr().err
     assert loop.is_symlink()
     assert not output.exists()
+
+
+def test_a_timer_patched_in_before_import_seals_synthetic_timing(tmp_path):
+    config = str(ROOT / "config/day-74-memory-access-ci-smoke.json")
+    output = tmp_path / "report.json"
+
+    made = run_with_timer_patched_before_import(
+        "memory_access_cli", "benchmark", "--config", config, "--output", str(output)
+    )
+
+    assert made.returncode == 0, made.stderr
+    report = load_report(output)
+    assert report["measured"] is False
+    assert report["timer"] == "injected"
+    checked = run_with_timer_patched_before_import(
+        "memory_access_cli", "verify", "--report", str(output), "--config", config
+    )
+    assert checked.returncode == 0, checked.stderr
+    assert checked.stdout.startswith(
+        "verified_memory_access_synthetic_timing="
+    ), checked.stdout

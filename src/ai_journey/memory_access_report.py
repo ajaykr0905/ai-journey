@@ -20,9 +20,9 @@ from __future__ import annotations
 from hashlib import sha256
 
 from .memory_access_banks import MODELED_BANK_ACCESS_BYTES, analyze_banks
-from .memory_access_baseline import MatmulMeasurement, cpu_environment
 from .memory_access_benchmark import INJECTED_TIMER, PERCENTILE_METHOD, TIMER
 from .memory_access_coalescing import analyze_coalescing
+from .memory_access_measurement import CPU_ENVIRONMENT_FIELDS, MatmulMeasurement
 from .memory_access_pattern import MemoryAccessError
 from .memory_access_plan import MemoryAccessPlan, PatternSpec, canonical_json_bytes
 from .memory_access_roofline import roofline_estimate_mapping, sweep_tile_rooflines
@@ -266,7 +266,7 @@ def build_measurement_report(
         for item in measurements
     ):
         raise MemoryAccessError("measurements must use the plan's benchmark budget")
-    if type(environment) is not dict or set(environment) != set(cpu_environment()):
+    if type(environment) is not dict or set(environment) != CPU_ENVIRONMENT_FIELDS:
         raise MemoryAccessError("environment fields do not match the CPU record")
     timers = {item.timer for item in measurements}
     if len(timers) != 1:

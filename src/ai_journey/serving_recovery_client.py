@@ -169,6 +169,14 @@ def attempt_from_mapping(payload: object) -> AttemptRecord:
     return AttemptRecord(**payload)
 
 
+# A gaierror carries a resolver EAI_* code, which may collide with errno numbers.
+_RESOLVER_ERRORS = {
+    getattr(socket, name): name
+    for name in dir(socket)
+    if name.startswith("EAI_") and name != "EAI_MAX"
+}
+
+
 def _remaining(deadline_ns: int, clock_ns: Callable[[], int]) -> float:
     remaining = (deadline_ns - clock_ns()) / 1e9
     if remaining <= 0:
@@ -187,6 +195,8 @@ def _exchange(
         return "timeout", "connect_timeout", b""
     except ConnectionRefusedError as exc:
         return "connection_refused", type(exc).__name__, b""
+    except socket.gaierror as exc:
+        return "connect_error", _RESOLVER_ERRORS.get(exc.errno, "gaierror"), b""
     except OSError as exc:
         return "connect_error", errno.errorcode.get(exc.errno, type(exc).__name__), b""
     chunks: list[bytes] = []

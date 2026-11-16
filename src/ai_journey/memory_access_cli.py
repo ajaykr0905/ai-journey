@@ -19,7 +19,6 @@ import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from .memory_access_baseline import cpu_environment, measure_matmul
 from .memory_access_plan import MemoryAccessPlan, canonical_json_bytes
 from .memory_access_pattern import MemoryAccessError
 from .memory_access_report import (
@@ -75,6 +74,9 @@ def run_benchmark(
 
     Any ``clock`` other than the host timer makes the report synthetic.
     """
+
+    # Only benchmarking needs torch and NumPy, so the other commands skip them.
+    from .memory_access_baseline import cpu_environment, measure_matmul
 
     benchmark = plan.benchmark
     measurements = tuple(

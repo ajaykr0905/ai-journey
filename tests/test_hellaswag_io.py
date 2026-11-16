@@ -1,5 +1,6 @@
 """Benchmark files must be bounded, unambiguous, and protected from output aliases."""
 
+import math
 import os
 
 import pytest
@@ -16,6 +17,33 @@ from test_hellaswag_modern import evaluation_files
 def test_ambiguous_or_nonfinite_json_is_rejected(raw):
     with pytest.raises(HellaSwagError, match="duplicate|finite"):
         parse_evaluation_json(raw, name="fixture")
+
+
+@pytest.mark.parametrize(
+    ("raw", "literal"),
+    [
+        (b'{"value": 1e400}', "1e400"),
+        (b'{"value": -1e400}', "-1e400"),
+        (b'{"value": [1, [2.5, 1e400]]}', "1e400"),
+        (b'{"value": {"inner": {"deep": -1e400}}}', "-1e400"),
+        (b'{"value": NaN}', "NaN"),
+        (b'{"value": Infinity}', "Infinity"),
+        (b'{"value": -Infinity}', "-Infinity"),
+    ],
+)
+def test_overflowing_or_nonfinite_numbers_are_rejected_by_literal(raw, literal):
+    with pytest.raises(HellaSwagError, match="finite JSON numbers") as error:
+        parse_evaluation_json(raw, name="fixture")
+    assert str(error.value).endswith(f": {literal}")
+
+
+def test_finite_edge_numbers_parse_unchanged():
+    payload = parse_evaluation_json(
+        b'{"tiny": 5e-324, "huge": 1.7976931348623157e308, "zero": -0.0}',
+        name="fixture",
+    )
+    assert payload == {"tiny": 5e-324, "huge": 1.7976931348623157e308, "zero": 0.0}
+    assert math.copysign(1.0, payload["zero"]) == -1.0
 
 
 def test_reader_rejects_oversized_symlink_and_fifo_inputs(tmp_path):

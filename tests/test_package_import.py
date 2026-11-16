@@ -108,6 +108,8 @@ TORCH_FREE_CLIS = (
     "ai_journey.simt_cli",
     "ai_journey.serving_recovery_cli",
     "ai_journey.resource_cli",
+    "ai_journey.memory_access_cli",
+    "ai_journey.memory_hierarchy_cli",
 )
 NEWLY_IMPORTED = """
 import json, sys

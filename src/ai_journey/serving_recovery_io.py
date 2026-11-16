@@ -26,6 +26,8 @@ from .serving_recovery_config import (
 from .serving_recovery_trace import ServingLifecycleEvent, verify_serving_trace
 
 MAX_ATTEMPT_LOG_BYTES = 8 * 1024 * 1024
+# Version 2 added the connect_error outcome and narrowed connection_refused.
+ATTEMPT_LOG_SCHEMA_VERSION = 2
 MAX_TRACE_BYTES = 256 * 1024
 
 
@@ -90,7 +92,7 @@ def write_attempt_log(
     if any(not isinstance(attempt, AttemptRecord) for attempt in attempts):
         raise TypeError("attempts must be AttemptRecord values")
     payload = {
-        "schema_version": 1,
+        "schema_version": ATTEMPT_LOG_SCHEMA_VERSION,
         "attempts": [attempt.to_mapping() for attempt in attempts],
     }
     publish_new_file(
@@ -109,8 +111,14 @@ def load_attempt_log(path: Path) -> tuple[AttemptRecord, ...]:
     )
     if type(payload) is not dict or set(payload) != {"schema_version", "attempts"}:
         raise ServingRecoveryError("attempt log fields do not match schema")
-    if type(payload["schema_version"]) is not int or payload["schema_version"] != 1:
+    version = payload["schema_version"]
+    if type(version) is not int:
         raise ServingRecoveryError("attempt log schema is unsupported")
+    if version != ATTEMPT_LOG_SCHEMA_VERSION:
+        raise ServingRecoveryError(
+            f"attempt log schema_version {version} is not supported; "
+            f"expected {ATTEMPT_LOG_SCHEMA_VERSION}"
+        )
     if type(payload["attempts"]) is not list:
         raise ServingRecoveryError("attempt log attempts must be a list")
     return tuple(attempt_from_mapping(item) for item in payload["attempts"])

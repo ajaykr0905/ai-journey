@@ -42,7 +42,8 @@ def write_adapter_artifact(path, model):
     """Publish factors and their integrity digest without serializing base weights.
 
     The hash detects accidental corruption; it is not an authenticity signature.
-    A failed encode, flush or replace leaves any previous artifact intact.
+    A failed encode, flush or replace leaves any previous artifact intact; after
+    the replace the parent directory is fsynced so the rename survives a crash.
     """
     state = adapter_state(model)
     payload = {
@@ -72,6 +73,11 @@ def write_adapter_artifact(path, model):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)

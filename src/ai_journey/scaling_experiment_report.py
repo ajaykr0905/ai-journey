@@ -43,13 +43,25 @@ def build_experiment_report(
     ordered = validate_observation_set(protocol, inputs, observations)
     aggregates = aggregate_replicates(ordered)
     split = largest_model_holdout(aggregates)
-    fit = fit_compute_loss(split.training)
-    residuals = evaluate_fit_residuals(split.training, fit)
-    holdout = evaluate_holdout(fit, residuals, split.holdout)
+    flops_per_parameter_token = 6
+    fit = fit_compute_loss(
+        split.training, flops_per_parameter_token=flops_per_parameter_token
+    )
+    residuals = evaluate_fit_residuals(
+        split.training, fit, flops_per_parameter_token=flops_per_parameter_token
+    )
+    holdout = evaluate_holdout(
+        fit,
+        residuals,
+        split.holdout,
+        flops_per_parameter_token=flops_per_parameter_token,
+    )
     scope = classify_extrapolation(fit, target_compute)
     band = residual_prediction_band(fit, residuals, target_compute)
     acceptance = assess_scaling_acceptance(fit, holdout, scope, policy)
-    budget = estimate_experiment_budget(protocol)
+    budget = estimate_experiment_budget(
+        protocol, flops_per_parameter_token=flops_per_parameter_token
+    )
     return {
         "schema_version": 1,
         "kind": "bounded_scaling_experiment",

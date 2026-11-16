@@ -1,10 +1,11 @@
 import copy
 import math
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import torch
 
@@ -224,6 +225,53 @@ class ComparisonReportContractTests(unittest.TestCase):
                 with self.assertRaises(OSError):
                     write_report(path, self.report)
             self.assertEqual(path.read_bytes(), b"previous report")
+            self.assertEqual(list(Path(directory).iterdir()), [path])
+
+    def test_writer_syncs_parent_directory_after_replacement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "comparison.json"
+            events = []
+            directories = set()
+            real_open, real_fsync, real_replace = os.open, os.fsync, os.replace
+
+            def opened(target, flags, *args, **kwargs):
+                descriptor = real_open(target, flags, *args, **kwargs)
+                if Path(target) == path.parent:
+                    directories.add(descriptor)
+                    events.append(("open", flags))
+                return descriptor
+
+            def synced(descriptor):
+                events.append(
+                    ("fsync", "directory" if descriptor in directories else "file")
+                )
+                return real_fsync(descriptor)
+
+            def replaced(source, target):
+                events.append(("replace", Path(target)))
+                return real_replace(source, target)
+
+            with (
+                patch(
+                    "ai_journey.lora_report.os.open", side_effect=opened
+                ) as open_mock,
+                patch(
+                    "ai_journey.lora_report.os.fsync", side_effect=synced
+                ) as fsync_mock,
+                patch("ai_journey.lora_report.os.replace", side_effect=replaced),
+            ):
+                write_report(path, self.report)
+            self.assertIn(call(path.parent, os.O_RDONLY), open_mock.call_args_list)
+            self.assertEqual(fsync_mock.call_count, 2)
+            self.assertEqual(
+                events,
+                [
+                    ("fsync", "file"),
+                    ("replace", path),
+                    ("open", os.O_RDONLY),
+                    ("fsync", "directory"),
+                ],
+            )
             self.assertEqual(list(Path(directory).iterdir()), [path])
 
 

@@ -40,6 +40,8 @@ from .serving_recovery_metrics import PERCENTILE_METHOD
 
 REPORT_FILE = "report.json"
 REPORT_KIND = "ai-journey-serving-recovery-report"
+# Version 2 added reconciliation.attempt_outcomes.connect_error.
+REPORT_SCHEMA_VERSION = 2
 MAX_REPORT_BYTES = 512 * 1024
 CLOCK = "time.monotonic_ns in the experiment process on one host"
 EVIDENCE_BOUNDARY = (
@@ -109,7 +111,7 @@ def build_serving_report(result: ServingRecoveryResult, *, run_dir: Path) -> dic
         raise ServingRecoveryError("journals do not cover every spawned lifetime")
     slo_recovered = result.timing.slo_recovered_ns is not None
     report: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": REPORT_SCHEMA_VERSION,
         "kind": REPORT_KIND,
         "experiment": {
             "run_id": result.run_id,

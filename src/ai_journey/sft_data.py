@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 import re
 from dataclasses import dataclass
@@ -33,10 +34,21 @@ def _strict_json_object(value: str) -> dict:
     def nonfinite(value):
         raise SFTDataError(f"nonfinite tool argument: {value}")
 
+    def finite_float(literal):
+        number = float(literal)
+        if not math.isfinite(number):
+            nonfinite(literal)
+        return number
+
     if not isinstance(value, str) or not value or len(value.encode("utf-8")) > 4096:
         raise SFTDataError("tool arguments must be bounded UTF-8 JSON")
     try:
-        decoded = json.loads(value, object_pairs_hook=unique, parse_constant=nonfinite)
+        decoded = json.loads(
+            value,
+            object_pairs_hook=unique,
+            parse_float=finite_float,
+            parse_constant=nonfinite,
+        )
     except (UnicodeError, ValueError, RecursionError) as exc:
         raise SFTDataError(f"invalid tool arguments: {exc}") from exc
     if not isinstance(decoded, dict):
@@ -49,8 +61,8 @@ class ToolCall:
     """One assistant tool request with strict JSON-object arguments.
 
     The ``call_`` id lets a conversation match the tool result to its request;
-    duplicate keys, NaN or Infinity literals or non-object arguments raise
-    SFTDataError.
+    duplicate keys, NaN or Infinity literals, number literals such as 1e400
+    that overflow to infinity or non-object arguments raise SFTDataError.
     """
 
     call_id: str

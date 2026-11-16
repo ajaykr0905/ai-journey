@@ -1,6 +1,8 @@
 import json
 import shutil
 import sys
+import time
+from dataclasses import replace
 from hashlib import sha256
 
 import pytest
@@ -11,8 +13,10 @@ from ai_journey.serving_recovery_client import plan_requests
 from ai_journey.serving_recovery_config import canonical_json_bytes
 from ai_journey.serving_recovery_experiment import (
     journal_capacity,
+    journal_file,
     run_serving_recovery_experiment,
 )
+from ai_journey.serving_recovery_fault import AcknowledgedResponseFault
 from ai_journey.serving_recovery_identity import serving_run_id
 from ai_journey.serving_recovery_io import load_attempt_log, load_trace
 from ai_journey.serving_recovery_journal import ExecutionRecord, read_execution_journal
@@ -370,8 +374,8 @@ def start_an_acknowledgement_after_its_server_exited(run_dir):
     retime(run_dir)
 
 
-def credit_execution(run_dir, attempt, lifetime_id):
-    """Append ``attempt``'s execution to one lifetime's journal and reseal."""
+def planned_run():
+    """Return the config, model and request plan every test run is built from."""
 
     config = experiment_config()
     model = build_serving_model(FIXTURE.read_bytes())
@@ -380,47 +384,120 @@ def credit_execution(run_dir, attempt, lifetime_id):
         run_id=serving_run_id(config, model_sha256=model.model_sha256),
         model=model,
     )
-    planned = plan[attempt.request_index]
+    return config, model, plan
+
+
+def read_journals(run_dir):
+    """Read every journal the sealed report lists, in report order."""
+
     report = json.loads((run_dir / "report.json").read_bytes())
-    entries = report["evidence"]["journals"]
-    entry = next(item for item in entries if item["lifetime_id"] == lifetime_id)
-    path = run_dir / entry["file"]
-    data = path.read_bytes()
-    committed = data[: len(data) - entry["torn_tail_bytes"]]
-    record = ExecutionRecord(
-        lifetime_id=lifetime_id,
-        sequence=entry["records"],
-        idempotency_key=attempt.idempotency_key,
-        attempt=attempt.attempt,
-        request_sha256=planned.request.request_sha256(),
-        response_sha256=sha256(completion_body(model, planned.request)).hexdigest(),
-        model_sha256=model.model_sha256,
-    )
-    path.write_bytes(committed + canonical_json_bytes(record.to_mapping()) + b"\n")
-    journals = [
+    return [
         read_execution_journal(
-            run_dir / item["file"],
-            lifetime_id=item["lifetime_id"],
-            max_records=journal_capacity(config),
+            run_dir / entry["file"],
+            lifetime_id=entry["lifetime_id"],
+            max_records=journal_capacity(experiment_config()),
             allow_torn_tail=True,
         )
-        for item in entries
+        for entry in report["evidence"]["journals"]
     ]
+
+
+def journal_records(run_dir, lifetime_id):
+    """Return one lifetime's committed executions, without its torn tail."""
+
+    (journal,) = (j for j in read_journals(run_dir) if j.lifetime_id == lifetime_id)
+    return journal.records
+
+
+def reseal_journals(run_dir, executions):
+    """Rewrite journals to hold ``executions``, then re-reconcile and reseal.
+
+    ``executions`` maps a lifetime to the records its journal should hold. They
+    are renumbered in order and written without a torn tail, as a forger would
+    write them, and the reconciliation, counts and digests are all refreshed, so
+    only the journal contents differ from a genuine run.
+    """
+
+    config, model, plan = planned_run()
+    report = json.loads((run_dir / "report.json").read_bytes())
+    rewritten = [
+        entry
+        for entry in report["evidence"]["journals"]
+        if entry["lifetime_id"] in executions
+    ]
+    for entry in rewritten:
+        records = executions[entry["lifetime_id"]]
+        (run_dir / entry["file"]).write_bytes(
+            b"".join(
+                canonical_json_bytes(replace(record, sequence=number).to_mapping())
+                + b"\n"
+                for number, record in enumerate(records)
+            )
+        )
     reconciliation = reconcile_serving_run(
         plan=plan,
         attempts=load_attempt_log(run_dir / "attempts.json"),
-        journals=journals,
+        journals=read_journals(run_dir),
         retry_budget=config.retry_budget,
         model_sha256=model.model_sha256,
     ).to_mapping()
 
     def mutate(report):
         report["reconciliation"] = reconciliation
-        for item in report["evidence"]["journals"]:
-            if item["lifetime_id"] == lifetime_id:
-                item.update(records=item["records"] + 1, torn_tail_bytes=0)
+        for entry in report["evidence"]["journals"]:
+            if entry["lifetime_id"] in executions:
+                records = len(executions[entry["lifetime_id"]])
+                entry.update(records=records, torn_tail_bytes=0)
 
-    reseal(run_dir, mutate, refresh=["attempts.json", entry["file"]])
+    reseal(
+        run_dir,
+        mutate,
+        refresh=["attempts.json", *(entry["file"] for entry in rewritten)],
+    )
+
+
+def credit_execution(run_dir, attempt, lifetime_id):
+    """Append ``attempt``'s execution to one lifetime's journal and reseal."""
+
+    _, model, plan = planned_run()
+    planned = plan[attempt.request_index]
+    record = ExecutionRecord(
+        lifetime_id=lifetime_id,
+        sequence=0,  # reseal_journals renumbers every record
+        idempotency_key=attempt.idempotency_key,
+        attempt=attempt.attempt,
+        request_sha256=planned.request.request_sha256(),
+        response_sha256=sha256(completion_body(model, planned.request)).hexdigest(),
+        model_sha256=model.model_sha256,
+    )
+    executions = [*journal_records(run_dir, lifetime_id), record]
+    reseal_journals(run_dir, {lifetime_id: executions})
+
+
+def move_execution(run_dir, attempt, source, target):
+    """Move ``attempt``'s execution from ``source``'s journal to ``target``'s.
+
+    Every total survives the move, so the reconciliation alone cannot tell the
+    forged run from the genuine one.
+    """
+
+    executions = journal_records(run_dir, source)
+    (moved,) = (
+        record
+        for record in executions
+        if (record.idempotency_key, record.attempt)
+        == (attempt.idempotency_key, attempt.attempt)
+    )
+    reseal_journals(
+        run_dir,
+        {
+            source: [record for record in executions if record is not moved],
+            target: [
+                *journal_records(run_dir, target),
+                replace(moved, lifetime_id=target),
+            ],
+        },
+    )
 
 
 def journal_a_refused_attempt(run_dir):
@@ -489,4 +566,138 @@ def test_verifier_rejects_attempts_the_lifecycle_makes_impossible(
     run_dir = copy_run(sealed_run, tmp_path)
     forge(run_dir)
     with pytest.raises(ValueError, match=message):
+        verify_serving_recovery_run(run_dir)
+
+
+def test_new_runs_write_version_2_reports_and_attempt_logs(sealed_run):
+    report = json.loads((sealed_run / "report.json").read_bytes())
+    attempts = json.loads((sealed_run / "attempts.json").read_bytes())
+
+    assert (report["schema_version"], attempts["schema_version"]) == (2, 2)
+
+
+@pytest.mark.parametrize(
+    ("downgrade", "message"),
+    [
+        (
+            lambda d: reseal(d, lambda r: r.update(schema_version=1)),
+            "report schema_version 1 is not supported; expected 2",
+        ),
+        (
+            lambda d: (
+                edit_json(d / "attempts.json", lambda p: p.update(schema_version=1)),
+                reseal(d, refresh=["attempts.json"]),
+            ),
+            "attempt log schema_version 1 is not supported; expected 2",
+        ),
+    ],
+)
+def test_verifier_names_unsupported_schema_versions(
+    sealed_run, tmp_path, downgrade, message
+):
+    run_dir = copy_run(sealed_run, tmp_path)
+    downgrade(run_dir)
+    with pytest.raises(ValueError, match=message):
+        verify_serving_recovery_run(run_dir)
+
+
+# The first lifetime holds each committed response this long, so the request it
+# journaled last is still unanswered when the kill lands.
+HELD_RESPONSE_MS = 400
+
+
+def wait_for_journaled(path, records, timeout_s):
+    """Poll, with a bound, until ``path`` holds ``records`` committed lines."""
+
+    deadline = time.monotonic() + timeout_s
+    while not (path.exists() and path.read_bytes().count(b"\n") >= records):
+        if time.monotonic() > deadline:
+            raise AssertionError(f"{path.name} never committed {records} records")
+        time.sleep(0.001)
+
+
+@pytest.fixture(scope="module")
+def lost_response_run(tmp_path_factory):
+    """Seal a run whose kill always loses exactly one executed response.
+
+    An ordinary run only sometimes holds a reset attempt to the killed port,
+    because the kill races the other worker's in-flight request. Here the first
+    lifetime holds every committed response, and the fault, at its K-th
+    acknowledgement, waits until that lifetime has journaled one execution more
+    than the client acknowledged. The kill then lands on an executed request
+    that was never answered, so its retry on the replacement is a genuine
+    at-least-once duplicate on every run.
+    """
+
+    base = tmp_path_factory.mktemp("serving-lost-response")
+    config = base / "config.json"
+    config.write_text(json.dumps(experiment_config().to_mapping()))
+    run_dir = base / "run"
+    first_journal = run_dir / journal_file(1)
+    command = experiment.server_command
+
+    def hold_the_first_lifetime(**options):
+        if options["journal_path"] == first_journal:
+            options["hold_response_ms"] = HELD_RESPONSE_MS
+        return command(**options)
+
+    class KillAfterAnUnansweredCommit(AcknowledgedResponseFault):
+        def observe(self, acknowledged):
+            if acknowledged == self.after_acknowledged:
+                # Half the hold, so the held response cannot be released first.
+                wait_for_journaled(
+                    first_journal, acknowledged + 1, HELD_RESPONSE_MS / 2000
+                )
+            return super().observe(acknowledged)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(experiment, "server_command", hold_the_first_lifetime)
+        patch.setattr(
+            experiment, "AcknowledgedResponseFault", KillAfterAnUnansweredCommit
+        )
+        result = run_serving_recovery_experiment(
+            source_path=FIXTURE, config_path=config, run_dir=run_dir
+        )
+    write_serving_report(
+        run_dir / "report.json", build_serving_report(result, run_dir=run_dir)
+    )
+    return run_dir
+
+
+def the_lost_response_and_the_ready_ports(run_dir):
+    """Return the run's one executed but unanswered attempt, its owner and ports."""
+
+    _, events = load_trace(run_dir / "trace.json")
+    ports = {e.lifetime_id: e.payload["port"] for e in events if e.kind == "ready"}
+    owner = next(e for e in events if e.kind == "fault").lifetime_id
+    executed = {(r.idempotency_key, r.attempt) for r in journal_records(run_dir, owner)}
+    (lost,) = (
+        a
+        for a in load_attempt_log(run_dir / "attempts.json")
+        if a.outcome != "ok" and (a.idempotency_key, a.attempt) in executed
+    )
+    assert (lost.outcome, lost.port) == ("connection_reset", ports[owner])
+    # A replacement that reused the port would make the lifetimes inseparable.
+    assert len(set(ports.values())) == len(ports) == 2
+    return lost, ports, owner
+
+
+def test_a_lost_response_executed_by_the_lifetime_owning_its_port_verifies(
+    lost_response_run,
+):
+    the_lost_response_and_the_ready_ports(lost_response_run)
+
+    receipt = verify_serving_recovery_run(lost_response_run)
+    assert receipt["verified"] is True and receipt["duplicate_executions"] == 1
+
+
+def test_verifier_rejects_an_execution_by_a_lifetime_that_did_not_own_the_port(
+    lost_response_run, tmp_path
+):
+    run_dir = copy_run(lost_response_run, tmp_path)
+    lost, ports, owner = the_lost_response_and_the_ready_ports(run_dir)
+    (replacement,) = (lifetime for lifetime in ports if lifetime != owner)
+    move_execution(run_dir, lost, owner, replacement)
+
+    with pytest.raises(ValueError, match="executed an attempt sent to another"):
         verify_serving_recovery_run(run_dir)
