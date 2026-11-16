@@ -153,16 +153,24 @@ def test_misuse_records_do_not_depend_on_the_launch_order():
     assert len({log.write_conflicts for log in logs}) == 1
 
 
+def vector_add_beside_guard_kernel(t, a, b, out, guard, n):
+    vector_add_unguarded_kernel(t, a, b, out, n)
+
+
 def test_out_of_bounds_writes_never_reach_a_neighbouring_buffer():
+    # guard is attached to the same launch, right after out, so a recorder
+    # that let a write spill past the end of out would change it.
     config = launch_1d(10, 8)
     a = DeviceBuffer("a", "float32", [0.5] * 10)
     b = DeviceBuffer("b", "float32", [0.25] * 10)
     out = DeviceBuffer.zeros("out", "float32", 10)
     guard = DeviceBuffer("guard", "float32", [9.0] * 6)
 
-    result = launch(vector_add_unguarded_kernel, config, a, b, out, 10)
+    result = launch(vector_add_beside_guard_kernel, config, a, b, out, guard, 10)
 
     assert result.log.out_of_bounds_writes == 6
+    assert {record.buffer for record in result.log.out_of_bounds} == {"a", "b", "out"}
+    assert result.log.writer_threads == {"a": 0, "b": 0, "guard": 0, "out": 10}
     assert out.to_host() == (0.75,) * 10
     assert guard.to_host() == (9.0,) * 6
 
