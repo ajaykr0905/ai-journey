@@ -102,6 +102,50 @@ def test_each_structural_defect_fails_the_check_that_names_it(old, new, failure)
     assert not result.passed
 
 
+@pytest.mark.parametrize(
+    ("old", "new", "failure"),
+    [
+        ("threadIdx.x;\n    if (i < n)", "threadIdx.x;\n    i += 1;\n    if (i < n)", "vector_add_index"),
+        ("threadIdx.y;\n    if (col", "threadIdx.y;\n    col += 1;\n    if (col", "rgb_to_grayscale_index"),
+        ("+ col;\n", "+ col;\n        pixel += width;\n", "rgb_to_grayscale_guard"),
+        ("/ 10000u;\n", "/ 10000u;\n        luma = 0u;\n", "rgb_to_grayscale_rule"),
+        ("255u);\n", "255u);\n        gray[pixel + 1] = 0;\n", "rgb_to_grayscale_rule"),
+        ("cdiv(n, 256));\n", "cdiv(n, 256));\n    block.x = 128;\n", "vector_add_grid"),
+        ("cdiv(n, 256));\n", "cdiv(n, 256));\n    n = n + 1;\n", "vector_add_grid"),
+        ("(a, b, out, n);\n", "(a, b, out, n);\n    vector_add_kernel<<<1, 1>>>(a, b, out, n);\n", "vector_add_grid"),
+        ("block(256);\n    dim3 grid(cdiv(n, 256))", "block(0256);\n    dim3 grid(cdiv(n, 0256))", "vector_add_grid"),
+        ("cdiv(height, 16));\n", "cdiv(height, 16));\n    block.y = 8;\n", "rgb_to_grayscale_grid"),
+    ],
+)  # fmt: skip
+def test_an_extra_statement_fails_the_checks_of_its_function(old, new, failure):
+    # Each edit keeps every statement that the checks look for. 0256 is the
+    # octal literal 174 for a C compiler.
+    assert PINNED.count(old) == 1
+    result = check(PINNED.replace(old, new))
+
+    assert failure in result.failures
+    function = failure.rsplit("_", 1)[0]
+    assert all(name.startswith(function) for name in result.failures)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "__host__ int cdiv(int a, int b) { return a / b; }",
+        "#define threadIdx blockIdx",
+    ],
+)
+def test_code_outside_the_five_functions_fails_every_check(extra):
+    # The int overload is the better match for cdiv(n, 256), and the macro
+    # rewrites every threadIdx, so the check can confirm no function.
+    marker = "\n__global__ void vector_add_kernel("
+    result = check(PINNED.replace(marker, f"\n{extra}\n{marker}", 1))
+
+    assert result.failures == CHECK_NAMES
+    assert result.vector_add_launch is None
+    assert result.rgb_to_grayscale_launch is None
+
+
 def test_a_second_kernel_definition_breaks_the_unique_signature():
     start = PINNED.index("__global__ void vector_add_kernel(")
     end = PINNED.index("// Exact rule")

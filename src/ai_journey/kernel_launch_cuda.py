@@ -7,7 +7,9 @@ This lab never compiles or runs the text. It is source for a later run on
 an NVIDIA GPU. ``check_cuda_source`` reads the text back without a compiler.
 It confirms the ``__global__`` signatures, the index expressions, the guards
 and the grayscale arithmetic. It then evaluates the host grid sizing for the
-given extents and requires the simulator's launch configurations.
+given extents and requires the simulator's launch configurations. Each
+function must hold exactly its pinned statements, and the text must hold no
+other code, because one extra statement or overload can change the launch.
 """
 
 from __future__ import annotations
@@ -53,6 +55,32 @@ _VECTOR_HOST = (
 _GRAY_HOST = (
     "void launch_rgb_to_grayscale(const unsigned char* rgb, unsigned char* gray, "
     "int width, int height)"
+)
+_DEFINITIONS = (_CDIV, _VECTOR_KERNEL, _GRAY_KERNEL, _VECTOR_HOST, _GRAY_HOST)
+_VECTOR_INDEX = ("int i = blockIdx.x * blockDim.x + threadIdx.x;",)
+_VECTOR_GUARDED = ("out[i] = a[i] + b[i];",)
+_GRAY_INDEX = (
+    "int col = blockIdx.x * blockDim.x + threadIdx.x;",
+    "int row = blockIdx.y * blockDim.y + threadIdx.y;",
+)
+_GRAY_LOADS = (
+    "int pixel = row * width + col;",
+    "unsigned int r = rgb[3 * pixel];",
+    "unsigned int g = rgb[3 * pixel + 1];",
+    "unsigned int b = rgb[3 * pixel + 2];",
+)
+_GRAY_STORE = "gray[pixel] = (unsigned char)(luma < 255u ? luma : 255u);"
+# C reads a literal with a leading zero as octal, so each dim3 literal starts
+# with 1-9. At most 10 digits, the width of an unsigned int, keep int() bounded.
+_DECIMAL = r"([1-9][0-9]{0,9})"
+_VECTOR_LAUNCHER = re.compile(
+    rf"dim3 block\({_DECIMAL}\);dim3 grid\(cdiv\(n,{_DECIMAL}\)\);"
+    r"vector_add_kernel<<<grid,block>>>\(a,b,out,n\);"
+)
+_GRAY_LAUNCHER = re.compile(
+    rf"dim3 block\({_DECIMAL},{_DECIMAL}\);"
+    rf"dim3 grid\(cdiv\(width,{_DECIMAL}\),cdiv\(height,{_DECIMAL}\)\);"
+    r"rgb_to_grayscale_kernel<<<grid,block>>>\(rgb,gray,width,height\);"
 )
 
 
@@ -158,8 +186,25 @@ def _function_body(text: str, signature: str) -> str | None:
     return _braced(text, start + len(head) - 1)
 
 
-def _guarded(body: str, condition: str) -> tuple[str, str] | None:
-    """Split a body into its guarded block and the code outside that block."""
+def _definitions(source: str) -> tuple[str, ...] | None:
+    """Return the five function bodies if the text is those definitions only.
+
+    Other code, such as an ``int`` overload of ``cdiv`` or a macro, can
+    change what the five functions do, so it fails the whole text.
+    """
+
+    bodies = [_function_body(source, signature) for signature in _DEFINITIONS]
+    if any(body is None for body in bodies):
+        return None
+    rebuilt = "".join(
+        f"{_normalize(signature)}{{{body}}}"
+        for signature, body in zip(_DEFINITIONS, bodies)
+    )
+    return tuple(bodies) if rebuilt == source else None
+
+
+def _guarded(body: str, condition: str) -> tuple[str, str, str] | None:
+    """Split a body at its one guard: code before, inside and after the block."""
 
     head = _normalize(f"if ({condition}) {{")
     start = body.find(head)
@@ -169,17 +214,19 @@ def _guarded(body: str, condition: str) -> tuple[str, str] | None:
     if inside is None:
         return None
     end = start + len(head) + len(inside) + 1
-    return inside, body[:start] + body[end:]
+    return body[:start], inside, body[end:]
 
 
-def _contains_in_order(text: str, statements: tuple[str, ...]) -> bool:
-    position = 0
-    for statement in statements:
-        found = text.find(_normalize(statement), position)
-        if found < 0:
-            return False
-        position = found + len(_normalize(statement))
-    return True
+def _statements(code: str) -> tuple[str, ...]:
+    """Split normalized code after each semicolon; a trailing rest stays."""
+
+    pieces = code.split(";")
+    statements = tuple(f"{piece};" for piece in pieces[:-1])
+    return statements + ((pieces[-1],) if pieces[-1] else ())
+
+
+def _expected(*statements: str) -> tuple[str, ...]:
+    return tuple(_normalize(statement) for statement in statements)
 
 
 def _touches(text: str, *buffers: str) -> bool:
@@ -191,41 +238,21 @@ def _cdiv(numerator: int, denominator: int) -> int:
     return ((numerator + denominator - 1) % _UNSIGNED_WRAP) // denominator
 
 
-def _dim3(host: str, name: str, pattern: str) -> tuple[int, ...] | None:
-    """Parse the one ``dim3 name(...)`` statement of a launcher, or ``None``.
-
-    Each literal has at most 10 digits, the width of an unsigned int, so an
-    overlong literal fails the check instead of overflowing ``int()``.
-    """
-
-    if host.count(f"dim3 {name}(") != 1:
-        return None
-    found = re.findall(f"dim3 {name}\\({pattern}\\);", host)
-    if len(found) != 1:
-        return None
-    groups = found[0] if isinstance(found[0], tuple) else (found[0],)
-    values = tuple(int(value) for value in groups)
-    return None if 0 in values else values
-
-
 def _host_launch(
-    host: str | None,
-    statement: str,
-    block_pattern: str,
-    grid_pattern: str,
-    extents: tuple[int, ...],
+    host: str, pattern: re.Pattern[str], extents: tuple[int, ...]
 ) -> LaunchConfig | None:
-    """Evaluate a launcher's ``dim3`` block and grid for concrete extents.
+    """Evaluate a launcher that is exactly a block, a grid and one launch.
 
     Each grid axis must divide its extent by that axis of the block, so a
     divisor that agrees with the block only for one extent still fails.
     """
 
-    if host is None or not _contains_in_order(host, (statement,)):
+    found = pattern.fullmatch(host)
+    if found is None:
         return None
-    block = _dim3(host, "block", block_pattern)
-    divisors = _dim3(host, "grid", grid_pattern)
-    if block is None or divisors != block:
+    values = tuple(int(value) for value in found.groups())
+    block, divisors = values[: len(extents)], values[len(extents) :]
+    if divisors != block:
         return None
     try:
         return LaunchConfig(
@@ -278,9 +305,12 @@ def check_cuda_source(
 ) -> CudaSourceCheck:
     """Check the CUDA text's structure and its grid sizing for given extents.
 
-    Each grid check evaluates the host ``dim3`` expressions with C unsigned
-    division and passes only if the result equals the configuration that the
-    simulator launches for the same extent and block.
+    Each kernel must be its index statements, then one guard whose block
+    holds exactly the pinned statements, and nothing after it. Each grid
+    check evaluates the host ``dim3`` expressions with C unsigned division
+    and passes only if the result equals the configuration that the
+    simulator launches for the same extent and block. Text with code beyond
+    the five definitions fails every check.
     """
 
     if type(text) is not str:
@@ -289,65 +319,50 @@ def check_cuda_source(
     if type(block) is not tuple or len(block) != 2:
         raise KernelLaunchError("block must be a (block_x, block_y) tuple")
     expected_gray = launch_2d(width, height, *block)
-    source = _normalize(text)
-    cdiv = _function_body(source, _CDIV)
-    vector = _function_body(source, _VECTOR_KERNEL)
-    gray = _function_body(source, _GRAY_KERNEL)
-    vector_guard = None if vector is None else _guarded(vector, "i < n")
-    gray_guard = None if gray is None else _guarded(gray, "col < width && row < height")
-    vector_launch = _host_launch(
-        _function_body(source, _VECTOR_HOST),
-        "vector_add_kernel<<<grid, block>>>(a, b, out, n);",
-        r"(\d{1,10})",
-        r"cdiv\(n,(\d{1,10})\)",
-        (n,),
-    )
-    gray_launch = _host_launch(
-        _function_body(source, _GRAY_HOST),
-        "rgb_to_grayscale_kernel<<<grid, block>>>(rgb, gray, width, height);",
-        r"(\d{1,10}),(\d{1,10})",
-        r"cdiv\(width,(\d{1,10})\),cdiv\(height,(\d{1,10})\)",
-        (width, height),
-    )
+    bodies = _definitions(_normalize(text))
+    if bodies is None:
+        return CudaSourceCheck(
+            checks=tuple((name, False) for name in CHECK_NAMES),
+            vector_add_launch=None,
+            rgb_to_grayscale_launch=None,
+        )
+    cdiv, vector, gray, vector_host, gray_host = bodies
+    vector_index = vector_safe = False
+    vector_guard = _guarded(vector, "i < n")
+    if vector_guard is not None:
+        before, inside, after = vector_guard
+        vector_index = _statements(before) == _expected(*_VECTOR_INDEX)
+        vector_safe = (
+            _statements(inside) == _expected(*_VECTOR_GUARDED)
+            and not after
+            and not _touches(before, "out", "a", "b")
+        )
+    gray_index = gray_safe = gray_rule = False
+    gray_guard = _guarded(gray, "col < width && row < height")
+    if gray_guard is not None:
+        before, inside, after = gray_guard
+        guarded = _statements(inside)
+        loads = len(_GRAY_LOADS)
+        gray_index = _statements(before) == _expected(*_GRAY_INDEX)
+        gray_safe = (
+            guarded[:loads] == _expected(*_GRAY_LOADS)
+            and not after
+            and not _touches(before, "gray", "rgb")
+        )
+        gray_rule = guarded[loads:] == _expected(_luma_statement(), _GRAY_STORE)
+    vector_launch = _host_launch(vector_host, _VECTOR_LAUNCHER, (n,))
+    gray_launch = _host_launch(gray_host, _GRAY_LAUNCHER, (width, height))
     checks = {
         "cdiv_definition": cdiv == _normalize("return (a + b - 1) / b;"),
-        "vector_add_signature": vector is not None,
-        "vector_add_index": vector_guard is not None
-        and _contains_in_order(
-            vector_guard[1], ("int i = blockIdx.x * blockDim.x + threadIdx.x;",)
-        ),
-        "vector_add_guard": vector_guard is not None
-        and vector_guard[0] == _normalize("out[i] = a[i] + b[i];")
-        and not _touches(vector_guard[1], "out", "a", "b"),
+        # _definitions found each signature exactly once.
+        "vector_add_signature": True,
+        "vector_add_index": vector_index,
+        "vector_add_guard": vector_safe,
         "vector_add_grid": vector_launch == expected_vector,
-        "rgb_to_grayscale_signature": gray is not None,
-        "rgb_to_grayscale_index": gray_guard is not None
-        and _contains_in_order(
-            gray_guard[1],
-            (
-                "int col = blockIdx.x * blockDim.x + threadIdx.x;",
-                "int row = blockIdx.y * blockDim.y + threadIdx.y;",
-            ),
-        ),
-        "rgb_to_grayscale_guard": gray_guard is not None
-        and _contains_in_order(
-            gray_guard[0],
-            (
-                "int pixel = row * width + col;",
-                "unsigned int r = rgb[3 * pixel];",
-                "unsigned int g = rgb[3 * pixel + 1];",
-                "unsigned int b = rgb[3 * pixel + 2];",
-            ),
-        )
-        and not _touches(gray_guard[1], "gray", "rgb"),
-        "rgb_to_grayscale_rule": gray_guard is not None
-        and _contains_in_order(
-            gray_guard[0],
-            (
-                _luma_statement(),
-                "gray[pixel] = (unsigned char)(luma < 255u ? luma : 255u);",
-            ),
-        ),
+        "rgb_to_grayscale_signature": True,
+        "rgb_to_grayscale_index": gray_index,
+        "rgb_to_grayscale_guard": gray_safe,
+        "rgb_to_grayscale_rule": gray_rule,
         "rgb_to_grayscale_grid": gray_launch == expected_gray,
     }
     return CudaSourceCheck(

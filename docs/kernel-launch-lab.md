@@ -206,6 +206,16 @@ checks:
   expressions for the plan extents and requires the launch configuration of
   the simulator.
 
+Each function must hold exactly its pinned statements, in the pinned order.
+Only whitespace and comments can differ. Thus one extra statement fails a
+check of its function. For example, `i += 1;` after the index statement fails
+`vector_add_index`.
+
+Each `dim3` literal must be a decimal literal without a leading zero, because
+C reads `0256` as the octal value 174. The text must hold the five
+definitions and no other code. Other code, such as an `int` overload of
+`cdiv`, can change the five functions. Thus such text fails every check.
+
 The pinned text has the SHA-256
 `cf14adedc20211d11c978cf0d6af291a447853ec01e4d0dee1ecfd02c8631bcc`. The report
 holds the full text.

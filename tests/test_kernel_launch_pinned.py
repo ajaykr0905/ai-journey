@@ -143,6 +143,8 @@ def test_guide_states_commands_numbers_sources_and_boundaries(report):
         "index 1200, from block (0, 1), thread (0, 14)",
         "232 write conflicts",
         "A matching output does not prove that a kernel is free of races.",
+        "Each function must hold exactly its pinned statements, in the pinned order.",
+        "The text must hold the five definitions and no other code.",
         VECTOR_SHA256,
         GRAY_SHA256,
         CUDA_SHA256,
