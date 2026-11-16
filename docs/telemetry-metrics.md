@@ -68,7 +68,11 @@ it wrote with the same code that `verify` runs.
 3. It loads the worker `report.json` as bounded, canonical, strict JSON and
    passes it to `verify_recovery_report` together with `trace.json`. The
    worker verifier compares numbers by value, so the adapter also requires
-   counts, timestamps and exit codes to be exact integers.
+   counts, timestamps and exit codes to be exact integers. That verifier
+   binds only the timestamps and the trace head to the trace. The adapter
+   therefore re-reads the trace, requires the five-event kill-and-resume
+   lifecycle, and requires the run and attempt identities, the failed exit
+   code and the item counts to equal the events that record them.
 4. It derives the metric families, described below, and encodes the
    exposition.
 5. It generates the rules from the objectives, binds every selector to the

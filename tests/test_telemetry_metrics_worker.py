@@ -6,11 +6,13 @@ from hashlib import sha256
 import pytest
 from test_recovery_config import valid_config as worker_config
 
+import ai_journey.telemetry_metrics_worker as worker_module
 from ai_journey.recovery_experiment import run_recovery_experiment
 from ai_journey.recovery_report import build_recovery_report
 from ai_journey.recovery_report_io import write_recovery_report
 from ai_journey.recovery_trace import chain_recovery_event
 from ai_journey.recovery_trace_io import load_recovery_trace
+from ai_journey.recovery_verify import verify_recovery_report
 from ai_journey.serving_recovery_config import canonical_json_bytes
 from ai_journey.telemetry_metrics_exposition import encode_exposition, parse_exposition
 from ai_journey.telemetry_metrics_model import TelemetryMetricsError, metric_set
@@ -188,6 +190,85 @@ def test_evidence_the_worker_verifier_fails_on_is_rejected_not_raised(
     damage(copy)
 
     with pytest.raises(TelemetryMetricsError, match="evidence was rejected"):
+        load_verified_worker_evidence(copy)
+
+
+@pytest.mark.parametrize(
+    "forge",
+    [
+        lambda r: r["experiment"].update(run_id="forged-run-0123456789abcdef"),
+        lambda r: r["experiment"].update(workload_sha256="0" * 64),
+        lambda r: r["attempts"].update(failed_attempt_id="attempt-1-0123456789abcdef"),
+        lambda r: r["attempts"].update(resumed_attempt_id="attempt-2-0123456789abcdef"),
+        lambda r: r["attempts"].update(failed_exit_code=1),
+        lambda r: r["attempts"].update(parent_checkpoint_sha256="0" * 64),
+        lambda r: (
+            r["fault"].update(fault_after_items=15),
+            r["loss_assessment"].update(
+                fault_observed_items=15, lost_uncheckpointed_items=7, replayed_items=7
+            ),
+        ),
+        lambda r: r["loss_assessment"].update(
+            durable_items_at_fault=4, lost_uncheckpointed_items=7, replayed_items=7
+        ),
+        lambda r: (
+            r["experiment"].update(work_items=40),
+            r["loss_assessment"].update(final_items=40),
+        ),
+    ],
+    ids=[
+        "run_id",
+        "workload_sha256",
+        "failed_attempt_id",
+        "resumed_attempt_id",
+        "failed_exit_code",
+        "parent_checkpoint_sha256",
+        "fault_observed_items",
+        "durable_items_at_fault",
+        "final_items",
+    ],
+)
+def test_report_fields_the_worker_verifier_leaves_unbound_must_match_the_trace(
+    worker_run, tmp_path, forge
+):
+    copy = tmp_path / "copy"
+    shutil.copytree(worker_run, copy)
+    rewrite(copy, forge)
+    report = json.loads((copy / "report.json").read_bytes())
+    # The worker verifier accepts each of these resealed reports.
+    assert verify_recovery_report(report, trace_path=copy / "trace.json") == report
+
+    with pytest.raises(TelemetryMetricsError, match="does not match its trace"):
+        load_verified_worker_evidence(copy)
+
+
+def test_the_trace_must_record_one_kill_and_resume_lifecycle(worker_run, tmp_path):
+    copy = tmp_path / "copy"
+    shutil.copytree(worker_run, copy)
+    events = list(load_recovery_trace(copy / "trace.json"))
+    events[1] = replace(events[1], kind="heartbeat")
+    rechain(copy, events)
+    report = json.loads((copy / "report.json").read_bytes())
+    assert verify_recovery_report(report, trace_path=copy / "trace.json") == report
+
+    with pytest.raises(TelemetryMetricsError, match="kill-and-resume lifecycle"):
+        load_verified_worker_evidence(copy)
+
+
+def test_a_trace_replaced_after_verification_is_refused(
+    worker_run, tmp_path, monkeypatch
+):
+    copy = tmp_path / "copy"
+    shutil.copytree(worker_run, copy)
+    events = list(load_recovery_trace(copy / "trace.json"))
+    events[-1] = replace(events[-1], payload={})
+    rechain(copy, events)
+    shutil.copy(worker_run / "report.json", copy / "report.json")
+    monkeypatch.setattr(
+        worker_module, "verify_recovery_report", lambda report, trace_path: report
+    )
+
+    with pytest.raises(TelemetryMetricsError, match="trace changed"):
         load_verified_worker_evidence(copy)
 
 
