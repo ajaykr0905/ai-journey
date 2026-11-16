@@ -27,6 +27,7 @@ from ai_journey.telemetry_traces_report import (
     write_trace_export,
 )
 from ai_journey.telemetry_traces_verify import verify_trace_export
+from ai_journey.trace_context import TraceContext
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = load_telemetry_config(ROOT / "config" / "day-73-telemetry-traces.json")
@@ -215,11 +216,35 @@ def hide_attempt_errors(original):
     return hidden
 
 
+def shift_first_phase(original):
+    def shifted(timing, root, at):
+        first, *rest = original(timing, root, at)
+        moved = replace(
+            first,
+            start_unix_nano=first.start_unix_nano + 1,
+            end_unix_nano=first.end_unix_nano + 1,
+        )
+        return [moved, *rest]
+
+    return shifted
+
+
+def repeat_first_phase(original):
+    def repeated(timing, root, at):
+        phases = original(timing, root, at)
+        twin = TraceContext(root.trace_id, "abcdef0123456789", True, root.span_id)
+        return phases + [replace(phases[0], context=twin)]
+
+    return repeated
+
+
 @pytest.mark.parametrize(
     ("name", "patch", "message"),
     [
         ("_lifecycle_event", shift_lifecycle_event, "does not map its trace record"),
         ("_attempt_span", hide_attempt_errors, "errors differ from the failed"),
+        ("_phase_spans", shift_first_phase, "does not span its sealed boundaries"),
+        ("_phase_spans", repeat_first_phase, "differ from the sealed timing"),
     ],
 )
 def test_a_self_consistent_encoder_bug_is_caught_against_raw_evidence(

@@ -80,7 +80,7 @@ def _check_events(spans: list[dict[str, Any]], records, origin: int, anchor: int
     seen: dict[int, dict[str, Any]] = {}
     for span in spans:
         for event in span.get("events", []):
-            attributes = _decode(event["attributes"])
+            attributes = _decode(event.get("attributes", []))
             sequence = attributes.get("ai_journey.event.sequence")
             _require(
                 type(sequence) is int and sequence not in seen,
@@ -101,28 +101,38 @@ def _check_events(spans: list[dict[str, Any]], records, origin: int, anchor: int
         )
 
 
-def _check_phases(spans: list[dict[str, Any]], evidence) -> None:
+def _check_phases(
+    spans: list[dict[str, Any]], evidence, origin: int, anchor: int
+) -> None:
     timing = evidence.report["timing"]
     serving = isinstance(evidence, ServingEvidence)
     expected = {
-        f"timing.{duration}": duration
-        for _, _, _, duration in (SERVING_PHASES if serving else WORKER_PHASES)
+        f"timing.{duration}": (start, duration)
+        for _, start, _, duration in (SERVING_PHASES if serving else WORKER_PHASES)
         if timing[duration] is not None
     }
-    phases = {}
-    for span in spans:
-        attributes = _decode(span["attributes"])
-        if attributes.get("ai_journey.span.derived") is True:
-            phases[attributes.get("ai_journey.phase.source")] = span
-    _require(set(phases) == set(expected), "derived phases differ from the timing")
-    for source, span in phases.items():
-        duration = int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"])
+    phases = [
+        span
+        for span in spans
+        if _decode(span["attributes"]).get("ai_journey.span.derived") is True
+    ]
+    sources = [
+        _decode(span["attributes"]).get("ai_journey.phase.source") for span in phases
+    ]
+    _require(
+        sorted(map(str, sources)) == sorted(expected),
+        "derived phases differ from the sealed timing fields",
+    )
+    for source, span in zip(sources, phases):
+        start, field = expected[source]
+        begin = int(span["startTimeUnixNano"])
+        duration = int(span["endTimeUnixNano"]) - begin
         # Serving timings are sealed in nanoseconds, worker timings in ms.
         if not serving:
             duration = duration / 1_000_000
         _require(
-            duration == timing[expected[source]],
-            f"phase {source} does not last its sealed duration",
+            begin == anchor + timing[start] - origin and duration == timing[field],
+            f"phase {source} does not span its sealed boundaries",
         )
 
 
@@ -160,7 +170,7 @@ def _check_mapping(request: dict[str, Any], export, anchor: int) -> None:
             "a resource does not name its run, report and clock mapping",
         )
         _check_events(spans, records, origin, anchor)
-        _check_phases(spans, evidence)
+        _check_phases(spans, evidence, origin, anchor)
         if isinstance(evidence, ServingEvidence):
             _check_attempts(spans, evidence)
 
