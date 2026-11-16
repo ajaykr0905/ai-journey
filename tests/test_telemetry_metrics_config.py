@@ -87,6 +87,13 @@ def test_config_round_trips_and_binds_every_control_to_its_digest():
             TelemetryMetricsError,
             "one of latency_buckets_us",
         ),
+        # Text format 0.0.4 spells a 1 s bound le="1"; Prometheus 3 stores it
+        # as le="1.0", so the latency rule's matcher would select nothing.
+        (
+            {"serving_objectives": {"post_fault_latency_us": 1_000_000}},
+            TelemetryMetricsError,
+            "whole number of seconds",
+        ),
         (
             {"serving_objectives": {"detection_latency_ms": 0}},
             TelemetryMetricsError,

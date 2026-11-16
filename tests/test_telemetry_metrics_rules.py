@@ -41,7 +41,7 @@ RELAXED = {
         "restart_latency_ms": 300_000,
         "unavailability_ms": 300_000,
         "time_to_slo_recovery_ms": 300_000,
-        "post_fault_latency_us": 1_000_000,
+        "post_fault_latency_us": 250_000,
         "post_fault_within_latency_ratio": 0.5,
     },
     "worker_objectives": {"detection_ms": 300_000, "recovery_ms": 300_000},

@@ -258,6 +258,13 @@ sample name, or a recording rule defined earlier in the same group. Its
 matchers must name labels that the series carry and values that occur in
 the family. An `le` matcher must spell one of the family's bucket bounds.
 
+The config also refuses a latency objective that is a whole number of
+seconds. Text format 0.0.4 writes such a bound as `le="1"`. Prometheus 2
+keeps that spelling from a text scrape, but Prometheus 3 and protobuf
+scrapes store `le="1.0"`, so no single equality matcher would select the
+bucket on every server and the latency alert could never fire on some of
+them. The pinned 250 ms objective is `le="0.25"` everywhere.
+
 ## Declared objectives in the pinned config
 
 | Control | Pinned value | Why |

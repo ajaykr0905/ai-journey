@@ -55,7 +55,10 @@ class ServingObjectives:
     latency objective asks that at least ``post_fault_within_latency_ratio``
     of the successes served by a post-fault lifetime took at most
     ``post_fault_latency_us``, which must be a histogram bucket bound so the
-    rule can read it from one cumulative bucket.
+    rule can read it from one cumulative bucket. It must not be a whole
+    number of seconds: text format 0.0.4 writes that bound as ``le="1"``,
+    which Prometheus 3 and protobuf scrapes store as ``le="1.0"``, so no
+    single ``le`` matcher would select the bucket on every server.
     """
 
     detection_latency_ms: int
@@ -76,6 +79,11 @@ class ServingObjectives:
         _require_int(
             self.post_fault_latency_us, "post_fault_latency_us", 1, MAX_BUCKET_US
         )
+        if self.post_fault_latency_us % 1_000_000 == 0:
+            raise TelemetryMetricsError(
+                "post_fault_latency_us must not be a whole number of seconds, "
+                'whose le="1" bucket Prometheus 3 stores as le="1.0"'
+            )
         ratio = self.post_fault_within_latency_ratio
         if type(ratio) is not float:
             raise TypeError("post_fault_within_latency_ratio must be a float")
