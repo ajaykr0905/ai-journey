@@ -48,6 +48,10 @@ MAX_NAME_CHARS = 128
 MAX_LABEL_VALUE_CHARS = 256
 MAX_HELP_CHARS = 512
 MAX_EXACT_INTEGER = 2**53
+# Every series this lab exports carries scope="local_cpu_lab", so its
+# telemetry stays distinguishable from production monitoring once scraped.
+SCOPE_LABEL = "scope"
+LAB_SCOPE = "local_cpu_lab"
 _NAME = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
 
 
