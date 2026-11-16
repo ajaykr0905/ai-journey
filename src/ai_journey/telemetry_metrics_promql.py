@@ -13,11 +13,14 @@ need and nothing more:
 
 Evaluation follows PromQL instant-query semantics on that subset: a matcher
 on an absent label compares with the empty string, ``sum`` over no series is
-no series rather than 0, results carry no metric name, division by zero
-gives ``+Inf``, ``-Inf`` or ``NaN`` as IEEE 754 does, and a comparison with
-``NaN`` holds only for ``!=``. Range vectors, ``rate`` and every other
-function are deliberately absent: the exposition is one sealed snapshot of a
-finished run, so each counter already covers the whole run.
+no series rather than 0, division by zero gives ``+Inf``, ``-Inf`` or
+``NaN`` as IEEE 754 does, and a comparison with ``NaN`` holds only for
+``!=``. Results never carry a metric name. PromQL keeps the name on a
+selector, alone or compared with a number, but an alert drops it and a
+recording rule replaces it, so no rule outcome differs. Range vectors,
+``rate`` and every other function are deliberately absent: the exposition is
+one sealed snapshot of a finished run, so each counter already covers the
+whole run.
 """
 
 from __future__ import annotations

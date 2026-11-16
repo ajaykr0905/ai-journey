@@ -224,9 +224,12 @@ else. Evaluation follows PromQL instant-query semantics on that subset:
 
 - A matcher on an absent label compares with the empty string.
 - `sum` over no series yields no series, not 0.
-- Results carry no metric name.
 - Division by zero gives `+Inf`, `-Inf` or `NaN`.
 - A comparison with `NaN` holds only for `!=`.
+
+Results never carry a metric name. PromQL keeps the name on a selector,
+alone or compared with a number, but an alert drops it and a recording rule
+replaces it, so no rule outcome differs.
 
 So an absent gauge fires no alert. A run without unavailability raises no
 unavailability alert, and a run that never recovered raises
@@ -337,8 +340,10 @@ They are not a benchmark, and timings depend on the host and its load.
   OpenTelemetry collector or Alertmanager. During development, the
   exposition was re-encoded byte for byte by the Go client library's
   `expfmt` text parser and writer, and the rule file was read into the same
-  structure by Go's `yaml.v3`. Those checks ran once by hand and are not
-  part of the test suite.
+  structure by Go's `yaml.v3`. That writer drops a family that has `# HELP`
+  and `# TYPE` lines but no sample, such as a null unavailability, so the
+  round trip is byte for byte only while every family has a sample. Those
+  checks ran by hand and are not part of the test suite.
 - Durations come from `time.monotonic_ns` on the experiment host and depend
   on its load. The objectives are declared lab controls, not production
   SLOs.
