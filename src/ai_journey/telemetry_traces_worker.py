@@ -8,8 +8,10 @@ verified records. That verifier never reads the report's evidence boundary,
 so the exact text the lab seals is required: a resealed report cannot make
 the export claim other evidence. The experiment writes exactly five records
 (started, fault_injected, failure_detected, resumed, completed); any other
-shape is refused even when the lab verifier tolerates it. One trace per run
-holds:
+shape is refused even when the lab verifier tolerates it, and so are payloads
+with other keys or types, counts and exit codes that are not exact integers,
+and a report whose run, workload, parent checkpoint, recovery time or item
+counts differ from its trace. One trace per run holds:
 
 * ``worker-recovery run`` (INTERNAL root) from the start to completion;
 * ``worker attempt 1`` (INTERNAL) from the start to the observed failure, in
@@ -22,6 +24,7 @@ holds:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -76,6 +79,30 @@ PHASES = (
     ("worker restart", "failure_detected_ns", "restart_started_ns", "restart_delay_ms"),
     ("recovery", "fault_injected_ns", "recovery_completed_ns", "recovery_time_ms"),
 )
+# Report numbers the spans carry; verify_recovery_report compares them by value.
+_INTEGERS = {
+    "experiment": ("work_items",),
+    "fault": ("fault_after_items", "checkpoint_interval"),
+    "attempts": ("failed_exit_code", "resumed_exit_code"),
+    "loss_assessment": (
+        "fault_observed_items",
+        "durable_items_at_fault",
+        "lost_uncheckpointed_items",
+        "replayed_items",
+        "final_items",
+        "omitted_items",
+        "duplicated_committed_items",
+    ),
+}
+# The payload keys and exact types of the five records, in TRACE_SHAPE order.
+PAYLOAD_TYPES = (
+    {"workload_sha256": str},
+    {"mechanism": str},
+    {"exit_code": int},
+    {"parent_checkpoint_sha256": str},
+    {"accumulator_sha256": str, "recovery_time_ms": float},
+)
+_DIGEST = re.compile(r"[0-9a-f]{64}")
 # The float recovery_time_ms payload is carried by the recovery phase span.
 _PAYLOAD_ATTRIBUTES = {
     "workload_sha256": "ai_journey.workload.sha256",
@@ -106,6 +133,62 @@ def _load_strict(run_dir: Path, name: str, max_bytes: int) -> Any:
     value = strict_json_loads(data, label=name)
     _require(canonical_json_bytes(value) == data, f"{name} is not canonical JSON")
     return value
+
+
+def _require_exact_evidence(
+    report: dict[str, Any], events: tuple[RecoveryEvent, ...]
+) -> None:
+    """Close what the by-value lab verifier leaves open before any span exists.
+
+    ``verify_recovery_report`` accepts ``false`` for ``0`` and ``20.0`` for
+    ``20`` and never reads record payloads or the report's run identity, so a
+    resealed report could otherwise export boolean counts or name another run.
+    """
+
+    _require(
+        all(
+            type(report[section][name]) is int
+            for section, names in _INTEGERS.items()
+            for name in names
+        ),
+        "worker report counts and exit codes must be exact integers",
+    )
+    for event, types in zip(events, PAYLOAD_TYPES):
+        payload = event.payload
+        _require(
+            set(payload) == set(types)
+            and all(type(payload[key]) is kind for key, kind in types.items())
+            and all(
+                _DIGEST.fullmatch(value) is not None
+                for key, value in payload.items()
+                if key.endswith("_sha256")
+            ),
+            f"worker {event.kind} payload differs from the experiment's",
+        )
+    experiment, attempts, loss = (
+        report["experiment"],
+        report["attempts"],
+        report["loss_assessment"],
+    )
+    started, injected, detected, resumed, completed = events
+    _require(
+        experiment["run_id"] == started.run_id
+        and started.payload["workload_sha256"] == experiment["workload_sha256"]
+        and injected.payload["mechanism"] == report["fault"]["mechanism"]
+        and detected.payload["exit_code"] == attempts["failed_exit_code"]
+        and resumed.payload["parent_checkpoint_sha256"]
+        == attempts["parent_checkpoint_sha256"]
+        and completed.payload["recovery_time_ms"]
+        == report["timing"]["recovery_time_ms"]
+        and [event.completed_items for event in events[1:]]
+        == [
+            loss["fault_observed_items"],
+            loss["fault_observed_items"],
+            loss["durable_items_at_fault"],
+            loss["final_items"],
+        ],
+        "worker trace payloads and counts differ from the verified report",
+    )
 
 
 def load_verified_worker_evidence(run_dir: Path) -> WorkerEvidence:
@@ -156,6 +239,7 @@ def load_verified_worker_evidence(run_dir: Path) -> WorkerEvidence:
         and events[2].payload.get("exit_code") == attempts["failed_exit_code"],
         "worker trace boundaries differ from the verified report",
     )
+    _require_exact_evidence(report, events)
     return WorkerEvidence(report, tuple(records), events)
 
 

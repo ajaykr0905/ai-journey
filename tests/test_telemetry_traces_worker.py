@@ -199,6 +199,83 @@ def test_only_the_experiments_five_record_shape_is_converted(worker_run, tmp_pat
         load_verified_worker_evidence(run_dir)
 
 
+def as_float(section, name):
+    def mutate(report):
+        report[section][name] = float(report[section][name])
+
+    return mutate
+
+
+# verify_recovery_report compares by value, so each of these still verifies.
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda r: r["loss_assessment"].update(omitted_items=False),
+            "exact integers",
+        ),
+        (lambda r: r["attempts"].update(resumed_exit_code=False), "exact integers"),
+        (lambda r: r["fault"].update(checkpoint_interval=True), "exact integers"),
+        (
+            lambda r: (
+                as_float("experiment", "work_items")(r),
+                as_float("loss_assessment", "final_items")(r),
+            ),
+            "exact integers",
+        ),
+        (
+            lambda r: r["experiment"].update(run_id="day-70-other-0123456789abcdef"),
+            "differ from the verified report",
+        ),
+        (
+            lambda r: r["attempts"].update(parent_checkpoint_sha256="1" * 64),
+            "differ from the verified report",
+        ),
+    ],
+)
+def test_resealed_reports_must_keep_exact_types_and_trace_bindings(
+    worker_run, tmp_path, mutate, message
+):
+    run_dir = copy_run(worker_run, tmp_path)
+    reseal(run_dir, mutate)
+
+    with pytest.raises(TelemetryVerificationError, match=message):
+        load_verified_worker_evidence(run_dir)
+
+
+def set_payload(sequence, **payload):
+    def mutate(records):
+        records[sequence]["payload"].update(payload)
+
+    return mutate
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (set_payload(2, exit_code=-9.0), "payload differs"),
+        (set_payload(0, exit_code=0), "payload differs"),
+        (set_payload(0, workload_sha256="1" * 64), "differ from the verified report"),
+        (set_payload(1, mechanism="sigterm"), "differ from the verified report"),
+        (set_payload(4, recovery_time_ms=0.5), "differ from the verified report"),
+        (
+            lambda records: records[3].update(completed_items=4),
+            "differ from the verified report",
+        ),
+    ],
+)
+def test_rechained_traces_must_carry_the_experiments_payloads(
+    worker_run, tmp_path, mutate, message
+):
+    run_dir = copy_run(worker_run, tmp_path)
+    records = records_of(run_dir)
+    mutate(records)
+    rewrite(run_dir, records)
+
+    with pytest.raises(TelemetryVerificationError, match=message):
+        load_verified_worker_evidence(run_dir)
+
+
 @pytest.mark.parametrize(
     "tamper",
     [

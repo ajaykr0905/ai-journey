@@ -73,7 +73,11 @@ evidence boundary, so the export also requires the exact boundary text
 `build_recovery_report` seals; a resealed report that claims other evidence
 is rejected. The worker experiment writes exactly five records
 (started, fault_injected, failure_detected, resumed, completed), and any other
-shape is refused. `verify_recovery_report` indexes the trace by position and
+shape is refused. `verify_recovery_report` compares numbers by value and never
+reads record payloads, so the export also requires exact integer counts and
+exit codes, each record's payload keys and types, and a report whose run ID,
+workload digest, parent checkpoint, recovery time and item counts equal its
+trace's. `verify_recovery_report` indexes the trace by position and
 raises `IndexError` on a valid chain shorter than five records; the export
 reports that as rejected evidence instead of crashing.
 
