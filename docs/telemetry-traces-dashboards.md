@@ -265,7 +265,8 @@ Separately from the encoder it maps the OTLP JSON back to the raw evidence:
 one event per lifecycle record with that record's sequence, digest and
 mapped time; resource identities and clock mappings equal to the run's; phase
 durations equal to the sealed timings; and one CLIENT span per recorded
-attempt, with matching durations and error count. For a dashboard it
+attempt, under that attempt's own request, with its mapped start and finish,
+outcome and error status. For a dashboard it
 re-validates the file, requires every catalog metric to be charted and
 rebuilds the same bytes from the embedded config. `--config` binds either
 report to a pinned config file.

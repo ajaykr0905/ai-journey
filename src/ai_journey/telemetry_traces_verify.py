@@ -7,12 +7,13 @@ each source lab's verifier through the export pipeline, rebuilds the export
 from the raw evidence under the embedded config, and requires the same bytes
 and source statements, then the same report bytes, so no sealed field can
 hold another JSON spelling of its value, such as ``1.0`` or ``true`` for
-``1``. Separately from the encoder, it reads the OTLP JSON
-directly and maps it back to the evidence: one event per lifecycle record
-carrying that record's sequence, digest and mapped time; resource identities
-and clock mappings equal to the run's; derived phase durations equal to the
-sealed timings; and, for the serving lab, one CLIENT span per recorded attempt
-whose duration multiset and error count match the attempt log.
+``1``. Separately from the encoder, it reads the OTLP JSON directly and maps
+it back to the evidence: one event per lifecycle record carrying that
+record's sequence, digest and mapped time; resource identities and clock
+mappings equal to the run's; derived phase durations equal to the sealed
+timings; and, for the serving lab, one CLIENT span per recorded attempt,
+found through its parent request's idempotency key and its attempt number,
+with that attempt's mapped start and finish, outcome and error status.
 
 A report that cannot be read raises ``TelemetryError``; anything read and
 then found wrong raises ``TelemetryVerificationError``.
@@ -139,7 +140,9 @@ def _check_phases(
         )
 
 
-def _check_attempts(spans: list[dict[str, Any]], evidence: ServingEvidence) -> None:
+def _check_attempts(
+    spans: list[dict[str, Any]], evidence: ServingEvidence, origin: int, anchor: int
+) -> None:
     clients = [span for span in spans if span["kind"] == _CLIENT]
     attempts = evidence.attempts
     _require(len(clients) == len(attempts), "CLIENT spans differ from the attempts")
@@ -153,6 +156,22 @@ def _check_attempts(spans: list[dict[str, Any]], evidence: ServingEvidence) -> N
         == sum(attempt.outcome != "ok" for attempt in attempts),
         "CLIENT span errors differ from the failed attempts",
     )
+    # Multisets miss an attempt parented under another request, so map each.
+    parents = {span["spanId"]: span for span in spans}
+    records = {(a.idempotency_key, a.attempt): a for a in attempts}
+    for span in clients:
+        parent = parents.get(span.get("parentSpanId"), {"attributes": []})
+        key = _decode(parent["attributes"]).get("ai_journey.request.idempotency_key")
+        decoded = _decode(span["attributes"])
+        attempt = records.pop((key, decoded.get("ai_journey.attempt.number")), None)
+        _require(
+            attempt is not None
+            and int(span["startTimeUnixNano"]) == anchor + attempt.started_ns - origin
+            and int(span["endTimeUnixNano"]) == anchor + attempt.finished_ns - origin
+            and decoded.get("ai_journey.attempt.outcome") == attempt.outcome
+            and (span["status"]["code"] == 2) is (attempt.outcome != "ok"),
+            "a CLIENT span does not map its attempt record",
+        )
 
 
 def _check_mapping(request: dict[str, Any], export, anchor: int) -> None:
@@ -175,7 +194,7 @@ def _check_mapping(request: dict[str, Any], export, anchor: int) -> None:
         _check_events(spans, records, origin, anchor)
         _check_phases(spans, evidence, origin, anchor)
         if isinstance(evidence, ServingEvidence):
-            _check_attempts(spans, evidence)
+            _check_attempts(spans, evidence, origin, anchor)
 
 
 def verify_trace_export(

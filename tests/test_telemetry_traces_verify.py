@@ -269,6 +269,36 @@ def repeat_first_phase(original):
     return repeated
 
 
+def swap_two_single_attempt_requests(original):
+    """Parent two one-attempt requests' attempts under each other's request."""
+
+    def swapped(requests, attempts, root, at):
+        keys = [
+            entry["idempotency_key"] for entry in requests if entry["attempts"] == 1
+        ]
+        assert len(keys) >= 2
+        first, second = (
+            next(a for a in attempts if a.idempotency_key == key) for key in keys[:2]
+        )
+        moved = {
+            id(first): replace(
+                second,
+                idempotency_key=first.idempotency_key,
+                request_index=first.request_index,
+            ),
+            id(second): replace(
+                first,
+                idempotency_key=second.idempotency_key,
+                request_index=second.request_index,
+            ),
+        }
+        return original(
+            requests, tuple(moved.get(id(a), a) for a in attempts), root, at
+        )
+
+    return swapped
+
+
 @pytest.mark.parametrize(
     ("name", "patch", "message"),
     [
@@ -276,6 +306,11 @@ def repeat_first_phase(original):
         ("_attempt_span", hide_attempt_errors, "errors differ from the failed"),
         ("_phase_spans", shift_first_phase, "does not span its sealed boundaries"),
         ("_phase_spans", repeat_first_phase, "differ from the sealed timing"),
+        (
+            "_request_spans",
+            swap_two_single_attempt_requests,
+            "does not map its attempt record",
+        ),
     ],
 )
 def test_a_self_consistent_encoder_bug_is_caught_against_raw_evidence(
