@@ -244,6 +244,8 @@ dashboard was not imported into a running Grafana.
 `verify` trusts no stored summary. For an export it needs the run directory
 of exactly the exported labs, re-runs each lab verifier, rebuilds the export
 under the embedded config and requires the same bytes and source statements.
+Both kinds of report must then rebuild byte for byte, so a resealed report
+that spells a sealed number as `1.0` or `true` is rejected.
 Separately from the encoder it maps the OTLP JSON back to the raw evidence:
 one event per lifecycle record with that record's sequence, digest and
 mapped time; resource identities and clock mappings equal to the run's; phase

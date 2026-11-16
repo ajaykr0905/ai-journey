@@ -165,6 +165,23 @@ def test_tampered_dashboards_and_reports_are_rejected(published, tamper, message
         verify_dashboard_report(published / REPORT_FILE)
 
 
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda r: r.update(schema_version=1.0),
+        lambda r: r["grafana"].update(imported_into_grafana=0),
+        lambda r: r["grafana"].update(schema_version=39.0),
+        lambda r: r["dashboard"].update(panels=7.0),
+        lambda r: r["dashboard"].update(bytes=float(r["dashboard"]["bytes"])),
+    ],
+)
+def test_reports_resealed_with_other_json_number_forms_are_rejected(published, mutate):
+    # Python equality calls false, 0 and 0.0 equal; the sealed bytes do not.
+    edit_report(published, mutate)
+    with pytest.raises(TelemetryVerificationError, match="byte for byte"):
+        verify_dashboard_report(published / REPORT_FILE)
+
+
 def test_a_report_from_another_config_fails_the_pinned_binding(published, tmp_path):
     other = tmp_path / "other.json"
     other.write_text(PINNED.read_text().replace('"refresh": "1m"', '"refresh": "5m"'))

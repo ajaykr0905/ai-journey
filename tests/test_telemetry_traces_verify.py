@@ -161,6 +161,36 @@ def test_forged_or_tampered_exports_are_rejected(copied, tamper, message):
         verify(exported, runs)
 
 
+def as_float(*path):
+    """Return a report edit that keeps one integer's value but makes it a float."""
+
+    def mutate(report):
+        *parents, key = path
+        for parent in parents:
+            report = report[parent]
+        report[key] = float(report[key])
+
+    return mutate
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda r: r.update(schema_version=True),
+        as_float("export", "spans"),
+        as_float("export", "bytes"),
+        as_float("export", "spans_by_kind", "internal"),
+        as_float("sources", 1, "spans"),
+    ],
+)
+def test_reports_resealed_with_other_json_number_forms_are_rejected(copied, mutate):
+    # Python equality calls true, 1 and 1.0 equal; the sealed bytes do not.
+    exported, runs = copied
+    edit_report(exported, mutate)
+    with pytest.raises(TelemetryVerificationError, match="byte for byte"):
+        verify(exported, runs)
+
+
 def test_a_pinned_config_must_be_the_one_the_export_embeds(copied, tmp_path):
     exported, (serving_run, worker_run) = copied
     pinned = ROOT / "config" / "day-73-telemetry-traces.json"

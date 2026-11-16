@@ -8,7 +8,9 @@ evidence boundary, and states that the dashboard was not imported into a
 running Grafana. ``verify_dashboard_report`` trusts none of it: it checks the
 seal and schema, optionally binds the embedded config to a pinned file,
 re-reads and re-validates the dashboard file and rebuilds it from the
-embedded config to require the same bytes.
+embedded config to require the same bytes, then rebuilds the report and
+requires its exact bytes, so no sealed field can hold another JSON spelling
+of its value, such as ``0`` for ``false``.
 
 A report that cannot be read raises ``TelemetryError``; anything read and
 then found wrong raises ``TelemetryVerificationError``.
@@ -228,9 +230,15 @@ def verify_dashboard_report(
     )
     missing = uncharted_metrics(summary)
     _require(not missing, f"dashboard does not chart {', '.join(missing)}")
+    artifact = build_dashboard_artifact(config)
     _require(
-        build_dashboard_artifact(config).data == dashboard_bytes,
+        artifact.data == dashboard_bytes,
         "dashboard does not rebuild from the embedded config",
+    )
+    # Python equality calls false, 0 and 0.0 equal, so compare canonical bytes.
+    _require(
+        artifact_bytes(build_dashboard_report(config, artifact)) == data,
+        "report does not rebuild byte for byte from the embedded config",
     )
     return {
         "verified": True,

@@ -5,7 +5,9 @@ scope, boundary, encoding statement and embedded config; re-reads the export
 bytes, their size and digest; and validates their structure. It then re-runs
 each source lab's verifier through the export pipeline, rebuilds the export
 from the raw evidence under the embedded config, and requires the same bytes
-and source statements. Separately from the encoder, it reads the OTLP JSON
+and source statements, then the same report bytes, so no sealed field can
+hold another JSON spelling of its value, such as ``1.0`` or ``true`` for
+``1``. Separately from the encoder, it reads the OTLP JSON
 directly and maps it back to the evidence: one event per lifecycle record
 carrying that record's sequence, digest and mapped time; resource identities
 and clock mappings equal to the run's; derived phase durations equal to the
@@ -39,6 +41,7 @@ from .telemetry_traces_report import (
     REPORT_KIND,
     REPORT_SCHEMA_VERSION,
     build_trace_export,
+    build_trace_export_report,
     require_sealed_report,
 )
 from .telemetry_traces_serving import PHASES as SERVING_PHASES
@@ -270,6 +273,11 @@ def verify_trace_export(
     _require(
         list(rebuilt.sources) == exported,
         "report sources do not recompute from the evidence",
+    )
+    # Python equality calls true, 1 and 1.0 equal, so compare canonical bytes.
+    _require(
+        artifact_bytes(build_trace_export_report(config, rebuilt)) == data,
+        "report does not recompute byte for byte from the source evidence",
     )
     _check_mapping(request, rebuilt, config.anchor_unix_nano)
     return {
