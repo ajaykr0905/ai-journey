@@ -24,11 +24,15 @@ python -m ai_journey.kernel_metal_cli verify \
 `run` compiles the kernels, checks them, times them, checks its own report,
 and writes the report. It prints one line for the correctness of each kernel
 and one line for the contraction probe. It also prints one line for each sweep
-point and a summary line with the report digest. A measured run puts the label
-`apple_gpu_metal_measurement` at the front of each line. The `verify` command
-recomputes a report on the CPU and prints the same summary line with the
-prefix `verified_`. With `--config`, `verify` also requires that the report
-comes from that exact config.
+point and a summary line with the report digest. In a measured run, each line
+before the summary has the prefix `apple_gpu_metal_measurement`, and the
+summary line has the prefix `kernel_metal_measurement=`. A run with a
+stand-in backend or clock uses `synthetic_timing` and
+`kernel_metal_synthetic_timing=` instead.
+
+The `verify` command recomputes a report on the CPU and prints the same
+summary line with the prefix `verified_`. With `--config`, `verify` also
+requires that the report comes from that exact config.
 
 The exit codes are:
 
@@ -253,8 +257,8 @@ different.
 | Field | Pinned | Allowed |
 | --- | --- | --- |
 | `seed` | 73 | 0 to 2^32 - 1 |
-| `launch.vector_add_group_size` | 256 | 1 to 1024 |
-| `launch.rgb_to_gray_group_size` | [16, 16] | [x, y] with at most 1024 threads in total |
+| `launch.vector_add_group_size` | 256 | 2 to 1024 |
+| `launch.rgb_to_gray_group_size` | [16, 16] | [x, y], each 2 or more, with at most 1024 threads in total |
 | `correctness.vector_add_lengths` | 7 lengths, 1 to 1048579 | 1 to 16 increasing lengths of 1 to 2^25 elements |
 | `correctness.rgb_to_gray_shapes` | 5 shapes, 1 x 1 to 1023 x 1025 | 1 to 16 different [height, width] pairs |
 | `correctness.rgb_to_gray_all_triples` | true | true or false |
@@ -268,12 +272,13 @@ different.
 An image can have at most 8192 pixels on a side and 2^24 pixels in total. The
 correctness cases need one length that is not a multiple of the vector group
 size. They also need one width and one height that are not multiples of the
-image group size.
+image group size. A group size of 1 divides every extent, so the parser
+refuses it.
 
 The config parser counts the planned work before a run, with the batch sizes
 of the run. For the pinned config, the counts are 13 correctness cases, 13
 sweep points, 286 timed samples, 81354 kernel calls and 17363214336
-compulsory bytes. A run must stay below 2^22 calls and 2^38 bytes. The time
+compulsory bytes. A run can have at most 2^22 calls and 2^38 bytes. The time
 budget covers the probe, the cases and the sweep, but not the torch import or
 the kernel compile.
 

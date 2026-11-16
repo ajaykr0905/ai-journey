@@ -116,6 +116,10 @@ def test_planned_work_counts_both_sides_of_every_sample():
         (("launch", "rgb_to_gray_group_size"), [64, 32], KernelMetalError, "1024"),
         (("launch", "rgb_to_gray_group_size"), [16], KernelMetalError, "pair"),
         (("launch", "rgb_to_gray_group_size"), 16, KernelMetalError, "JSON array"),
+        # A size of 1 divides every extent, so no case could test the guard.
+        (("launch", "vector_add_group_size"), 1, KernelMetalError, "group size 1"),
+        (("launch", "rgb_to_gray_group_size"), [1, 16], KernelMetalError, "group x"),
+        (("launch", "rgb_to_gray_group_size"), [16, 1], KernelMetalError, "group y"),
         (
             ("correctness", "vector_add_lengths"),
             [257, 1],

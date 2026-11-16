@@ -4,7 +4,7 @@ import shlex
 from pathlib import Path
 
 from ai_journey import kernel_metal_cli
-from ai_journey.kernel_metal_config import load_config
+from ai_journey.kernel_metal_config import MAX_RUN_BYTES, MAX_RUN_CALLS, load_config
 from ai_journey.kernel_metal_reference import GRAY_WEIGHTS, MAX_LEVEL_DIFFERENCE
 from ai_journey.kernel_metal_report import (
     MEASUREMENT_BOUNDARY,
@@ -121,3 +121,21 @@ def test_guide_controls_and_extents_match_the_pinned_config():
     assert len(config.benchmark.vector_add_lengths) == 7
     assert len(config.benchmark.rgb_to_gray_shapes) == 6
     assert "The pinned sweep has 7 vector lengths and 6 image shapes." in flat(text)
+
+
+def test_guide_names_every_line_prefix_and_the_inclusive_bounds():
+    text = flat(guide())
+
+    # The summary line has its own prefix; the CLI tests pin both forms.
+    for prefix in (
+        "`apple_gpu_metal_measurement`",
+        "`kernel_metal_measurement=`",
+        "`synthetic_timing`",
+        "`kernel_metal_synthetic_timing=`",
+    ):
+        assert prefix in text, prefix
+    calls, data = MAX_RUN_CALLS.bit_length() - 1, MAX_RUN_BYTES.bit_length() - 1
+    assert (1 << calls, 1 << data) == (MAX_RUN_CALLS, MAX_RUN_BYTES)
+    assert f"A run can have at most 2^{calls} calls and 2^{data} bytes." in text
+    assert "| `launch.vector_add_group_size` | 256 | 2 to 1024 |" in guide()
+    assert "each 2 or more, with at most 1024 threads in total |" in guide()
