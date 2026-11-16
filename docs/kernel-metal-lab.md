@@ -150,10 +150,11 @@ Three implementations run each case:
 - the PyTorch equivalent on the CPU
 
 The PyTorch equivalent of `vector_add` is `torch.add`. The PyTorch equivalent
-of `rgb_to_gray` is ten eager operations with the same int32 steps as the
-kernel. A NumPy reference on the CPU computes the expected outputs: float32
-sums for vector add, and the integer rule for grayscale. Each output must obey
-these rules:
+of `rgb_to_gray` is ten eager operations. These operations do the integer
+steps of the kernel in int32, and the kernel does them in 32-bit `uint`. A
+NumPy reference on the CPU computes the expected outputs: float32 sums for
+vector add, and the integer rule for grayscale. Each output must obey these
+rules:
 
 - Each vector-add output must match the reference bit for bit.
 - Each grayscale output must match the reference bit for bit. The report

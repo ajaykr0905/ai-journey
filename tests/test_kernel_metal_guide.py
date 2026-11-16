@@ -15,8 +15,10 @@ from ai_journey.kernel_metal_report import (
     MEASUREMENT_LABEL,
     MEASUREMENT_SCOPE,
     SYNTHETIC_SCOPE,
+    TORCH_EQUIVALENTS,
 )
 from ai_journey.kernel_metal_runtime import UNAVAILABLE_REASONS
+from ai_journey.kernel_metal_source import SHADER_SOURCE
 
 ROOT = Path(__file__).resolve().parents[1]
 GUIDE = ROOT / "docs/kernel-metal-lab.md"
@@ -69,6 +71,13 @@ def test_guide_states_the_rounding_rule_the_bound_and_the_exit_codes():
     assert MAX_LEVEL_DIFFERENCE == 0
     for kernel in ("vector-add", "grayscale"):
         assert f"Each {kernel} output must match the reference bit for bit." in text
+    # The kernel computes in uint and PyTorch in int32; the guide names both.
+    assert "uint luma = " in SHADER_SOURCE
+    assert TORCH_EQUIVALENTS["rgb_to_gray"].startswith("p = rgb.to(int32);")
+    assert (
+        "These operations do the integer steps of the kernel in int32, and the "
+        "kernel does them in 32-bit `uint`."
+    ) in text
     for phrase in (
         "0: the command succeeded.",
         "1: the command read a report, but the report failed the checks.",
