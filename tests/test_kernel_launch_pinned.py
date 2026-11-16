@@ -146,6 +146,8 @@ def test_guide_states_commands_numbers_sources_and_boundaries(report):
         "Each function must hold exactly its pinned statements, in the pinned order.",
         "The text must hold the five definitions and no other code.",
         "Text with a backslash, a `??` trigraph or an unterminated `/*` comment fails every check.",
+        "Recompute the kernel, demo and summary sections with its own code",
+        "It reads the CUDA text with `check_cuda_source`, and it compares the limits and the rule with the lab constants.",
         VECTOR_SHA256,
         GRAY_SHA256,
         CUDA_SHA256,

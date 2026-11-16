@@ -2,12 +2,14 @@
 
 Verification trusts no number in a report. It checks the field set, the
 fixed evidence boundary and the SHA-256 seal, parses the embedded plan, and
-can bind the report to a plan file. It then recomputes every section from
-the plan with this module's own code: launch geometry by ceil division, input
-streams from SHA-256 counter blocks, float32 sums through ``array('f')``, the
-grayscale rule in integers, permutation digests, and the out-of-bounds
-records and write conflicts of each unguarded demo by direct enumeration of
-its threads, without the simulator. The first field that differs is named.
+can bind the report to a plan file. It then recomputes the kernel, demo and
+summary sections from the plan with this module's own code: launch geometry
+by ceil division, input streams from SHA-256 counter blocks, float32 sums
+through ``array('f')``, the grayscale rule in integers, permutation digests,
+and the out-of-bounds records and write conflicts of each unguarded demo by
+direct enumeration of its threads, without the simulator. The CUDA text is
+read with ``check_cuda_source``, and the limits and the grayscale rule are
+compared with the lab constants. The first field that differs is named.
 Last, the report must equal, byte for byte, a fresh build that runs the
 simulator again.
 """

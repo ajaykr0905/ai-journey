@@ -253,10 +253,12 @@ and the counts of accesses, out-of-bounds accesses and conflicts.
 
 1. Check the field set, the seal and the fixed evidence boundary.
 2. Parse the embedded plan. With `--config`, require that plan.
-3. Recompute each section with its own code, and name the first field that
-   differs. The code makes the input streams, the float32 sums, the integer
-   rule and the order digests again. It also enumerates the threads of each
-   unguarded demo directly.
+3. Recompute the kernel, demo and summary sections with its own code, and
+   name the first field that differs. The code makes the input streams, the
+   float32 sums, the integer rule and the order digests again. It also
+   enumerates the threads of each unguarded demo directly. It reads the CUDA
+   text with `check_cuda_source`, and it compares the limits and the rule
+   with the lab constants.
 4. Require that the report equals a fresh build, byte for byte.
 
 The reader accepts only regular non-symlink files: plans of at most 64 KiB and
