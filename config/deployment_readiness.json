@@ -35,6 +35,7 @@
     "tests/test_telemetry_dashboard_promql.py",
     "tests/test_telemetry_dashboard_report.py",
     "tests/test_telemetry_dashboard_validate.py",
+    "tests/test_telemetry_delivery.py",
     "tests/test_telemetry_metrics_cli.py",
     "tests/test_telemetry_metrics_config.py",
     "tests/test_telemetry_metrics_exposition.py",
