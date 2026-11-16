@@ -51,7 +51,8 @@ PYTHONPATH=src python -m ai_journey.telemetry_traces_cli verify \
 wrote with the same code `verify` uses. Each command prints one JSON receipt
 with the report seal, the artifact digest and `telemetry_scope` set to
 `local-cpu-lab`; an export receipt also lists each run's root `traceparent`.
-There is no console script yet, so use the module form.
+An installed wheel provides the same commands as `ai-journey-serving-recovery`,
+`ai-journey-recovery` and `ai-journey-telemetry-traces`.
 
 | Exit code | Meaning |
 | --- | --- |

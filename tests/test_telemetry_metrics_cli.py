@@ -182,7 +182,7 @@ def test_usage_lists_both_commands_and_refuses_abbreviations(capsys):
         main(["--help"])
     assert stopped.value.code == 0
     usage = capsys.readouterr().out
-    assert usage.startswith("usage: python -m ai_journey.telemetry_metrics_cli ")
+    assert usage.startswith("usage: ai-journey-telemetry-metrics ")
     assert "{export,verify}" in usage
     with pytest.raises(SystemExit) as stopped:
         main(

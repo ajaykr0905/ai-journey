@@ -40,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Define the ``export`` and ``verify`` commands without abbreviations."""
 
     parser = argparse.ArgumentParser(
-        prog="python -m ai_journey.telemetry_metrics_cli",
+        prog="ai-journey-telemetry-metrics",
         description=(
             "Derive Prometheus metrics and SLO rules from verified local CPU "
             "recovery evidence, or verify a stored export; no server is scraped."

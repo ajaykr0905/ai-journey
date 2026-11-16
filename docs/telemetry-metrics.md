@@ -46,7 +46,9 @@ PYTHONPATH=src python -m ai_journey.telemetry_metrics_cli verify \
 Both telemetry commands print one JSON receipt. It holds the report seal,
 the scope, the family, series and sample counts, the rule counts, the
 breached objectives and the alerts that would fire. `export` verifies what
-it wrote with the same code that `verify` runs.
+it wrote with the same code that `verify` runs. An installed wheel provides
+the same commands as `ai-journey-serving-recovery`, `ai-journey-recovery`
+and `ai-journey-telemetry-metrics`.
 
 | Exit code | Meaning |
 | --- | --- |

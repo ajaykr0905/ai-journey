@@ -56,7 +56,7 @@ EXIT_INVALID = 2
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m ai_journey.telemetry_traces_cli",
+        prog="ai-journey-telemetry-traces",
         description=(
             "OTLP/JSON traces and a Grafana dashboard derived from verified "
             "recovery-lab evidence; local CPU lab telemetry only."
