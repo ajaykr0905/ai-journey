@@ -4,9 +4,12 @@ The worker lab's report is read once as bounded, canonical, duplicate-free
 JSON and handed with its trace path to ``verify_recovery_report``. Only after
 that verifier accepts it is the trace read once more, re-verified as a hash
 chain and bound to the report by its head digest, so the spans describe the
-verified records. The experiment writes exactly five records (started,
-fault_injected, failure_detected, resumed, completed); any other shape is
-refused even when the lab verifier tolerates it. One trace per run holds:
+verified records. That verifier never reads the report's evidence boundary,
+so the exact text the lab seals is required: a resealed report cannot make
+the export claim other evidence. The experiment writes exactly five records
+(started, fault_injected, failure_detected, resumed, completed); any other
+shape is refused even when the lab verifier tolerates it. One trace per run
+holds:
 
 * ``worker-recovery run`` (INTERNAL root) from the start to completion;
 * ``worker attempt 1`` (INTERNAL) from the start to the observed failure, in
@@ -49,6 +52,12 @@ TRACE_FILE = "trace.json"
 MAX_REPORT_BYTES = 256 * 1024
 MAX_TRACE_BYTES = 1024 * 1024
 TRACE_SHAPE = ("started", "fault_injected", "failure_detected", "resumed", "completed")
+# The boundary build_recovery_report seals; verify_recovery_report never reads it.
+WORKER_EVIDENCE_BOUNDARY = (
+    "Measured local CPU process-kill recovery on one host. This does not prove "
+    "NVIDIA GPU, distributed, serving, production, model-quality, cost, or "
+    "learner-completion evidence."
+)
 # The sealed timing fields that records 1 to 4 of the trace must carry.
 BOUNDARIES = (
     "fault_injected_ns",
@@ -127,6 +136,10 @@ def load_verified_worker_evidence(run_dir: Path) -> WorkerEvidence:
             f"worker-recovery evidence changed after verification: {error}"
         ) from error
     attempts, timing = report["attempts"], report["timing"]
+    _require(
+        report["evidence_boundary"] == WORKER_EVIDENCE_BOUNDARY,
+        "worker report states another evidence boundary than the lab seals",
+    )
     _require(
         tuple(event.kind for event in events) == TRACE_SHAPE,
         "worker trace does not have the experiment's five-record shape",

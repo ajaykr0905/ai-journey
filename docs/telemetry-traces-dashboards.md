@@ -68,7 +68,10 @@ hash to the digests that report binds, so a file swapped after verification is
 refused. For a worker run, the report is read once as bounded, canonical,
 duplicate-free JSON and passed with its trace to `verify_recovery_report`;
 the trace is then re-read, re-verified as a hash chain and bound to the
-report by its head digest. The worker experiment writes exactly five records
+report by its head digest. `verify_recovery_report` never reads the report's
+evidence boundary, so the export also requires the exact boundary text
+`build_recovery_report` seals; a resealed report that claims other evidence
+is rejected. The worker experiment writes exactly five records
 (started, fault_injected, failure_detected, resumed, completed), and any other
 shape is refused. `verify_recovery_report` indexes the trace by position and
 raises `IndexError` on a valid chain shorter than five records; the export

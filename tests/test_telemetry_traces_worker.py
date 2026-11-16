@@ -151,6 +151,32 @@ def records_of(run_dir):
     return json.loads((run_dir / "trace.json").read_bytes())
 
 
+def reseal(run_dir, mutate):
+    """Edit the report and reseal it exactly as build_recovery_report does."""
+
+    report = json.loads((run_dir / "report.json").read_bytes())
+    report.pop("report_sha256")
+    mutate(report)
+    report["report_sha256"] = digest(report)
+    (run_dir / "report.json").write_bytes(
+        json.dumps(report, sort_keys=True, separators=(",", ":")).encode()
+    )
+
+
+def test_a_report_resealed_with_another_boundary_is_never_converted(
+    worker_run, tmp_path
+):
+    genuine = json.loads((worker_run / "report.json").read_bytes())
+    assert genuine["evidence_boundary"] == worker.WORKER_EVIDENCE_BOUNDARY
+    run_dir = copy_run(worker_run, tmp_path)
+    # verify_recovery_report checks the seal but never the boundary text.
+    claim = "Production GPU fleet monitoring across 512 hosts."
+    reseal(run_dir, lambda r: r.update(evidence_boundary=claim))
+
+    with pytest.raises(TelemetryVerificationError, match="evidence boundary"):
+        load_verified_worker_evidence(run_dir)
+
+
 def test_a_trace_too_short_for_the_lab_verifier_is_rejected_not_a_crash(
     worker_run, tmp_path
 ):
