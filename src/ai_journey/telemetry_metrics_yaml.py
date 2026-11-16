@@ -1,17 +1,20 @@
 """Emit and strictly read the YAML subset that the lab's rule files use.
 
 PyYAML is not a dependency, so rule files use a subset small enough to read
-back exactly. A document is a block mapping. Keys are plain identifiers.
-Every scalar is a single-quoted string on one line, so no YAML 1.1 reader can
-turn a value such as ``on`` or ``0s`` into a boolean, number or null. Every
-sequence item is a block mapping whose first key shares the dash line, and
-indentation is two spaces per level. ``#`` comment lines may appear only
-before the document. Everything else is rejected: tabs, carriage returns,
-blank lines, trailing spaces, flow collections, anchors, aliases, tags,
-block scalars, plain and double-quoted scalars, document markers, inline
-comments, duplicate keys and empty collections. As a result
-``emit_yaml(read_yaml(text)) == text`` for every accepted document without
-comments, and any YAML 1.2 reader gets the same nested strings back.
+back exactly. A document is a block mapping. Keys are plain identifiers,
+except the spellings that YAML 1.1 or 1.2 reads as a boolean or null, such
+as ``on``, ``Yes`` or ``null``; Go's yaml.v3 even drops a ``null`` key from
+a string map. Every scalar is a single-quoted string on one line, so no YAML
+1.1 reader can turn a value such as ``on`` or ``0s`` into a boolean, number
+or null. Every sequence item is a block mapping whose first key shares the
+dash line, and indentation is two spaces per level. ``#`` comment lines of
+printable text may appear only before the document. Everything else is
+rejected: tabs, carriage returns, blank lines, trailing spaces, flow
+collections, anchors, aliases, tags, block scalars, plain and double-quoted
+scalars, document markers, inline comments, duplicate keys and empty
+collections. As a result ``emit_yaml(read_yaml(text)) == text`` for every
+accepted document without comments, and any YAML 1.2 reader gets the same
+nested strings back.
 """
 
 from __future__ import annotations
@@ -26,11 +29,19 @@ MAX_YAML_BYTES = 256 * 1024
 MAX_DEPTH = 16
 _KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _COMMENT = re.compile(r"#(?: .*)?")
+# The YAML 1.1 boolean and null spellings, which include YAML 1.2's.
+_NON_STRING_KEYS = frozenset(
+    spelling
+    for word in ("y", "n", "yes", "no", "on", "off", "true", "false", "null")
+    for spelling in (word, word.capitalize(), word.upper())
+)
 
 
 def _require_key(key: object) -> str:
     if type(key) is not str or _KEY.fullmatch(key) is None:
         raise TelemetryMetricsError(f"YAML keys must be plain identifiers: {key!r}")
+    if key in _NON_STRING_KEYS:
+        raise TelemetryMetricsError(f"YAML key {key!r} reads as a boolean or null")
     return key
 
 
@@ -122,6 +133,8 @@ def _tokenize(text: str) -> list[_Line]:
                 raise TelemetryMetricsError(
                     f"{where}: comments may only precede the document"
                 )
+            if not line.isprintable():
+                raise TelemetryMetricsError(f"{where}: comments must be printable")
             continue
         body = line.lstrip(" ")
         indent = len(line) - len(body)
@@ -135,6 +148,10 @@ def _tokenize(text: str) -> list[_Line]:
         key, colon, rest = body.partition(":")
         if not colon or _KEY.fullmatch(key) is None:
             raise TelemetryMetricsError(f"{where}: expected a plain key and a colon")
+        if key in _NON_STRING_KEYS:
+            raise TelemetryMetricsError(
+                f"{where}: key {key} reads as a boolean or null"
+            )
         if rest and not rest.startswith(" "):
             raise TelemetryMetricsError(f"{where}: one space must follow the colon")
         value = _unquote(rest[1:], where) if rest else None

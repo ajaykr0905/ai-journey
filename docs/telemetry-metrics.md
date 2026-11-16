@@ -233,11 +233,13 @@ unavailability alert, and a run that never recovered raises
 
 The YAML is a subset that the lab writes and reads itself, without PyYAML:
 
-- block mappings, plain identifier keys and two-space indentation;
+- block mappings, plain identifier keys and two-space indentation, with no
+  key that YAML 1.1 or 1.2 reads as a boolean or null, such as `on` or
+  `null`;
 - sequences of mappings whose first key shares the dash line;
 - single-quoted one-line scalars, so no YAML 1.1 reader turns `0s` or `on`
   into a number or a boolean;
-- `#` comments only before the document.
+- printable `#` comments only before the document.
 
 The reader rejects tabs, blank lines, trailing spaces, flow collections,
 anchors, aliases, tags, block scalars, plain scalars, inline comments,

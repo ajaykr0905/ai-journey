@@ -72,6 +72,13 @@ def test_scalars_keep_every_printable_character_and_the_empty_string():
         assert read_yaml(emit_yaml({"key": value})) == {"key": value}
 
 
+def test_keys_that_only_contain_boolean_or_null_words_stay_plain_strings():
+    # YAML 1.1 reads on, yes and No as booleans and both versions read null
+    # as null, but a key that merely contains such a word is a plain string.
+    document = {"nullable": "x", "online": "y", "yes_no": "z", "tRUE": "w"}
+    assert read_yaml(emit_yaml(document)) == document
+
+
 @pytest.mark.parametrize(
     ("text", "message"),
     [
@@ -113,6 +120,10 @@ def test_scalars_keep_every_printable_character_and_the_empty_string():
         ("a:\n  - b: 'x'\n    b: 'y'\n", "duplicate key"),
         ("a: 'x'\n# late\n", "precede the document"),
         ("#bad\na: 'x'\n", "precede the document"),
+        ("# bell \x07\na: 'x'\n", "printable"),
+        ("null: 'x'\n", "boolean or null"),
+        ("a:\n  On: 'x'\n", "boolean or null"),
+        ("a:\n  - YES: 'x'\n", "boolean or null"),
         ("a:\n  - b: 'x'\n- c: 'y'\n", "unexpected indentation"),
         ("a:\n  b: 'x'\n  - c: 'y'\n", "unexpected indentation"),
     ],
@@ -148,6 +159,9 @@ def test_reader_and_emitter_bound_size_and_depth():
         ({"a": ["x"]}, TelemetryMetricsError, "non-empty dicts"),
         ({"a-b": "x"}, TelemetryMetricsError, "plain identifiers"),
         ({1: "x"}, TelemetryMetricsError, "plain identifiers"),
+        ({"null": "x"}, TelemetryMetricsError, "boolean or null"),
+        ({"a": {"off": "x"}}, TelemetryMetricsError, "boolean or null"),
+        ({"a": [{"True": "x"}]}, TelemetryMetricsError, "boolean or null"),
         ({"a": "line\nbreak"}, TelemetryMetricsError, "printable"),
         ({"a": 1}, TypeError, "str, dict or list"),
         ({"a": None}, TypeError, "str, dict or list"),
