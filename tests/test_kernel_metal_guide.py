@@ -53,7 +53,8 @@ def test_documented_commands_parse_and_operate_the_pinned_config():
     assert {str(arguments.config) for arguments in parsed} == {PINNED}
     assert parsed[1].report == parsed[0].output
     assert (ROOT / PINNED).is_file()
-    assert parser.prog == " ".join(COMMAND)
+    assert parser.prog == "ai-journey-kernel-metal"
+    assert f"the same commands as `{parser.prog}`" in flat(guide())
 
 
 def test_guide_states_the_rounding_rule_the_bound_and_the_exit_codes():

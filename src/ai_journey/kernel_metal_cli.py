@@ -39,7 +39,7 @@ EXIT_OK = 0
 EXIT_REJECTED = 1
 EXIT_INVALID = 2
 EXIT_UNAVAILABLE = 3
-PROG = "python -m ai_journey.kernel_metal_cli"
+PROG = "ai-journey-kernel-metal"
 
 
 def build_parser() -> argparse.ArgumentParser:

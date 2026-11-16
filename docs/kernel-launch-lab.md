@@ -22,8 +22,8 @@ PYTHONPATH=src python -m ai_journey.kernel_launch_cli verify \
   --config config/day-73-kernel-launch.json
 ```
 
-The package does not install a console script for this lab yet. `run` prints
-one line:
+An installed wheel gives the same commands as `ai-journey-kernel-launch`.
+`run` prints one line:
 
 ```text
 kernel_launch_report=4dfd9f8c599ae45e5033e56dddbd33f82bd02827bc9fbd41574c167995ae8af0 runs=8 runs_matching_reference=8 order_independent_kernels=2 out_of_bounds_writes_caught=128 write_conflicts_caught=232 cuda_checks=10/10 simulated_on_cpu=true gpu_executed=false cuda_compiled=false

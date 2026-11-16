@@ -122,7 +122,7 @@ def test_guide_states_commands_numbers_sources_and_boundaries(report):
         "--config config/day-73-kernel-launch.json",
         "python -m ai_journey.kernel_launch_cli verify",
         "`Getting Started With CUDA for Python Programmers`",
-        "does not install a console script",
+        "An installed wheel gives the same commands as `ai-journey-kernel-launch`.",
         "`1`: the command read or built a report, but the report failed verification.",
         "Table 21",
         "NVIDIA CUDA C++ Programming Guide v12.6 (archive 12.6.3)",

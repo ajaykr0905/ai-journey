@@ -21,6 +21,8 @@ python -m ai_journey.kernel_metal_cli verify \
   --config config/day-73-kernel-metal.json
 ```
 
+An installed wheel gives the same commands as `ai-journey-kernel-metal`.
+
 `run` compiles the kernels, checks them, times them, checks its own report,
 and writes the report. It prints one line for the correctness of each kernel
 and one line for the contraction probe. It also prints one line for each sweep

@@ -78,7 +78,7 @@ def without_torch(*arguments):
 def test_the_parser_requires_explicit_commands_and_paths():
     parser = build_parser()
 
-    assert parser.prog == "python -m ai_journey.kernel_metal_cli"
+    assert parser.prog == "ai-journey-kernel-metal"
     parsed = parser.parse_args(["run", "--config", "c.json", "--output", "r.json"])
     assert (parsed.command, str(parsed.config), str(parsed.output)) == (
         "run",

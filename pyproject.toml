@@ -76,6 +76,8 @@ ai-journey-memory-access = "ai_journey.memory_access_cli:main"
 ai-journey-memory-hierarchy = "ai_journey.memory_hierarchy_cli:main"
 ai-journey-telemetry-metrics = "ai_journey.telemetry_metrics_cli:main"
 ai-journey-telemetry-traces = "ai_journey.telemetry_traces_cli:main"
+ai-journey-kernel-launch = "ai_journey.kernel_launch_cli:main"
+ai-journey-kernel-metal = "ai_journey.kernel_metal_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
