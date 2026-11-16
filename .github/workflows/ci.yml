@@ -1366,3 +1366,98 @@ jobs:
             ${{ runner.temp }}/telemetry-evidence/
             ${{ runner.temp }}/telemetry-dist/
           if-no-files-found: error
+  kernel-launch-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install kernel-launch verification tools
+        run: |
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check simulated CUDA kernel-launch lab contracts
+        run: |
+          ruff check src/ai_journey/kernel_launch_*.py tests/test_kernel_launch_*.py
+          ruff format --check src/ai_journey/kernel_launch_*.py tests/test_kernel_launch_*.py
+          python -m compileall -q src/ai_journey/kernel_launch_*.py tests/test_kernel_launch_*.py
+          python -m pytest -q tests/test_kernel_launch_*.py
+      - name: Build and install isolated kernel-launch wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/kernel-launch-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/kernel-launch-installed" "$RUNNER_TEMP"/kernel-launch-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/kernel-launch-evidence"
+      - name: Run and verify the pinned plan with the installed command
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/kernel-launch-installed
+        run: |
+          export PATH="$RUNNER_TEMP/kernel-launch-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/kernel-launch-installed/")'
+          ai-journey-kernel-launch run --config "$GITHUB_WORKSPACE/config/day-73-kernel-launch.json" --output "$RUNNER_TEMP/kernel-launch-evidence/report.json"
+          ai-journey-kernel-launch verify --report "$RUNNER_TEMP/kernel-launch-evidence/report.json" --config "$GITHUB_WORKSPACE/config/day-73-kernel-launch.json"
+      - name: Retain kernel-launch evidence and package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-launch-evidence
+          path: |
+            ${{ runner.temp }}/kernel-launch-evidence/
+            ${{ runner.temp }}/kernel-launch-dist/
+          if-no-files-found: error
+  kernel-metal-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Metal lab contract tools and CPU-only PyTorch
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check Metal kernel lab contracts on a runner without an Apple GPU
+        run: |
+          ruff check src/ai_journey/kernel_metal_*.py tests/test_kernel_metal_*.py
+          ruff format --check src/ai_journey/kernel_metal_*.py tests/test_kernel_metal_*.py
+          python -m compileall -q src/ai_journey/kernel_metal_*.py tests/test_kernel_metal_*.py
+          python -m pytest -q -rs tests/test_kernel_metal_*.py
+      - name: Build and install isolated Metal lab wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/kernel-metal-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/kernel-metal-installed" "$RUNNER_TEMP"/kernel-metal-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/kernel-metal-evidence"
+      - name: Check that the installed command stops where MPS is not available
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/kernel-metal-installed
+        run: |
+          export PATH="$RUNNER_TEMP/kernel-metal-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/kernel-metal-installed/")'
+          python -c 'import torch; assert not torch.backends.mps.is_available()'
+          status=0
+          ai-journey-kernel-metal run --config "$GITHUB_WORKSPACE/config/day-73-kernel-metal.json" --output "$RUNNER_TEMP/kernel-metal-evidence/report.json" 2> "$RUNNER_TEMP/kernel-metal-evidence/run-unavailable.txt" || status=$?
+          cat "$RUNNER_TEMP/kernel-metal-evidence/run-unavailable.txt"
+          test "$status" -eq 3
+          grep -F "kernel-metal run unavailable: Metal kernels run only on macOS (unsupported_operating_system)" "$RUNNER_TEMP/kernel-metal-evidence/run-unavailable.txt"
+          test ! -e "$RUNNER_TEMP/kernel-metal-evidence/report.json"
+      - name: Retain the refused-run record and package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-metal-contracts-evidence
+          path: |
+            ${{ runner.temp }}/kernel-metal-evidence/
+            ${{ runner.temp }}/kernel-metal-dist/
+          if-no-files-found: error
