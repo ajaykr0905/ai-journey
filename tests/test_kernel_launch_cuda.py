@@ -133,3 +133,15 @@ def test_require_names_every_failure_and_source_rejects_bad_blocks():
         cuda_source(threads_per_block=256, block=[16, 16])
     with pytest.raises(TypeError, match="must be a string"):
         check(PINNED.encode("ascii"))
+
+
+def test_overlong_dim3_literals_fail_the_grid_check_instead_of_raising():
+    # 5,000 digits exceed CPython's 4,300-digit limit for int() on a string.
+    huge = "9" * 5_000
+    vector = check(PINNED.replace("dim3 block(256);", f"dim3 block({huge});"))
+    gray = check(PINNED.replace("cdiv(height, 16)", f"cdiv(height, {huge})"))
+    wide = check(PINNED.replace("dim3 block(256);", "dim3 block(99999999999);"))
+
+    assert vector.failures == ("vector_add_grid",)
+    assert gray.failures == ("rgb_to_grayscale_grid",)
+    assert wide.failures == ("vector_add_grid",)

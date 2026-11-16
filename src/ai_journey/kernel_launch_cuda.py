@@ -192,7 +192,11 @@ def _cdiv(numerator: int, denominator: int) -> int:
 
 
 def _dim3(host: str, name: str, pattern: str) -> tuple[int, ...] | None:
-    """Parse the one ``dim3 name(...)`` statement of a launcher, or ``None``."""
+    """Parse the one ``dim3 name(...)`` statement of a launcher, or ``None``.
+
+    Each literal has at most 10 digits, the width of an unsigned int, so an
+    overlong literal fails the check instead of overflowing ``int()``.
+    """
 
     if host.count(f"dim3 {name}(") != 1:
         return None
@@ -294,15 +298,15 @@ def check_cuda_source(
     vector_launch = _host_launch(
         _function_body(source, _VECTOR_HOST),
         "vector_add_kernel<<<grid, block>>>(a, b, out, n);",
-        r"(\d+)",
-        r"cdiv\(n,(\d+)\)",
+        r"(\d{1,10})",
+        r"cdiv\(n,(\d{1,10})\)",
         (n,),
     )
     gray_launch = _host_launch(
         _function_body(source, _GRAY_HOST),
         "rgb_to_grayscale_kernel<<<grid, block>>>(rgb, gray, width, height);",
-        r"(\d+),(\d+)",
-        r"cdiv\(width,(\d+)\),cdiv\(height,(\d+)\)",
+        r"(\d{1,10}),(\d{1,10})",
+        r"cdiv\(width,(\d{1,10})\),cdiv\(height,(\d{1,10})\)",
         (width, height),
     )
     checks = {

@@ -173,3 +173,20 @@ def test_loading_separates_unreadable_files_from_rejected_reports(sealed, tmp_pa
         path.write_bytes(payload)
         with pytest.raises(KernelLaunchVerificationError, match=message):
             load_report(path)
+
+
+def test_an_overlong_cuda_literal_is_a_rejection_not_a_crash(sealed, tmp_path):
+    def overflow(report):
+        cuda = report["cuda_source"]
+        cuda["text"] = cuda["text"].replace(
+            "dim3 block(32);", f"dim3 block({'9' * 5_000});"
+        )
+
+    path = tmp_path / "report.json"
+    path.write_bytes(canonical_json_bytes(resealed(sealed, overflow)) + b"\n")
+
+    with pytest.raises(
+        KernelLaunchVerificationError,
+        match="cuda_source.text structure.checks.vector_add_grid",
+    ):
+        load_report(path)
