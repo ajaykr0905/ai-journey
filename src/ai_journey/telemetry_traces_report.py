@@ -35,6 +35,7 @@ from .telemetry_traces_otlp import (
     encode_export_request,
 )
 from .telemetry_traces_serving import (
+    ServingEvidence,
     load_verified_serving_evidence,
     serving_resource,
 )
@@ -43,7 +44,11 @@ from .telemetry_traces_validate import (
     ExportSummary,
     validate_export_request,
 )
-from .telemetry_traces_worker import load_verified_worker_evidence, worker_resource
+from .telemetry_traces_worker import (
+    WorkerEvidence,
+    load_verified_worker_evidence,
+    worker_resource,
+)
 from .trace_context import TraceContext
 
 EXPORT_FILE = "traces.otlp.json"
@@ -85,12 +90,17 @@ def require_sealed_report(report: object, *, kind: str) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class TraceExport:
-    """Encoded, validated export bytes and the verified runs they came from."""
+    """Encoded, validated export bytes and the verified runs they came from.
+
+    ``evidence`` holds each run's verified evidence in the order of
+    ``sources`` so a verifier can map spans back without re-verifying runs.
+    """
 
     request: dict[str, Any]
     data: bytes
     sources: tuple[dict[str, Any], ...]
     summary: ExportSummary
+    evidence: tuple[ServingEvidence | WorkerEvidence, ...]
 
 
 def _source(lab: str, resource: ResourceTelemetry) -> dict[str, Any]:
@@ -126,26 +136,35 @@ def build_trace_export(
     if not isinstance(config, TelemetryConfig):
         raise TypeError("config must be TelemetryConfig")
     anchor = config.anchor_unix_nano
-    resources: list[tuple[str, ResourceTelemetry]] = []
+    runs: list[tuple[str, ServingEvidence | WorkerEvidence, ResourceTelemetry]] = []
     if serving_run_dir is not None:
-        evidence = load_verified_serving_evidence(serving_run_dir)
-        resources.append(
-            ("serving-recovery", serving_resource(evidence, anchor_unix_nano=anchor))
+        serving = load_verified_serving_evidence(serving_run_dir)
+        runs.append(
+            (
+                "serving-recovery",
+                serving,
+                serving_resource(serving, anchor_unix_nano=anchor),
+            )
         )
     if worker_run_dir is not None:
-        evidence = load_verified_worker_evidence(worker_run_dir)
-        resources.append(
-            ("worker-recovery", worker_resource(evidence, anchor_unix_nano=anchor))
+        worker = load_verified_worker_evidence(worker_run_dir)
+        runs.append(
+            (
+                "worker-recovery",
+                worker,
+                worker_resource(worker, anchor_unix_nano=anchor),
+            )
         )
-    if not resources:
+    if not runs:
         raise TelemetryError("an export needs at least one source run directory")
-    request = encode_export_request([resource for _, resource in resources])
+    request = encode_export_request([resource for _, _, resource in runs])
     summary = validate_export_request(request)
     data = artifact_bytes(request)
     if len(data) > MAX_EXPORT_BYTES:
         raise TelemetryError(f"export exceeds its {MAX_EXPORT_BYTES}-byte bound")
-    sources = tuple(_source(lab, resource) for lab, resource in resources)
-    return TraceExport(request, data, sources, summary)
+    sources = tuple(_source(lab, resource) for lab, _, resource in runs)
+    evidence = tuple(item for _, item, _ in runs)
+    return TraceExport(request, data, sources, summary, evidence)
 
 
 def build_trace_export_report(
