@@ -10,7 +10,7 @@ from ai_journey.kernel_launch_verify import verify_report
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config/day-73-kernel-launch.json"
 GUIDE = ROOT / "docs/kernel-launch-lab.md"
-REPORT_SHA256 = "4dfd9f8c599ae45e5033e56dddbd33f82bd02827bc9fbd41574c167995ae8af0"
+REPORT_SHA256 = "95b6791cc71fddc96e0e8e45bba60f1f95951921a8b382fbcae383e447ed9d9a"
 VECTOR_SHA256 = "879aaad6e7345f9a1f64a662323d767deb8b3322d70bc3df550b19d0e47bf870"
 GRAY_SHA256 = "681b798d88c39d1160f671a756c5a9df66f84f1bb1e6ea2763a70d703e735726"
 CUDA_SHA256 = "cf14adedc20211d11c978cf0d6af291a447853ec01e4d0dee1ecfd02c8631bcc"

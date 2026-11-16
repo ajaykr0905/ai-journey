@@ -1,8 +1,11 @@
 # Kernel launch model lab
 
-This lab is the launch-model half of the Day 73 lab for GPU MODE Lecture 3,
-`Getting Started With CUDA for Python Programmers`. It writes the first
-kernels of the lecture as per-thread Python functions. A simulator runs them
+This lab is the launch-model half of the Day 73 lab. The day pairs GPU MODE
+Lecture 3, `Getting Started With CUDA for Python Programmers`, with an
+exercise: vector add, then RGB-to-grayscale. The lab writes those two kernels
+as per-thread Python functions. The lecture's own grayscale kernel uses a 1D
+grid over planar channels. This lab's grayscale kernel uses a 2D grid over
+interleaved HxWx3 pixels. A simulator runs them
 thread by thread on the CPU and records each out-of-bounds access and each
 data race. No GPU runs, and the lab compiles no CUDA source and measures no
 time. The lab imports only the Python standard library, so it runs without
@@ -26,7 +29,7 @@ An installed wheel gives the same commands as `ai-journey-kernel-launch`.
 `run` prints one line:
 
 ```text
-kernel_launch_report=4dfd9f8c599ae45e5033e56dddbd33f82bd02827bc9fbd41574c167995ae8af0 runs=8 runs_matching_reference=8 order_independent_kernels=2 out_of_bounds_writes_caught=128 write_conflicts_caught=232 cuda_checks=10/10 simulated_on_cpu=true gpu_executed=false cuda_compiled=false
+kernel_launch_report=95b6791cc71fddc96e0e8e45bba60f1f95951921a8b382fbcae383e447ed9d9a runs=8 runs_matching_reference=8 order_independent_kernels=2 out_of_bounds_writes_caught=128 write_conflicts_caught=232 cuda_checks=10/10 simulated_on_cpu=true gpu_executed=false cuda_compiled=false
 ```
 
 `verify` prints the same line with the prefix `verified_kernel_launch_report=`.
@@ -109,7 +112,7 @@ different orders.
 
 ## Kernels
 
-`kernel_launch_kernels` writes the two lecture kernels in the per-thread
+`kernel_launch_kernels` writes the two exercise kernels in the per-thread
 style:
 
 ```python
@@ -299,7 +302,7 @@ The unguarded demos give these results in all four orders:
 A matching output does not prove that a kernel is free of races. The conflict
 records show the race. The tests check that the out-of-bounds writes and the
 extra writes equal the closed forms of the SIMT lab. The report digest is
-`4dfd9f8c599ae45e5033e56dddbd33f82bd02827bc9fbd41574c167995ae8af0`.
+`95b6791cc71fddc96e0e8e45bba60f1f95951921a8b382fbcae383e447ed9d9a`.
 
 ## Boundaries
 

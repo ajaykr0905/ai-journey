@@ -54,7 +54,7 @@ def write_plan(path: Path, mapping: dict | None = None) -> Path:
     return path
 
 
-def test_pinned_plan_declares_ragged_and_aligned_lecture_launches():
+def test_pinned_plan_declares_ragged_and_aligned_exercise_launches():
     plan = load_plan(PINNED)
 
     assert plan.name == "day-73-kernel-launch"

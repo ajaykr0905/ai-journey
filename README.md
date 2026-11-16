@@ -711,7 +711,7 @@ access and each data race in the simulated buffers. On the pinned plan, all
 unguarded kernels make 128 out-of-bounds writes and 232 write conflicts. The
 lab also pins CUDA C++ source for both kernels, and 10 structural checks pass
 on it without a compiler. Both commands print one line with the report digest
-`4dfd9f8c599ae45e5033e56dddbd33f82bd02827bc9fbd41574c167995ae8af0`.
+`95b6791cc71fddc96e0e8e45bba60f1f95951921a8b382fbcae383e447ed9d9a`.
 
 `ai-journey-kernel-metal` compiles the kernels at run time through
 `torch.mps.compile_shader`. The Metal kernels and their PyTorch equivalents on
@@ -724,8 +724,10 @@ In three runs of the pinned config on the development host, all 13
 correctness cases were exact. The Metal grayscale kernel was 12.8 to 23.6
 times faster than the eager PyTorch equivalent. For vector add, the ratio of
 the PyTorch median to the Metal median stayed between 0.85 and 1.24. Neither
-side was faster at every point. These values are host-specific Apple GPU
-(Metal) measurements from one shared host, not portable figures.
+side was faster at every point. Later runs, while other jobs used the host,
+gave grayscale speedups from 8.1 to 24.3 times and vector-add ratios up to
+1.30. These values are host-specific Apple GPU (Metal) measurements from one
+shared host, not portable figures.
 
 `ai-journey-kernel-launch` and `ai-journey-kernel-metal` exit 0 on success, 1
 when a report fails verification, and 2 for usage errors, unreadable or

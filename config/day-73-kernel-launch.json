@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "day-73-kernel-launch",
-  "statement": "Inputs for a pure-Python CPU simulation of the GPU MODE Lecture 3 vector add and RGB-to-grayscale launches under compute capability 8.0 limits. No GPU runs, and no CUDA source is compiled.",
+  "statement": "Inputs for a pure-Python CPU simulation of the Day 73 exercise launches, vector add and then RGB-to-grayscale, under compute capability 8.0 limits. No GPU runs, and no CUDA source is compiled.",
   "compute_capability": "8.0",
   "vector_add": {
     "n": 1000,

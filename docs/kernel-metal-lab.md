@@ -310,6 +310,9 @@ your host, run the command on it.
   equivalent at each shape in each run.
 - At 4096 x 4096, the Metal kernel gave 79 to 82 GB/s and the PyTorch
   equivalent gave 3.9 to 4.1 GB/s.
+- Later runs, while other test jobs used the host, gave a wider spread. The
+  grayscale speedup went from 8.1 to 24.3 times, and the vector-add ratio
+  reached 1.30. The values change with the load on the host.
 
 ## Evidence boundary and exclusions
 
