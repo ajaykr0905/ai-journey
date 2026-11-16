@@ -1,11 +1,16 @@
 import numpy
 import pytest
 
-from ai_journey.kernel_metal_geometry import KernelMetalError
+from ai_journey.kernel_metal_geometry import (
+    MAX_THREADGROUP_THREADS,
+    KernelMetalError,
+    vector_launch,
+)
 from ai_journey.kernel_metal_reference import (
     FLOAT32_SENTINEL_BITS,
     MAX_IMAGE_PIXELS,
     MAX_RECORDED_MISMATCHES,
+    MAX_VECTOR_LENGTH,
     UINT8_SENTINEL,
     LevelComparison,
     all_rgb_triples,
@@ -153,6 +158,18 @@ def test_sentinels_have_fixed_bits_and_digests_cover_exact_bytes():
     )
     with pytest.raises(KernelMetalError, match="float32 and uint8"):
         array_sha256(numpy.arange(4, dtype=numpy.float64))
+
+
+def test_sentinels_fill_the_longest_vector_launch_of_any_group_size():
+    # A group size that does not divide the length adds up to group - 1
+    # padding threads, so the guarded buffer can pass MAX_VECTOR_LENGTH.
+    longest = max(
+        vector_launch(MAX_VECTOR_LENGTH, group).launched_threads
+        for group in range(1, MAX_THREADGROUP_THREADS + 1)
+    )
+
+    assert longest > MAX_VECTOR_LENGTH
+    assert float32_sentinels(longest).size == longest
 
 
 @pytest.mark.parametrize(

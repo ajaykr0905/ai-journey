@@ -28,13 +28,20 @@ from hashlib import sha256
 
 import numpy
 
-from .kernel_metal_geometry import KernelMetalError, require_integer
+from .kernel_metal_geometry import (
+    MAX_THREADGROUP_THREADS,
+    KernelMetalError,
+    require_integer,
+)
 
 VECTOR_ADD_STREAM = 0
 RGB_TO_GRAY_STREAM = 1
 MAX_SEED = 2**32 - 1
 MAX_CASE_INDEX = 63
 MAX_VECTOR_LENGTH = 1 << 25
+# A guarded launch of n elements in groups of g spans ceil(n / g) * g < n + g
+# threads, so its output buffer can hold up to g - 1 elements past the data.
+MAX_VECTOR_BUFFER = MAX_VECTOR_LENGTH + MAX_THREADGROUP_THREADS - 1
 MAX_IMAGE_SIDE = 8192
 MAX_IMAGE_PIXELS = 1 << 24
 ALL_TRIPLES_SHAPE = (4096, 4096)
@@ -173,9 +180,12 @@ def array_sha256(array: numpy.ndarray) -> str:
 
 
 def float32_sentinels(count: int) -> numpy.ndarray:
-    """Return ``count`` quiet NaNs with fixed bits, so a hash can expect them."""
+    """Return ``count`` quiet NaNs with fixed bits, so a hash can expect them.
 
-    require_integer(count, "sentinel count", 0, MAX_VECTOR_LENGTH)
+    The bound is the longest guarded vector launch, padding threads included.
+    """
+
+    require_integer(count, "sentinel count", 0, MAX_VECTOR_BUFFER)
     return numpy.full(count, FLOAT32_SENTINEL_BITS, dtype=numpy.uint32).view(
         numpy.float32
     )
