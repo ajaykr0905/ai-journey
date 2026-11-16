@@ -19,7 +19,7 @@ from ai_journey.kernel_metal_reference import (
     vector_add_inputs,
     vector_add_reference,
 )
-from test_kernel_metal_recorded import RECORDED_ALL_TRIPLES_MISMATCHES, RecordedBackend
+from test_kernel_metal_recorded import RecordedBackend
 from test_kernel_metal_runtime import metal_runtime, requires_metal
 
 
@@ -59,7 +59,7 @@ def test_a_vector_add_case_is_exact_and_hashes_the_guard_tail():
     ]
 
 
-def test_the_all_triples_case_records_every_mismatched_metal_pixel():
+def test_the_all_triples_case_is_exact_on_every_implementation():
     case = check_rgb_to_gray(
         RecordedBackend(),
         seed=73,
@@ -69,27 +69,21 @@ def test_the_all_triples_case_records_every_mismatched_metal_pixel():
         pattern=ALL_RGB_TRIPLES,
     )
     image = all_rgb_triples()
-    rebuilt = rgb_to_gray_reference(image).reshape(-1)
-    for index, level in RECORDED_ALL_TRIPLES_MISMATCHES:
-        rebuilt[index] = level
+    reference = array_sha256(rgb_to_gray_reference(image))
 
     mapping = case.to_mapping()
-    metal, torch_mps, torch_cpu = mapping["outputs"]
-    assert metal["mismatches"] == [
-        list(item) for item in RECORDED_ALL_TRIPLES_MISMATCHES
-    ]
-    assert (metal["mismatched_pixels"], metal["max_abs_difference_levels"]) == (21, 1)
-    assert metal["buffer_sha256"] == array_sha256(rebuilt)
-    for output in (torch_mps, torch_cpu):
+    for output in mapping["outputs"]:
+        assert output["buffer_sha256"] == reference
         assert (output["mismatched_pixels"], output["mismatches"]) == (0, [])
-    assert case.max_abs_difference == 1
+        assert output["max_abs_difference_levels"] == 0
+    assert case.max_abs_difference == 0
     assert case.mismatched_pixels == {
-        "metal_kernel/mps": 21,
+        "metal_kernel/mps": 0,
         "torch/mps": 0,
         "torch/cpu": 0,
     }
     assert mapping["rgb_sha256"] == array_sha256(image)
-    assert (mapping["pattern"], mapping["bound_levels"]) == (ALL_RGB_TRIPLES, 1)
+    assert (mapping["pattern"], mapping["bound_levels"]) == (ALL_RGB_TRIPLES, 0)
 
 
 def test_a_padded_image_case_keeps_its_tail_and_records_its_shape():
@@ -142,11 +136,20 @@ class ShortBuffer(RecordedBackend):
         return super().vector_add(first, second, launch)[:-1]
 
 
-class TwoLevelsOff(RecordedBackend):
+class MetalOneLevelOff(RecordedBackend):
+    """One pixel one level off: the exact rule leaves no tolerance for it."""
+
+    def rgb_to_gray(self, rgb, launch):
+        buffer = super().rgb_to_gray(rgb, launch)
+        buffer[0] = (int(buffer[0]) + 1) % 256
+        return buffer
+
+
+class TorchOneLevelOff(RecordedBackend):
     def torch_rgb_to_gray(self, rgb, device):
         gray = super().torch_rgb_to_gray(rgb, device)
         if device == "cpu":
-            gray[0, 0] = (int(gray[0, 0]) + 2) % 256
+            gray[0, 0] = (int(gray[0, 0]) + 1) % 256
         return gray
 
 
@@ -169,10 +172,16 @@ def test_vector_add_cases_stop_on_any_inexact_output(backend, message):
     ("backend", "shape", "pattern", "message"),
     [
         (
-            TwoLevelsOff(),
+            MetalOneLevelOff(),
             (17, 33),
             "uniform",
-            "cpu differs by 2 levels; the bound is 1",
+            "the Metal kernel differs by 1 levels; the bound is 0",
+        ),
+        (
+            TorchOneLevelOff(),
+            (17, 33),
+            "uniform",
+            "torch on cpu differs by 1 levels; the bound is 0",
         ),
         (WritesPastTheGuard(), (17, 33), "uniform", "wrote into the guard tail"),
         (RecordedBackend(), (17, 33), ALL_RGB_TRIPLES, "4096 x 4096"),
@@ -207,26 +216,29 @@ def test_metal_vector_add_is_exact_on_this_gpu(length):
 
 @requires_metal
 @pytest.mark.parametrize("shape", [(1, 1), (15, 17), (16, 16), (31, 1025)])
-def test_metal_grayscale_stays_within_the_bound_on_this_gpu(shape):
+def test_metal_grayscale_is_exact_on_this_gpu(shape):
     case = check_rgb_to_gray(
         metal_runtime(), seed=73, index=0, shape=shape, group_size=(16, 16)
     )
 
-    assert case.max_abs_difference <= 1
-    assert case.mismatched_pixels["torch/cpu"] == 0
+    assert case.max_abs_difference == 0
+    assert set(case.mismatched_pixels.values()) == {0}
 
 
 @requires_metal
-def test_metal_grayscale_over_every_rgb_triple_stays_within_the_bound():
+@pytest.mark.parametrize("group_size", [(16, 16), (32, 8), (8, 32)])
+def test_metal_grayscale_is_exact_on_every_rgb_triple_in_any_group_shape(group_size):
+    # Each shape orders the threads differently; the levels must not change.
     case = check_rgb_to_gray(
         metal_runtime(),
         seed=73,
         index=0,
         shape=(4096, 4096),
-        group_size=(16, 16),
+        group_size=group_size,
         pattern=ALL_RGB_TRIPLES,
     )
 
-    assert case.max_abs_difference <= 1
-    assert case.mismatched_pixels["torch/mps"] == 0
-    assert case.mismatched_pixels["torch/cpu"] == 0
+    assert case.max_abs_difference == 0
+    assert set(case.mismatched_pixels.values()) == {0}
+    exact = case.reference_sha256
+    assert {output.buffer_sha256 for output in case.outputs} == {exact}

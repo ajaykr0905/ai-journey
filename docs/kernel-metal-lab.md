@@ -45,8 +45,8 @@ The exit codes are:
 - 3: this host cannot run Metal kernels through PyTorch, so `run` stopped
   before it measured anything.
 
-On the development host, one run of the pinned config took about 5 seconds,
-with the torch import. It wrote a report of about 38 KB.
+On the development host, one run of the pinned config took 4 to 5 seconds,
+with the torch import. It wrote a report of about 37 KB.
 
 ## Requirements and hosts without MPS
 
@@ -69,8 +69,7 @@ import torch, so they work on any host with NumPy.
 
 The tests that need the GPU skip on other hosts and report the reason. The
 other tests use observations from the development host. These are the
-pipeline limits, the probe result, the 21 mismatched pixels of the all-triples
-image, and one complete measured report.
+pipeline limits, the probe result and one complete measured report.
 
 ## Kernels
 
@@ -91,23 +90,33 @@ PyTorch 2.15.0 passes a Python integer as 64 bits unless `arg_casts` gives
 another type. Thus the runtime gives `arg_casts` with `int32` for each of these
 parameters.
 
-Grayscale uses the weights 0.2989, 0.5870 and 0.1140. It uses the rounding
-rule of the CUDA half of this lab:
+Grayscale uses the weights 0.2989, 0.5870 and 0.1140 as exact decimals. It
+applies the rule of the CUDA half of this lab, with the same integer
+statements as the CUDA source of that half:
 
-1. Compute `y = 0.2989 R + 0.5870 G + 0.1140 B` in float32, from left to right.
-2. Round half up: `floor(y + 0.5)`.
+1. Compute the integer `2989 R + 5870 G + 1140 B`, which is the exact weighted
+   sum times 10,000.
+2. Round half up: add 5,000, then divide by 10,000 with floor division.
 3. Clamp the result to 0..255.
 
-The sum of the weights is 0.9999, so `y` is at most about 254.97. The clamp
-thus never changes a value, but the kernel keeps it because the rule includes
-it.
+The sum of the weights is 0.9999, so the weighted sum is at most 254.9745. The
+clamp thus never changes a value, but the kernel keeps it because the rule
+includes it. The largest integer in these steps is 2,554,745, so a 32-bit
+`uint` holds each step exactly.
+
+Binary floating point cannot hold the decimal weights exactly. Of the 2^24 RGB
+triples, 1,703 have an exact weighted sum that ends in .5. The float32 form
+`floor(0.2989f * r + 0.5870f * g + 0.1140f * b + 0.5f)` rounds 19 of these
+ties down. A compiler that fuses a multiply and an add can round a tie in the
+other direction. The integer rule has no such case, so the kernel, the
+PyTorch equivalent and the NumPy reference all use it.
 
 The source also has a third kernel, `contraction_probe`. It computes
 `x[0] * x[1] + x[2]` for three exact float32 inputs. Two separate float32
 roundings give 0, and one fused multiply-add gives 2^-24. On the development
-host, the probe gave 2^-24. This result shows that the kernel did not round
-the product before the sum, which is what a fused multiply-add does. The probe
-does not show which operations the compiler fused in `rgb_to_gray`.
+host, the probe gave 2^-24, so the compiler fused the multiply and the add. A
+fused multiply-add cannot change an integer result, so the probe result does
+not affect `rgb_to_gray`.
 
 ## Launch geometry
 
@@ -141,13 +150,15 @@ Three implementations run each case:
 - the PyTorch equivalent on the CPU
 
 The PyTorch equivalent of `vector_add` is `torch.add`. The PyTorch equivalent
-of `rgb_to_gray` is ten eager operations with the same float32 steps as the
-reference. A NumPy reference on the CPU computes the expected output in
-float32. Each output must obey these rules:
+of `rgb_to_gray` is ten eager operations with the same int32 steps as the
+kernel. A NumPy reference on the CPU computes the expected outputs: float32
+sums for vector add, and the integer rule for grayscale. Each output must obey
+these rules:
 
 - Each vector-add output must match the reference bit for bit.
-- A grayscale output can differ from the reference by at most 1 level. The
-  report records each mismatched pixel with its index and its level.
+- Each grayscale output must match the reference bit for bit. The report
+  keeps a list of the mismatched pixels of each output, and in a valid report
+  each list is empty.
 - The Metal output buffer is longer than the data by the padding threads. Its
   tail holds sentinel values before the launch. After the launch, the tail
   must still hold the sentinels, which shows that the guard stopped each
@@ -160,21 +171,11 @@ are not multiples on either axis. The shape 480 x 641 is not a multiple on the
 x axis. The config parser refuses a config without such extents on each axis.
 The length 256 and the shape 16 x 16 are exact multiples, for contrast.
 
-In three runs on the development host, all 7 vector-add cases were exact on
-all three implementations. PyTorch on MPS and on the CPU matched the grayscale
-reference exactly in each case. The Metal kernel had 23 mismatched pixels,
-each 1 level from the reference:
-
-- 21 pixels of the all-triples image
-- 1 pixel of the 480 x 641 image
-- 1 pixel of the 1023 x 1025 image
-
-The exact decimal value of each of these 23 pixels is a half level, k + 0.5.
-One fused multiply-add and two separate float32 roundings can round such a
-tie in different directions. The RGB values of the two seeded pixels are also
-among the 21 pixels of the all-triples image. The float32 reference is not
-exact decimal arithmetic either. It puts 19 of the 2^24 triples one level
-below `floor((2989 R + 5870 G + 1140 B + 5000) / 10000)`.
+In three runs on the development host, each of the 13 cases was exact on all
+three implementations. These cases include the all-triples image, so the Metal
+kernel matched the rule of the CUDA half on each possible RGB input. The GPU
+tests also run the all-triples image with 16 x 16, 32 x 8 and 8 x 32
+threadgroups. Each of these threadgroup shapes gave the same exact output.
 
 ## Benchmark
 
@@ -187,8 +188,7 @@ each sweep point, the steps are:
 3. The sample then launches a batch of calls, calls `torch.mps.synchronize()`
    again, and reads the clock again.
 4. The two sides alternate, and the order flips at each repeat.
-5. After the last sample, the latest outputs of the two sides must agree
-   within the bound of the kernel.
+5. After the last sample, the latest outputs of the two sides must be equal.
 
 A launch returns when its command is in the queue. The two synchronize calls
 make each sample cover the completion of its own work. A batch holds the
@@ -203,7 +203,7 @@ by the median sample time, in decimal GB/s.
 
 Vector add reads 8 bytes and writes 4 bytes for each element. Grayscale reads
 3 bytes and writes 1 byte for each pixel. The PyTorch equivalent of grayscale
-moves more bytes than that through its float32 temporary tensors. Both sides
+moves more bytes than that through its int32 temporary tensors. Both sides
 use the same byte count, so their rates compare their times directly.
 
 Only `time.perf_counter_ns` with the real `MetalRuntime` makes a measurement.
@@ -236,7 +236,7 @@ It recomputes the correctness facts on the CPU from the seed and the stored
 digests:
 
 1. It draws the inputs again from the seed and checks their digests.
-2. It computes the float32 reference and checks its digest.
+2. It computes the reference again and checks its digest.
 3. It rebuilds each output from the reference and the recorded mismatches. It
    adds the sentinel tail to the Metal buffer.
 4. It requires each rebuilt buffer to match its stored digest. A match shows
@@ -291,19 +291,22 @@ medians from three runs on one host, not portable figures. To get figures for
 your host, run the command on it.
 
 - Vector add: the ratio of the PyTorch median to the Metal median stayed
-  between 0.87 and 1.16 at each length. A ratio above 1 means that the Metal
-  kernel was faster. Neither side was faster at every point.
-- At 16777216 elements, 192 MiB for each call, the Metal kernel gave 91 to 98
-  GB/s and `torch.add` gave 97 to 105 GB/s.
-- The highest Metal rate for vector add was 143 GB/s, at 262144 elements in
-  one run. The same point gave 81 GB/s in another run.
-- At 4096 elements, a vector-add call took 3.0 to 3.6 µs, which gives 14 to 16
-  GB/s. The fixed cost of each call probably sets this time. At 90 GB/s, the
+  between 0.85 and 1.24 at each length. A ratio above 1 means that the Metal
+  kernel was faster. The ratio was 1 or more at 18 of the 21 points. Neither
+  side was faster at every point.
+- At 16777216 elements, 192 MiB for each call, the Metal kernel gave 92 to 116
+  GB/s and `torch.add` gave 99 to 109 GB/s.
+- The highest Metal rate for vector add was 193 GB/s, at 262144 elements. The
+  same point gave 161 to 193 GB/s in the three runs. The 3 MiB of one call
+  probably stay in the GPU caches from call to call. Thus this rate does not
+  measure the memory bandwidth of the host.
+- At 4096 elements, a vector-add call took 2.4 to 2.5 µs, which gives 19 to 20
+  GB/s. The fixed cost of each call probably sets this time. At 100 GB/s, the
   48 KiB of one call would move in about 0.5 µs.
-- Grayscale: the Metal kernel was 10.9 to 21.3 times faster than the PyTorch
+- Grayscale: the Metal kernel was 12.8 to 23.6 times faster than the PyTorch
   equivalent at each shape in each run.
-- At 4096 x 4096, the Metal kernel gave 76 to 81 GB/s and the PyTorch
-  equivalent gave 4.1 to 4.2 GB/s.
+- At 4096 x 4096, the Metal kernel gave 79 to 82 GB/s and the PyTorch
+  equivalent gave 3.9 to 4.1 GB/s.
 
 ## Evidence boundary and exclusions
 

@@ -17,7 +17,6 @@ from ai_journey.kernel_metal_geometry import (
 )
 from ai_journey.kernel_metal_reference import (
     FLOAT32_SENTINEL_BITS,
-    MAX_LEVEL_DIFFERENCE,
     UINT8_SENTINEL,
     compare_levels,
     rgb_to_gray_reference,
@@ -26,7 +25,6 @@ from ai_journey.kernel_metal_reference import (
     vector_add_reference,
 )
 from ai_journey.kernel_metal_runtime import (
-    FLOAT32_WEIGHTS,
     KernelMetalUnavailableError,
     MetalAvailability,
     MetalRuntime,
@@ -132,14 +130,6 @@ def test_importing_and_probing_without_torch_never_loads_it():
     assert completed.stdout.strip() == expected
 
 
-def test_float32_weights_are_the_reference_weights_rounded_once():
-    assert [numpy.float32(weight) for weight in FLOAT32_WEIGHTS] == [
-        numpy.float32(0.2989),
-        numpy.float32(0.5870),
-        numpy.float32(0.1140),
-    ]
-
-
 @requires_metal
 def test_the_compiled_pipelines_report_usable_limits():
     runtime = metal_runtime()
@@ -170,7 +160,7 @@ def test_vector_add_matches_the_reference_and_leaves_the_guard_tail():
 
 
 @requires_metal
-def test_grayscale_stays_within_the_bound_and_leaves_the_guard_tail():
+def test_grayscale_matches_the_reference_and_leaves_the_guard_tail():
     runtime = metal_runtime()
     image = uniform_rgb_image(73, 1, 17, 33)
     launch = CheckedLaunch(
@@ -182,7 +172,7 @@ def test_grayscale_stays_within_the_bound_and_leaves_the_guard_tail():
 
     assert buffer.shape == (17 * 33 + 975,)
     comparison = compare_levels(buffer[: 17 * 33].reshape(17, 33), reference)
-    assert comparison.max_abs_difference <= MAX_LEVEL_DIFFERENCE
+    assert (comparison.mismatches, comparison.max_abs_difference) == ((), 0)
     assert set(buffer[17 * 33 :].tolist()) == {UINT8_SENTINEL}
     for device in ("mps", "cpu"):
         result = runtime.torch_rgb_to_gray(image, device)

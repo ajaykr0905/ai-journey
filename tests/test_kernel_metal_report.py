@@ -86,7 +86,7 @@ def test_the_report_holds_every_case_and_point_with_a_reconciled_summary():
         (1, 1),
         (17, 33),
     ]
-    assert correctness["bound_levels"] == 1
+    assert correctness["bound_levels"] == 0
     assert correctness["sentinels"] == {"float32_bits": 0x7FC00000, "uint8": 0xA5}
     assert [point["length"] for point in benchmark["vector_add"]] == [4096, 65537]
     assert [point["width"] for point in benchmark["rgb_to_gray"]] == [33, 64]
@@ -112,7 +112,7 @@ def test_the_report_holds_every_case_and_point_with_a_reconciled_summary():
     assert summary["contraction_fused"] is True
 
 
-def test_the_all_triples_case_carries_the_recorded_mismatches_into_the_summary():
+def test_the_all_triples_case_reaches_the_summary_with_no_mismatch():
     config = config_from_mapping(
         changed(("correctness", "rgb_to_gray_all_triples"), True)
     )
@@ -121,8 +121,9 @@ def test_the_all_triples_case_carries_the_recorded_mismatches_into_the_summary()
 
     last = report["correctness"]["rgb_to_gray"][-1]
     assert (last["pattern"], last["index"]) == ("all_rgb_triples", 2)
-    assert report["summary"]["rgb_to_gray_metal_mismatched_pixels"] == 21
-    assert report["summary"]["rgb_to_gray_max_abs_difference_levels"] == 1
+    assert report["correctness"]["bound_levels"] == 0
+    assert report["summary"]["rgb_to_gray_metal_mismatched_pixels"] == 0
+    assert report["summary"]["rgb_to_gray_max_abs_difference_levels"] == 0
 
 
 def test_the_host_timer_with_a_stand_in_backend_is_still_synthetic():
@@ -183,7 +184,7 @@ def test_a_metal_run_with_the_host_timer_is_a_measurement():
     )
     assert report["environment"]["platform_system"] == "Darwin"
     assert report["summary"]["vector_add_exact_cases"] == 3
-    assert report["summary"]["rgb_to_gray_max_abs_difference_levels"] <= 1
+    assert report["summary"]["rgb_to_gray_max_abs_difference_levels"] == 0
 
 
 @requires_metal

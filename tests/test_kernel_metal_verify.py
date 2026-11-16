@@ -69,8 +69,8 @@ def test_measured_and_synthetic_reports_verify_and_bind_to_their_config():
         "correctness_cases": 4,
         "benchmark_points": 2,
         "timed_samples": 12,
-        "rgb_to_gray_max_abs_difference_levels": 1,
-        "rgb_to_gray_metal_mismatched_pixels": 21,
+        "rgb_to_gray_max_abs_difference_levels": 0,
+        "rgb_to_gray_metal_mismatched_pixels": 0,
     }
     assert (synthetic["measured"], synthetic["scope"]) == (
         False,
@@ -96,17 +96,16 @@ POINT = ("benchmark", "vector_add", 0, "metal_kernel")
 @pytest.mark.parametrize(
     ("path", "change", "message"),
     [
-        ((*TRIPLES, "mismatches"), lambda v: v[1:], "does not rebuild from its"),
-        ((*TRIPLES, "mismatches"), lambda v: v + [[16777215, 0]], "does not rebuild"),
-        ((*TRIPLES, "mismatches", 0, 1), lambda v: v - 1, "does not rebuild from its"),
-        (
-            (*TRIPLES, "mismatches", 0, 1),
-            lambda v: v + 1,
-            "mismatch matches the reference",
-        ),
-        ((*TRIPLES, "mismatches"), lambda v: v[::-1], "indices must increase"),
-        ((*TRIPLES, "mismatched_pixels"), lambda v: v - 1, "does not rebuild"),
-        ((*TRIPLES, "max_abs_difference_levels"), lambda v: 0, "does not rebuild"),
+        # Pixel p of the all-triples image is (p >> 16, p >> 8 & 255, p & 255):
+        # pixel 1 has level 0, pixel 5 level 1, pixel 2**24 - 1 level 255.
+        ((*TRIPLES, "mismatches"), lambda v: [[1, 1]], "does not rebuild from its"),
+        ((*TRIPLES, "mismatches"), lambda v: [[16777215, 0]], "does not rebuild"),
+        ((*TRIPLES, "mismatches"), lambda v: [[5, 1]], "matches the reference"),
+        ((*TRIPLES, "mismatches"), lambda v: [[5, 2], [1, 1]], "must increase"),
+        ((*TRIPLES, "mismatches"), lambda v: [[1, 256]], "must increase inside"),
+        ((*TRIPLES, "mismatches"), lambda v: [[1, True]], "integer pairs"),
+        ((*TRIPLES, "mismatched_pixels"), lambda v: v + 1, "does not rebuild"),
+        ((*TRIPLES, "max_abs_difference_levels"), lambda v: 1, "does not rebuild"),
         ((*TRIPLES, "guard_elements"), lambda v: v + 1, "does not rebuild"),
         (
             ("correctness", "vector_add", 0, "outputs", 0, "buffer_sha256"),
@@ -178,7 +177,7 @@ POINT = ("benchmark", "vector_add", 0, "metal_kernel")
         (("planned_work", "calls"), lambda v: v + 1, "planned work"),
         (("run", "elapsed_ns"), lambda v: 1, "run time does not cover"),
         (("run", "timed_ns"), lambda v: v + 1, "run time does not cover"),
-        (("summary", "rgb_to_gray_metal_mismatched_pixels"), lambda v: 0, "summary"),
+        (("summary", "rgb_to_gray_metal_mismatched_pixels"), lambda v: 1, "summary"),
         (("summary", "contraction_fused"), lambda v: False, "summary"),
         (("config", "seed"), lambda v: 74, "config digest"),
         (("config_sha256",), lambda v: "f" * 64, "config digest"),
@@ -198,22 +197,22 @@ def test_a_new_seed_with_a_matching_config_digest_no_longer_rebuilds():
         verify_report(reseal(report))
 
 
-def test_a_consistent_report_beyond_the_level_bound_is_still_rejected():
+def test_a_consistent_one_level_mismatch_is_rejected_by_the_exact_rule():
     report = fresh()
     metal = report["correctness"]["rgb_to_gray"][1]["outputs"][0]
     reference = rgb_to_gray_reference(all_rgb_triples()).reshape(-1)
-    index, _ = metal["mismatches"][0]
-    level = int(reference[index]) + 2
-    metal["mismatches"][0] = [index, level]
+    # A tie, 0.2989 * 10 + 0.5870 * 57 + 0.1140 * 18 = 38.5, one level low.
+    index = (10 << 16) | (57 << 8) | 18
     rebuilt = reference.copy()
-    for pixel, value in metal["mismatches"]:
-        rebuilt[pixel] = value
+    rebuilt[index] -= 1
+    metal["mismatches"] = [[index, int(rebuilt[index])]]
+    metal["mismatched_pixels"] = 1
+    metal["max_abs_difference_levels"] = 1
     metal["buffer_sha256"] = array_sha256(rebuilt)
-    metal["max_abs_difference_levels"] = 2
 
-    with pytest.raises(KernelMetalVerificationError, match="exceeds the 1-level bound"):
+    with pytest.raises(KernelMetalVerificationError, match="exceeds the 0-level bound"):
         verify_report(reseal(report))
-    assert numpy.count_nonzero(rebuilt != reference) == 21
+    assert numpy.count_nonzero(rebuilt != reference) == 1
 
 
 @pytest.mark.parametrize(

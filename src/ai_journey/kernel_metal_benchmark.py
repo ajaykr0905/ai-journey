@@ -9,8 +9,8 @@ completion. Each implementation first runs ``warmup`` untimed samples, which
 absorb one-time costs such as PyTorch building its MPS graphs. Timed samples
 then alternate between the Metal kernel and PyTorch's equivalent, and the
 order flips every repeat, so slow drift in clocks or load favors neither
-side. After the last sample, the latest outputs of both sides must agree
-within the kernel's bound.
+side. After the last sample, the latest outputs of both sides must be
+equal, as the exact rules of both kernels require.
 
 A sample holds the fewest whole calls whose compulsory bytes reach
 ``target_bytes_per_sample``, at most ``MAX_CALLS_PER_SAMPLE``, so a small

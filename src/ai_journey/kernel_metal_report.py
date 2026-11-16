@@ -73,15 +73,18 @@ SYNTHETIC_LABEL = "synthetic timing, not a measurement"
 INJECTED_BACKEND = "injected"
 REPORT_DIGEST_FIELD = DIGEST_FIELD
 DEVICE = "mps"
+REFERENCE = "NumPy integers on the CPU, rebuilt from the seed"
 ROUNDING_RULE = (
-    "y = 0.2989 R + 0.5870 G + 0.1140 B in float32, left to right; "
-    "gray = clamp(floor(y + 0.5), 0, 255): round half up, then clamp to 0..255"
+    "gray = min((2989 R + 5870 G + 1140 B + 5000) // 10000, 255) in integers: "
+    "the exact weighted sum of the decimal weights 0.2989, 0.5870 and 0.1140, "
+    "rounded half up, then clamped to 0..255, the rule of the CUDA half"
 )
 TORCH_EQUIVALENTS = {
     "vector_add": "torch.add(a, b, out=out)",
     "rgb_to_gray": (
-        "p = rgb.to(float32); y = p[..., 0] * 0.2989 + p[..., 1] * 0.5870; "
-        "y = y + p[..., 2] * 0.1140; floor(y + 0.5).clamp_(0, 255).to(uint8)"
+        "p = rgb.to(int32); y = p[..., 0] * 2989 + p[..., 1] * 5870; "
+        "y = y + p[..., 2] * 1140; "
+        "div(y + 5000, 10000, rounding_mode='floor').clamp_(0, 255).to(uint8)"
     ),
 }
 SYNCHRONIZATION = (
@@ -319,7 +322,7 @@ def build_report(
         "shaders": _shaders(backend, observed),
         "planned_work": config.planned_work().to_mapping(),
         "correctness": {
-            "reference": "NumPy float32 on the CPU, rebuilt from the seed",
+            "reference": REFERENCE,
             "rounding": ROUNDING_RULE,
             "weights": list(GRAY_WEIGHTS),
             "bound_levels": MAX_LEVEL_DIFFERENCE,

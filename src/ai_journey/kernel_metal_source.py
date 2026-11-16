@@ -7,12 +7,15 @@ element or pixel from ``thread_position_in_grid``, which equals CUDA's
 because the grid is rounded up to whole threadgroups. Scalars are 32-bit
 ``constant uint&`` parameters, and every buffer binding is explicit.
 
-The grayscale weights are formatted from ``GRAY_WEIGHTS``, so the kernel and
-the CPU reference cannot drift apart. The source also holds a contraction
-probe: one ``x[0] * x[1] + x[2]`` whose float32 result is 0 when the compiler
-rounds the product and the sum separately, and 2**-24 when it fuses them
-into one fused multiply-add. The probe shows whether this host's compiler
-fuses; it cannot show which operations it fused inside another kernel.
+The grayscale kernel applies the exact integer rule of the CUDA half of the
+lab, in the same statement as its CUDA source, with the integer weights
+formatted from ``GRAY_WEIGHTS_PER_10000``, so the kernel and the CPU reference
+cannot drift apart. The source also holds a contraction probe: one
+``x[0] * x[1] + x[2]`` whose float32 result is 0 when the compiler rounds the
+product and the sum separately, and 2**-24 when it fuses them into one fused
+multiply-add. The probe shows whether this host's compiler fuses float
+arithmetic, which is why a float grayscale formula could not match the
+reference exactly. Integer arithmetic has no rounding for a fusion to change.
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 
-from .kernel_metal_reference import GRAY_WEIGHTS
+from .kernel_metal_reference import GRAY_SCALE, GRAY_WEIGHTS_PER_10000, MAX_LEVEL
 
 VECTOR_ADD = "vector_add"
 RGB_TO_GRAY = "rgb_to_gray"
@@ -34,10 +37,12 @@ PROBE_UNFUSED_RESULT = 0.0
 PROBE_FUSED_RESULT = 2.0**-24
 
 
-# 0.2989f * r + 0.5870f * g + 0.1140f * b, the reference's operation order.
-GRAY_EXPRESSION = " + ".join(
-    f"{weight:.4f}f * {channel}" for weight, channel in zip(GRAY_WEIGHTS, "rgb")
+# The CUDA half's statement: the weighted sum times 10000, rounded half up by
+# adding 5000 before the floor division, then clamped to 255.
+GRAY_LUMA = "({}u * r + {}u * g + {}u * b + {}u) / {}u".format(
+    *GRAY_WEIGHTS_PER_10000, GRAY_SCALE // 2, GRAY_SCALE
 )
+GRAY_CLAMP = f"luma < {MAX_LEVEL}u ? luma : {MAX_LEVEL}u"
 
 SHADER_SOURCE = f"""#include <metal_stdlib>
 using namespace metal;
@@ -57,7 +62,7 @@ kernel void {VECTOR_ADD}(device float* out [[buffer(0)]],
 
 // One thread per pixel: x is the column and y the row, as in a CUDA 2D
 // launch. Pixels are row-major RGB triples; out holds one level per pixel.
-// Round half up, then clamp to 0..255.
+// Exact rule: round the weighted sum half up, then clamp to 255.
 kernel void {RGB_TO_GRAY}(device uchar* out [[buffer(0)]],
                         device const uchar* rgb [[buffer(1)]],
                         constant uint& width [[buffer(2)]],
@@ -67,11 +72,11 @@ kernel void {RGB_TO_GRAY}(device uchar* out [[buffer(0)]],
     uint row = position.y;
     if (column < width && row < height) {{
         uint pixel = row * width + column;
-        float r = float(rgb[3 * pixel]);
-        float g = float(rgb[3 * pixel + 1]);
-        float b = float(rgb[3 * pixel + 2]);
-        float y = {GRAY_EXPRESSION};
-        out[pixel] = uchar(clamp(floor(y + 0.5f), 0.0f, 255.0f));
+        uint r = rgb[3 * pixel];
+        uint g = rgb[3 * pixel + 1];
+        uint b = rgb[3 * pixel + 2];
+        uint luma = {GRAY_LUMA};
+        out[pixel] = uchar({GRAY_CLAMP});
     }}
 }}
 

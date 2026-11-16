@@ -27,7 +27,9 @@ import numpy
 
 from .kernel_metal_geometry import CheckedLaunch, KernelMetalError, PipelineLimits
 from .kernel_metal_reference import (
-    GRAY_WEIGHTS,
+    GRAY_SCALE,
+    GRAY_WEIGHTS_PER_10000,
+    MAX_LEVEL,
     MAX_LEVEL_DIFFERENCE,
     float32_sentinels,
     uint8_sentinels,
@@ -54,9 +56,6 @@ REQUIREMENT = (
     "the run needs an Apple GPU on macOS and a PyTorch build with MPS and "
     "torch.mps.compile_shader"
 )
-# The weights as exact float32 values: whether PyTorch multiplies in float32
-# or in float64 and rounds once, the product is the float32 product.
-FLOAT32_WEIGHTS = tuple(float(numpy.float32(weight)) for weight in GRAY_WEIGHTS)
 
 
 class KernelMetalUnavailableError(KernelMetalError):
@@ -122,7 +121,7 @@ class DeviceWorkload:
 
     ``metal`` and ``torch`` only queue work; ``synchronize`` waits for it.
     ``check`` waits too, then reports whether the latest outputs of the two
-    implementations agree within the kernel's bound.
+    implementations are equal.
     """
 
     metal: Callable[[], object]
@@ -267,14 +266,19 @@ class MetalRuntime:
         return self._host(output)
 
     def _gray(self, image: object) -> object:
-        """PyTorch's eager equivalent: the reference's float32 steps in order."""
+        """PyTorch's eager equivalent: the reference's integer steps in order.
+
+        Every value stays below 2**22 in int32, so each step is exact on the
+        MPS device and on the CPU.
+        """
 
         torch = self._torch
-        pixels = image.to(torch.float32)
-        red, green, blue = FLOAT32_WEIGHTS
+        pixels = image.to(torch.int32)
+        red, green, blue = GRAY_WEIGHTS_PER_10000
         level = pixels[..., 0] * red + pixels[..., 1] * green
         level = level + pixels[..., 2] * blue
-        return torch.floor(level + 0.5).clamp_(0.0, 255.0).to(torch.uint8)
+        level = torch.div(level + GRAY_SCALE // 2, GRAY_SCALE, rounding_mode="floor")
+        return level.clamp_(0, MAX_LEVEL).to(torch.uint8)
 
     def torch_vector_add(
         self, first: numpy.ndarray, second: numpy.ndarray, device: str

@@ -55,11 +55,10 @@ def check_lines(lines, label):
         f"{label} correctness kernel=vector_add cases=3 exact_cases=3 "
         "implementations=metal_kernel/mps,torch/mps,torch/cpu"
     )
-    assert re.fullmatch(
+    assert lines[1] == (
         f"{label} correctness kernel=rgb_to_gray cases=2 "
-        r"max_abs_difference_levels=[01] metal_mismatched_pixels=\d+ bound_levels=1",
-        lines[1],
-    ), lines[1]
+        "max_abs_difference_levels=0 metal_mismatched_pixels=0 bound_levels=0"
+    )
     assert re.fullmatch(f"{label} contraction_probe fused=(true|false)", lines[2])
     for line in lines[3:7]:
         assert re.fullmatch(f"{label} {POINT}", line), line

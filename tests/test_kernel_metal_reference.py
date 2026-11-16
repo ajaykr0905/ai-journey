@@ -1,3 +1,6 @@
+import math
+from fractions import Fraction
+
 import numpy
 import pytest
 
@@ -8,7 +11,9 @@ from ai_journey.kernel_metal_geometry import (
 )
 from ai_journey.kernel_metal_reference import (
     FLOAT32_SENTINEL_BITS,
+    GRAY_WEIGHTS,
     MAX_IMAGE_PIXELS,
+    MAX_LEVEL_DIFFERENCE,
     MAX_RECORDED_MISMATCHES,
     MAX_VECTOR_LENGTH,
     UINT8_SENTINEL,
@@ -33,7 +38,7 @@ RECORDED = {
     "image": "2c2b39a98d773e94e2af75d529a1d042f3e7cf439621a4acc69b9be8d369b11d",
     "gray": "fd17eeaccc763bbf357490f3b0712eb4748da7fcc8f9c73aed9c762dd233cb9c",
     "all_triples": "95eeb80877c99cdcb38755b9bb5ed29066bf70e870ea6eff9ee30285bd4cd5b7",
-    "all_triples_gray": "73b98ca1d9177e3bcea9816a73f18bcd9f4080ad50a6af8c28408ff6726bbaa4",
+    "all_triples_gray": "fd765e780c79467c5a60363988d11528e0e76a30efe4d37517897ca0fa08f9c1",
 }
 
 
@@ -68,7 +73,7 @@ def test_each_case_draws_from_its_own_stream():
 
 
 def test_grayscale_rounds_half_up_where_banker_rounding_would_go_down():
-    # 0.1140 * 250 is 28.5 in decimal, and the float32 product rounds to 28.5.
+    # 1140 * 250 + 5000 is 290000: the exact sum 28.5 rounds up to 29.
     assert gray_of(0, 0, 250) == 29
     assert numpy.round(28.5) == 28
     assert [gray_of(0, 0, 0), gray_of(255, 255, 255)] == [0, 255]
@@ -77,20 +82,43 @@ def test_grayscale_rounds_half_up_where_banker_rounding_would_go_down():
 
 def test_the_all_triples_image_covers_the_whole_input_domain_once():
     image = all_rgb_triples()
-    flat = image.reshape(-1, 3).astype(numpy.int64)
-    codes = (flat[:, 0] << 16) | (flat[:, 1] << 8) | flat[:, 2]
+    channels = [image.reshape(-1, 3)[:, axis].astype(numpy.int32) for axis in range(3)]
+    codes = (channels[0] << 16) | (channels[1] << 8) | channels[2]
 
     assert image.shape == (4096, 4096, 3)
     assert numpy.array_equal(codes, numpy.arange(1 << 24))
     assert array_sha256(image) == RECORDED["all_triples"]
-    gray = rgb_to_gray_reference(image)
-    assert array_sha256(gray) == RECORDED["all_triples_gray"]
-    # Exact decimal rounding as integers: floor((2989 R + 5870 G + 1140 B
-    # + 5000) / 10000). Float32 rounding drops 19 triples one level below it.
-    exact = (2989 * flat[:, 0] + 5870 * flat[:, 1] + 1140 * flat[:, 2] + 5000) // 10000
-    difference = gray.reshape(-1).astype(numpy.int64) - exact
-    assert int(numpy.count_nonzero(difference)) == 19
-    assert set(difference[difference != 0].tolist()) == {-1}
+    assert array_sha256(rgb_to_gray_reference(image)) == RECORDED["all_triples_gray"]
+
+
+def test_every_exact_tie_rounds_up_as_in_the_cuda_half():
+    image = all_rgb_triples()
+    pixels = image.reshape(-1, 3)
+    gray = rgb_to_gray_reference(image).reshape(-1)
+    # Round half up as a quotient and a carry, apart from the reference's
+    # add-then-divide form: the weighted sum times 10000 is an integer.
+    total = sum(
+        weight * pixels[:, axis].astype(numpy.int32)
+        for axis, weight in enumerate((2989, 5870, 1140))
+    )
+    quotient, remainder = numpy.divmod(total, 10000)
+
+    assert numpy.array_equal(gray, quotient + (remainder >= 5000))
+    assert MAX_LEVEL_DIFFERENCE == 0
+    ties = numpy.flatnonzero(remainder == 5000)
+    assert ties.size == 1703
+    decimals = [Fraction(f"{weight:.4f}") for weight in GRAY_WEIGHTS]
+    for index in ties.tolist():
+        exact = sum(w * int(v) for w, v in zip(decimals, pixels[index]))
+        assert exact - math.floor(exact) == Fraction(1, 2)
+        assert int(gray[index]) == math.floor(exact) + 1
+    # The float32 form of the rule, which this lab used before it took the
+    # integer form, rounds 19 of the ties down.
+    red, green, blue = (numpy.float32(weight) for weight in GRAY_WEIGHTS)
+    tie = pixels[ties].astype(numpy.float32)
+    level = (tie[:, 0] * red + tie[:, 1] * green) + tie[:, 2] * blue
+    rounded = numpy.floor(level + numpy.float32(0.5))
+    assert int(numpy.count_nonzero(rounded < gray[ties])) == 19
 
 
 def test_comparisons_record_every_mismatch_needed_to_rebuild_the_output():

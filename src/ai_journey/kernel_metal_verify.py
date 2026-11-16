@@ -2,8 +2,8 @@
 
 A device output cannot be observed again, so verification rebuilds every
 correctness fact from the seed and the stored digests. For each case the
-verifier draws the inputs again, checks their digests, recomputes the NumPy
-float32 reference with its own code and checks its digest. It then rebuilds
+verifier draws the inputs again, checks their digests, recomputes the exact
+integer reference with its own code and checks its digest. It then rebuilds
 each recorded output from the reference: a vector-add output is the
 reference itself, a grayscale output is the reference with every recorded
 mismatched pixel set to its recorded level, and the Metal buffer adds its
@@ -45,6 +45,7 @@ from .kernel_metal_report import (
     MEASUREMENT_BOUNDARY,
     MEASUREMENT_LABEL,
     MEASUREMENT_SCOPE,
+    REFERENCE,
     REPORT_DIGEST_FIELD,
     REPORT_KIND,
     ROUNDING_RULE,
@@ -61,13 +62,15 @@ from .memory_access_benchmark import INJECTED_TIMER, PERCENTILE_METHOD, TIMER
 _NS = 1_000_000_000
 _MAX_CALLS = 4096
 _MAX_MISMATCHES = 1024
-_BOUND_LEVELS = 1
+# The exact integer rule leaves no rounding to differ: outputs must match.
+_BOUND_LEVELS = 0
 _BENCHMARK_OFFSET = 32
 _ALL_TRIPLES = (4096, 4096)
 _CHUNK = 1 << 20
 _FLOAT_SENTINEL = 0x7FC00000
 _BYTE_SENTINEL = 0xA5
 _WEIGHTS = (0.2989, 0.5870, 0.1140)
+_WEIGHTS_PER_10000 = numpy.array([2989, 5870, 1140], dtype=numpy.int64)
 _STREAMS = {"vector_add": 0, "rgb_to_gray": 1}
 _KERNELS = {
     "vector_add": {
@@ -174,18 +177,19 @@ def _image(seed: int, index: int, height: int, width: int, pattern: str):
 
 
 def _gray(image: numpy.ndarray) -> numpy.ndarray:
-    """The lab's float32 formula, written independently of the run's reference."""
+    """The exact rule, written independently of the run's reference.
+
+    The weighted sum times 10000 is an integer. Its quotient by 10000 gains
+    one when the remainder is at least 5000: round half up, with no float.
+    """
 
     flat = image.reshape(-1, 3)
     gray = numpy.empty(flat.shape[0], dtype=numpy.uint8)
-    red, green, blue = (numpy.float32(weight) for weight in _WEIGHTS)
     for start in range(0, flat.shape[0], _CHUNK):
-        block = flat[start : start + _CHUNK].astype(numpy.float32)
-        level = (block[:, 0] * red + block[:, 1] * green) + block[:, 2] * blue
-        rounded = numpy.floor(level + numpy.float32(0.5))
-        gray[start : start + block.shape[0]] = numpy.clip(rounded, 0, 255).astype(
-            numpy.uint8
-        )
+        block = flat[start : start + _CHUNK].astype(numpy.int64)
+        quotient, remainder = numpy.divmod(block @ _WEIGHTS_PER_10000, 10000)
+        level = numpy.minimum(quotient + (remainder >= 5000), 255)
+        gray[start : start + block.shape[0]] = level.astype(numpy.uint8)
     return gray
 
 
@@ -662,7 +666,7 @@ def _verify(report: object, supplied: KernelMetalConfig | None) -> dict[str, obj
     vector_cases = _vector_cases(correctness.get("vector_add"), config, limits)
     gray_cases = _gray_cases(correctness.get("rgb_to_gray"), config, limits)
     expected_correctness = {
-        "reference": "NumPy float32 on the CPU, rebuilt from the seed",
+        "reference": REFERENCE,
         "rounding": ROUNDING_RULE,
         "weights": list(_WEIGHTS),
         "bound_levels": _BOUND_LEVELS,

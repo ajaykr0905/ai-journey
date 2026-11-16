@@ -8,11 +8,13 @@ that guard tail must keep its sentinels, which shows the bounds guard
 stopped every padding thread. Every output is recorded by the SHA-256 digest
 of its whole buffer.
 
-Vector add must match the reference bit for bit on all three. A grayscale
-output may differ from the reference by at most ``MAX_LEVEL_DIFFERENCE``
-level, and every mismatched pixel is recorded with its value, so a verifier
-can rebuild each output from the reference and check its digest. A case that
-breaks either rule stops the run, so a report never holds a failed check.
+Vector add must match the reference bit for bit on all three. Grayscale
+uses the exact integer rule, so its outputs must match too: a grayscale
+output may differ by at most ``MAX_LEVEL_DIFFERENCE`` levels, which is 0.
+Each grayscale record keeps the list of mismatched pixels with their values,
+so a verifier rebuilds each output from the reference and checks its digest.
+A case that breaks either rule stops the run, so a report never holds a
+failed check.
 """
 
 from __future__ import annotations

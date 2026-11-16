@@ -5,7 +5,11 @@ from pathlib import Path
 
 from ai_journey import kernel_metal_cli
 from ai_journey.kernel_metal_config import MAX_RUN_BYTES, MAX_RUN_CALLS, load_config
-from ai_journey.kernel_metal_reference import GRAY_WEIGHTS, MAX_LEVEL_DIFFERENCE
+from ai_journey.kernel_metal_reference import (
+    GRAY_WEIGHTS,
+    GRAY_WEIGHTS_PER_10000,
+    MAX_LEVEL_DIFFERENCE,
+)
 from ai_journey.kernel_metal_report import (
     MEASUREMENT_BOUNDARY,
     MEASUREMENT_LABEL,
@@ -55,15 +59,16 @@ def test_guide_states_the_rounding_rule_the_bound_and_the_exit_codes():
 
     for weight in GRAY_WEIGHTS:
         assert f"{weight:.4f}" in text
+    red, green, blue = GRAY_WEIGHTS_PER_10000
     for step in (
-        "Compute `y = 0.2989 R + 0.5870 G + 0.1140 B` in float32",
-        "Round half up: `floor(y + 0.5)`.",
+        f"Compute the integer `{red} R + {green} G + {blue} B`, which is the exact",
+        "Round half up: add 5,000, then divide by 10,000 with floor division.",
         "Clamp the result to 0..255.",
     ):
         assert step in text, step
-    assert MAX_LEVEL_DIFFERENCE == 1
-    assert "can differ from the reference by at most 1 level" in text
-    assert "Each vector-add output must match the reference bit for bit." in text
+    assert MAX_LEVEL_DIFFERENCE == 0
+    for kernel in ("vector-add", "grayscale"):
+        assert f"Each {kernel} output must match the reference bit for bit." in text
     for phrase in (
         "0: the command succeeded.",
         "1: the command read a report, but the report failed the checks.",

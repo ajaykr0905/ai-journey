@@ -3,10 +3,15 @@ from fractions import Fraction
 
 import numpy
 
-from ai_journey.kernel_metal_reference import GRAY_WEIGHTS
+from ai_journey.kernel_metal_reference import (
+    GRAY_SCALE,
+    GRAY_WEIGHTS,
+    GRAY_WEIGHTS_PER_10000,
+)
 from ai_journey.kernel_metal_source import (
     CONTRACTION_PROBE,
-    GRAY_EXPRESSION,
+    GRAY_CLAMP,
+    GRAY_LUMA,
     KERNELS,
     PROBE_EXPRESSION,
     PROBE_FUSED_RESULT,
@@ -20,8 +25,12 @@ from ai_journey.kernel_metal_source import (
 
 # Recorded with the source below; reports bind to this exact text.
 RECORDED_SOURCE_SHA256 = (
-    "f12a5e8af97c2baf1f835af8ec166d3c4cdf02a07bcf53d32c658a7fb0938802"
+    "07892c3a5dcfb94cc8fb84652c64482aec1225f5ad68e16360e952be2e16cf76"
 )
+# The grayscale statements of the CUDA half's kernel, with its unsigned int
+# spelled uint as in Metal. Both halves must compute the same levels.
+CUDA_HALF_LUMA = "(2989u * r + 5870u * g + 1140u * b + 5000u) / 10000u"
+CUDA_HALF_CLAMP = "luma < 255u ? luma : 255u"
 
 
 def kernel_text(name):
@@ -61,14 +70,18 @@ def test_kernels_index_from_the_grid_position_and_guard_the_padding():
     assert "uint column = position.x;\n    uint row = position.y;" in body
     assert "if (column < width && row < height) {" in body
     assert "uint pixel = row * width + column;" in body
-    assert "out[pixel] = uchar(clamp(floor(y + 0.5f), 0.0f, 255.0f));" in body
 
 
-def test_the_kernel_weights_are_the_reference_weights_in_the_same_order():
-    assert GRAY_EXPRESSION == "0.2989f * r + 0.5870f * g + 0.1140f * b"
-    assert f"float y = {GRAY_EXPRESSION};" in kernel_text(RGB_TO_GRAY)[1]
-    literals = re.findall(r"(\d\.\d{4})f \* [rgb]", GRAY_EXPRESSION)
-    assert tuple(float(value) for value in literals) == GRAY_WEIGHTS
+def test_grayscale_applies_the_cuda_half_integer_rule_without_floats():
+    body = kernel_text(RGB_TO_GRAY)[1]
+
+    assert (GRAY_LUMA, GRAY_CLAMP) == (CUDA_HALF_LUMA, CUDA_HALF_CLAMP)
+    assert f"uint luma = {GRAY_LUMA};" in body
+    assert f"out[pixel] = uchar({GRAY_CLAMP});" in body
+    # A float in the body could round an exact tie the wrong way.
+    assert "float" not in body and "." not in body.replace("position.", "")
+    for decimal, integer in zip(GRAY_WEIGHTS, GRAY_WEIGHTS_PER_10000):
+        assert Fraction(f"{decimal:.4f}") * GRAY_SCALE == integer
 
 
 def test_the_probe_separates_a_fused_multiply_add_from_two_roundings():
