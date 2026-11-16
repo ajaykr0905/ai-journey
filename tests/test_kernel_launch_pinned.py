@@ -145,6 +145,7 @@ def test_guide_states_commands_numbers_sources_and_boundaries(report):
         "A matching output does not prove that a kernel is free of races.",
         "Each function must hold exactly its pinned statements, in the pinned order.",
         "The text must hold the five definitions and no other code.",
+        "Text with a backslash, a `??` trigraph or an unterminated `/*` comment fails every check.",
         VECTOR_SHA256,
         GRAY_SHA256,
         CUDA_SHA256,

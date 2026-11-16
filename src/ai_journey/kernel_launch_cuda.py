@@ -10,6 +10,8 @@ and the grayscale arithmetic. It then evaluates the host grid sizing for the
 given extents and requires the simulator's launch configurations. Each
 function must hold exactly its pinned statements, and the text must hold no
 other code, because one extra statement or overload can change the launch.
+Comments are read left to right, as a compiler reads them, and text that a
+line splice or a trigraph can change fails every check.
 """
 
 from __future__ import annotations
@@ -73,6 +75,8 @@ _GRAY_STORE = "gray[pixel] = (unsigned char)(luma < 255u ? luma : 255u);"
 # C reads a literal with a leading zero as octal, so each dim3 literal starts
 # with 1-9. At most 10 digits, the width of an unsigned int, keep int() bounded.
 _DECIMAL = r"([1-9][0-9]{0,9})"
+_COMMENT_OPENER = re.compile(r"//|/\*")
+_LINE_END = re.compile(r"[\n\r]")
 _VECTOR_LAUNCHER = re.compile(
     rf"dim3 block\({_DECIMAL}\);dim3 grid\(cdiv\(n,{_DECIMAL}\)\);"
     r"vector_add_kernel<<<grid,block>>>\(a,b,out,n\);"
@@ -153,13 +157,42 @@ void launch_rgb_to_grayscale(
 """
 
 
-def _normalize(text: str) -> str:
-    """Drop comments and every space that does not separate two identifiers."""
+def _code(text: str) -> str | None:
+    """Replace each comment with a space, or return ``None`` for unsafe text.
 
-    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
-    text = re.sub(r"//[^\n]*", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return re.sub(r" (?=\W)|(?<=\W) ", "", text)
+    A compiler joins a line that ends in a backslash to the next line before
+    it removes comments, and a compiler that reads trigraphs reads ``??/``
+    as a backslash. Such a splice can move code into a comment, so text with
+    a backslash or ``??`` is refused. Comments are found left to right, as a
+    compiler finds them: ``/*`` inside a ``//`` comment opens nothing, and a
+    ``//`` comment ends at a line feed or a carriage return. An unterminated
+    ``/*`` is refused. Each search starts where the last one stopped, so the
+    time is linear in the length of the text.
+    """
+
+    if "\\" in text or "??" in text:
+        return None
+    pieces: list[str] = []
+    position = 0
+    while (opener := _COMMENT_OPENER.search(text, position)) is not None:
+        pieces += (text[position : opener.start()], " ")
+        if opener.group() == "//":
+            end = _LINE_END.search(text, opener.end())
+            position = len(text) if end is None else end.start()
+        else:
+            close = text.find("*/", opener.end())
+            if close < 0:
+                return None
+            position = close + 2
+    pieces.append(text[position:])
+    return "".join(pieces)
+
+
+def _normalize(code: str) -> str:
+    """Drop every space that does not separate two identifiers."""
+
+    code = re.sub(r"\s+", " ", code).strip()
+    return re.sub(r" (?=\W)|(?<=\W) ", "", code)
 
 
 def _braced(text: str, opening: int) -> str | None:
@@ -310,7 +343,8 @@ def check_cuda_source(
     check evaluates the host ``dim3`` expressions with C unsigned division
     and passes only if the result equals the configuration that the
     simulator launches for the same extent and block. Text with code beyond
-    the five definitions fails every check.
+    the five definitions, a line splice, a trigraph or an unterminated
+    comment fails every check.
     """
 
     if type(text) is not str:
@@ -319,7 +353,8 @@ def check_cuda_source(
     if type(block) is not tuple or len(block) != 2:
         raise KernelLaunchError("block must be a (block_x, block_y) tuple")
     expected_gray = launch_2d(width, height, *block)
-    bodies = _definitions(_normalize(text))
+    code = _code(text)
+    bodies = None if code is None else _definitions(_normalize(code))
     if bodies is None:
         return CudaSourceCheck(
             checks=tuple((name, False) for name in CHECK_NAMES),

@@ -216,6 +216,13 @@ C reads `0256` as the octal value 174. The text must hold the five
 definitions and no other code. Other code, such as an `int` overload of
 `cdiv`, can change the five functions. Thus such text fails every check.
 
+The check finds comments from left to right, as a compiler does. Thus `/*` in
+a `//` comment does not open a block comment. A `//` comment stops at a line
+feed or at a carriage return. A compiler joins a line that ends with a
+backslash to the next line, so a backslash can move a guard into a comment.
+Text with a backslash, a `??` trigraph or an unterminated `/*` comment fails
+every check.
+
 The pinned text has the SHA-256
 `cf14adedc20211d11c978cf0d6af291a447853ec01e4d0dee1ecfd02c8631bcc`. The report
 holds the full text.

@@ -1,4 +1,5 @@
 import re
+import time
 from hashlib import sha256
 
 import pytest
@@ -144,6 +145,35 @@ def test_code_outside_the_five_functions_fails_every_check(extra):
     assert result.failures == CHECK_NAMES
     assert result.vector_add_launch is None
     assert result.rgb_to_grayscale_launch is None
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "failures"),
+    [
+        # A backslash at the end of a // comment splices the guard into it.
+        ("    if (i < n) {\n", "    // keep the guard \\\n    if (i < n)\n    {\n", CHECK_NAMES),
+        # A compiler that reads trigraphs reads ??/ as a backslash.
+        ("    if (i < n) {\n", "    // keep the guard ??/\n    if (i < n)\n    {\n", CHECK_NAMES),
+        # A compiler also ends a // comment at a carriage return.
+        ("threadIdx.x;\n    if (i < n)", "threadIdx.x; // note\r    i += 1;\n    if (i < n)", ("vector_add_index",)),
+        # A /* inside a // comment opens no block comment.
+        ("threadIdx.x;\n    if (i < n)", "threadIdx.x; // /*\n    i += 1;\n    // */\n    if (i < n)", ("vector_add_index",)),
+    ],
+)  # fmt: skip
+def test_comments_are_read_as_a_compiler_reads_them(old, new, failures):
+    assert PINNED.count(old) == 1
+    assert check(PINNED.replace(old, new)).failures == failures
+
+
+def test_an_unterminated_comment_fails_every_check_quickly():
+    # Each unterminated /* made the old comment regex rescan the rest of the
+    # text, so the time grew with the square of the length: a resealed
+    # 132 KB report took 19 s to reject.
+    started = time.monotonic()
+    result = check(PINNED + "/*x" * 120_000)
+
+    assert time.monotonic() - started < 2
+    assert result.failures == CHECK_NAMES
 
 
 def test_a_second_kernel_definition_breaks_the_unique_signature():
