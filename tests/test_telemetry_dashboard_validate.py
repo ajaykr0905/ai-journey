@@ -30,8 +30,8 @@ def test_the_generated_dashboard_validates_and_summarizes_its_queries():
         "series": sorted(
             SERIES
             - {
-                "ai_journey_serving_request_latency_seconds_count",
-                "ai_journey_serving_request_latency_seconds_sum",
+                "ai_journey_serving_recovery_success_latency_seconds_count",
+                "ai_journey_serving_recovery_success_latency_seconds_sum",
             }
         ),
         "functions": ["histogram_quantile", "max", "sum"],
@@ -79,17 +79,22 @@ def grid(index, **changes):
         ),
         (target(2, 1, refId="A"), "unique uppercase refId"),
         (target(2, 0, refId="a"), "unique uppercase refId"),
-        (target(2, 0, expr="sum(ai_journey_serving_executions_total"), "unclosed"),
         (
-            target(2, 0, expr="summ(ai_journey_serving_executions_total)"),
+            target(2, 0, expr="sum(ai_journey_serving_recovery_executions_total"),
+            "unclosed",
+        ),
+        (
+            target(2, 0, expr="summ(ai_journey_serving_recovery_executions_total)"),
             "unknown PromQL function",
         ),
         (
-            target(2, 0, expr="sum(ai_journey_serving_execution_total)"),
+            target(2, 0, expr="sum(ai_journey_serving_recovery_execution_total)"),
             "unknown metric",
         ),
         (
-            target(4, 0, expr="max(ai_journey_serving_request_latency_seconds)"),
+            target(
+                4, 0, expr="max(ai_journey_serving_recovery_success_latency_seconds)"
+            ),
             "unknown metric",
         ),
         (target(2, 0, interval="1m"), "fields do not match a Prometheus target"),

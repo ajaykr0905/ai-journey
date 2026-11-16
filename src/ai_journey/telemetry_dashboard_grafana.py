@@ -4,11 +4,12 @@
 ``schemaVersion`` 39) from the pinned config and the shared metric catalog,
 so the same config always yields the same bytes. Every query panel reads the
 Prometheus datasource chosen through the ``datasource`` template variable,
-and every catalog metric appears in at least one panel: client attempt
-outcomes, executions and duplicates, the detection, restart, unavailability
-and SLO recovery durations, request latency quantiles and the worker lab's
-recovery time and lost items. The dashboard is titled, tagged, described and
-headed as local CPU lab telemetry.
+every selector matches ``scope="local_cpu_lab"`` as the metrics lab labels
+its series, and every catalog metric appears in at least one panel: client
+attempt outcomes, executions and duplicates, the detection, restart,
+unavailability and SLO recovery durations, success latency quantiles and the
+worker lab's recovery time and lost items. The dashboard is titled, tagged,
+described and headed as local CPU lab telemetry.
 
 Latency quantiles come from ``histogram_quantile`` over cumulative bucket
 counts, so they are bucket-interpolated estimates; the labs' sealed reports
@@ -23,6 +24,7 @@ import copy
 from dataclasses import dataclass
 from typing import Any
 
+from .telemetry_dashboard_metrics import LAB_SCOPE, SCOPE_LABEL
 from .telemetry_traces_config import TelemetryConfig
 
 DASHBOARD_SCHEMA_VERSION = 39
@@ -52,13 +54,24 @@ def _quantile_label(quantile: float) -> str:
     return f"p{quantile * 100:g}"
 
 
+def _scoped(series: str) -> str:
+    """Select a series only where the metrics lab labels it lab telemetry."""
+
+    return f'{series}{{{SCOPE_LABEL}="{LAB_SCOPE}"}}'
+
+
 def _panels(config: TelemetryConfig) -> tuple[_Panel, ...]:
-    latency = "ai_journey_serving_request_latency_seconds_bucket"
+    attempts = _scoped("ai_journey_serving_recovery_attempts_total")
+    executions = _scoped("ai_journey_serving_recovery_executions_total")
+    duplicates = _scoped("ai_journey_serving_recovery_duplicate_executions_total")
+    latency = _scoped("ai_journey_serving_recovery_success_latency_seconds_bucket")
+    worker_recovery = _scoped("ai_journey_worker_recovery_recovery_seconds")
+    items_lost = _scoped("ai_journey_worker_recovery_lost_items_total")
     durations = (
-        ("ai_journey_serving_detection_seconds", "fault detection"),
-        ("ai_journey_serving_restart_seconds", "server restart"),
-        ("ai_journey_serving_unavailability_seconds", "client unavailability"),
-        ("ai_journey_serving_slo_recovery_seconds", "SLO recovery"),
+        ("ai_journey_serving_recovery_detection_latency_seconds", "fault detection"),
+        ("ai_journey_serving_recovery_restart_latency_seconds", "server restart"),
+        ("ai_journey_serving_recovery_unavailability_seconds", "client unavailability"),
+        ("ai_journey_serving_recovery_time_to_slo_recovery_seconds", "SLO recovery"),
     )
     return (
         _Panel(
@@ -72,7 +85,7 @@ def _panels(config: TelemetryConfig) -> tuple[_Panel, ...]:
             "bargauge",
             (0, 4, 12, 8),
             "Classified client attempts of the serving-recovery lab, by outcome.",
-            (("sum by (outcome) (ai_journey_serving_attempts_total)", "{{outcome}}"),),
+            ((f"sum by (outcome) ({attempts})", "{{outcome}}"),),
         ),
         _Panel(
             "Serving executions and duplicates",
@@ -80,11 +93,8 @@ def _panels(config: TelemetryConfig) -> tuple[_Panel, ...]:
             (12, 4, 12, 8),
             "Committed executions and at-least-once duplicate executions.",
             (
-                ("sum(ai_journey_serving_executions_total)", "executions"),
-                (
-                    "sum(ai_journey_serving_duplicate_executions_total)",
-                    "duplicate executions",
-                ),
+                (f"sum({executions})", "executions"),
+                (f"sum({duplicates})", "duplicate executions"),
             ),
         ),
         _Panel(
@@ -92,15 +102,16 @@ def _panels(config: TelemetryConfig) -> tuple[_Panel, ...]:
             "stat",
             (0, 12, 24, 6),
             "Measured monotonic durations of the last verified serving run.",
-            tuple((f"max({name})", label) for name, label in durations),
+            tuple((f"max({_scoped(name)})", label) for name, label in durations),
             unit="s",
         ),
         _Panel(
-            "Serving request latency quantiles",
+            "Serving success latency quantiles",
             "timeseries",
             (0, 18, 16, 9),
-            "histogram_quantile estimates from cumulative latency buckets; the "
-            "sealed report keeps exact nearest-rank percentiles.",
+            "histogram_quantile estimates from cumulative buckets of successful "
+            "attempts in every recovery phase; the sealed report keeps exact "
+            "nearest-rank percentiles.",
             tuple(
                 (
                     f"histogram_quantile({quantile!r}, sum by (le) ({latency}))",
@@ -115,7 +126,7 @@ def _panels(config: TelemetryConfig) -> tuple[_Panel, ...]:
             "stat",
             (16, 18, 8, 5),
             "Fault injection to completed recovery of the worker-recovery lab.",
-            (("max(ai_journey_worker_recovery_seconds)", "worker recovery"),),
+            ((f"max({worker_recovery})", "worker recovery"),),
             unit="s",
         ),
         _Panel(
@@ -123,7 +134,7 @@ def _panels(config: TelemetryConfig) -> tuple[_Panel, ...]:
             "stat",
             (16, 23, 8, 4),
             "Uncheckpointed work items lost to the fault and then replayed.",
-            (("sum(ai_journey_worker_items_lost_total)", "items lost"),),
+            ((f"sum({items_lost})", "items lost"),),
         ),
     )
 

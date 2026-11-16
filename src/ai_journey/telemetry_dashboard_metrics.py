@@ -1,13 +1,17 @@
-"""Metric catalog shared with the recovery-lab metrics workstream.
+"""Metric families from the telemetry-metrics lab that the dashboard charts.
 
-The dashboard may reference only these names, which the metrics workstream
-derives from the same sealed local CPU lab evidence. Counters end in
-``_total`` and the latency is a Prometheus histogram, as agreed. The duration
-metrics are assumed to be gauges holding the last verified run's value; if
-they are exposed with another type, this catalog is the one place to change
-before the dashboard is regenerated. ``series`` lists the names a PromQL
-expression can select: a histogram exposes ``_bucket``, ``_sum`` and
-``_count`` series and never its bare name.
+The dashboard may reference only these names. They are the families that the
+metrics workstream's ``telemetry_metrics_serving`` and
+``telemetry_metrics_worker`` derive from the same sealed local CPU lab
+evidence and export in text exposition 0.0.4, with the same types and label
+names: counters end in ``_total``, durations are seconds gauges holding the
+verified run's value and the success latency is a histogram split by
+recovery phase. Every exported series carries ``scope="local_cpu_lab"``, and
+every dashboard query selects on it, so a panel cannot show a same-named
+series from anywhere else. If the metrics lab renames or retypes a family,
+this catalog is the one place to change before the dashboard is regenerated.
+``series`` lists the names a PromQL expression can select: a histogram
+exposes ``_bucket``, ``_sum`` and ``_count`` series and never its bare name.
 """
 
 from __future__ import annotations
@@ -18,6 +22,8 @@ from dataclasses import dataclass
 from .telemetry_traces_io import TelemetryError
 
 METRIC_TYPES = ("counter", "gauge", "histogram")
+SCOPE_LABEL = "scope"
+LAB_SCOPE = "local_cpu_lab"
 _NAME = re.compile(r"ai_journey_[a-z][a-z0-9_]*[a-z0-9]")
 _LABEL = re.compile(r"[a-z][a-z0-9_]*")
 _HELP = re.compile(r"[A-Z][ -~]{0,159}")
@@ -78,63 +84,63 @@ class MetricSpec:
 
 METRICS = (
     MetricSpec(
-        "ai_journey_serving_attempts_total",
+        "ai_journey_serving_recovery_attempts_total",
         "counter",
-        ("outcome",),
+        ("outcome", SCOPE_LABEL),
         "Classified client attempts by outcome",
     ),
     MetricSpec(
-        "ai_journey_serving_executions_total",
+        "ai_journey_serving_recovery_executions_total",
         "counter",
-        (),
-        "Committed journal executions across server lifetimes",
+        ("lifetime", SCOPE_LABEL),
+        "Committed journal executions by server lifetime",
     ),
     MetricSpec(
-        "ai_journey_serving_duplicate_executions_total",
+        "ai_journey_serving_recovery_duplicate_executions_total",
         "counter",
-        (),
+        (SCOPE_LABEL,),
         "At-least-once duplicate executions after a lost response",
     ),
     MetricSpec(
-        "ai_journey_serving_detection_seconds",
+        "ai_journey_serving_recovery_detection_latency_seconds",
         "gauge",
-        (),
+        (SCOPE_LABEL,),
         "SIGKILL to the supervisor observing the exit",
     ),
     MetricSpec(
-        "ai_journey_serving_restart_seconds",
+        "ai_journey_serving_recovery_restart_latency_seconds",
         "gauge",
-        (),
+        (SCOPE_LABEL,),
         "Observed exit to the replacement lifetime being ready",
     ),
     MetricSpec(
-        "ai_journey_serving_unavailability_seconds",
+        "ai_journey_serving_recovery_unavailability_seconds",
         "gauge",
-        (),
+        (SCOPE_LABEL,),
         "First failed attempt after the kill to the first replacement success",
     ),
     MetricSpec(
-        "ai_journey_serving_slo_recovery_seconds",
+        "ai_journey_serving_recovery_time_to_slo_recovery_seconds",
         "gauge",
-        (),
+        (SCOPE_LABEL,),
         "Kill to the end of the first run of consecutive in-SLO successes",
     ),
     MetricSpec(
-        "ai_journey_serving_request_latency_seconds",
+        "ai_journey_serving_recovery_success_latency_seconds",
         "histogram",
-        (),
-        "Latency of successful client attempts",
+        ("phase", SCOPE_LABEL),
+        "Latency of successful client attempts by recovery phase",
     ),
     MetricSpec(
-        "ai_journey_worker_recovery_seconds",
+        "ai_journey_worker_recovery_recovery_seconds",
         "gauge",
-        (),
+        (SCOPE_LABEL,),
         "Worker fault injection to completed recovery",
     ),
     MetricSpec(
-        "ai_journey_worker_items_lost_total",
+        "ai_journey_worker_recovery_lost_items_total",
         "counter",
-        (),
+        (SCOPE_LABEL,),
         "Uncheckpointed work items lost to the fault and replayed",
     ),
 )

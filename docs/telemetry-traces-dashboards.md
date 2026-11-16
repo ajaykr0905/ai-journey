@@ -192,37 +192,40 @@ events lie in order inside their span. Every resource must declare
 `dashboard.json` is Grafana dashboard JSON with `schemaVersion` 39, a null
 `id` for import and the UID, title, time range, refresh and latency quantiles
 pinned in the config. Every query panel and target uses the Prometheus
-datasource chosen through the `${datasource}` template variable.
+datasource chosen through the `${datasource}` template variable, and every
+selector matches `scope="local_cpu_lab"`, written `{scope}` below, so a panel
+shows only series that the metrics lab labels as local CPU lab telemetry.
 
 | Panel | Type | Query |
 | --- | --- | --- |
 | Local CPU lab telemetry | text | The evidence boundary. |
-| Serving client attempts by outcome | bargauge | `sum by (outcome) (ai_journey_serving_attempts_total)` |
+| Serving client attempts by outcome | bargauge | `sum by (outcome) (ai_journey_serving_recovery_attempts_total{scope})` |
 | Serving executions and duplicates | stat | `sum(...)` of the executions and duplicate-executions counters |
-| Serving recovery durations | stat | `max(...)` of the detection, restart, unavailability and SLO recovery gauges, in seconds |
-| Serving request latency quantiles | timeseries | `histogram_quantile(q, sum by (le) (ai_journey_serving_request_latency_seconds_bucket))` for q in 0.5, 0.95, 0.99 |
-| Worker recovery time | stat | `max(ai_journey_worker_recovery_seconds)` |
-| Worker items lost | stat | `sum(ai_journey_worker_items_lost_total)` |
+| Serving recovery durations | stat | `max(...)` of the detection, restart, unavailability and time-to-SLO-recovery gauges, in seconds |
+| Serving success latency quantiles | timeseries | `histogram_quantile(q, sum by (le) (ai_journey_serving_recovery_success_latency_seconds_bucket{scope}))` for q in 0.5, 0.95, 0.99, over every recovery phase |
+| Worker recovery time | stat | `max(ai_journey_worker_recovery_recovery_seconds{scope})` |
+| Worker items lost | stat | `sum(ai_journey_worker_recovery_lost_items_total{scope})` |
 
-The metric catalog in `telemetry_dashboard_metrics.py` is the contract with the
-metrics workstream:
+The metric catalog in `telemetry_dashboard_metrics.py` lists the families of
+the telemetry-metrics lab (`telemetry_metrics_serving.py` and
+`telemetry_metrics_worker.py`) that the dashboard charts, with the types and
+labels that lab exports:
 
 | Metric | Type | Labels |
 | --- | --- | --- |
-| `ai_journey_serving_attempts_total` | counter | `outcome` |
-| `ai_journey_serving_executions_total` | counter | |
-| `ai_journey_serving_duplicate_executions_total` | counter | |
-| `ai_journey_serving_detection_seconds` | gauge | |
-| `ai_journey_serving_restart_seconds` | gauge | |
-| `ai_journey_serving_unavailability_seconds` | gauge | |
-| `ai_journey_serving_slo_recovery_seconds` | gauge | |
-| `ai_journey_serving_request_latency_seconds` | histogram | |
-| `ai_journey_worker_recovery_seconds` | gauge | |
-| `ai_journey_worker_items_lost_total` | counter | |
+| `ai_journey_serving_recovery_attempts_total` | counter | `outcome`, `scope` |
+| `ai_journey_serving_recovery_executions_total` | counter | `lifetime`, `scope` |
+| `ai_journey_serving_recovery_duplicate_executions_total` | counter | `scope` |
+| `ai_journey_serving_recovery_detection_latency_seconds` | gauge | `scope` |
+| `ai_journey_serving_recovery_restart_latency_seconds` | gauge | `scope` |
+| `ai_journey_serving_recovery_unavailability_seconds` | gauge | `scope` |
+| `ai_journey_serving_recovery_time_to_slo_recovery_seconds` | gauge | `scope` |
+| `ai_journey_serving_recovery_success_latency_seconds` | histogram | `phase`, `scope` |
+| `ai_journey_worker_recovery_recovery_seconds` | gauge | `scope` |
+| `ai_journey_worker_recovery_lost_items_total` | counter | `scope` |
 
-The counters and the latency histogram are as agreed. The duration metrics are
-assumed to be gauges holding the last verified run's value; if they are
-exposed with another type, change the catalog and regenerate the dashboard.
+The duration gauges hold the verified run's value. If the metrics lab renames
+or retypes a family, change the catalog and regenerate the dashboard.
 
 The dashboard validator checks the top-level, panel and target fields the
 generator emits, `schemaVersion` 39, unique positive panel IDs and unique

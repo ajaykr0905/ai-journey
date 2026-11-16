@@ -1,3 +1,4 @@
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -20,39 +21,51 @@ from ai_journey.telemetry_traces_io import TelemetryError, artifact_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = load_telemetry_config(ROOT / "config" / "day-73-telemetry-traces.json")
-# The names the metrics workstream agreed to expose, in its order.
-AGREED = (
-    "ai_journey_serving_attempts_total",
-    "ai_journey_serving_executions_total",
-    "ai_journey_serving_duplicate_executions_total",
-    "ai_journey_serving_detection_seconds",
-    "ai_journey_serving_restart_seconds",
-    "ai_journey_serving_unavailability_seconds",
-    "ai_journey_serving_slo_recovery_seconds",
-    "ai_journey_serving_request_latency_seconds",
-    "ai_journey_worker_recovery_seconds",
-    "ai_journey_worker_items_lost_total",
-)
+# The families the telemetry-metrics lab exports that this dashboard charts,
+# with type and labels, as telemetry_metrics_serving.py and
+# telemetry_metrics_worker.py name them; every series carries a scope label.
+EXPOSED = {
+    "ai_journey_serving_recovery_attempts_total": ("counter", ("outcome", "scope")),
+    "ai_journey_serving_recovery_executions_total": (
+        "counter",
+        ("lifetime", "scope"),
+    ),
+    "ai_journey_serving_recovery_duplicate_executions_total": ("counter", ("scope",)),
+    "ai_journey_serving_recovery_detection_latency_seconds": ("gauge", ("scope",)),
+    "ai_journey_serving_recovery_restart_latency_seconds": ("gauge", ("scope",)),
+    "ai_journey_serving_recovery_unavailability_seconds": ("gauge", ("scope",)),
+    "ai_journey_serving_recovery_time_to_slo_recovery_seconds": ("gauge", ("scope",)),
+    "ai_journey_serving_recovery_success_latency_seconds": (
+        "histogram",
+        ("phase", "scope"),
+    ),
+    "ai_journey_worker_recovery_recovery_seconds": ("gauge", ("scope",)),
+    "ai_journey_worker_recovery_lost_items_total": ("counter", ("scope",)),
+}
+LATENCY = "ai_journey_serving_recovery_success_latency_seconds"
 
 
-def test_catalog_matches_the_agreed_metric_names_and_types():
+def test_catalog_names_the_families_the_metrics_lab_exports():
+    assert METRIC_NAMES == tuple(EXPOSED)
+    assert {m.name: (m.type, m.labels) for m in METRICS} == EXPOSED
+    assert LATENCY not in SERIES and f"{LATENCY}_bucket" in SERIES
     by_name = {metric.name: metric for metric in METRICS}
-
-    assert METRIC_NAMES == AGREED
-    assert by_name["ai_journey_serving_attempts_total"].labels == ("outcome",)
-    assert by_name["ai_journey_serving_request_latency_seconds"].type == "histogram"
-    assert {m.name for m in METRICS if m.type == "counter"} == {
-        name for name in AGREED if name.endswith("_total")
-    }
-    assert "ai_journey_serving_request_latency_seconds" not in SERIES
-    assert "ai_journey_serving_request_latency_seconds_bucket" in SERIES
-    assert by_name["ai_journey_worker_recovery_seconds"].to_mapping() == {
-        "name": "ai_journey_worker_recovery_seconds",
+    assert by_name["ai_journey_worker_recovery_recovery_seconds"].to_mapping() == {
+        "name": "ai_journey_worker_recovery_recovery_seconds",
         "type": "gauge",
-        "labels": [],
+        "labels": ["scope"],
         "unit": "s",
         "help": "Worker fault injection to completed recovery",
     }
+
+
+def test_every_query_reads_only_series_scoped_to_the_local_cpu_lab():
+    selector = re.compile(r"(ai_journey_[a-z0-9_]+)(\{[^}]*\})?")
+
+    for _, target in queries(build_dashboard(CONFIG)):
+        found = selector.findall(target["expr"])
+        assert found, target["expr"]
+        assert all(matchers == '{scope="local_cpu_lab"}' for _, matchers in found)
 
 
 @pytest.mark.parametrize(
@@ -135,7 +148,7 @@ def test_latency_quantiles_follow_the_config():
     assert [t["refId"] for t in panel["targets"]] == ["A", "B"]
     assert panel["targets"][1]["expr"] == (
         "histogram_quantile(0.999, sum by (le) "
-        "(ai_journey_serving_request_latency_seconds_bucket))"
+        f'({LATENCY}_bucket{{scope="local_cpu_lab"}}))'
     )
 
 
