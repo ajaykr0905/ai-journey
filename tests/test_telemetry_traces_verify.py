@@ -159,6 +159,18 @@ def test_forged_or_tampered_exports_are_rejected(copied, tamper, message):
         verify(exported, runs)
 
 
+def test_a_pinned_config_must_be_the_one_the_export_embeds(copied, tmp_path):
+    exported, (serving_run, worker_run) = copied
+    pinned = ROOT / "config" / "day-73-telemetry-traces.json"
+    other = tmp_path / "other.json"
+    other.write_text(pinned.read_text().replace('"now-6h"', '"now-1h"'))
+    runs = dict(serving_run_dir=serving_run, worker_run_dir=worker_run)
+
+    verify_trace_export(exported / REPORT_FILE, config_path=pinned, **runs)
+    with pytest.raises(TelemetryVerificationError, match="another config"):
+        verify_trace_export(exported / REPORT_FILE, config_path=other, **runs)
+
+
 def test_source_evidence_that_no_longer_verifies_rejects_the_export(copied, tmp_path):
     exported, (serving_run, worker_run) = copied
     changed = tmp_path / "serving-copy"

@@ -21,7 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .telemetry_traces_config import config_from_mapping
+from .telemetry_traces_config import config_from_mapping, load_telemetry_config
 from .telemetry_traces_io import (
     TelemetryError,
     TelemetryVerificationError,
@@ -170,15 +170,18 @@ def verify_trace_export(
     *,
     serving_run_dir: Path | None = None,
     worker_run_dir: Path | None = None,
+    config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Recompute a sealed export from its sources and return a receipt.
 
-    The run directory of every exported lab is required, and no other.
+    The run directory of every exported lab is required, and no other. A
+    ``config_path`` additionally binds the embedded config to a pinned file.
     """
 
     data = read_bounded_file(
         report_path, max_bytes=MAX_REPORT_BYTES, label="trace export report"
     )
+    pinned = load_telemetry_config(config_path) if config_path is not None else None
     try:
         report = strict_json_loads(data, label="trace export report")
         _require(artifact_bytes(report) == data, "report is not canonical JSON")
@@ -197,6 +200,10 @@ def verify_trace_export(
     _require(report["evidence_boundary"] == TELEMETRY_BOUNDARY, "boundary changed")
     _require(report["encoding"] == ENCODING, "encoding statement changed")
     _require(report["config_sha256"] == config.fingerprint(), "config digest differs")
+    _require(
+        pinned is None or pinned == config,
+        "report was built from another config than the pinned one",
+    )
     exported = report["sources"]
     _require(
         type(exported) is list
