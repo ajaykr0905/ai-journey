@@ -34,8 +34,10 @@ The exit codes are:
 
 - 0: the command succeeded.
 - 1: the command read a report, but the report failed the checks.
-- 2: a usage error, an unreadable or invalid input, a refused output, or a run
-  that failed a check or exceeded its time budget.
+- 2: a usage error, an unreadable or invalid input, or a refused output. Code
+  2 also marks a run that failed a check, had a device error or exceeded its
+  time budget. PyTorch reports an MPS device without enough memory as a
+  device error.
 - 3: this host cannot run Metal kernels through PyTorch, so `run` stopped
   before it measured anything.
 

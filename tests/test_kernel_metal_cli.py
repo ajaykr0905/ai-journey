@@ -208,6 +208,24 @@ def test_invalid_inputs_refused_outputs_and_failed_runs_exit_two(tmp_path, capsy
     assert not (tmp_path / "b.json").exists()
 
 
+def test_a_device_error_during_a_run_exits_two_not_the_rejected_code(tmp_path, capsys):
+    # PyTorch reports MPS failures, such as running out of device memory, as
+    # RuntimeError. Exit 1 must keep its one meaning: a rejected report.
+    class DeviceFails(RecordedBackend):
+        def vector_add(self, first, second, launch):
+            raise RuntimeError("MPS backend out of memory")
+
+    config = write_config(tmp_path / "config.json")
+    output = tmp_path / "report.json"
+
+    argv = ["run", "--config", str(config), "--output", str(output)]
+    assert main(argv, backend=DeviceFails(), clock=scripted_clock()) == EXIT_INVALID
+    assert capsys.readouterr().err == (
+        "kernel-metal run failed: MPS backend out of memory\n"
+    )
+    assert not output.exists()
+
+
 @requires_metal
 def test_a_run_on_this_gpu_is_a_labeled_measurement_that_verifies(tmp_path, capsys):
     config = write_config(tmp_path / "config.json")

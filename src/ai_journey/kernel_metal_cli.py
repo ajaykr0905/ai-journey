@@ -10,10 +10,12 @@ against the config it must come from, and never imports torch.
 
 Exit codes: 0 success; 1 a report was read but failed verification; 2 usage
 errors, unreadable or invalid inputs, refused outputs, and runs that failed
-a check or exceeded their budget; 3 this host cannot run Metal kernels
-through PyTorch (not macOS, no torch, no MPS device or no
+a check, hit a device error or exceeded their budget; 3 this host cannot run
+Metal kernels through PyTorch (not macOS, no torch, no MPS device or no
 ``torch.mps.compile_shader``), so ``run`` stopped before it measured
-anything.
+anything. PyTorch raises ``RuntimeError`` when the MPS device fails, for
+example when it runs out of memory; that is exit 2, so exit 1 keeps its one
+meaning.
 """
 
 from __future__ import annotations
@@ -188,7 +190,7 @@ def main(
     except KernelMetalVerificationError as error:
         print(f"kernel-metal {args.command} rejected: {error}", file=sys.stderr)
         return EXIT_REJECTED
-    except (OSError, TypeError, ValueError) as error:
+    except (OSError, TypeError, ValueError, RuntimeError) as error:
         print(f"kernel-metal {args.command} failed: {error}", file=sys.stderr)
         return EXIT_INVALID
     _print_run(report)
