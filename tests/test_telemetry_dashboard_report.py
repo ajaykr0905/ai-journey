@@ -114,6 +114,7 @@ def edit_dashboard(directory, mutate):
             lambda d: edit_report(d, lambda r: r.update(evidence_boundary="fleet")),
             "boundary changed",
         ),
+        (lambda d: edit_report(d, lambda r: r.pop("config")), "fields"),
         (
             lambda d: edit_report(d, lambda r: r["metrics"].pop()),
             "metric catalog differs",

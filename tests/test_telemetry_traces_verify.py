@@ -128,6 +128,7 @@ def shift_anchor(report):
             "scope changed",
         ),
         (lambda d: edit_report(d, lambda r: r.update(extra=1)), "fields"),
+        (lambda d: edit_report(d, lambda r: r.pop("config")), "fields"),
         (lambda d: edit_report(d, shift_anchor), "does not recompute"),
         (
             lambda d: edit_report(

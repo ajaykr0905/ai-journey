@@ -196,12 +196,13 @@ def verify_trace_export(
         report = strict_json_loads(data, label="trace export report")
         _require(artifact_bytes(report) == data, "report is not canonical JSON")
         require_sealed_report(report, kind=REPORT_KIND)
+        # A sealed report may still lack a field, so check before reading one.
+        _require(set(report) == _REPORT_FIELDS, "report fields do not match schema")
         config = config_from_mapping(report["config"])
     except TelemetryVerificationError:
         raise
     except TelemetryError as error:
         raise TelemetryVerificationError(str(error)) from error
-    _require(set(report) == _REPORT_FIELDS, "report fields do not match schema")
     _require(
         report["schema_version"] == REPORT_SCHEMA_VERSION,
         "report schema is unsupported",
