@@ -86,10 +86,8 @@ def test_pinned_export_of_the_pinned_runs_verifies(pinned_evidence):
     assert receipt["verified"] is True
     assert receipt["families"] == 28
     assert (receipt["recording_rules"], receipt["alerting_rules"]) == (3, 11)
-    assert quiet(main, ["verify", "--output-dir", str(output), *evidence]) == (
-        code,
-        printed,
-    )
+    verify = ["verify", "--output-dir", str(output), "--config", str(PINNED)]
+    assert quiet(main, [*verify, *evidence]) == (code, printed)
     report = json.loads((output / "report.json").read_bytes())
     assert report["evidence"]["serving"]["requests"] == 48
     assert report["evidence"]["serving"]["run_id"].startswith(

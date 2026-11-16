@@ -2,7 +2,9 @@ import json
 import shutil
 
 import pytest
+from test_telemetry_metrics_config import valid_config
 from test_telemetry_metrics_report import RELAXED_CONFIG
+from test_telemetry_metrics_rules import RELAXED
 from test_telemetry_metrics_serving import make_serving_run
 from test_telemetry_metrics_worker import make_worker_run
 
@@ -173,6 +175,47 @@ def test_consistently_reconfigured_exports_fail_on_the_rules(sealed, tmp_path):
     )
     with pytest.raises(TelemetryMetricsError, match="stored rules differ"):
         verify(output, serving, worker)
+
+
+def test_a_breach_rebuilt_under_relaxed_objectives_fails_the_declared_config(
+    sealed, tmp_path
+):
+    relaxed, serving, worker = sealed
+    tight = valid_config(
+        **(
+            RELAXED
+            | {
+                "serving_objectives": RELAXED["serving_objectives"]
+                | {"restart_latency_ms": 1}
+            }
+        )
+    )
+    breached = tmp_path / "breached"
+    write_metrics_export(
+        breached,
+        build_metrics_export(tight, serving_run_dir=serving, worker_run_dir=worker),
+    )
+    assert verify(breached, serving, worker)["breached_objectives"] == [
+        "serving-restart-latency"
+    ]
+    # Export is deterministic, so the same evidence under relaxed objectives
+    # is an equally genuine export that shows no breach; only the declared
+    # config tells the two apart.
+    assert verify(relaxed, serving, worker)["breached_objectives"] == []
+
+    pinned = {
+        "serving_run_dir": serving,
+        "worker_run_dir": worker,
+        "declared_config": tight,
+    }
+    receipt = verify_metrics_export(breached, **pinned)
+    assert receipt["breached_objectives"] == ["serving-restart-latency"]
+    with pytest.raises(TelemetryMetricsError, match="not the declared config"):
+        verify_metrics_export(relaxed, **pinned)
+    with pytest.raises(TypeError):
+        verify_metrics_export(
+            relaxed, **(pinned | {"declared_config": tight.to_mapping()})
+        )
 
 
 def test_other_or_damaged_evidence_does_not_verify_an_export(sealed, tmp_path):

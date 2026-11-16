@@ -12,7 +12,9 @@ Key samples of the stored exposition are cross-checked against the verified
 evidence reports directly, not through the adapters, so a mapping mistake in
 an adapter cannot verify itself. Finally the whole report body, including
 the objective judgements and the firing alerts, is recomputed and compared
-section by section in canonical JSON.
+section by section in canonical JSON. Export is deterministic, so the same
+evidence under other objectives is an equally consistent export; given the
+declared config, the verifier also requires the export to use exactly it.
 """
 
 from __future__ import annotations
@@ -27,7 +29,11 @@ from .serving_recovery_config import (
     strict_json_loads,
 )
 from .serving_recovery_reconcile import REQUEST_OUTCOMES
-from .telemetry_metrics_config import MAX_CONFIG_BYTES, config_from_mapping
+from .telemetry_metrics_config import (
+    MAX_CONFIG_BYTES,
+    TelemetryMetricsConfig,
+    config_from_mapping,
+)
 from .telemetry_metrics_exposition import (
     MAX_EXPOSITION_BYTES,
     encode_exposition,
@@ -191,16 +197,27 @@ def _cross_check(
 
 
 def verify_metrics_export(
-    output_dir: Path, *, serving_run_dir: Path, worker_run_dir: Path
+    output_dir: Path,
+    *,
+    serving_run_dir: Path,
+    worker_run_dir: Path,
+    declared_config: TelemetryMetricsConfig | None = None,
 ) -> dict[str, Any]:
     """Recompute an export from its evidence and require every byte to match.
 
-    Returns the export receipt with ``verified: true``; raises
-    ``TelemetryMetricsError`` on the first disagreement.
+    With ``declared_config`` the export's copied config must be exactly that
+    config, so an export rebuilt under relaxed objectives cannot pass as one
+    that met the declared ones. Returns the export receipt with
+    ``verified: true``; raises ``TelemetryMetricsError`` on the first
+    disagreement.
     """
 
     if not isinstance(output_dir, Path):
         raise TypeError("output_dir must be pathlib.Path")
+    if declared_config is not None and not isinstance(
+        declared_config, TelemetryMetricsConfig
+    ):
+        raise TypeError("declared_config must be TelemetryMetricsConfig")
     _require(
         output_dir.is_dir() and not output_dir.is_symlink(), "output_dir is invalid"
     )
@@ -230,6 +247,11 @@ def verify_metrics_export(
         _same(report["config"], config.to_mapping())
         and report["config_sha256"] == config.fingerprint(),
         "report config does not match the copied config",
+    )
+    _require(
+        declared_config is None
+        or config.fingerprint() == declared_config.fingerprint(),
+        "export config is not the declared config",
     )
 
     serving = load_verified_serving_evidence(serving_run_dir)

@@ -39,7 +39,8 @@ PYTHONPATH=src python -m ai_journey.telemetry_metrics_cli export \
 PYTHONPATH=src python -m ai_journey.telemetry_metrics_cli verify \
   --output-dir /tmp/day-73/telemetry \
   --serving-run-dir /tmp/day-73/serving \
-  --worker-run-dir /tmp/day-73/worker
+  --worker-run-dir /tmp/day-73/worker \
+  --config config/day-73-telemetry-metrics.json
 ```
 
 Both telemetry commands print one JSON receipt. It holds the report seal,
@@ -300,6 +301,13 @@ and still pass its own check. Finally, every report section is recomputed
 and compared as canonical JSON, including the objective judgements and the
 firing alerts. Evidence from another run, a damaged trace, a reformatted
 file or a resealed report all fail with exit code 1.
+
+Export is deterministic, so the same evidence exported under other
+objectives is an equally consistent export. A breach exported under the
+pinned objectives could therefore be rebuilt under relaxed ones and verify
+with no breach. `--config` closes that gap: `verify` then also requires the
+export's copied controls to be exactly the given ones. An unreadable or
+invalid `--config` exits with code 2.
 
 ## One development-host run
 

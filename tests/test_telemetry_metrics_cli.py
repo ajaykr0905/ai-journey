@@ -104,6 +104,23 @@ def test_breached_objectives_exit_three_after_full_verification(
     assert json.loads(capsys.readouterr().out) == receipt
 
 
+def test_verify_with_the_declared_config_refuses_other_objectives(
+    evidence, tmp_path, capsys
+):
+    _, _, _, relaxed, breached = evidence
+    output = tmp_path / "breached"
+    assert main(export_argv(evidence, output, config=breached)) == 3
+    capsys.readouterr()
+
+    assert main(verify_argv(evidence, output) + ["--config", str(breached)]) == 3
+    capsys.readouterr()
+    assert main(verify_argv(evidence, output) + ["--config", str(relaxed)]) == 1
+    assert "not the declared config" in capsys.readouterr().err
+    missing = str(tmp_path / "missing.json")
+    assert main(verify_argv(evidence, output) + ["--config", missing]) == 2
+    assert "readable regular" in capsys.readouterr().err
+
+
 def test_invalid_inputs_exit_two_without_publishing(evidence, tmp_path, capsys):
     serving = evidence[1]
     output = tmp_path / "export"
