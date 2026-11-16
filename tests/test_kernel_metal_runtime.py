@@ -1,3 +1,4 @@
+import functools
 import os
 import subprocess
 import sys
@@ -42,10 +43,10 @@ requires_metal = pytest.mark.skipif(
 )
 
 
-@pytest.fixture(scope="module")
-def runtime():
-    if not AVAILABILITY.available:
-        pytest.skip(f"needs an Apple GPU: {AVAILABILITY.message}")
+@functools.cache
+def metal_runtime():
+    """Compile the kernels once per test process; call only under requires_metal."""
+
     return MetalRuntime()
 
 
@@ -140,7 +141,9 @@ def test_float32_weights_are_the_reference_weights_rounded_once():
 
 
 @requires_metal
-def test_the_compiled_pipelines_report_usable_limits(runtime):
+def test_the_compiled_pipelines_report_usable_limits():
+    runtime = metal_runtime()
+
     assert set(runtime.limits) == {"vector_add", "rgb_to_gray"}
     for limits in runtime.limits.values():
         assert isinstance(limits, PipelineLimits)
@@ -150,7 +153,8 @@ def test_the_compiled_pipelines_report_usable_limits(runtime):
 
 
 @requires_metal
-def test_vector_add_matches_the_reference_and_leaves_the_guard_tail(runtime):
+def test_vector_add_matches_the_reference_and_leaves_the_guard_tail():
+    runtime = metal_runtime()
     first, second = vector_add_inputs(73, 0, 1000)
     launch = CheckedLaunch(vector_launch(1000, 256), runtime.limits["vector_add"])
     reference = vector_add_reference(first, second).view(numpy.uint32)
@@ -166,7 +170,8 @@ def test_vector_add_matches_the_reference_and_leaves_the_guard_tail(runtime):
 
 
 @requires_metal
-def test_grayscale_stays_within_the_bound_and_leaves_the_guard_tail(runtime):
+def test_grayscale_stays_within_the_bound_and_leaves_the_guard_tail():
+    runtime = metal_runtime()
     image = uniform_rgb_image(73, 1, 17, 33)
     launch = CheckedLaunch(
         image_launch(17, 33, (16, 16)), runtime.limits["rgb_to_gray"]
@@ -185,7 +190,8 @@ def test_grayscale_stays_within_the_bound_and_leaves_the_guard_tail(runtime):
 
 
 @requires_metal
-def test_workloads_bind_both_sides_and_check_their_agreement(runtime):
+def test_workloads_bind_both_sides_and_check_their_agreement():
+    runtime = metal_runtime()
     first, second = vector_add_inputs(73, 2, 4097)
     vector = CheckedLaunch(vector_launch(4097, 256), runtime.limits["vector_add"])
     image = uniform_rgb_image(73, 3, 31, 47)
@@ -202,7 +208,8 @@ def test_workloads_bind_both_sides_and_check_their_agreement(runtime):
 
 
 @requires_metal
-def test_launches_must_be_checked_against_the_kernels_own_pipeline(runtime):
+def test_launches_must_be_checked_against_the_kernels_own_pipeline():
+    runtime = metal_runtime()
     first, second = vector_add_inputs(73, 0, 64)
     other = PipelineLimits(512, 32, 0)
 
