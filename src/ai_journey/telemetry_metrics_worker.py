@@ -31,6 +31,11 @@ TRACE_FILE = "trace.json"
 MAX_REPORT_BYTES = 256 * 1024
 PREFIX = "ai_journey_worker_recovery_"
 _LAB = "local CPU lab telemetry from one verified worker recovery run"
+# The worker verifier rejects with ValueError, but some malformed evidence
+# makes it fail instead: a zero checkpoint interval divides by zero, a chained
+# trace shorter than the lifecycle runs out of events, and a deeply nested
+# trace exhausts the JSON decoder. Each of those is rejected evidence too.
+_REJECTED = (ArithmeticError, LookupError, RecursionError, TypeError, ValueError)
 
 
 @dataclass(frozen=True)
@@ -44,9 +49,9 @@ def load_verified_worker_evidence(run_dir: Path) -> WorkerEvidence:
     """Load ``report.json`` strictly and verify it against ``trace.json``.
 
     Raises ``TelemetryMetricsError`` when the report is not canonical strict
-    JSON or the worker verifier rejects it. The verifier compares numbers by
-    value, so a resealed ``3.0`` would pass it; counts, timestamps and exit
-    codes must also be exact integers here.
+    JSON or the worker verifier rejects it or fails on it. The verifier
+    compares numbers by value, so a resealed ``3.0`` would pass it; counts,
+    timestamps and exit codes must also be exact integers here.
     """
 
     if not isinstance(run_dir, Path):
@@ -56,7 +61,7 @@ def load_verified_worker_evidence(run_dir: Path) -> WorkerEvidence:
             run_dir / REPORT_FILE, max_bytes=MAX_REPORT_BYTES, name="worker report"
         )
         verify_recovery_report(report, trace_path=run_dir / TRACE_FILE)
-    except (KeyError, TypeError, ValueError) as error:
+    except _REJECTED as error:
         raise TelemetryMetricsError(
             f"worker-recovery evidence was rejected: {error}"
         ) from error

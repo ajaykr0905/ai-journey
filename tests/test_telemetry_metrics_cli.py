@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -8,7 +9,7 @@ import pytest
 from test_telemetry_metrics_config import config_mapping
 from test_telemetry_metrics_rules import RELAXED
 from test_telemetry_metrics_serving import make_serving_run
-from test_telemetry_metrics_worker import make_worker_run
+from test_telemetry_metrics_worker import make_worker_run, rewrite
 
 from ai_journey.serving_recovery_config import canonical_json_bytes
 from ai_journey.telemetry_metrics_cli import main
@@ -136,6 +137,27 @@ def test_rejected_exports_exit_one(evidence, tmp_path, capsys):
     assert main(verify_argv(evidence, output)) == 1
     assert "comment lines" in capsys.readouterr().err
     assert main(verify_argv(evidence, tmp_path / "missing")) == 1
+
+
+def test_worker_evidence_that_crashes_its_verifier_keeps_the_exit_codes(
+    evidence, tmp_path, capsys
+):
+    output = tmp_path / "export"
+    assert main(export_argv(evidence, output)) == 0
+    capsys.readouterr()
+    worker = tmp_path / "worker"
+    shutil.copytree(evidence[2], worker)
+    rewrite(worker, lambda report: report["fault"].update(checkpoint_interval=0))
+
+    argv = export_argv(evidence, tmp_path / "new")
+    argv[argv.index("--worker-run-dir") + 1] = str(worker)
+    assert main(argv) == 2
+    assert "worker-recovery evidence was rejected" in capsys.readouterr().err
+    assert not (tmp_path / "new").exists()
+    argv = verify_argv(evidence, output)
+    argv[argv.index("--worker-run-dir") + 1] = str(worker)
+    assert main(argv) == 1
+    assert "worker-recovery evidence was rejected" in capsys.readouterr().err
 
 
 def test_usage_lists_both_commands_and_refuses_abbreviations(capsys):

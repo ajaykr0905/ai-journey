@@ -1,5 +1,6 @@
 import json
 import shutil
+from dataclasses import replace
 from hashlib import sha256
 
 import pytest
@@ -8,6 +9,8 @@ from test_recovery_config import valid_config as worker_config
 from ai_journey.recovery_experiment import run_recovery_experiment
 from ai_journey.recovery_report import build_recovery_report
 from ai_journey.recovery_report_io import write_recovery_report
+from ai_journey.recovery_trace import chain_recovery_event
+from ai_journey.recovery_trace_io import load_recovery_trace
 from ai_journey.serving_recovery_config import canonical_json_bytes
 from ai_journey.telemetry_metrics_exposition import encode_exposition, parse_exposition
 from ai_journey.telemetry_metrics_model import TelemetryMetricsError, metric_set
@@ -43,6 +46,27 @@ def rewrite(run_dir, mutate):
     unsigned = {key: value for key, value in report.items() if key != "report_sha256"}
     report["report_sha256"] = sha256(canonical_json_bytes(unsigned)).hexdigest()
     (run_dir / "report.json").write_bytes(canonical_json_bytes(report))
+
+
+def rechain(run_dir, events):
+    """Replace the trace with a freshly chained one and reseal the report to it."""
+
+    records, previous = [], None
+    for event in events:
+        records.append(chain_recovery_event(event, previous))
+        previous = records[-1]["event_sha256"]
+    (run_dir / "trace.json").write_bytes(canonical_json_bytes(records))
+    rewrite(run_dir, lambda report: report.update(trace_sha256=previous))
+
+
+def two_event_trace(run_dir):
+    # The chain is valid and its second event sits at the fault instant, so
+    # the worker verifier goes on to index lifecycle events that are absent.
+    started, fault, *_ = load_recovery_trace(run_dir / "trace.json")
+    completed = replace(
+        started, sequence=1, kind="completed", monotonic_ns=fault.monotonic_ns
+    )
+    rechain(run_dir, [started, completed])
 
 
 def test_families_restate_the_verified_loss_and_exact_timing(worker_run):
@@ -145,6 +169,26 @@ def test_rejected_worker_evidence_yields_no_metrics(
     with pytest.raises(TelemetryMetricsError, match="evidence was rejected") as caught:
         load_verified_worker_evidence(copy)
     assert caught.match(message)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        lambda d: rewrite(d, lambda r: r["fault"].update(checkpoint_interval=0)),
+        two_event_trace,
+        lambda d: (d / "trace.json").write_bytes(b"[" * 100_000 + b"]" * 100_000),
+    ],
+    ids=["zero-checkpoint-interval", "two-event-trace", "deeply-nested-trace"],
+)
+def test_evidence_the_worker_verifier_fails_on_is_rejected_not_raised(
+    worker_run, tmp_path, damage
+):
+    copy = tmp_path / "copy"
+    shutil.copytree(worker_run, copy)
+    damage(copy)
+
+    with pytest.raises(TelemetryMetricsError, match="evidence was rejected"):
+        load_verified_worker_evidence(copy)
 
 
 def test_values_the_worker_verifier_compares_loosely_must_be_integers(
