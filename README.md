@@ -680,6 +680,73 @@ NumPy or matplotlib. See the
 [telemetry metrics guide](docs/telemetry-metrics.md) and the
 [telemetry traces and dashboards guide](docs/telemetry-traces-dashboards.md).
 
+## Simulate CUDA kernel launches and time Metal kernels on an Apple GPU
+
+Two labs write a vector-add kernel and an RGB-to-grayscale kernel. Both labs
+use the same exact integer rule for grayscale. The kernel-launch lab
+simulates CUDA launches of both kernels in pure Python on the CPU. The Metal
+lab compiles both kernels for the Apple GPU of a Mac and times them against
+PyTorch. Each `run` seals a report, and each `verify` checks a report against
+the pinned config:
+
+```bash
+ai-journey-kernel-launch run \
+  --config config/day-73-kernel-launch.json \
+  --output /tmp/day-73-kernel-launch-report.json
+ai-journey-kernel-launch verify \
+  --report /tmp/day-73-kernel-launch-report.json \
+  --config config/day-73-kernel-launch.json
+ai-journey-kernel-metal run \
+  --config config/day-73-kernel-metal.json \
+  --output /tmp/day-73-kernel-metal.json
+ai-journey-kernel-metal verify \
+  --report /tmp/day-73-kernel-metal.json \
+  --config config/day-73-kernel-metal.json
+```
+
+`ai-journey-kernel-launch` runs each kernel thread by thread, in the
+canonical order and in three seeded orders. It records each out-of-bounds
+access and each data race in the simulated buffers. On the pinned plan, all
+8 runs of the guarded kernels match exact references. At ragged extents, the
+unguarded kernels make 128 out-of-bounds writes and 232 write conflicts. The
+lab also pins CUDA C++ source for both kernels, and 10 structural checks pass
+on it without a compiler. Both commands print one line with the report digest
+`4dfd9f8c599ae45e5033e56dddbd33f82bd02827bc9fbd41574c167995ae8af0`.
+
+`ai-journey-kernel-metal` compiles the kernels at run time through
+`torch.mps.compile_shader`. The Metal kernels and their PyTorch equivalents on
+the MPS device and on the CPU must each match a NumPy reference bit for bit.
+Then the command times the Metal kernels against PyTorch on the same MPS
+device. `verify` does not import torch. It rebuilds the correctness results
+on the CPU, and it checks the timings for structure only.
+
+In three runs of the pinned config on the development host, all 13
+correctness cases were exact. The Metal grayscale kernel was 12.8 to 23.6
+times faster than the eager PyTorch equivalent. For vector add, the ratio of
+the PyTorch median to the Metal median stayed between 0.85 and 1.24. Neither
+side was faster at every point. These values are host-specific Apple GPU
+(Metal) measurements from one shared host, not portable figures.
+
+`ai-journey-kernel-launch` and `ai-journey-kernel-metal` exit 0 on success, 1
+when a report fails verification, and 2 for usage errors, unreadable or
+invalid inputs, or a refused output. For `ai-journey-kernel-metal`, code 2
+also marks a run that failed a check, had a device error or exceeded its time
+budget. Code 3 means that the host cannot run Metal kernels through PyTorch.
+Then `run` stops before it measures anything.
+
+Evidence boundary: the kernel-launch lab runs no GPU, compiles no CUDA
+source and measures no time. Its CUDA C++ text is source for a later run on
+an NVIDIA GPU. The Metal timings do not measure or predict CUDA, NVIDIA,
+distributed or production performance. No CUDA kernel ran, and the labs used
+no NVIDIA GPU.
+
+CI job `kernel-launch-cpu` runs and verifies the pinned plan from an
+installed wheel without torch, NumPy or matplotlib. CI job
+`kernel-metal-contracts` runs the Metal lab tests on Linux, where the GPU
+tests skip. It also requires the installed `run` to exit 3 and write no
+report. See the [kernel-launch lab guide](docs/kernel-launch-lab.md) and the
+[Metal kernel lab guide](docs/kernel-metal-lab.md).
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with
