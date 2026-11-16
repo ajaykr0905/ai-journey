@@ -5,6 +5,10 @@ Lecture 3 does, and guards that index before it touches memory: ``if i < n``
 in 1D, and a test on both axes in 2D. The run helpers size the grid with
 ``ceil_div``, copy the inputs into device buffers, launch the kernel in one
 declared order and copy the output back to the host.
+
+The unguarded variants drop the guard. Only the tests and the run report use
+them, to show that the simulator catches the out-of-bounds writes of a launch
+whose extent is not a multiple of its block size.
 """
 
 from __future__ import annotations
@@ -65,6 +69,30 @@ def rgb_to_grayscale_kernel(
         gray[pixel] = luma_u8(rgb[3 * pixel], rgb[3 * pixel + 1], rgb[3 * pixel + 2])
 
 
+def vector_add_unguarded_kernel(
+    t: ThreadContext, a: DeviceBuffer, b: DeviceBuffer, out: DeviceBuffer, n: int
+) -> None:
+    """Run the vector add without ``if i < n``; for tests and the report only."""
+
+    i = t.block_idx.x * t.block_dim.x + t.thread_idx.x
+    out[i] = to_float32(a[i] + b[i])
+
+
+def rgb_to_grayscale_unguarded_kernel(
+    t: ThreadContext, rgb: DeviceBuffer, gray: DeviceBuffer, width: int, height: int
+) -> None:
+    """Run the grayscale kernel without its guard; for tests and the report only.
+
+    A thread past the last column still computes ``row * width + col``. That
+    index wraps onto a pixel of the next row, or past the end of the image.
+    """
+
+    col = t.block_idx.x * t.block_dim.x + t.thread_idx.x
+    row = t.block_idx.y * t.block_dim.y + t.thread_idx.y
+    pixel = row * width + col
+    gray[pixel] = luma_u8(rgb[3 * pixel], rgb[3 * pixel + 1], rgb[3 * pixel + 2])
+
+
 @dataclass(frozen=True)
 class KernelRun:
     """One simulated launch of a lab kernel, with its output and its log."""
@@ -78,7 +106,12 @@ class KernelRun:
 
     @property
     def useful_threads(self) -> int:
-        """Count threads that wrote an output element: those the guard admitted."""
+        """Count threads that wrote an output element.
+
+        For a guarded kernel these are exactly the threads the guard admits.
+        An unguarded kernel also counts threads that wrote another thread's
+        element.
+        """
 
         return self.result.log.writer_threads[self.output_buffer]
 
@@ -87,12 +120,19 @@ class KernelRun:
         return self.result.threads_run - self.useful_threads
 
 
+def _guard(guarded: object) -> bool:
+    if type(guarded) is not bool:
+        raise TypeError("guarded must be a bool")
+    return guarded
+
+
 def run_vector_add(
     a: Sequence[float],
     b: Sequence[float],
     *,
     threads_per_block: int,
     order: LaunchOrder | None = None,
+    guarded: bool = True,
 ) -> KernelRun:
     """Launch the vector add with one thread per element in ``order``."""
 
@@ -102,7 +142,7 @@ def run_vector_add(
     config = launch_1d(n, threads_per_block)
     out = DeviceBuffer.zeros("out", "float32", n)
     result = launch(
-        vector_add_kernel,
+        vector_add_kernel if _guard(guarded) else vector_add_unguarded_kernel,
         config,
         DeviceBuffer("a", "float32", a),
         DeviceBuffer("b", "float32", b),
@@ -111,7 +151,7 @@ def run_vector_add(
         order=order,
     )
     return KernelRun(
-        kernel="vector_add",
+        kernel="vector_add" if guarded else "vector_add_unguarded",
         extent=Dim3(n),
         output_buffer="out",
         result=result,
@@ -127,6 +167,7 @@ def run_rgb_to_grayscale(
     height: int,
     block: tuple[int, int],
     order: LaunchOrder | None = None,
+    guarded: bool = True,
 ) -> KernelRun:
     """Launch the grayscale kernel with 2D blocks over image columns and rows."""
 
@@ -138,8 +179,13 @@ def run_rgb_to_grayscale(
         raise KernelLaunchError("an HxWx3 image needs 3 * width * height values")
     config = launch_2d(width, height, *block)
     gray = DeviceBuffer.zeros("gray", "uint8", width * height)
+    kernel = (
+        rgb_to_grayscale_kernel
+        if _guard(guarded)
+        else rgb_to_grayscale_unguarded_kernel
+    )
     result = launch(
-        rgb_to_grayscale_kernel,
+        kernel,
         config,
         DeviceBuffer("rgb", "uint8", rgb),
         gray,
@@ -148,7 +194,7 @@ def run_rgb_to_grayscale(
         order=order,
     )
     return KernelRun(
-        kernel="rgb_to_grayscale",
+        kernel="rgb_to_grayscale" if guarded else "rgb_to_grayscale_unguarded",
         extent=Dim3(width, height),
         output_buffer="gray",
         result=result,
