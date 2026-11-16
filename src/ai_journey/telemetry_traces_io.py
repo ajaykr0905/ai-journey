@@ -1,7 +1,9 @@
 """Strict canonical JSON, bounded reads and no-overwrite publication for telemetry.
 
 Telemetry artifacts are derived evidence: an OTLP/JSON trace export, a Grafana
-dashboard and the sealed reports that bind them to their sources. Readers open
+dashboard and the sealed reports that bind them to their sources. A report's
+seal is the SHA-256 of its canonical JSON without the seal field; it proves
+content identity, not authorship. Readers open
 only regular files without following a final symlink, stop at an explicit byte
 bound and decode strict UTF-8 JSON that rejects duplicate keys, non-finite
 numbers and integer literals too long to parse. Writers publish complete bytes
@@ -66,6 +68,27 @@ def canonical_sha256(value: object) -> str:
     """Digest the canonical JSON encoding of a value (no trailing newline)."""
 
     return sha256_hex(canonical_json_bytes(value))
+
+
+def seal_report(report: dict[str, object]) -> dict[str, object]:
+    """Add the canonical SHA-256 seal over every other report field."""
+
+    if type(report) is not dict or "report_sha256" in report:
+        raise TelemetryError("report must be an unsealed mapping")
+    return {**report, "report_sha256": canonical_sha256(report)}
+
+
+def require_sealed_report(report: object, *, kind: str) -> dict[str, object]:
+    """Return a report of ``kind`` whose seal matches its canonical content."""
+
+    if type(report) is not dict or type(report.get("report_sha256")) is not str:
+        raise TelemetryError("report is not sealed")
+    unsigned = {key: value for key, value in report.items() if key != "report_sha256"}
+    if canonical_sha256(unsigned) != report["report_sha256"]:
+        raise TelemetryError("report seal does not match its content")
+    if report.get("kind") != kind:
+        raise TelemetryError(f"report kind is not {kind}")
+    return report
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:

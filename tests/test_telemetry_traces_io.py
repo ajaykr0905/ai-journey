@@ -13,6 +13,8 @@ from ai_journey.telemetry_traces_io import (
     load_canonical_artifact,
     publish_new_file,
     read_bounded_file,
+    require_sealed_report,
+    seal_report,
     sha256_hex,
     strict_json_loads,
 )
@@ -150,3 +152,18 @@ def test_output_directories_are_new_and_outside_every_source(tmp_path):
     assert list(source.iterdir()) == []
     with pytest.raises(TypeError, match="source directories"):
         create_output_directory(tmp_path / "c", sources=(str(source),))
+
+
+def test_seals_cover_every_other_field_and_name_the_report_kind():
+    sealed = seal_report({"kind": "sample", "value": 1})
+
+    assert sealed["report_sha256"] == canonical_sha256({"kind": "sample", "value": 1})
+    assert require_sealed_report(sealed, kind="sample") is sealed
+    with pytest.raises(TelemetryError, match="unsealed"):
+        seal_report(sealed)
+    with pytest.raises(TelemetryError, match="kind is not other"):
+        require_sealed_report(sealed, kind="other")
+    with pytest.raises(TelemetryError, match="does not match"):
+        require_sealed_report(sealed | {"value": 2}, kind="sample")
+    with pytest.raises(TelemetryError, match="not sealed"):
+        require_sealed_report({"kind": "sample"}, kind="sample")

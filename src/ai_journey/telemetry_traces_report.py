@@ -22,10 +22,11 @@ from .telemetry_traces_config import TelemetryConfig
 from .telemetry_traces_io import (
     TelemetryError,
     artifact_bytes,
-    canonical_sha256,
     create_output_directory,
     load_canonical_artifact,
     publish_new_file,
+    require_sealed_report,
+    seal_report,
     sha256_hex,
 )
 from .telemetry_traces_lab import TELEMETRY_BOUNDARY
@@ -65,27 +66,6 @@ ENCODING = {
     "attribute_values": "stringValue, boolValue, or intValue as a decimal string",
     "span_order": "start time, then depth, so each parent precedes its children",
 }
-
-
-def seal_report(report: dict[str, Any]) -> dict[str, Any]:
-    """Add the canonical SHA-256 seal over every other report field."""
-
-    if type(report) is not dict or "report_sha256" in report:
-        raise TelemetryError("report must be an unsealed mapping")
-    return {**report, "report_sha256": canonical_sha256(report)}
-
-
-def require_sealed_report(report: object, *, kind: str) -> dict[str, Any]:
-    """Return a report of ``kind`` whose seal matches its canonical content."""
-
-    if type(report) is not dict or type(report.get("report_sha256")) is not str:
-        raise TelemetryError("report is not sealed")
-    unsigned = {key: value for key, value in report.items() if key != "report_sha256"}
-    if canonical_sha256(unsigned) != report["report_sha256"]:
-        raise TelemetryError("report seal does not match its content")
-    if report.get("kind") != kind:
-        raise TelemetryError(f"report kind is not {kind}")
-    return report
 
 
 @dataclass(frozen=True)
