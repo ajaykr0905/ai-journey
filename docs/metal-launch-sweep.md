@@ -188,8 +188,9 @@ binds one call for each admitted shape. Then it does these steps:
 3. The sample launches a batch of calls with one shape, calls
    `torch.mps.synchronize()` again and reads the clock again.
 4. Repeat `r` runs each shape once. Shape `r` modulo the number of shapes
-   runs first. Thus slow drift in the clock, the heat or the load does not
-   favor the shapes that run first.
+   runs first. When the repeat count is a multiple of the number of shapes,
+   each shape takes each turn equally often. Slow drift in the clock, the
+   heat or the load then favors no shape.
 5. After the last sample, the outputs of all shapes must be equal. The
    matmul output must also meet the bound, and the vector output must equal
    the float32 sum.
@@ -335,6 +336,12 @@ of the best size.
 At 1048576 elements, the sizes 8, 16 and 32 gave the three lowest rates. Their
 IQRs overlap the IQRs of the other sizes, so this run does not separate them.
 
+These three sizes also ran first in one more repeat than the other sizes. At
+this length, the samples in the first turn of a repeat had a median of 139.7
+µs for each call. The samples in the other turns had medians of 117.9 µs to
+125.4 µs. In the first 18 repeats, each size ran first 2 times, and the sizes
+8, 16 and 32 still gave the three lowest rates.
+
 The following statements are hypotheses. The lab reads no hardware counters.
 It cannot observe how the GPU schedules threadgroups or SIMD groups. Thus the
 data does not prove or disprove these statements.
@@ -408,8 +415,12 @@ launch.
 
 The correctness cases must leave padding threads on each axis of each shape.
 A shape with 1 thread on an axis has no padding on that axis, so the parser
-refuses it. The repeat count 21 is a multiple of the 7 matmul shapes, so each
-shape takes each turn 3 times.
+refuses it.
+
+The repeat count 21 is a multiple of the 7 matmul shapes, so each shape takes
+each turn 3 times. It is not a multiple of the 9 vector sizes. Thus the sizes
+8, 16 and 32 run first in 3 repeats, and each other size runs first in 2
+repeats.
 
 The config parser counts the planned work before a run, as if each pipeline
 admits each shape. For the pinned config, the checks are 7 mapping checks, 16

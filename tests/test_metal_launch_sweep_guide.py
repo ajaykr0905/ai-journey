@@ -1,10 +1,14 @@
+import itertools
 import json
 import re
 import shlex
+from functools import partial
 from pathlib import Path
 
 from ai_journey import metal_launch_sweep_cli
 from ai_journey.kernel_metal_runtime import UNAVAILABLE_REASONS
+from ai_journey.memory_access_benchmark import summarize_timings
+from ai_journey.metal_launch_sweep_benchmark import time_shapes
 from ai_journey.metal_launch_sweep_config import (
     MAX_RUN_BYTES,
     MAX_RUN_CALLS,
@@ -17,7 +21,7 @@ from ai_journey.metal_launch_sweep_report import (
     MEASUREMENT_BOUNDARY,
     MEASUREMENT_LABEL,
 )
-from ai_journey.metal_launch_sweep_runtime import MetalLaunchSweepRuntime
+from ai_journey.metal_launch_sweep_runtime import MetalLaunchSweepRuntime, SweepWorkload
 from ai_journey.metal_launch_sweep_shapes import REJECTION_REASONS, simd_footprint
 from test_metal_launch_sweep_recorded import (
     RECORDED_LOAD_AVERAGES,
@@ -275,3 +279,76 @@ def test_the_width_section_states_only_what_the_recorded_report_shows():
     lowest = sorted(short["shapes"], key=lambda shape: shape["rank"])[-3:]
     assert sorted(shape["group_size"][0] for shape in lowest) == [8, 16, 32]
     assert "the sizes 8, 16 and 32 gave the three lowest rates" in words
+
+
+def first_turns(shapes, repeats):
+    """Count the repeats in which each shape runs first, from the timing loop."""
+
+    log = []
+    workload = SweepWorkload(
+        calls=tuple(partial(log.append, position) for position in range(shapes)),
+        synchronize=lambda: None,
+        outputs_agree=lambda: True,
+        output=lambda: None,
+    )
+    time_shapes(
+        workload,
+        calls_per_sample=1,
+        warmup=0,
+        repeats=repeats,
+        clock=itertools.count().__next__,
+    )
+    starts = log[::shapes]
+    return [starts.count(position) for position in range(shapes)]
+
+
+def median_ns(samples):
+    return summarize_timings(tuple(samples)).median_ns
+
+
+def test_the_guide_states_how_often_each_shape_runs_first():
+    config = load_config(ROOT / PINNED)
+    repeats = config.timing.repeats
+    shapes, sizes = config.matmul.group_shapes, config.vector.group_sizes
+    text = flat(guide())
+
+    # The turns rotate, but only whole cycles give every shape each turn.
+    assert set(first_turns(len(shapes), repeats)) == {repeats // len(shapes)}
+    turns = first_turns(len(sizes), repeats)
+    more = [size for size, count in zip(sizes, turns) if count > min(turns)]
+    assert (more, max(turns), min(turns)) == ([8, 16, 32], 3, 2)
+    assert "When the repeat count is a multiple of the number of shapes" in text
+    assert (
+        f"It is not a multiple of the {len(sizes)} vector sizes. Thus the sizes 8, "
+        f"16 and 32 run first in {max(turns)} repeats, and each other size runs "
+        f"first in {min(turns)} repeats."
+    ) in text
+
+
+def test_the_extra_first_turns_leave_the_lowest_vector_rates_unchanged():
+    words = flat(section("Shape, size and the execution width"))
+    short = recorded_report()["benchmark"]["vector"][0]
+    sizes, calls = len(short["shapes"]), short["calls_per_sample"]
+    by_turn = [[] for _ in range(sizes)]
+    for position, shape in enumerate(short["shapes"]):
+        for repeat, sample in enumerate(shape["samples_ns"]):
+            by_turn[(position - repeat) % sizes].append(sample)
+    per_call = [median_ns(samples) / calls / 1000 for samples in by_turn]
+    whole = short["repeats"] - short["repeats"] % sizes
+
+    assert f"a repeat had a median of {per_call[0]:.1f} µs for each call" in words
+    assert (
+        f"other turns had medians of {min(per_call[1:]):.1f} µs to "
+        f"{max(per_call[1:]):.1f} µs"
+    ) in words
+    # All the repeats, then only the whole cycles, where every size runs first
+    # equally often, rank the same three sizes lowest.
+    for cut in (None, whole):
+        ranked = sorted(
+            short["shapes"], key=lambda shape: median_ns(shape["samples_ns"][:cut])
+        )
+        assert {shape["group_size"][0] for shape in ranked[-3:]} == {8, 16, 32}
+    assert (
+        f"In the first {whole} repeats, each size ran first {whole // sizes} times, "
+        "and the sizes 8, 16 and 32 still gave the three lowest rates."
+    ) in words
