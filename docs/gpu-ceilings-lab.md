@@ -119,8 +119,10 @@ value stops after about 31000 steps. Thus each step count is 16384 or less.
 At 16384 steps, about 97% of the chains still move. A kernel that skips a
 trip then gives a different output, and the check stops the run.
 
-If a kernel rounds the product before the add, most chains change within 256
-steps. Thus the check also shows that the kernel fused each multiply and add.
+If a kernel rounds the product before the add, the result changes in about
+one step in eight. A later step seldom removes such a change, so most chains
+change within 256 steps. Thus a kernel that rounds each product before the
+add fails the check.
 
 ### Bandwidth ceiling
 

@@ -3,6 +3,7 @@ from fractions import Fraction
 import numpy
 import pytest
 
+from ai_journey import gpu_ceiling_reference
 from ai_journey.gpu_ceiling_reference import (
     FMA_ADDEND,
     FMA_COEFFICIENTS,
@@ -85,6 +86,19 @@ def test_an_unfused_multiply_then_add_changes_most_chains():
     for _ in range(256):
         unfused = (unfused * FMA_MULTIPLIER).astype(numpy.float32) + FMA_ADDEND
     assert (unfused != fused).mean() > 0.9
+
+
+def test_an_unfused_step_differs_in_one_step_in_eight_as_the_docstring_says():
+    # fl(a * x) is a whole multiple of 2**-23 for every x in [1, 2), so an
+    # unfused step differs only when rounding the product moves the sum.
+    x = (numpy.arange(2**23, 2**24) * 2.0**-23).astype(numpy.float32)
+    unfused = (x * FMA_MULTIPLIER).astype(numpy.float32) + FMA_ADDEND
+    fused = x.astype(numpy.float64) * float(FMA_MULTIPLIER) + float(FMA_ADDEND)
+
+    assert 0.12 < (fused.astype(numpy.float32) != unfused).mean() < 0.13
+    assert "in about one step in eight" in " ".join(
+        gpu_ceiling_reference.__doc__.split()
+    )
 
 
 def test_chains_stay_in_the_binade_and_keep_moving_across_the_sweep():

@@ -97,6 +97,16 @@ def test_guide_states_the_kernel_constants_of_the_source():
     assert f"whole numbers below {MAX_REDUCE_VALUE + 1}" in text
 
 
+def test_guide_claims_only_what_the_unfused_check_can_show():
+    text = flat(guide())
+
+    assert "the result changes in about one step in eight." in text
+    assert "Thus a kernel that rounds each product before the add fails" in text
+    # One unfused step matches the fused result seven times in eight, so the
+    # check cannot show that every single step was fused.
+    assert "fused each multiply and add" not in text
+
+
 def test_guide_states_the_step_bound_that_keeps_the_chains_moving():
     text = guide()
 

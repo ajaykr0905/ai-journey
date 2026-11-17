@@ -7,15 +7,18 @@ inputs from the seed alone.
 FMA chains start from uniform float32 values in [1, 2): ``m * 2**-23`` for
 integers ``m`` in [2**23, 2**24). The multiplier ``a = (2**24 - 4173) *
 2**-24`` and the addend ``b = 12561923 * 2**-35`` are exact float32 values
-with full 24-bit significands, so a fused and an unfused multiply-add round
-differently in most steps and the check can tell them apart. For ``x`` in
-[1, 2) the exact ``x * a + b`` is an integer multiple of 2**-47 below 4, so it
-has at most 49 significant bits and float64 holds it exactly; rounding that
-float64 to float32 is then the one rounding of a fused multiply-add. Each
-step moves ``x`` toward ``b / (1 - a)``, about 1.47, so ``x`` never leaves
-[1, 2) and the argument holds at every step. One thread's output is the XOR
-of its chains' final bit patterns, and thread ``i`` uses row ``i % 32`` of
-the start table, so 32 words rebuild a whole output buffer.
+with full 24-bit significands. Rounding the product first, as an unfused
+multiply-add does, changes the result in about one step in eight. Each step
+multiplies a difference by ``a``, only 0.025% below 1, so rounding seldom
+removes it: after 256 steps nearly every chain differs, and the check can
+tell the two apart. For ``x`` in [1, 2) the exact ``x * a + b`` is an
+integer multiple of 2**-47 below 4, so it has at most 49 significant bits
+and float64 holds it exactly; rounding that float64 to float32 is then the
+one rounding of a fused multiply-add. Each step moves ``x`` toward
+``b / (1 - a)``, about 1.47, so ``x`` never leaves [1, 2) and the argument
+holds at every step. One thread's output is the XOR of its chains' final bit
+patterns, and thread ``i`` uses row ``i % 32`` of the start table, so 32
+words rebuild a whole output buffer.
 
 Copy sources are standard-normal float32 values, so every bit of a copy
 matters. Read-reduce sources are whole numbers in [0, 1024), so a partial of
