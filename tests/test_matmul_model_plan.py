@@ -34,7 +34,7 @@ def plan_mapping() -> dict:
         "block": [32, 2],
         "cases": [
             {"name": "ragged", "m": 3, "n": 35, "k": 3, "input_seed": 7},
-            {"name": "aligned", "m": 4, "n": 32, "k": 2, "input_seed": 7},
+            {"name": "aligned", "m": 32, "n": 32, "k": 2, "input_seed": 7},
         ],
         "permuted_order_seeds": [5],
         "accounting_shapes": [{"m": 64, "n": 64, "k": 64}],
@@ -130,7 +130,7 @@ def change(*path):
         (change("cases", 0, "input_seed", -1), KernelLaunchError, "input_seed"),
         (change("cases", 0, "k", 20000), MatmulModelError, "2100000 multiply-adds"),
         (change("cases", 0, "m", 1000), MatmulModelError, "launches 64000 threads with x_columns"),
-        (change("cases", 1, "n", 9000), MatmulModelError, "launches 36096 threads with x_columns"),
+        (change("cases", 1, "n", 2000), MatmulModelError, "launches 64512 threads with x_columns"),
         (change("permuted_order_seeds", []), MatmulModelError, "1 to 4"),
         (change("permuted_order_seeds", [5, 5]), MatmulModelError, "must not repeat"),
         (change("accounting_shapes", [{"m": 1, "n": 1, "k": i} for i in range(1, 6)]), MatmulModelError, "0 to 4"),
