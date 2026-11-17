@@ -20,7 +20,7 @@ from ai_journey.matmul_metal_io import load_report
 from ai_journey.memory_access_plan import canonical_json_bytes
 from test_kernel_metal_runtime import requires_metal
 from test_matmul_metal_config import make_config_mapping
-from test_matmul_metal_recorded import RecordedBackend
+from test_matmul_metal_recorded import RECORDED_REPORT_JSON, RecordedBackend
 
 ROOT = Path(__file__).resolve().parents[1]
 NUMBER = r"\d+(?:\.\d+)?(?:e[-+]\d+)?"
@@ -118,6 +118,22 @@ def test_a_stand_in_run_prints_and_verifies_as_synthetic(tmp_path, capsys):
     )
     assert main(["verify", "--report", str(output), "--config", str(config)]) == 0
     assert capsys.readouterr().out == f"verified_{lines[-1]}\n"
+
+
+def test_the_recorded_measurement_verifies_with_its_labels(tmp_path, capsys):
+    path = tmp_path / "recorded.json"
+    path.write_text(RECORDED_REPORT_JSON + "\n", encoding="ascii")
+    report = json.loads(RECORDED_REPORT_JSON)
+
+    assert main(["verify", "--report", str(path)]) == EXIT_OK
+    assert capsys.readouterr().out == (
+        f"verified_matmul_metal_measurement={report['report_sha256']} "
+        "correctness_cases=3 benchmark_points=2 scope=apple_gpu_metal_this_host "
+        "cuda=false nvidia=false\n"
+    )
+    completed = without_torch("verify", "--report", str(path))
+    assert completed.returncode == EXIT_OK, completed.stderr
+    assert completed.stdout.startswith("verified_matmul_metal_measurement=")
 
 
 def test_run_stops_with_a_distinct_code_where_torch_cannot_be_imported(tmp_path):
