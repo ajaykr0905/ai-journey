@@ -112,6 +112,13 @@ The constants let the CPU compute each output exactly:
 - Each step moves `x` toward `b / (1 - a)`, about 1.47, so `x` stays in
   [1, 2) at each step.
 
+Rounding stops a chain when the distance from `x` to `b / (1 - a)` is less
+than 1/4173. A step then changes `x` by less than half a unit in the last
+place, so the rounded result is `x` again. A chain with the farthest initial
+value stops after about 31000 steps. Thus each step count is 16384 or less.
+At 16384 steps, about 97% of the chains still move. A kernel that skips a
+trip then gives a different output, and the check stops the run.
+
 If a kernel rounds the product before the add, most chains change within 256
 steps. Thus the check also shows that the kernel fused each multiply and add.
 
@@ -264,13 +271,13 @@ limits, the load averages and the labels.
 | --- | --- | --- |
 | `seed` | 74 | 0 to 2^32 - 1 |
 | `correctness.threads` | 1000 | 1 to 65536, not a multiple of a group size |
-| `correctness.fma_steps` | 256 | a multiple of 8, up to 65536 |
+| `correctness.fma_steps` | 256 | a multiple of 8, up to 16384 |
 | `correctness.stream_float4` | 4099 | 1 to 2^20 float4 values, with read-reduce threads past the data |
 | `correctness.bank_trips` | 9 | 1 to 65536 |
 | `fma.group_size` | 256 | 1 to 1024 |
 | `fma.threads` | 1048576 | 1 to 2^24 |
 | `fma.chain_counts` | 1, 2, 4, 8, 16, 32 | increasing values from that list |
-| `fma.fma_steps` | 32 to 8192 | 3 to 8 increasing multiples of 8, up to 65536 |
+| `fma.fma_steps` | 32 to 8192 | 3 to 8 increasing multiples of 8, up to 16384 |
 | `bandwidth.group_size` | 256 | 1 to 1024 |
 | `bandwidth.buffer_bytes` | 16, 64 and 256 MiB | 1 to 8 increasing multiples of 16 bytes, up to 1 GiB |
 | `bandwidth.copy_float4_per_thread` | 4 | 1 to 1024 |

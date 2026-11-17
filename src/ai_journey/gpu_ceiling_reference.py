@@ -60,8 +60,12 @@ MAX_CASE_INDEX = 63
 FMA_MULTIPLIER = numpy.float32((2**24 - 4173) * 2.0**-24)
 FMA_ADDEND = numpy.float32(12561923 * 2.0**-35)
 FMA_COEFFICIENTS = (float(FMA_MULTIPLIER), float(FMA_ADDEND))
-# The CPU rebuild costs one NumPy step per FMA step of a chain.
-MAX_FMA_STEPS = 1 << 16
+# A timed output shows that its trips ran only while its chains still move.
+# Once x is within 1/4173 of b / (1 - a), one step moves it less than half an
+# ulp and rounding keeps it; the farthest start gets there in about 31000
+# steps. At 2**14 steps the chains that start more than 0.015 from that point,
+# about 97% of them, still move, and the CPU rebuild costs one NumPy step each.
+MAX_FMA_STEPS = 1 << 14
 
 MAX_STREAM_FLOAT4 = 1 << 26
 MAX_REDUCE_VALUE = 1023

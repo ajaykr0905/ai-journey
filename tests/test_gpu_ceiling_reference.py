@@ -8,6 +8,7 @@ from ai_journey.gpu_ceiling_reference import (
     FMA_COEFFICIENTS,
     FMA_MULTIPLIER,
     MAX_FLOAT4_PER_THREAD,
+    MAX_FMA_STEPS,
     bank_first_words,
     bank_lane_addresses,
     bank_lane_sums,
@@ -27,6 +28,8 @@ from ai_journey.gpu_ceiling_source import (
     BANK_LOADS_PER_TRIP,
     BANK_SHIFT_PERIOD,
     BANK_TILE_ROWS,
+    FMA_CHAIN_COUNTS,
+    FMA_STEPS_PER_TRIP,
     GpuCeilingError,
 )
 from ai_journey.kernel_metal_reference import array_sha256
@@ -95,6 +98,36 @@ def test_chains_stay_in_the_binade_and_keep_moving_across_the_sweep():
         fma_chain_values(start, (64, 64))
     with pytest.raises(GpuCeilingError, match=r"\[1, 2\)"):
         fma_chain_values(start * 2, (1,))
+
+
+def fused_step(values):
+    exact = values.astype(numpy.float64) * float(FMA_MULTIPLIER) + float(FMA_ADDEND)
+    return exact.astype(numpy.float32)
+
+
+@pytest.mark.parametrize("seed", [0, 74, 2**32 - 1])
+def test_at_the_step_bound_one_trip_more_still_changes_most_lane_words(seed):
+    # A timed output proves that its trips ran only while the chains move.
+    before, last = fma_chain_values(
+        fma_start_values(seed), (MAX_FMA_STEPS - FMA_STEPS_PER_TRIP, MAX_FMA_STEPS)
+    )
+
+    assert (before != last).mean() > 0.9
+    for chains in FMA_CHAIN_COUNTS:
+        words = fma_lane_words(last, chains) != fma_lane_words(before, chains)
+        assert words.mean() > 0.9, chains
+
+
+def test_past_twice_the_step_bound_rounding_has_stopped_every_chain():
+    # x stops once it is within 1/4173 of b / (1 - a); from the farthest start
+    # that takes about 31000 steps, so more steps could not change an output.
+    (values,) = fma_chain_values(fma_start_values(74), (MAX_FMA_STEPS,))
+    for _ in range(MAX_FMA_STEPS):
+        values = fused_step(values)
+
+    assert numpy.array_equal(fused_step(values), values)
+    with pytest.raises(GpuCeilingError, match="steps must be in"):
+        fma_chain_values(fma_start_values(74), (MAX_FMA_STEPS + FMA_STEPS_PER_TRIP,))
 
 
 def test_lane_words_xor_every_chain_and_tile_over_threads():

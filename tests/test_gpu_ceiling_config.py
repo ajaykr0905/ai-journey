@@ -107,6 +107,10 @@ def test_planned_work_counts_the_run_with_its_own_batch_sizes():
         (("fma", "fma_steps"), [8, 32], "must hold 3 to 8 values"),
         (("fma", "fma_steps"), [8, 32, 100], "multiples of 8"),
         (("fma", "fma_steps"), [8.0, 32, 128], "must be an integer"),
+        # Rounding has stopped every chain by 32768 steps, so the timed outputs
+        # of these points could not show that their trips ran.
+        (("fma", "fma_steps"), [8192, 16384, 32768], "fma_steps must be in"),
+        (("correctness", "fma_steps"), 32768, "fma_steps must be in"),
         (("fma", "group_size"), 2048, "fma group_size must be in"),
         (("bandwidth", "buffer_bytes"), [16384, 65544], "multiples of 16"),
         (("bandwidth", "buffer_bytes"), [8, 65536], "buffer_bytes must be in"),
@@ -130,7 +134,7 @@ def test_invalid_controls_are_refused_with_one_error_type(path, value, message):
 def test_work_bounds_and_oversized_samples_are_refused_before_a_run():
     huge = changed(("fma", "threads"), 1 << 24)
     huge["fma"]["chain_counts"] = [32]
-    huge["fma"]["fma_steps"] = [8192, 16384, 65536]
+    huge["fma"]["fma_steps"] = [4096, 8192, 16384]
     with pytest.raises(GpuCeilingError, match="FLOPs; the bound is"):
         config_from_mapping(huge)
     tiny_batches = changed(("bandwidth", "buffer_bytes"), [16, 32])

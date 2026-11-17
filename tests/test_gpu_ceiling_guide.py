@@ -15,6 +15,7 @@ from ai_journey.gpu_ceiling_config import (
 from ai_journey.gpu_ceiling_reference import (
     FMA_ADDEND,
     FMA_MULTIPLIER,
+    MAX_FMA_STEPS,
     MAX_REDUCE_VALUE,
 )
 from ai_journey.gpu_ceiling_report import (
@@ -94,6 +95,14 @@ def test_guide_states_the_kernel_constants_of_the_source():
     assert f"The tile has {BANK_TILE_ROWS} rows" in text
     assert f"then reads {BANK_LOADS_PER_TRIP} rows" in text
     assert f"whole numbers below {MAX_REDUCE_VALUE + 1}" in text
+
+
+def test_guide_states_the_step_bound_that_keeps_the_chains_moving():
+    text = guide()
+
+    assert f"Thus each step count is {MAX_FMA_STEPS} or less." in flat(text)
+    assert f"a multiple of 8, up to {MAX_FMA_STEPS} |" in text
+    assert f"increasing multiples of 8, up to {MAX_FMA_STEPS} |" in text
 
 
 def test_guide_states_the_thresholds_and_every_finding():
