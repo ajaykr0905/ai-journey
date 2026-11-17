@@ -268,6 +268,32 @@ def test_a_timed_vector_output_must_agree_and_be_exact(backend, message):
         )
 
 
+class MatmulDisagreeing(StandInBackend):
+    """Time every shape, then report that their latest outputs differ."""
+
+    def matmul_workload(self, a, b, launches):
+        base = super().matmul_workload(a, b, launches)
+        return SweepWorkload(base.calls, base.synchronize, lambda: False, base.output)
+
+
+def test_a_timed_matmul_point_stops_when_its_shapes_disagree():
+    backend = MatmulDisagreeing()
+
+    # Only the first output meets the bound check, so the others must agree.
+    with pytest.raises(MetalLaunchSweepError, match="timed outputs differ between"):
+        measure_matmul_point(
+            backend,
+            seed=74,
+            index=0,
+            shape=(32, 32, 32),
+            admissions=matmul_admissions(backend, ((16, 16), (64, 4))),
+            warmup=0,
+            repeats=3,
+            target_flops_per_sample=1 << 20,
+            clock=itertools.count(0, 1000).__next__,
+        )
+
+
 @requires_metal
 def test_a_small_point_on_this_gpu_is_timed_with_the_host_clock():
     from test_metal_launch_sweep_runtime import sweep_runtime

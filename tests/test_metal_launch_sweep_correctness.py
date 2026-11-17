@@ -143,12 +143,22 @@ class Wrong(StandInBackend):
         return numpy.concatenate([product, tail])
 
 
+class NoTail(StandInBackend):
+    """Return C alone, so an unchecked length would pass the guard check."""
+
+    def matmul(self, a, b, launch):
+        self.launches.append(launch)
+        return rounded_product(a, b).reshape(-1)
+
+
 @pytest.mark.parametrize(
     ("backend", "message"),
     [
         (ShapeDependent(), "with group 4x64: the result differs between shapes"),
         (WritesTail(), "with group 8x8: a padding thread wrote the tail"),
         (Wrong(), "exceeds the float32 rounding bound"),
+        # 8x8 covers the 37 x 53 case with 56 x 40 threads.
+        (NoTail(), "with group 8x8: no 2240-element buffer"),
     ],
 )
 def test_a_case_stops_on_a_shape_dependent_wrong_or_unguarded_result(backend, message):
