@@ -228,6 +228,41 @@ def test_the_ceiling_is_the_best_torch_point_and_fractions_follow():
         ceiling_summary(())
 
 
+def test_the_ceiling_follows_torch_matmul_where_a_naive_kernel_peaks_elsewhere():
+    # x_columns peaks at point 0 and torch.matmul at point 1, so only the
+    # torch point can give the ceiling.
+    shape = matmul_shape(64, 64, 64)
+    points = []
+    for index, costs in enumerate(
+        [
+            {COLUMNS: 100, ROWS: 300, TORCH_MATMUL: 80},
+            {COLUMNS: 400, ROWS: 200, TORCH_MATMUL: 20},
+        ]
+    ):
+        workload = ScriptedWorkload(costs)
+        timings = time_sides(
+            workload, calls_per_sample=1, warmup=0, repeats=3, clock=workload.clock
+        )
+        points.append(MatmulPoint(index, shape, (), timings, 0.0))
+
+    summary = ceiling_summary(tuple(points))
+
+    flops = shape.flops
+    assert (
+        summary["ceiling_index"],
+        summary["measured_ceiling_gflops_per_second"],
+    ) == (
+        1,
+        flops / 20,
+    )
+    assert summary["naive"][COLUMNS] == {
+        "best_median_gflops_per_second": flops / 100,
+        "best_index": 0,
+        "fraction_of_measured_ceiling": (flops / 100) / (flops / 20),
+    }
+    assert summary["naive"][ROWS]["best_index"] == 1
+
+
 @requires_metal
 def test_this_gpu_times_a_small_sweep_with_the_host_timer():
     points = scripted_sweep(
