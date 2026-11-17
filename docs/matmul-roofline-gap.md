@@ -122,8 +122,10 @@ of the two rates. The matmul-metal report gives the same ratio.
 
 A roof share above 1 at no reuse shows that the kernel ran faster than the
 bandwidth ceiling times the no-reuse intensity. Thus the kernel probably moved
-fewer bytes than the no-reuse model counts, and caches served part of the
-loads. The labs read no hardware counters, so they do not measure this traffic.
+fewer bytes than the no-reuse model counts, for example because caches served
+part of the loads. The measured bandwidth ceiling can also be lower than the
+true limit of the host. The labs read no hardware counters, so they do not
+measure this traffic.
 
 ## Gap on the development host
 

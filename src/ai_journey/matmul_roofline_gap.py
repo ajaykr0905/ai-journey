@@ -9,8 +9,9 @@ each shape and side the gap report gives:
 
 * the share of the measured FMA ceiling: the median rate over that ceiling;
 * the share of the bandwidth roof at each intensity: the median rate over the
-  bandwidth ceiling times the intensity. A share above 1 at no reuse means
-  that caches served loads that the no-reuse model sends to memory;
+  bandwidth ceiling times the intensity. A share above 1 at no reuse shows
+  that the kernel probably moved fewer bytes than the no-reuse model counts,
+  or that the measured bandwidth ceiling is below the true limit of the host;
 * the ratio to ``torch.matmul``, as the matmul-metal report states it.
 
 Both sources must pass their own verifiers first, so a tampered source sets
