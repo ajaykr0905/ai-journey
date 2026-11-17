@@ -1,6 +1,10 @@
 import copy
 import json
+import math
+import random
+import struct
 from dataclasses import replace
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -10,6 +14,7 @@ from ai_journey.kernel_launch_config import KernelLaunchError
 from ai_journey.kernel_launch_io import canonical_json_bytes
 from ai_journey.matmul_model_access import OperandTraffic
 from ai_journey.matmul_model_plan import MatmulModelPlan, load_plan
+from ai_journey.matmul_model_reference import round_to_float32
 from ai_journey.matmul_model_report import DIGEST_FIELD, build_report, seal_report
 from ai_journey.matmul_model_verify import (
     MatmulModelVerificationError,
@@ -220,3 +225,50 @@ def test_an_overlong_cuda_literal_is_a_rejection_not_a_crash(sealed, tmp_path):
 
     with pytest.raises(MatmulModelVerificationError, match="checks.matmul_grid"):
         load_report(path)
+
+
+def float32_bits(value):
+    return struct.unpack("<I", struct.pack("<f", value))[0]
+
+
+@pytest.mark.parametrize(
+    ("significand", "exponent"),
+    [
+        (2**25 - 1, 0),
+        (-(2**25 - 1), -40),
+        (2**24 + 1, 3),
+        (2**24 + 3, -3),
+        (2**48 - 1, -60),
+        (3, -2),
+        (-1, 0),
+    ],
+)
+def test_the_verifier_rounds_and_encodes_edge_values_like_ieee(significand, exponent):
+    # 2**25 - 1 rounds up with a carry to a 25-bit 2**24. No pinned input
+    # reaches a carry, so these values pin the encoder on that path.
+    rounded = matmul_model_verify._round24(significand, exponent)
+
+    assert matmul_model_verify._bits(rounded) == float32_bits(
+        math.ldexp(significand, exponent)
+    )
+    assert math.ldexp(*rounded) == round_to_float32(
+        Fraction(significand) * Fraction(2) ** exponent
+    )
+
+
+def test_the_verifier_encoding_matches_struct_on_seeded_values():
+    # Each significand has at most 48 bits, so ldexp is exact in double and
+    # struct rounds it to float32 once.
+    draw = random.Random(74)
+    for _ in range(2_000):
+        significand = draw.randrange(1, 2**48) * draw.choice((1, -1))
+        exponent = draw.randrange(-70, 40)
+        rounded = matmul_model_verify._round24(significand, exponent)
+        assert matmul_model_verify._bits(rounded) == float32_bits(
+            math.ldexp(significand, exponent)
+        )
+    assert matmul_model_verify._bits((0, 0)) == 0
+    with pytest.raises(MatmulModelVerificationError, match="normal float32 range"):
+        matmul_model_verify._bits((1, 200))
+    with pytest.raises(MatmulModelVerificationError, match="normal float32 range"):
+        matmul_model_verify._bits((1, -200))

@@ -106,7 +106,8 @@ def _ratio(value: Fraction) -> dict[str, object]:
 
 
 # A float32 value here is (significand, exponent): significand * 2**exponent,
-# with |significand| below 2**24, or (0, 0) for +0.0.
+# with |significand| at most 2**24, or (0, 0) for +0.0. A rounding carry gives
+# exactly 2**24, so _bits shifts it back to 24 bits.
 
 
 def _operand(seed: int, stream: str, count: int) -> list[tuple[int, int]]:
