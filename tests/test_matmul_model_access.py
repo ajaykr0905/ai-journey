@@ -129,7 +129,9 @@ def test_a_ragged_edge_warp_keeps_only_the_lanes_inside_c():
         (strided_access(stride_elements=2), "strided", 8),
         (WarpAccess(4, tuple(4 * (31 - lane) for lane in range(32))), "strided", -4),
         (permuted_access(seed=7), "strided", None),
-        (WarpAccess(4, (8,) + (None,) * 31), "broadcast", None),
+        (WarpAccess(4, (8,) + (None,) * 31), "single", None),
+        (WarpAccess(4, (None, 8, None, 8) + (None,) * 28), "broadcast", 0),
+        (WarpAccess(4, (0, None, 4) + (None,) * 29), "strided", 2),
         (WarpAccess(4, (0, 4, 12) + (None,) * 29), "strided", None),
     ],
 )
@@ -137,6 +139,28 @@ def test_requests_are_classified_by_their_lane_addresses(access, expected, strid
     assert access_class(access) == expected
     assert lane_stride_bytes(access) == stride
     assert expected in ACCESS_CLASSES
+
+
+def test_a_request_with_one_active_lane_is_neither_a_broadcast_nor_a_walk():
+    # n = 33 leaves only column 32 in the second warp of each row. One lane
+    # fits the broadcast rule and the coalesced rule alike, and a C store
+    # from one lane is not a broadcast, so the request gets its own class.
+    current = launch(MatmulShape(m=4, n=33, k=2), X_COLUMNS, block=(32, 1))
+    lone = warp_requests(current, warp_of_element(current, 0, 32))
+
+    assert lone.active_lanes == 1
+    for access in (*lone.a_loads, *lone.b_loads, lone.c_store):
+        assert access_class(access) == "single"
+        assert request_mapping(access)["sectors"] == 1
+    classes = {
+        name: dict(traffic.classes)
+        for name, traffic in analyze_launch(current).operands
+    }
+    assert classes == {
+        "a": {"single": 8, "broadcast": 8, "coalesced": 0, "strided": 0},
+        "b": {"single": 8, "broadcast": 0, "coalesced": 8, "strided": 0},
+        "c": {"single": 4, "broadcast": 0, "coalesced": 4, "strided": 0},
+    }
 
 
 def test_aligned_launch_totals_match_closed_forms():
@@ -152,7 +176,7 @@ def test_aligned_launch_totals_match_closed_forms():
         "requested_bytes": steps * 128,
         "unique_bytes": steps * 4,
         "transferred_bytes": steps * 32,
-        "classes": {"broadcast": steps, "coalesced": 0, "strided": 0},
+        "classes": {"single": 0, "broadcast": steps, "coalesced": 0, "strided": 0},
     }
     assert columns["operands"]["b"]["sectors"] == 4 * steps
     assert columns["operands"]["b"]["classes"]["coalesced"] == steps

@@ -10,7 +10,7 @@ from ai_journey.matmul_model_verify import verify_report
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config/day-74-matmul-model.json"
 GUIDE = ROOT / "docs/matmul-model-lab.md"
-REPORT_SHA256 = "6fac533806b4746c46cca614bad20d9cd04eda07bb8a8d7eacd76951fc40ebb8"
+REPORT_SHA256 = "85f0aa8ddefb7e99d0e9de81047663a1e2e3d43332347a51560b1a19b34b1136"
 RAGGED_SHA256 = "41d50935c365946c5bce24e34eeb75d2e1589ab7ff729920591204c344950cd8"
 ALIGNED_SHA256 = "5d3baafab74b128d9c5039142a041e2e0c6b4d855e7706e703688c046867c35f"
 CUDA_SHA256 = "a97031329a75820abe14a8cd5a3a55dbe728bbedd64871a79f8d5e2e7b815fc0"
@@ -192,6 +192,8 @@ def test_guide_states_commands_numbers_sources_and_boundaries(report, guide):
         'In this lab, "peak" means a ceiling that a run measured on this host.',
         "This half measured no ceiling, so it states no peak.",
         "Double has 53 bits, and 53 is at least 2 * 24 + 2.",
+        "`single`: one lane is active, so the request reads or writes one element.",
+        "`coalesced`: each active lane reads or writes the 4-byte element at byte `base + 4 * lane`, for one value of `base`.",
         "When x runs over rows, the A loads and the C stores are `strided` requests, and the B loads are broadcasts.",
         "Both mappings request the same 270,336 bytes.",
         "With x over rows, the sectors move 20/3 times as many bytes.",

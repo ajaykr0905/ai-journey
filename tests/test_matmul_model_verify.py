@@ -69,6 +69,21 @@ def test_the_pinned_report_reproduces_from_the_pinned_plan():
     assert verify_report(seal_report(build_report(plan)), plan=plan) == plan
 
 
+def test_one_lane_requests_get_their_own_class_in_the_independent_recount():
+    # 33 x 33 leaves one lane in the second warp of each row with x over
+    # columns, and of each column with x over rows.
+    case = {"name": "lone-lanes", "m": 33, "n": 33, "k": 2, "input_seed": 7}
+    plan = MatmulModelPlan.from_mapping({**plan_mapping(), "cases": [case]})
+    report = seal_report(build_report(plan))
+
+    assert verify_report(report, plan=plan) == plan
+    for section in report["cases"][0]["mappings"]:
+        operands = section["access"]["operands"]
+        assert operands["c"]["classes"]["single"] == 33
+        assert operands["c"]["classes"]["broadcast"] == 0
+        assert operands["a"]["classes"]["single"] == 33 * 2
+
+
 @pytest.mark.parametrize(
     ("change", "message"),
     [

@@ -34,7 +34,7 @@ PYTHONPATH=src python -m ai_journey.matmul_model_cli verify \
 `run` prints one line:
 
 ```text
-matmul_model_report=6fac533806b4746c46cca614bad20d9cd04eda07bb8a8d7eacd76951fc40ebb8 runs=16 runs_matching_reference=16 order_independent_launches=4/4 cross_checked_requests=13900 probe_traces=8/8 memory_bound_points=10/16 cuda_checks=16/16 simulated_on_cpu=true gpu_executed=false cuda_compiled=false
+matmul_model_report=85f0aa8ddefb7e99d0e9de81047663a1e2e3d43332347a51560b1a19b34b1136 runs=16 runs_matching_reference=16 order_independent_launches=4/4 cross_checked_requests=13900 probe_traces=8/8 memory_bound_points=10/16 cuda_checks=16/16 simulated_on_cpu=true gpu_executed=false cuda_compiled=false
 ```
 
 `verify` prints the same line with the prefix `verified_matmul_model_report=`.
@@ -135,10 +135,18 @@ runtime aligns each allocation to at least 256 bytes. A lane that the guard
 stops issues no address. For each request, the model counts the distinct
 32-byte sectors and 128-byte lines. It gives each request one class:
 
-- `broadcast`: every active lane reads one address.
-- `coalesced`: the active lanes, in lane order, read consecutive 4-byte
-  elements.
+- `single`: one lane is active, so the request reads or writes one element.
+- `broadcast`: two or more active lanes read one address.
+- `coalesced`: each active lane reads or writes the 4-byte element at byte
+  `base + 4 * lane`, for one value of `base`.
 - `strided`: any other pattern.
+
+A request with one active lane has one address and no lane step. It could
+count as a broadcast or as a coalesced request, and a store from one lane is
+not a broadcast. Thus such a request has its own class. With x over columns,
+the guard leaves one active lane in an edge warp when `n` is one more than a
+multiple of 32. With x over rows, the same occurs for `m`. The pinned plan has
+no such warp.
 
 The model has no cache. It counts each request alone, as if no cache holds a
 sector between requests. The memory_access lab counts the same way.
@@ -385,7 +393,7 @@ CUDA checks pass. The reference digests are
 `41d50935c365946c5bce24e34eeb75d2e1589ab7ff729920591204c344950cd8` for
 `ragged` and `5d3baafab74b128d9c5039142a041e2e0c6b4d855e7706e703688c046867c35f`
 for `aligned`. The report digest is
-`6fac533806b4746c46cca614bad20d9cd04eda07bb8a8d7eacd76951fc40ebb8`.
+`85f0aa8ddefb7e99d0e9de81047663a1e2e3d43332347a51560b1a19b34b1136`.
 
 ## Boundaries
 

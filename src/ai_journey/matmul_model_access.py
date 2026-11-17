@@ -13,9 +13,17 @@ every allocation to at least 256 bytes (Programming Guide section 5.3.2), so
 sector and line numbers count per matrix. A 4-byte element never crosses a
 32-byte sector or a 128-byte line. Each request gets one class:
 
-* ``broadcast``: every active lane reads one address;
-* ``coalesced``: the active lanes, in lane order, read consecutive elements;
+* ``single``: one lane is active, so the request reads or writes one element;
+* ``broadcast``: two or more active lanes read one address;
+* ``coalesced``: each active lane reads or writes the element at byte
+  ``base + 4 * lane`` for one ``base``;
 * ``strided``: any other pattern.
+
+A request with one active lane has one address and no lane step, so it could
+count as a broadcast or as a coalesced request, and a C store from one lane is
+not a broadcast. Such a request has its own class. The guard leaves one lane
+in an edge warp when the axis that x covers, ``n`` or ``m``, is one more than
+a multiple of 32.
 
 No cache is modeled. Each request counts its sectors as if no earlier request
 had brought them on chip, as the memory_access lab's coalescing model does.
@@ -33,7 +41,7 @@ from .memory_access_tiling import MatmulShape
 
 ELEMENT_BYTES = 4
 OPERANDS = ("a", "b", "c")
-ACCESS_CLASSES = ("broadcast", "coalesced", "strided")
+ACCESS_CLASSES = ("single", "broadcast", "coalesced", "strided")
 
 
 @dataclass(frozen=True)
@@ -214,8 +222,10 @@ def lane_stride_bytes(access: WarpAccess) -> int | None:
 
 
 def access_class(access: WarpAccess) -> str:
-    """Classify one request as broadcast, coalesced or strided."""
+    """Classify one request as single, broadcast, coalesced or strided."""
 
+    if len(access.active_lanes) == 1:
+        return "single"
     if len(set(access.active_addresses)) == 1:
         return "broadcast"
     if lane_stride_bytes(access) == access.access_bytes:

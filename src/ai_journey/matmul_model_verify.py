@@ -219,7 +219,9 @@ def _request(addresses: list[int | None]) -> dict[str, object]:
             address == first + (lane - lane0) * step for lane, address in active
         ):
             stride = step
-    if len(distinct) == 1:
+    if len(active) == 1:
+        kind = "single"
+    elif len(distinct) == 1:
         kind = "broadcast"
     elif stride == _ELEMENT:
         kind = "coalesced"
@@ -263,7 +265,7 @@ def _expected_access(
             "requested_bytes": 0,
             "unique_bytes": 0,
             "transferred_bytes": 0,
-            "classes": {"broadcast": 0, "coalesced": 0, "strided": 0},
+            "classes": {"single": 0, "broadcast": 0, "coalesced": 0, "strided": 0},
         }
         for name in ("a", "b", "c")
     }
