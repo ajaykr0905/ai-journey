@@ -26,9 +26,13 @@ from ai_journey.gpu_ceiling_report import (
 )
 from ai_journey.gpu_ceiling_source import (
     BANK_LOADS_PER_TRIP,
+    BANK_ROW_WORDS,
+    BANK_SHIFT_PERIOD,
     BANK_TILE_ROWS,
     FMA_CHAIN_COUNTS,
     FMA_STEPS_PER_TRIP,
+    SHADER_SOURCE,
+    WORD_BYTES,
 )
 from ai_journey.kernel_metal_runtime import UNAVAILABLE_REASONS
 from test_gpu_ceiling_recorded import RECORDED
@@ -113,6 +117,43 @@ def test_guide_states_the_step_bound_that_keeps_the_chains_moving():
     assert f"Thus each step count is {MAX_FMA_STEPS} or less." in flat(text)
     assert f"a multiple of 8, up to {MAX_FMA_STEPS} |" in text
     assert f"increasing multiples of 8, up to {MAX_FMA_STEPS} |" in text
+
+
+def test_guide_states_the_access_widths_that_the_stream_kernels_use():
+    text = flat(guide())
+    read_reduce = SHADER_SOURCE[
+        SHADER_SOURCE.index("kernel void stream_read_reduce(") :
+    ]
+
+    assert read_reduce.index("device float* out") < read_reduce.index("{")
+    assert "All loads and stores are float4." not in text
+    assert (
+        "Each load is a float4. The copy also stores float4 values, and the "
+        "read-reduce stores one float32 for each thread."
+    ) in text
+
+
+def test_guide_states_how_often_a_stride_1_load_starts_a_128_byte_block():
+    # Trip k reads rows k % 64 to k % 64 + 15; lane 0 starts at column 0.
+    rows = [
+        shift + load
+        for shift in range(BANK_SHIFT_PERIOD)
+        for load in range(BANK_LOADS_PER_TRIP)
+    ]
+    starts = {
+        words: [row * words * WORD_BYTES % 128 == 0 for row in rows]
+        for words in BANK_ROW_WORDS
+    }
+
+    assert all(starts[32])
+    assert 32 * sum(starts[33]) == len(rows)
+    text = flat(guide())
+    assert "the first of those words is not on a 128-byte boundary" not in text
+    assert (
+        "In the unpadded layout, the first word of each load is at a multiple of "
+        "128 bytes in the tile. In the padded layout, this is true for only one "
+        "load in 32."
+    ) in text
 
 
 def test_guide_states_the_thresholds_and_every_finding():

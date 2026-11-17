@@ -130,9 +130,10 @@ add fails the check.
 the same kind of buffer and writes one float32 partial sum for each thread.
 Both kernels walk the buffer with a grid stride: thread `t` reads the values
 `t`, `t + threads`, `t + 2 * threads` and so on. Thus each SIMD group reads
-32 consecutive float4 values at each step. All loads and stores are float4.
-The read-reduce data are whole numbers below 1024, so each float32 sum is
-exact in any order.
+32 consecutive float4 values at each step. Each load is a float4. The copy
+also stores float4 values, and the read-reduce stores one float32 for each
+thread. The read-reduce data are whole numbers below 1024, so each float32
+sum is exact in any order.
 
 ### Threadgroup-memory banks
 
@@ -392,8 +393,9 @@ The data show these results about this Apple GPU:
   host does not match the model there.
 - At stride 1, the padded layout was 1.55 to 1.60 times slower than the
   unpadded layout. Both layouts read 32 consecutive words in each load at
-  stride 1. In the padded layout, the first of those words is not on a
-  128-byte boundary.
+  stride 1. In the unpadded layout, the first word of each load is at a
+  multiple of 128 bytes in the tile. In the padded layout, this is true for
+  only one load in 32.
 - In each run, the finding was `stride_slowdown_reduced_by_padding`.
 
 Thus the stride has a strong effect on threadgroup memory reads on this
