@@ -6,14 +6,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy
 import pytest
 
 from ai_journey.matmul_metal_config import config_from_mapping
 from ai_journey.matmul_metal_report import measure_report
-from ai_journey.matmul_metal_verify import MatmulMetalVerificationError, verify_report
+from ai_journey.matmul_metal_verify import (
+    MatmulMetalVerificationError,
+    _replay,
+    verify_report,
+)
 from ai_journey.memory_access_report import DIGEST_FIELD, report_digest
 from test_matmul_metal_config import make_config_mapping
 from test_matmul_metal_recorded import RECORDED_REPORT_JSON, RecordedBackend
+from test_matmul_metal_reference import TRAPS, exact_fma, trap_operands
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -182,6 +188,24 @@ def test_every_resealed_tamper_is_caught_by_recomputation(name):
 
     with pytest.raises(MatmulMetalVerificationError, match=message):
         verify_report(resealed(report, change))
+
+
+@pytest.mark.parametrize("sign", [1.0, -1.0])
+@pytest.mark.parametrize(("start", "a", "b", "fused", "twice_rounded"), TRAPS)
+def test_the_verifier_replay_rounds_once_next_to_a_float32_midpoint(
+    start, a, b, fused, twice_rounded, sign
+):
+    # Seeded operands almost never put a float64 sum on a float32 midpoint,
+    # so only these pairs show that rounding to odd stops a second rounding.
+    left, right = trap_operands(sign * start, sign * a, b)
+
+    replayed = _replay(left, right)
+
+    assert replayed.dtype == numpy.float32
+    assert replayed[0, 0] == numpy.float32(sign * fused)
+    assert replayed[0, 0] == exact_fma(sign * a, b, numpy.float32(sign * start))
+    widened = numpy.float64(sign * a) * numpy.float64(b) + numpy.float64(sign * start)
+    assert numpy.float32(widened) == numpy.float32(sign * twice_rounded)
 
 
 def lower_a_replay_equal_torch_error(report):
