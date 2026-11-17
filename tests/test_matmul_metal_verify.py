@@ -13,7 +13,7 @@ from ai_journey.matmul_metal_report import measure_report
 from ai_journey.matmul_metal_verify import MatmulMetalVerificationError, verify_report
 from ai_journey.memory_access_report import DIGEST_FIELD, report_digest
 from test_matmul_metal_config import make_config_mapping
-from test_matmul_metal_recorded import RecordedBackend
+from test_matmul_metal_recorded import RECORDED_REPORT_JSON, RecordedBackend
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -182,6 +182,39 @@ def test_every_resealed_tamper_is_caught_by_recomputation(name):
 
     with pytest.raises(MatmulMetalVerificationError, match=message):
         verify_report(resealed(report, change))
+
+
+def lower_a_replay_equal_torch_error(report):
+    """Quarter one torch error whose digest says it holds the replay's bits.
+
+    The record's ratio and the summary are rebuilt to match, so only the
+    error itself is false.
+    """
+
+    cases = report["correctness"]["cases"]
+    case = cases[1]
+    output = case["outputs"][3]
+    assert output["buffer_sha256"] == case["replay_sha256"]
+    output["max_relative_error"] /= 4
+    output["bound_ratio"] = output["max_relative_error"] / case["bound"]
+    summary = report["summary"]
+    summary["max_relative_error"]["torch_matmul/cpu"] = max(
+        entry["outputs"][3]["max_relative_error"] for entry in cases
+    )
+    summary["max_bound_ratio"] = max(
+        entry["max_relative_error"] / item["bound"]
+        for item in cases
+        for entry in item["outputs"]
+    )
+
+
+def test_a_torch_record_with_the_replay_digest_must_carry_the_replay_error():
+    report = json.loads(RECORDED_REPORT_JSON)
+
+    tampered = resealed(report, lower_a_replay_equal_torch_error)
+
+    with pytest.raises(MatmulMetalVerificationError, match="the replay's error"):
+        verify_report(tampered)
 
 
 def test_an_unsealed_change_fails_the_digest_first():

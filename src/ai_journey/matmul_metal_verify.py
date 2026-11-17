@@ -14,7 +14,8 @@ relative error is recomputed and held to the bound. A PyTorch output has an
 unknown summation order and cannot be rebuilt, so its record is checked for
 structure: a digest, an error within the bound, a ratio that recomputes, and
 a count of differing elements that is zero exactly when its digest is the
-replay's.
+replay's. A record with the replay's digest holds the replay's bits, so its
+error must equal the replay's error.
 
 Timings cannot be observed again either, so they are checked for structure
 only: sample counts, positive integers, and the arithmetic of the statistics,
@@ -326,13 +327,22 @@ def _naive_output(
 
 
 def _torch_output(
-    entry: object, device: str, replay_digest: str, elements: int, bound: float
+    entry: object,
+    device: str,
+    replay: tuple[str, float],
+    elements: int,
+    bound: float,
 ) -> float:
-    """Check what a PyTorch record can show without its output; return its error."""
+    """Check what a PyTorch record can show without its output; return its error.
+
+    ``replay`` is the replay's digest and its error. A record with that
+    digest holds the replay's bits, so its error must be the replay's too.
+    """
 
     _require(type(entry) is dict, "an output must be a JSON object")
     error, digest = entry.get("max_relative_error"), entry.get("buffer_sha256")
     differing = entry.get("differing_elements")
+    replay_digest, replay_error = replay
     _require(
         type(error) is float and math.isfinite(error) and 0.0 <= error <= bound,
         f"torch_matmul on {device} must record an error within the bound",
@@ -344,6 +354,11 @@ def _torch_output(
         and 0 <= differing <= elements
         and (differing == 0) == (digest == replay_digest),
         f"torch_matmul on {device} must count its differing elements consistently",
+    )
+    _require(
+        digest != replay_digest or error == replay_error,
+        f"torch_matmul on {device} holds the replay's bits, so it must record "
+        "the replay's error",
     )
     expected = {
         "implementation": _TORCH,
@@ -387,7 +402,7 @@ def _cases(
             guard = launches[mapping]["padding_threads"]
             _naive_output(output, _MAPPINGS[mapping], replay, guard, error, bound)
         for output, (_, device) in zip(outputs[2:], _OUTPUTS[2:]):
-            _torch_output(output, device, _hash(replay), m * n, bound)
+            _torch_output(output, device, (_hash(replay), error), m * n, bound)
         expected = {
             "index": index,
             "m": m,

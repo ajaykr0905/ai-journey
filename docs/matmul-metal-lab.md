@@ -368,7 +368,9 @@ rounds to odd. Thus the two methods check each other. A `torch.matmul` output
 has an unknown summation order, so the verifier cannot rebuild it. For these
 outputs, the verifier checks the digest format and holds the recorded error to
 the bound. It also requires a count of 0 differing elements exactly when the
-digest is the digest of the replay.
+digest is the digest of the replay. When the digest is the digest of the
+replay, the output has the bits of the replay. Then the verifier also requires
+the error of the replay.
 
 The verifier cannot observe a timing again, so it checks the timings for
 structure only. It checks the sample counts, the positive integer values, and
