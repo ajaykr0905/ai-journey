@@ -18,22 +18,25 @@ from ai_journey.metal_launch_sweep_cli import (
     main,
 )
 from ai_journey.metal_launch_sweep_io import load_report, save_report
+from ai_journey.metal_launch_sweep_runtime import SweepWorkload
 from ai_journey.metal_launch_sweep_shapes import MetalLaunchSweepError
 from test_kernel_metal_runtime import requires_metal
 from test_metal_launch_sweep_config import make_config_mapping
 from test_metal_launch_sweep_standin import StandInBackend
 
 ROOT = Path(__file__).resolve().parents[1]
+# Ranks reach 16 and the ratios have no upper limit: a GPU that other jobs
+# share can slow one shape tenfold, and the CLI prints that as it is.
 MATMUL = (
-    r"matmul m=\d+ n=\d+ k=\d+ group=\d+x\d+ rank=\d median_us=\d+\.\d\d "
-    r"iqr_us=\d+\.\d\d gflops_per_second=\d+\.\d relative_to_fastest=\d\.\d{3}"
+    r"matmul m=\d+ n=\d+ k=\d+ group=\d+x\d+ rank=\d+ median_us=\d+\.\d\d "
+    r"iqr_us=\d+\.\d\d gflops_per_second=\d+\.\d relative_to_fastest=\d+\.\d{3}"
 )
 VECTOR = (
-    r"vector length=\d+ group=\d+ rank=\d median_us=\d+\.\d\d iqr_us=\d+\.\d\d "
-    r"gb_per_second=\d+\.\d\d relative_to_fastest=\d\.\d{3}"
+    r"vector length=\d+ group=\d+ rank=\d+ median_us=\d+\.\d\d iqr_us=\d+\.\d\d "
+    r"gb_per_second=\d+\.\d\d relative_to_fastest=\d+\.\d{3}"
 )
 RANKING = r"ranking (matmul m=\d+ n=\d+ k=\d+|vector length=\d+) order=[0-9x,]+ "
-RANKING += r"spread=\d\.\d{3} separated=(true|false)"
+RANKING += r"spread=\d+\.\d{3} separated=(true|false)"
 # Setting sys.modules["torch"] to None makes every import of torch fail.
 WITHOUT_TORCH = """
 import sys
@@ -134,6 +137,52 @@ def test_a_stand_in_run_prints_and_verifies_as_synthetic(tmp_path, capsys):
     argv = ["verify", "--report", str(output), "--config", str(config)]
     assert main(argv) == EXIT_OK
     assert capsys.readouterr().out == f"verified_{lines[-1]}\n"
+
+
+class TickingClock:
+    """A clock that each reading moves 1 us, and that slow calls move further."""
+
+    def __init__(self):
+        self.now = 0
+
+    def __call__(self):
+        self.now += 1_000
+        return self.now
+
+
+class SlowShape(StandInBackend):
+    """A stand-in whose 4x64 matmul call costs 50 us more than the others."""
+
+    def __init__(self, clock):
+        super().__init__()
+        self.clock = clock
+
+    def matmul_workload(self, a, b, launches):
+        base = super().matmul_workload(a, b, launches)
+
+        def call(launch):
+            cost = 50_000 if launch.geometry.group_size == (4, 64) else 0
+
+            def run():
+                self.clock.now += cost
+
+            return run
+
+        calls = tuple(call(launch) for launch in launches)
+        return SweepWorkload(calls, base.synchronize, base.outputs_agree, base.output)
+
+
+def test_lines_with_a_ratio_of_ten_or_more_keep_their_format(tmp_path, capsys):
+    # A shared GPU can slow one shape tenfold, which the CLI prints as it is.
+    clock = TickingClock()
+    config = write_config(tmp_path / "config.json")
+    argv = ["run", "--config", str(config), "--output", str(tmp_path / "r.json")]
+
+    assert main(argv, backend=SlowShape(clock), clock=clock) == EXIT_OK
+    lines = capsys.readouterr().out.splitlines()
+    assert any("relative_to_fastest=801.000" in line for line in lines)
+    assert any("spread=801.000" in line for line in lines)
+    check_lines(lines, "synthetic_timing")
 
 
 def test_rejected_shapes_are_printed_with_their_reason(tmp_path, capsys):
