@@ -181,6 +181,42 @@ def test_a_workload_times_every_side_and_checks_their_agreement():
 
 
 @requires_metal
+def test_kernel_calls_pass_whole_groups_and_32_bit_scalars():
+    # Without arg_casts a little-endian GPU still reads the low 32 bits, and a
+    # grid of exactly the extent leaves the outputs right, so only the bound
+    # call itself shows the documented launch.
+    runtime = matmul_runtime()
+    shape = matmul_shape(17, 33, 9)
+    left, right = matmul_inputs(74, CORRECTNESS_STREAM, 0, shape)
+    checked = launches(runtime, shape)
+
+    workload = runtime.workload(left, right, checked)
+
+    for name, launch in checked.items():
+        call = workload.sides[name]
+        assert call.args[3:] == (17, 33, 9), name
+        assert call.keywords == {
+            "threads": list(launch.geometry.threads),
+            "group_size": [32, 8],
+            "arg_casts": {3: "int32", 4: "int32", 5: "int32"},
+        }, name
+
+
+@requires_metal
+def test_the_runtime_reads_the_float32_matmul_precision_in_force():
+    import torch
+
+    previous = torch.get_float32_matmul_precision()
+    try:
+        torch.set_float32_matmul_precision("medium")
+        runtime = MatmulMetalRuntime()
+    finally:
+        torch.set_float32_matmul_precision(previous)
+
+    assert runtime.float32_matmul_precision == "medium"
+
+
+@requires_metal
 def test_the_workload_check_sees_outputs_that_moved():
     # The check is the only guard on the timed outputs, so it must notice a
     # torch.matmul output that moved and naive outputs that differ in a bit.
