@@ -355,7 +355,10 @@ data does not prove or disprove these statements.
   matmul at 1024 and 2048.
 - Hypothesis: at 256, one call takes about 110 µs, and the grid holds 64 to
   1024 threadgroups. A fixed cost for each threadgroup would favor the 64
-  large threadgroups of 32x32 at this size.
+  large threadgroups of 32x32 at this size. But 8x8 has the most
+  threadgroups, 1024, and it ranked 2. Its IQR was below the IQRs of 32x8,
+  64x4 and 4x64, which have 256 threadgroups. Thus the count of threadgroups
+  alone does not set the ranks.
 - Hypothesis: a threadgroup of 1024 threads must fit on a GPU core as a whole.
   This could leave fewer threads active on a core at 1024 and 2048 than the
   smaller shapes do.

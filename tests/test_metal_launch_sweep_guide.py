@@ -387,3 +387,27 @@ def test_the_width_section_hedges_ranks_whose_quartiles_overlap():
         "comes from the recorded report of the run. The source is the tables "
         "above, or the raw samples and quartiles in the report."
     ) in words
+
+
+def test_the_threadgroup_cost_hypothesis_names_the_rank_that_weighs_against_it():
+    analysis = section("Shape, size and the execution width")
+    hypotheses = flat(analysis.split("The following statements are hypotheses.")[1])
+    point = recorded_report()["benchmark"]["matmul"][0]
+    shapes = shapes_of(point)
+    groups = {
+        label: -(-point["n"] // shape["group_size"][0])
+        * -(-point["m"] // shape["group_size"][1])
+        for label, shape in shapes.items()
+    }
+    most = max(groups, key=groups.get)
+
+    # A fixed cost for each threadgroup alone would rank 8x8 last at 256.
+    assert (most, groups[most], shapes[most]["rank"]) == ("8x8", 1024, 2)
+    for label in ("32x8", "64x4", "4x64"):
+        assert groups[label] == 256
+        assert shapes[most]["timing"]["p75_ns"] < shapes[label]["timing"]["p25_ns"]
+    assert "But 8x8 has the most threadgroups, 1024, and it ranked 2." in hypotheses
+    assert (
+        "Its IQR was below the IQRs of 32x8, 64x4 and 4x64, which have 256 "
+        "threadgroups. Thus the count of threadgroups alone does not set the ranks."
+    ) in hypotheses
