@@ -6,14 +6,14 @@ that runs them instead, each one built to stress a single resource:
 
 - ``fma_chains_<c>`` keeps ``c`` independent float32 chains in registers and
   applies ``x = fma(x, a, b)`` to every chain eight times per loop trip. The
-  loop reads and writes no memory. Lane ``i % 32`` of every thread starts
-  from row ``i % 32`` of a 32 x 32 table of seeded values, and the XOR of the
-  final bit patterns is the thread's one output: it depends on every chain,
-  so the compiler cannot drop a chain, and the CPU can rebuild it exactly.
+  loop reads and writes no memory. Thread ``i`` starts its chains from row
+  ``i % 32`` of a 32 x 32 table of seeded values, and the XOR of the final
+  bit patterns is the thread's one output: it depends on every chain, so the
+  compiler cannot drop a chain, and the CPU can rebuild it exactly.
 - ``stream_copy`` and ``stream_read_reduce`` walk a buffer of float4 values
   with a grid stride, so one SIMD group touches 32 consecutive float4 values
-  per step. The copy writes every value back; the read-reduce sums them into
-  one float32 partial per thread.
+  per step. The copy writes each value to its output buffer; the read-reduce
+  sums the values into one float32 partial per thread.
 - ``bank_rows_32`` and ``bank_rows_33`` read threadgroup memory: lane ``l``
   of each SIMD group reads logical word ``l * stride`` of a 32-column tile
   whose rows hold 32 words, or 33 with one word of padding. Each loop trip
