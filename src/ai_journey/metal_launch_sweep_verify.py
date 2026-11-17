@@ -312,8 +312,19 @@ def _tolerance(k: int) -> float:
     return sum(k * unit / (1 - k * unit) for unit in (2.0**-24, 2.0**-53))
 
 
+def _float32(value: float) -> bool:
+    """Whether a finite float is exactly a value that a float32 buffer can hold."""
+
+    with numpy.errstate(over="ignore"):
+        return float(numpy.float32(value)) == value
+
+
 def _accuracy(entry: object, a: numpy.ndarray, b: numpy.ndarray, label: str) -> None:
-    """Hold the recorded lattice values of C to a float64 reference rebuilt here."""
+    """Hold the recorded lattice values of C to a float64 reference rebuilt here.
+
+    C is a float32 buffer, so a lattice value with no float32 form, such as
+    the float64 reference itself, cannot have come from the kernel.
+    """
 
     _require(type(entry) is dict, f"{label}: accuracy must be a JSON object")
     samples = entry.get("samples")
@@ -329,9 +340,10 @@ def _accuracy(entry: object, a: numpy.ndarray, b: numpy.ndarray, label: str) -> 
             and sample[:2] == position
             and type(sample[2]) is float
             and math.isfinite(sample[2])
+            and _float32(sample[2])
             for sample, position in zip(samples, positions)
         ),
-        f"{label}: samples must be the lattice values of C",
+        f"{label}: samples must be the float32 lattice values of C",
     )
     left, right = a.astype(numpy.float64), b.astype(numpy.float64)
     tolerance = _tolerance(k)

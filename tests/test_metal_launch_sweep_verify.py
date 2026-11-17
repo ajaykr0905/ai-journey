@@ -7,11 +7,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy
 import pytest
 
 from ai_journey.memory_access_plan import canonical_json_bytes
 from ai_journey.memory_access_report import report_digest
 from ai_journey.metal_launch_sweep_config import config_from_mapping
+from ai_journey.metal_launch_sweep_correctness import matmul_inputs
 from ai_journey.metal_launch_sweep_report import MEASUREMENT_BOUNDARY, measure_report
 from ai_journey.metal_launch_sweep_verify import (
     MetalLaunchSweepVerificationError,
@@ -219,6 +221,36 @@ def test_the_error_maxima_of_a_case_cannot_fall_below_its_lattice():
         report["correctness"]["matmul"][0]["max_abs_error"] = value
         with pytest.raises(MetalLaunchSweepVerificationError, match="error maxima"):
             verify_report(reseal(report))
+
+
+def float64_value(seed, index, shape, row, column):
+    """Return one element of the float64 product, as no float32 kernel holds it."""
+
+    a, b = (
+        matrix.astype(numpy.float64) for matrix in matmul_inputs(seed, index, *shape)
+    )
+    value = float(a[row] @ b[:, column])
+    assert float(numpy.float32(value)) != value
+    return value
+
+
+def test_lattice_values_of_c_must_be_float32_values():
+    # Each changed value meets the bound with no error at all, but C is a
+    # float32 buffer, so no kernel can return it.
+    report = fresh()
+    case = report["correctness"]["matmul"][0]
+    assert (case["m"], case["n"], case["k"]) == (1, 1, 1)
+    case["samples"][0][2] = float64_value(74, 0, (1, 1, 1), 0, 0)
+    with pytest.raises(MetalLaunchSweepVerificationError, match="float32 lattice"):
+        verify_report(reseal(report))
+
+    report = fresh()
+    point = report["benchmark"]["matmul"][0]
+    sample = point["accuracy"]["samples"][3]
+    shape = (point["m"], point["n"], point["k"])
+    sample[2] = float64_value(74, 32, shape, sample[0], sample[1])
+    with pytest.raises(MetalLaunchSweepVerificationError, match="float32 lattice"):
+        verify_report(reseal(report))
 
 
 def test_an_unsealed_change_or_a_malformed_section_is_rejected():
