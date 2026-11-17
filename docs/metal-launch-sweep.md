@@ -25,8 +25,8 @@ python -m ai_journey.metal_launch_sweep_cli verify \
   --config config/day-74-metal-launch-sweep.json
 ```
 
-The parser names itself `ai-journey-metal-launch-sweep`. The package does not
-install that command yet.
+The parser names itself `ai-journey-metal-launch-sweep`. An installed wheel
+gives the same commands under that name.
 
 The `run` command compiles the kernels, checks them, times them, checks its
 own report and writes the report. It prints one line for each pipeline, each

@@ -24,8 +24,8 @@ python -m ai_journey.matmul_metal_cli verify \
   --config config/day-74-matmul-metal.json
 ```
 
-The parser uses the program name `ai-journey-matmul-metal`. This lab does not
-add a console script to `pyproject.toml`, so the commands use the module form.
+The parser uses the program name `ai-journey-matmul-metal`. An installed wheel
+gives the same commands under that name.
 
 The `run` command compiles the kernels, checks them, times them, checks its own
 report, and writes the report. It prints these lines:

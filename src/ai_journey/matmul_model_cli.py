@@ -30,7 +30,7 @@ from .matmul_model_verify import (
 EXIT_OK = 0
 EXIT_REJECTED = 1
 EXIT_INVALID = 2
-PROG = "python -m ai_journey.matmul_model_cli"
+PROG = "ai-journey-matmul-model"
 
 
 def build_parser() -> argparse.ArgumentParser:

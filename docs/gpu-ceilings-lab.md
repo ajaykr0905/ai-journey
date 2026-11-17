@@ -27,8 +27,8 @@ python -m ai_journey.gpu_ceiling_cli verify \
   --config config/day-74-gpu-ceilings.json
 ```
 
-The argument parser uses the program name `ai-journey-gpu-ceilings`. The
-package does not install a command with that name, so use `python -m`.
+The argument parser uses the program name `ai-journey-gpu-ceilings`. An
+installed wheel gives the same commands under that name.
 
 `run` compiles the kernels, checks them, times them, checks its own report,
 and writes the report. It prints these lines:

@@ -31,6 +31,7 @@ PYTHONPATH=src python -m ai_journey.matmul_model_cli verify \
   --config config/day-74-matmul-model.json
 ```
 
+An installed wheel gives the same commands as `ai-journey-matmul-model`.
 `run` prints one line:
 
 ```text

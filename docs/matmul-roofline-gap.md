@@ -30,8 +30,8 @@ python -m ai_journey.matmul_roofline_cli verify \
 ```
 
 The two source paths are the output paths in the guides of the two Metal
-labs. The parser uses the program name `ai-journey-matmul-roofline`. The
-package does not install that command yet, so use `python -m`.
+labs. The parser uses the program name `ai-journey-matmul-roofline`. An
+installed wheel gives the same commands under that name.
 
 The `gap` command verifies both source reports with their own verifiers. Then
 it seals the gap report, checks it and writes it. It prints these lines:
