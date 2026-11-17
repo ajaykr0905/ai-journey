@@ -102,8 +102,10 @@ class TorchTransposed(RecordedBackend):
 class TorchOneUlpFurther(RecordedBackend):
     """torch.matmul returns the replay with its worst element one ulp further out.
 
-    That output keeps within the bound for K > 1, has other bits than the
-    replay in exactly one element, and has a larger error than the kernels.
+    That output has other bits than the replay in exactly one element and a
+    larger error than the kernels. One more ulp can pass the bound when the
+    worst error is already near it, as at K = 1, so the tests use only shapes
+    whose errors sit far below the bound.
     """
 
     def torch_matmul(self, left, right, device):
