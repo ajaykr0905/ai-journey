@@ -352,3 +352,38 @@ def test_the_extra_first_turns_leave_the_lowest_vector_rates_unchanged():
         f"In the first {whole} repeats, each size ran first {whole // sizes} times, "
         "and the sizes 8, 16 and 32 still gave the three lowest rates."
     ) in words
+
+
+def iqrs_overlap(first, second):
+    """Whether the interquartile ranges of two timed shapes overlap."""
+
+    one, two = first["timing"], second["timing"]
+    return one["p25_ns"] <= two["p75_ns"] and two["p25_ns"] <= one["p75_ns"]
+
+
+def test_the_width_section_hedges_ranks_whose_quartiles_overlap():
+    words = flat(section("Shape, size and the execution width"))
+    report = recorded_report()
+    five = ("16x16", "32x8", "8x32", "64x4", "4x64")
+
+    for point in report["benchmark"]["matmul"]:
+        shapes = shapes_of(point)
+        fastest = min(five, key=lambda label: shapes[label]["timing"]["median_ns"])
+        one_row = [label for label in five if shapes[label]["rows_per_simd_group"] == 1]
+        assert any(iqrs_overlap(shapes[fastest], shapes[label]) for label in one_row)
+    assert (
+        "But at each size, the fastest of the five and a shape with 1 row had "
+        "overlapping IQRs, so this run does not separate them."
+    ) in words
+    middle = shapes_of(report["benchmark"]["matmul"][1])
+    assert middle["32x32"]["rank"] == 7
+    assert iqrs_overlap(middle["32x32"], middle["4x64"])
+    assert "At 1024, its IQR overlapped the IQR of 4x64." in words
+    # The separated mark covers only the extreme pair of a point.
+    assert "The mark compares only those two shapes." in flat(section("Timing method"))
+    # Quartiles and turn medians are not in the tables, so the section names
+    # the report's samples and quartiles as a source too.
+    assert (
+        "comes from the recorded report of the run. The source is the tables "
+        "above, or the raw samples and quartiles in the report."
+    ) in words

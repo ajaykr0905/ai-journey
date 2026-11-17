@@ -205,7 +205,8 @@ The ranking orders the shapes by their median sample. The spread is the
 slowest median divided by the fastest median. The report marks a point as
 `separated` when the IQR of the fastest shape and the IQR of the slowest
 shape do not overlap. Without that mark, the ranking of a point is inside the
-noise of the run.
+noise of the run. The mark compares only those two shapes. Thus two other
+shapes of a marked point can still have overlapping IQRs.
 
 ## One run on the development host
 
@@ -311,7 +312,8 @@ They are not vendor peaks.
 ## Shape, size and the execution width
 
 This section relates the measured data to the execution width of 32. Each
-statement before the hypotheses comes from the tables above.
+statement before the hypotheses comes from the recorded report of the run.
+The source is the tables above, or the raw samples and quartiles in the report.
 
 The x size of a 2D shape sets the rows that one SIMD group computes. Shapes
 with an x size of 32 or more put 1 row into each SIMD group. The shapes 16x16,
@@ -321,12 +323,14 @@ Five shapes have 256 threads. They have the same size, but a different split
 over rows and columns. At 1024 and at 2048, their rates were within 0.8% and
 0.7% of each other. At 256, the shape 4x64 with 8 rows had the lowest rate of
 the five, 8.9% below 16x16. A shape with 1 row per SIMD group was never the
-fastest of these five shapes.
+fastest of these five shapes. But at each size, the fastest of the five and a
+shape with 1 row had overlapping IQRs, so this run does not separate them.
 
 The effect of the threadgroup size changed with the matrix size. The shape
 32x32 has 1024 threads, the most that each pipeline allows. It was the
 fastest shape at 256, but it was the slowest at 1024 and at 2048. There, it
-was 4.1% and 2.2% slower than 8x8.
+was 4.1% and 2.2% slower than 8x8. At 1024, its IQR overlapped the IQR of
+4x64.
 
 At 16777216 elements, this run found no effect of the group size outside the
 noise. All nine sizes were within 3.6%, and their extreme IQRs overlapped. The
