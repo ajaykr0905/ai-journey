@@ -30,11 +30,26 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 
-from .kernel_metal_geometry import KernelMetalError
+from .kernel_metal_geometry import KernelMetalError, require_integer
 
 
 class GpuCeilingError(KernelMetalError):
     """Raised when a ceiling-lab control, launch, check or report is invalid."""
+
+
+def require_count(value: object, name: str, minimum: int, maximum: int) -> int:
+    """Bound an integer by the Metal lab's rule, as this lab's error.
+
+    ``require_integer`` refuses ``true`` and ``2.0`` with ``TypeError``; a
+    value out of range becomes ``GpuCeilingError``.
+    """
+
+    try:
+        return require_integer(value, name, minimum, maximum)
+    except GpuCeilingError:
+        raise
+    except KernelMetalError as error:
+        raise GpuCeilingError(str(error)) from error
 
 
 FMA = "fma"

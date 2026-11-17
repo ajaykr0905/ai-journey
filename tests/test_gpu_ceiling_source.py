@@ -23,6 +23,7 @@ from ai_journey.gpu_ceiling_source import (
     bank_kernel_name,
     bank_tile_bytes,
     fma_kernel_name,
+    require_count,
     source_sha256,
 )
 from ai_journey.kernel_metal_geometry import KernelMetalError
@@ -129,6 +130,15 @@ def test_unknown_chain_counts_and_row_lengths_are_refused(value):
     with pytest.raises(GpuCeilingError, match="row_words must be 32 or 33"):
         bank_kernel_name(value)
     assert issubclass(GpuCeilingError, KernelMetalError)
+
+
+def test_counts_reuse_the_metal_bound_rule_with_this_labs_error():
+    assert require_count(32, "stride", 1, 32) == 32
+    with pytest.raises(GpuCeilingError, match=r"stride must be in \[1, 32\]"):
+        require_count(33, "stride", 1, 32)
+    for value in (True, 2.0):
+        with pytest.raises(TypeError, match="stride must be an integer"):
+            require_count(value, "stride", 1, 32)
 
 
 def test_the_source_is_ascii_and_its_digest_covers_the_exact_text():
