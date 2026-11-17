@@ -25,6 +25,7 @@ from ai_journey.matmul_metal_verify import (
 from ai_journey.memory_access_benchmark import TIMER
 from ai_journey.memory_access_report import DIGEST_FIELD, report_digest
 from test_matmul_metal_config import make_config_mapping
+from test_matmul_metal_correctness import TorchOneUlpFurther
 from test_matmul_metal_recorded import RECORDED_REPORT_JSON, RecordedBackend
 from test_matmul_metal_reference import TRAPS, exact_fma, trap_operands
 
@@ -63,6 +64,31 @@ def test_a_synthetic_report_verifies_as_synthetic_and_binds_to_its_config():
     other = config_from_mapping({**make_config_mapping(), "name": "other-config"})
     with pytest.raises(MatmulMetalVerificationError, match="supplied config"):
         verify_report(report, config=other)
+
+
+def test_torch_outputs_with_other_bits_verify_and_can_set_the_largest_ratio():
+    # Without 1 x 1 x 1, whose single rounding sits near half the bound, the
+    # torch output that is one ulp further out sets the largest bound ratio.
+    shapes = {"shapes": [[17, 33, 9], [32, 32, 16]]}
+    config = config_from_mapping({**make_config_mapping(), "correctness": shapes})
+    clock = itertools.count(0, 1_000).__next__
+    report = measure_report(config, backend=TorchOneUlpFurther(), clock=clock)
+
+    summary = verify_report(report, config=config)
+
+    cases = report["correctness"]["cases"]
+    counts = [
+        [output["differing_elements"] for output in case["outputs"]] for case in cases
+    ]
+    assert counts == [[0, 0, 1, 1], [0, 0, 1, 1]]
+    ratios = [[output["bound_ratio"] for output in case["outputs"]] for case in cases]
+    naive_ratio = max(ratio for row in ratios for ratio in row[:2])
+    torch_ratio = max(ratio for row in ratios for ratio in row[2:])
+    assert summary["max_bound_ratio"] == torch_ratio > naive_ratio
+    assert report["summary"]["torch_cases_with_other_bits"] == {
+        "torch_matmul/mps": 2,
+        "torch_matmul/cpu": 2,
+    }
 
 
 def test_tied_points_resolve_to_the_first_one_as_the_run_chose():

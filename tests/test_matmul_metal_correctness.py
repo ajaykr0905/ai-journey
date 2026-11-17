@@ -99,6 +99,33 @@ class TorchTransposed(RecordedBackend):
         return (left @ right).T.copy()
 
 
+class TorchOneUlpFurther(RecordedBackend):
+    """torch.matmul returns the replay with its worst element one ulp further out.
+
+    That output keeps within the bound for K > 1, has other bits than the
+    replay in exactly one element, and has a larger error than the kernels.
+    """
+
+    def torch_matmul(self, left, right, device):
+        product = fma_replay(left, right)
+        reference, magnitude = float64_reference(left, right)
+        error = numpy.abs(product - reference) / magnitude
+        worst = numpy.unravel_index(numpy.argmax(error), error.shape)
+        outward = numpy.sign(product[worst] - reference[worst]) * numpy.inf
+        product[worst] = numpy.nextafter(product[worst], numpy.float32(outward))
+        return product
+
+
+def test_torch_bits_that_differ_from_the_replay_are_counted():
+    case = run_case(TorchOneUlpFurther())
+    outputs = case.to_mapping()["outputs"]
+
+    assert [output["differing_elements"] for output in outputs] == [0, 0, 1, 1]
+    assert outputs[2]["buffer_sha256"] != case.replay_sha256
+    assert outputs[2]["max_relative_error"] > outputs[0]["max_relative_error"]
+    assert outputs[2]["max_relative_error"] <= case.bound
+
+
 @pytest.mark.parametrize(
     ("backend", "message"),
     [
