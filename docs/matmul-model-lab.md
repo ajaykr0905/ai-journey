@@ -364,7 +364,8 @@ report holds these sections:
 
 The reader accepts only regular non-symlink files: plans of at most 64 KiB and
 reports of at most 1 MiB. It rejects duplicate keys, `NaN`, unknown or missing
-fields, and booleans in place of integers.
+fields, and booleans in place of integers. A simulated case has at most 64
+loop steps. Thus the report of each valid plan stays under the 1 MiB limit.
 
 ## Pinned results
 

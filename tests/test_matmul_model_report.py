@@ -6,7 +6,13 @@ import pytest
 from ai_journey import matmul_model_report
 from ai_journey.kernel_launch_io import canonical_json_bytes
 from ai_journey.matmul_model_cuda import CHECK_NAMES, cuda_source
-from ai_journey.matmul_model_plan import MatmulModelPlan
+from ai_journey.matmul_model_plan import (
+    MAX_CASE_INNER,
+    MAX_CASE_MULTIPLY_ADDS,
+    MAX_CASES,
+    MAX_CEILINGS,
+    MatmulModelPlan,
+)
 from ai_journey.matmul_model_reference import MatmulModelError
 from ai_journey.matmul_model_report import (
     DIGEST_FIELD,
@@ -16,6 +22,7 @@ from ai_journey.matmul_model_report import (
     report_digest,
     seal_report,
 )
+from ai_journey.matmul_model_verify import MAX_REPORT_BYTES
 from test_matmul_model_plan import plan_mapping
 
 PLAN = MatmulModelPlan.from_mapping(plan_mapping())
@@ -208,3 +215,35 @@ def test_sealing_adds_a_digest_over_every_other_field(report):
         seal_report(sealed)
     with pytest.raises(TypeError, match="MatmulModelPlan"):
         build_report(plan_mapping())
+
+
+def test_the_largest_valid_case_keeps_four_copies_under_the_read_limit():
+    # The probes list every loop step, so k and the address widths set most
+    # of the report size. 512 x 4 x 64 has the most multiply-adds and steps,
+    # and its x-over-rows probes hold 32 six-digit A addresses per step.
+    mapping = {
+        **plan_mapping(),
+        "block": [32, 8],
+        "cases": [
+            {"name": "widest", "m": 512, "n": 4, "k": MAX_CASE_INNER, "input_seed": 1}
+        ],
+        "accounting_shapes": [
+            {"m": 65536, "n": 65536, "k": k} for k in (1, 2, 3, 65536)
+        ],
+        "registers_per_thread": [16, 32, 40, 64, 96, 128],
+        "ceilings": [
+            {
+                "label": f"pair-{index}",
+                "compute_gflops": "123456789012.12345",
+                "bandwidth_gbps": "0.00001",
+            }
+            for index in range(MAX_CEILINGS)
+        ],
+    }
+    report = seal_report(build_report(MatmulModelPlan.from_mapping(mapping)))
+    case = len(canonical_json_bytes(report["cases"]))
+    rest = len(canonical_json_bytes(report)) + 1 - case
+
+    assert 512 * 4 * MAX_CASE_INNER == MAX_CASE_MULTIPLY_ADDS
+    # Three more cases also add accounting rows and order rows: under 40 KB.
+    assert MAX_CASES * case + rest < 0.7 * MAX_REPORT_BYTES

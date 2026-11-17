@@ -8,6 +8,11 @@ labeled ceiling pairs of the roofline. Unknown or missing fields are rejected
 at every level, booleans never pass as integers, every launch must pass the
 Day 73 compute capability 8.0 limits and the warp model's ``block_x``
 rule, and each simulated case stays small enough for a quick pure-Python run.
+
+The report lists every loop step of two probe warps for each launch, so its
+size grows with ``k``. ``MAX_CASE_INNER`` keeps the report of the largest
+valid plan under the verifier's 1 MiB read limit: four cases of 512 x 4 x 64
+with every other list at its maximum give about 680 KB.
 """
 
 from __future__ import annotations
@@ -33,6 +38,7 @@ MAX_PLAN_BYTES = 64 * 1024
 MAX_CASES = 4
 MAX_CASE_THREADS = 1 << 14
 MAX_CASE_MULTIPLY_ADDS = 1 << 17
+MAX_CASE_INNER = 64
 MAX_ORDER_SEEDS = 4
 MAX_ACCOUNTING_SHAPES = 4
 MAX_REGISTER_COUNTS = 6
@@ -85,6 +91,11 @@ class MatmulCase:
         if type(self.shape) is not MatmulShape:
             raise TypeError("case shape must be MatmulShape")
         require_int(self.input_seed, "input_seed", minimum=0, maximum=MAX_INPUT_SEED)
+        if self.shape.k > MAX_CASE_INNER:
+            raise MatmulModelError(
+                f"case {self.name} has k = {self.shape.k}; a simulated case "
+                f"allows at most {MAX_CASE_INNER} loop steps"
+            )
         products = self.shape.m * self.shape.n * self.shape.k
         if products > MAX_CASE_MULTIPLY_ADDS:
             raise MatmulModelError(
