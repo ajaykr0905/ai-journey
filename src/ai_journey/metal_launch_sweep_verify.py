@@ -69,7 +69,12 @@ _MAX_CALLS = 4096
 _OFFSET = 32
 _MATMUL_STREAM = 2
 _LATTICE = 5
-_SLACK = 1e-9
+# The run and the verifier sum the float64 reference of one element of C in
+# different orders, so their errors can differ by 2 gamma_K(2**-53) |A| @ |B|,
+# which is 2**-28 of the element's bound. A slack of 2**-20 of that bound
+# covers the difference at every size; a fixed slack would exceed the whole
+# error of a small case.
+_REFERENCE_SLACK = 2.0**-20
 _MAPPING_CASE = (13, 19, 3)
 _FLOAT_SENTINEL = 0x7FC00000
 _EXCEEDS = "exceeds_max_threads_per_threadgroup"
@@ -330,15 +335,17 @@ def _accuracy(entry: object, a: numpy.ndarray, b: numpy.ndarray, label: str) -> 
     )
     left, right = a.astype(numpy.float64), b.astype(numpy.float64)
     tolerance = _tolerance(k)
-    largest_error = largest_ratio = 0.0
+    # The recorded maxima span all of C, so they must reach every lattice
+    # error, less the reference slack, and they can never be negative.
+    least_error = least_ratio = 0.0
     for row, column, value in samples:
         reference = float(left[row] @ right[:, column])
         bound = tolerance * float(numpy.abs(left[row]) @ numpy.abs(right[:, column]))
         error = abs(value - reference)
         _require(error <= bound, f"{label}: C[{row}, {column}] exceeds the bound")
-        largest_error = max(largest_error, error)
+        least_error = max(least_error, error - _REFERENCE_SLACK * bound)
         if bound > 0:
-            largest_ratio = max(largest_ratio, error / bound)
+            least_ratio = max(least_ratio, error / bound - _REFERENCE_SLACK)
     error, ratio = entry.get("max_abs_error"), entry.get("max_bound_ratio")
     _require(
         set(entry) == {"output_sha256", "max_abs_error", "max_bound_ratio", "samples"}
@@ -346,8 +353,8 @@ def _accuracy(entry: object, a: numpy.ndarray, b: numpy.ndarray, label: str) -> 
         and _SHA256.fullmatch(entry["output_sha256"]) is not None
         and type(error) is float
         and type(ratio) is float
-        and largest_error - _SLACK <= error < math.inf
-        and largest_ratio - _SLACK <= ratio <= 1.0,
+        and least_error <= error < math.inf
+        and least_ratio <= ratio <= 1.0,
         f"{label}: the error maxima do not cover the lattice or exceed the bound",
     )
 

@@ -207,6 +207,20 @@ def test_a_resealed_report_with_any_changed_fact_is_rejected(tamper, message):
         verify_report(report)
 
 
+def test_the_error_maxima_of_a_case_cannot_fall_below_its_lattice():
+    case = fresh()["correctness"]["matmul"][0]
+    # The 1 x 1 x 1 case holds its whole C on the lattice, and its error is
+    # below 1e-9, so a fixed slack of that size would let its maximum drop to 0.
+    assert (case["m"], case["n"], case["k"]) == (1, 1, 1)
+    assert 0 < case["max_abs_error"] < 1e-9
+
+    for value in (0.0, -case["max_abs_error"], case["max_abs_error"] / 2):
+        report = fresh()
+        report["correctness"]["matmul"][0]["max_abs_error"] = value
+        with pytest.raises(MetalLaunchSweepVerificationError, match="error maxima"):
+            verify_report(reseal(report))
+
+
 def test_an_unsealed_change_or_a_malformed_section_is_rejected():
     report = fresh()
     report["summary"]["rejected_shapes"] = 1
