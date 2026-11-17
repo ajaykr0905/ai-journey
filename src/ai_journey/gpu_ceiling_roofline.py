@@ -94,8 +94,9 @@ class MeasuredRoofline:
     ) -> dict[str, object]:
         """Compare one achieved rate with the attainable rate of this host.
 
-        The fraction can exceed 1 when a kernel beats these ceilings, which
-        are the best that this lab's kernels reached, not hardware limits.
+        The fraction can exceed 1 when a kernel beats these ceilings: they are
+        the best medians of this lab's kernels, the bandwidth one at the
+        largest buffer only, not hardware limits.
         """
 
         achieved = _positive(achieved_gflops_per_second, "achieved_gflops_per_second")

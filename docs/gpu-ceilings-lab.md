@@ -210,8 +210,10 @@ The lab gets each ceiling from the recorded medians:
 - The ridge point is the FMA ceiling divided by the bandwidth ceiling, in
   FLOPs per byte.
 
-A ceiling is the best median rate that these kernels reached in one run. It
-is not a vendor peak and not a hardware limit. A faster kernel can exist.
+The FMA ceiling is the best median rate of all FMA points in one run. The
+bandwidth ceiling is the best median rate at the largest buffer, so a smaller
+buffer can give a higher rate. Runs 1 and 2 below show this. Neither ceiling
+is a vendor peak or a hardware limit, and a faster kernel can exist.
 
 A ceiling is valid only if the fixed cost of a call is small. For each chain
 count, the lab fits the line `time = fixed + flops / rate` to its points by
@@ -414,10 +416,10 @@ byte it moves, the attainable rate is the lower of the two values below:
 - the FMA ceiling
 - the bandwidth ceiling times `I`
 
-With the ceilings of run 1, a kernel at 8 FLOPs per byte can reach at most
-806 GFLOP/s. A kernel at 46 FLOPs per byte or more can reach at most 4618
-GFLOP/s. The fraction of the ceiling is the achieved rate divided by the
-attainable rate. A fraction from these ceilings describes this host only.
+With the ceilings of run 1, the attainable rate at 8 FLOPs per byte is 806
+GFLOP/s. At 46 FLOPs per byte or more, the attainable rate is 4618 GFLOP/s.
+The fraction of the ceiling is the achieved rate divided by the attainable
+rate. A fraction from these ceilings describes this host only.
 
 The module `gpu_ceiling_roofline.py` does this comparison in Python:
 
@@ -430,8 +432,8 @@ The module `gpu_ceiling_roofline.py` does this comparison in Python:
 
 A tampered report gives no roofline, because the verifier rejects it first. A
 synthetic report gives a roofline with `measured: false`. A fraction can be
-more than 1, because a ceiling is the best rate of the kernels of this lab,
-not a hardware limit.
+more than 1, because a ceiling is a rate that the kernels of this lab
+reached, not a hardware limit.
 
 ## Evidence boundary and exclusions
 

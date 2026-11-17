@@ -156,6 +156,24 @@ def test_guide_states_how_often_a_stride_1_load_starts_a_128_byte_block():
     ) in text
 
 
+def test_guide_defines_each_ceiling_by_the_rule_that_picks_it():
+    text = guide()
+    row = re.search(r"\| `stream_copy`, run 1 \| (.*) \|\n", text).group(1)
+    copies = [float(cell.split()[0]) for cell in row.split(" | ")]
+    run_1 = re.search(r"\n\| 1 \| (?:[^|]+\|){3} ([\d.]+) GB/s \|", text)
+
+    # Run 1's 16 MiB copy beat its bandwidth ceiling, set at the largest buffer,
+    # so the ceilings are not the best medians of every point.
+    assert copies[-1] == float(run_1.group(1)) < max(copies)
+    flat_text = flat(text)
+    assert "A ceiling is the best median rate that these kernels" not in flat_text
+    assert (
+        "The bandwidth ceiling is the best median rate at the largest buffer, so "
+        "a smaller buffer can give a higher rate."
+    ) in flat_text
+    assert "can reach at most" not in flat_text
+
+
 def test_guide_states_the_thresholds_and_every_finding():
     text = flat(guide())
 
