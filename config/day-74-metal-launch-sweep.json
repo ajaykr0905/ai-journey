@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "name": "day-74-metal-launch-sweep",
+  "seed": 74,
+  "matmul": {
+    "group_shapes": [[8, 8], [16, 16], [32, 32], [32, 8], [8, 32], [64, 4], [4, 64]],
+    "correctness_cases": [[1, 1, 1], [37, 53, 29], [64, 64, 16]],
+    "sizes": [[256, 256, 256], [1024, 1024, 1024], [2048, 2048, 2048]],
+    "target_flops_per_sample": 1073741824
+  },
+  "vector": {
+    "group_sizes": [8, 16, 32, 48, 64, 128, 256, 512, 1024],
+    "correctness_length": 65537,
+    "lengths": [1048576, 16777216],
+    "target_bytes_per_sample": 134217728
+  },
+  "timing": {
+    "warmup": 2,
+    "repeats": 21,
+    "max_runtime_seconds": 300
+  }
+}
