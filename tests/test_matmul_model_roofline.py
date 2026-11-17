@@ -37,13 +37,13 @@ def test_below_the_ridge_the_bandwidth_ceiling_sets_the_rate():
 
 
 def test_at_and_above_the_ridge_the_compute_ceiling_sets_the_rate():
-    ceilings = Ceilings("example", "19.5", "1.5")
-    ridge = roofline(Fraction(13), ceilings)
+    ceilings = Ceilings("example", "12.5", "2.5")
+    ridge = roofline(Fraction(5), ceilings)
     above = roofline(Fraction(512, 3), ceilings)
 
-    assert ceilings.ridge_point == 13
-    assert (ridge.bound, ridge.attainable_gflops) == ("ridge", Fraction(39, 2))
-    assert (above.bound, above.attainable_gflops) == ("compute", Fraction(39, 2))
+    assert ceilings.ridge_point == 5
+    assert (ridge.bound, ridge.attainable_gflops) == ("ridge", Fraction(25, 2))
+    assert (above.bound, above.attainable_gflops) == ("compute", Fraction(25, 2))
     assert above.fraction_of_compute_ceiling == 1
     assert BOUNDS == ("memory", "ridge", "compute")
 
@@ -68,7 +68,7 @@ def test_the_naive_kernel_without_reuse_reaches_under_a_quarter_of_the_ridge():
     "intensity", [Fraction(1, 8), Fraction(29, 118), Fraction(3), Fraction(1000)]
 )
 @pytest.mark.parametrize(
-    ("compute", "bandwidth"), [("4", "1"), ("19.5", "1.5"), ("1000", "0.25")]
+    ("compute", "bandwidth"), [("4", "1"), ("12.5", "2.5"), ("1000", "0.25")]
 )
 def test_exact_points_agree_with_the_float_roofline_module(
     intensity, compute, bandwidth
@@ -95,7 +95,7 @@ def test_exact_points_agree_with_the_float_roofline_module(
 
 @pytest.mark.parametrize(
     "text",
-    ["019.5", "1e3", "1.50", "", "-1", "0", "0.000", " 1", "1.", ".5", "1.1234567"],
+    ["012.5", "1e3", "1.50", "", "-1", "0", "0.000", " 1", "1.", ".5", "1.1234567"],
 )
 def test_ceilings_are_positive_canonical_decimal_strings(text):
     with pytest.raises(MatmulModelError, match="decimal string|positive"):
@@ -106,8 +106,8 @@ def test_ceilings_parse_exact_fields_and_refuse_floats():
     assert parse_decimal("0.25", "x") == Fraction(1, 4)
     assert parse_decimal("123456789012.12345", "x") == Fraction("123456789012.12345")
     mapping = {
-        "label": "measured-host",
-        "compute_gflops": "19.5",
+        "label": "example-pair",
+        "compute_gflops": "12.5",
         "bandwidth_gbps": "100",
     }
     assert Ceilings.from_mapping(mapping).to_mapping() == mapping
@@ -118,9 +118,9 @@ def test_ceilings_parse_exact_fields_and_refuse_floats():
         with pytest.raises(MatmulModelError, match="exactly label"):
             Ceilings.from_mapping(broken)
     with pytest.raises(MatmulModelError, match="decimal string"):
-        Ceilings("x", 19.5, "1")
+        Ceilings("x", 12.5, "1")
     with pytest.raises(MatmulModelError, match="lowercase slug"):
-        Ceilings("Measured", "1", "1")
+        Ceilings("Example", "1", "1")
     with pytest.raises(MatmulModelError, match="positive Fraction"):
         roofline(0.25, RIDGE_4)
     with pytest.raises(MatmulModelError, match="positive Fraction"):

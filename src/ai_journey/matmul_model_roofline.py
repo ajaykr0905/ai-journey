@@ -33,7 +33,7 @@ def parse_decimal(text: object, name: str) -> Fraction:
 
     if type(text) is not str or _DECIMAL.fullmatch(text) is None:
         raise MatmulModelError(
-            f"{name} must be a canonical decimal string such as '19.5'"
+            f"{name} must be a canonical decimal string such as '12.5'"
         )
     value = Fraction(text)
     if value <= 0:
