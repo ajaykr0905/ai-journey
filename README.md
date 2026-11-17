@@ -802,7 +802,8 @@ this host. On the development host, the naive `matmul_x_columns` kernel
 reached at most 406 GFLOP/s. That rate is 0.088 of the measured FMA ceiling of
 4618 GFLOP/s. `torch.matmul` reached 3963 GFLOP/s, 0.858 of the same ceiling.
 At all 9 sizes, both naive kernels ran 4.79 to 16.15 times above the no-reuse
-bandwidth roof. Thus caches served part of their loads.
+bandwidth roof. Thus caches probably served part of their loads. The labs read
+no hardware counters, so they do not measure this traffic.
 
 The 1-minute load averages were 7.98 to 10.72 before and after the two runs.
 These values are host-specific Apple GPU (Metal) measurements from one shared

@@ -120,9 +120,10 @@ divided by the median sample time of the naive kernel. All sides of a point
 run the same number of calls in each sample, so this ratio is also the ratio
 of the two rates. The matmul-metal report gives the same ratio.
 
-A roof share above 1 at no reuse shows that the kernel moved fewer bytes
-between the GPU and memory than the no-reuse model counts. Thus caches served
-part of the loads. The gap command does not show which cache served them.
+A roof share above 1 at no reuse shows that the kernel ran faster than the
+bandwidth ceiling times the no-reuse intensity. Thus the kernel probably moved
+fewer bytes than the no-reuse model counts, and caches served part of the
+loads. The labs read no hardware counters, so they do not measure this traffic.
 
 ## Gap on the development host
 
@@ -195,18 +196,18 @@ These are the results:
 - The highest FMA share of `matmul_x_columns` was 0.088. Thus the best naive
   kernel ran at about one eleventh of the measured FMA ceiling.
 - The highest FMA share of `matmul_x_rows` was 0.041, at 4096 x 4096 x 4096.
-- `torch.matmul` reached 0.858 of the FMA ceiling at 4096 x 4096 x 4096. Thus
-  a matmul can come near the measured FMA ceiling on this host.
+- `torch.matmul` reached 0.858 of the FMA ceiling at 4096 x 4096 x 4096.
 - At all 9 shapes, both naive kernels ran above the no-reuse roof.
   `matmul_x_columns` ran 8.49 to 16.15 times above it, and `matmul_x_rows`
   ran 4.79 to 7.46 times above it.
 - At ideal reuse, `matmul_x_columns` used 0.0056 to 0.0991 of the bandwidth
   roof, and `matmul_x_rows` used 0.0027 to 0.0624 of it.
 - From 512 x 512 x 512 up, the ideal-reuse roof was above the FMA ceiling.
-  Thus the FMA ceiling limits these shapes, and the FMA share gives their gap.
+  Thus, on the roofline at ideal reuse, the FMA ceiling is the lower roof of
+  these shapes, and the FMA share gives their gap.
 - At 128 x 128 x 128 and 256 x 256 x 256, the ideal-reuse roof was below the
-  FMA ceiling. Thus the bandwidth ceiling limits these two shapes even with
-  ideal reuse.
+  FMA ceiling. Thus, on the roofline, the bandwidth ceiling is the lower roof
+  of these two shapes even at ideal reuse.
 
 The ratios to `torch.matmul` are the ratios in the matmul-metal lab guide. The
 gap command adds the two ceilings and the two traffic models to them.
