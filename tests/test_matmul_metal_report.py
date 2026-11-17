@@ -56,6 +56,17 @@ def test_a_stand_in_run_is_labeled_synthetic_from_top_to_bottom():
     assert report["environment"][MATMUL_PRECISION_FIELD] == "highest"
 
 
+def test_the_report_names_the_float32_matmul_precision_the_backend_ran_with():
+    class MediumPrecision(RecordedBackend):
+        float32_matmul_precision = "medium"
+
+    config = config_from_mapping(make_config_mapping())
+
+    report = build_report(config, backend=MediumPrecision(), clock=scripted_clock())
+
+    assert report["environment"][MATMUL_PRECISION_FIELD] == "medium"
+
+
 def test_the_report_records_source_limits_cases_points_and_the_ceiling():
     config, report = synthetic_report()
 
