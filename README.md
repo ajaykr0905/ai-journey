@@ -603,6 +603,83 @@ sweep points, smaller arrays and fewer, shorter samples, so its timings are a
 smoke check, not a baseline. See the
 [memory-hierarchy lab guide](docs/memory-hierarchy-lab.md).
 
+## Export recovery telemetry as metrics, traces and a dashboard
+
+Derive Prometheus metrics and alerting rules, OpenTelemetry traces and a
+Grafana dashboard from one serving-recovery run and one worker-recovery run,
+then verify each output against those runs. Every run and output directory
+must be new; nothing is overwritten:
+
+```bash
+ai-journey-serving-recovery run \
+  --source data/day-19-demo-names.txt \
+  --config config/day-70-serving-recovery.json \
+  --run-dir /tmp/day-73/serving
+ai-journey-recovery run \
+  --source data/day-19-demo-names.txt \
+  --config config/day-70-worker-recovery.json \
+  --run-dir /tmp/day-73/worker
+ai-journey-telemetry-metrics export \
+  --config config/day-73-telemetry-metrics.json \
+  --serving-run-dir /tmp/day-73/serving \
+  --worker-run-dir /tmp/day-73/worker \
+  --output-dir /tmp/day-73/telemetry
+ai-journey-telemetry-metrics verify \
+  --output-dir /tmp/day-73/telemetry \
+  --serving-run-dir /tmp/day-73/serving \
+  --worker-run-dir /tmp/day-73/worker \
+  --config config/day-73-telemetry-metrics.json
+ai-journey-telemetry-traces export \
+  --config config/day-73-telemetry-traces.json \
+  --serving-run-dir /tmp/day-73/serving \
+  --worker-run-dir /tmp/day-73/worker \
+  --output-dir /tmp/day-73/traces
+ai-journey-telemetry-traces dashboard \
+  --config config/day-73-telemetry-traces.json \
+  --output-dir /tmp/day-73/dashboard
+ai-journey-telemetry-traces verify \
+  --report /tmp/day-73/traces/report.json \
+  --serving-run-dir /tmp/day-73/serving \
+  --worker-run-dir /tmp/day-73/worker \
+  --config config/day-73-telemetry-traces.json
+ai-journey-telemetry-traces verify \
+  --report /tmp/day-73/dashboard/report.json \
+  --config config/day-73-telemetry-traces.json
+```
+
+Neither run is converted until its own lab verifier accepts it. The metrics
+export writes `metrics.prom` in Prometheus text exposition format 0.0.4, 28
+families with every series labeled `scope="local_cpu_lab"`, and `rules.yml`
+with 3 recording and 11 alerting rules generated from the declared
+objectives. The traces export writes `traces.otlp.json`, one OTLP/JSON
+request with a trace per run, and `dashboard` writes Grafana `dashboard.json`
+(schemaVersion 39, 7 panels, 12 queries) whose queries select only series
+the metrics export writes. Each command prints one JSON receipt. `export`
+and `dashboard` seal a report and verify what they wrote. `verify` rebuilds
+every stored file byte for byte, after re-running the lab verifiers on an
+export's runs, and `--config` binds it to the pinned config.
+
+`ai-journey-telemetry-metrics` exits 0 when the export verifies and every
+declared objective is met, 1 when `verify` rejects an export or its
+evidence, 2 for usage errors, invalid inputs, refused outputs or evidence
+that `export` rejects, and 3 when the export verifies but an objective is
+breached, so its alert would fire. `ai-journey-telemetry-traces` exits 0 on
+success, 1 for rejected evidence or a rejected stored artifact, and 2 for
+usage errors, invalid inputs or a refused output.
+
+Evidence boundary: these are offline files derived from sealed local CPU
+evidence recorded on one host. No Prometheus server scraped the metrics, no
+OpenTelemetry collector received the traces and no Grafana imported the
+dashboard. Durations are measured monotonic-clock differences; absolute
+timestamps come from a declared anchor and are synthetic. The objectives
+are declared lab controls, not service-level agreements, and the measured
+timings change with the host and its load. This is not GPU, CUDA,
+distributed, multi-host or production monitoring evidence. CI job
+`telemetry-cpu` runs these commands from an installed wheel without torch,
+NumPy or matplotlib. See the
+[telemetry metrics guide](docs/telemetry-metrics.md) and the
+[telemetry traces and dashboards guide](docs/telemetry-traces-dashboards.md).
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with

@@ -1316,3 +1316,53 @@ jobs:
             ${{ runner.temp }}/memory-hierarchy-evidence/
             ${{ runner.temp }}/memory-hierarchy-dist/
           if-no-files-found: error
+  telemetry-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install telemetry verification tools
+        run: |
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check telemetry metrics, traces and dashboard contracts
+        run: |
+          ruff check src/ai_journey/telemetry_*.py tests/test_telemetry_*.py
+          ruff format --check src/ai_journey/telemetry_*.py tests/test_telemetry_*.py
+          python -m compileall -q src/ai_journey/telemetry_*.py tests/test_telemetry_*.py
+          python -m pytest -q tests/test_telemetry_*.py
+      - name: Build and install isolated telemetry wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/telemetry-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/telemetry-installed" "$RUNNER_TEMP"/telemetry-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/telemetry-evidence"
+      - name: Record recovery runs, then export and verify their telemetry
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/telemetry-installed
+        run: |
+          export PATH="$RUNNER_TEMP/telemetry-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/telemetry-installed/")'
+          ai-journey-serving-recovery run --source "$GITHUB_WORKSPACE/data/day-19-demo-names.txt" --config "$GITHUB_WORKSPACE/config/day-70-serving-recovery.json" --run-dir "$RUNNER_TEMP/telemetry-evidence/serving"
+          ai-journey-recovery run --source "$GITHUB_WORKSPACE/data/day-19-demo-names.txt" --config "$GITHUB_WORKSPACE/config/day-70-worker-recovery.json" --run-dir "$RUNNER_TEMP/telemetry-evidence/worker"
+          ai-journey-telemetry-metrics export --config "$GITHUB_WORKSPACE/config/day-73-telemetry-metrics.json" --serving-run-dir "$RUNNER_TEMP/telemetry-evidence/serving" --worker-run-dir "$RUNNER_TEMP/telemetry-evidence/worker" --output-dir "$RUNNER_TEMP/telemetry-evidence/metrics"
+          ai-journey-telemetry-metrics verify --output-dir "$RUNNER_TEMP/telemetry-evidence/metrics" --serving-run-dir "$RUNNER_TEMP/telemetry-evidence/serving" --worker-run-dir "$RUNNER_TEMP/telemetry-evidence/worker" --config "$GITHUB_WORKSPACE/config/day-73-telemetry-metrics.json"
+          ai-journey-telemetry-traces export --config "$GITHUB_WORKSPACE/config/day-73-telemetry-traces.json" --serving-run-dir "$RUNNER_TEMP/telemetry-evidence/serving" --worker-run-dir "$RUNNER_TEMP/telemetry-evidence/worker" --output-dir "$RUNNER_TEMP/telemetry-evidence/traces"
+          ai-journey-telemetry-traces dashboard --config "$GITHUB_WORKSPACE/config/day-73-telemetry-traces.json" --output-dir "$RUNNER_TEMP/telemetry-evidence/dashboard"
+          ai-journey-telemetry-traces verify --report "$RUNNER_TEMP/telemetry-evidence/traces/report.json" --serving-run-dir "$RUNNER_TEMP/telemetry-evidence/serving" --worker-run-dir "$RUNNER_TEMP/telemetry-evidence/worker" --config "$GITHUB_WORKSPACE/config/day-73-telemetry-traces.json"
+          ai-journey-telemetry-traces verify --report "$RUNNER_TEMP/telemetry-evidence/dashboard/report.json" --config "$GITHUB_WORKSPACE/config/day-73-telemetry-traces.json"
+      - name: Retain telemetry evidence and package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: telemetry-evidence
+          path: |
+            ${{ runner.temp }}/telemetry-evidence/
+            ${{ runner.temp }}/telemetry-dist/
+          if-no-files-found: error

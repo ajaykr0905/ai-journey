@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "name": "day-73-telemetry-traces",
+  "time_mapping": {
+    "anchor_unix_nano": 1794787200000000000,
+    "anchor_utc": "2026-11-16T00:00:00Z",
+    "note": "Declared instant assigned to each exported run's first lifecycle record. The recovery labs record only time.monotonic_ns in the experiment process, so absolute OTLP timestamps are synthetic; span durations and ordering are measured monotonic differences."
+  },
+  "dashboard": {
+    "uid": "ai-journey-day-73-recovery",
+    "title": "AI Journey local CPU lab: recovery telemetry",
+    "time_from": "now-6h",
+    "refresh": "1m",
+    "latency_quantiles": [0.5, 0.95, 0.99]
+  }
+}

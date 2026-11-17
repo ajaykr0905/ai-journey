@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "experiment_name": "day-73-telemetry-metrics",
+  "latency_buckets_us": [250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000],
+  "serving_objectives": {
+    "detection_latency_ms": 250,
+    "restart_latency_ms": 2000,
+    "unavailability_ms": 3000,
+    "time_to_slo_recovery_ms": 5000,
+    "post_fault_latency_us": 250000,
+    "post_fault_within_latency_ratio": 0.95
+  },
+  "worker_objectives": {
+    "detection_ms": 1000,
+    "recovery_ms": 5000
+  }
+}
