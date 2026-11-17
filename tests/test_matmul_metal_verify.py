@@ -65,6 +65,30 @@ def test_a_synthetic_report_verifies_as_synthetic_and_binds_to_its_config():
         verify_report(report, config=other)
 
 
+def test_tied_points_resolve_to_the_first_one_as_the_run_chose():
+    # 64**3 and 32 x 64 x 128 have the same FLOPs, so with every sample at
+    # 1000 ns the two points tie on every rate and on the largest point.
+    tied = {
+        **make_config_mapping()["benchmark"],
+        "shapes": [[64, 64, 64], [32, 64, 128]],
+    }
+    config, report = synthetic_report(benchmark=tied)
+
+    summary = verify_report(report, config=config)
+
+    first, second = report["benchmark"]["points"]
+    for side in ("matmul_x_columns", "matmul_x_rows", "torch_matmul"):
+        rates = [
+            point["sides"][side]["median_gflops_per_second"]
+            for point in (first, second)
+        ]
+        assert rates[0] == rates[1], side
+    ceiling = report["benchmark"]["ceiling"]
+    assert ceiling["ceiling_index"] == 0
+    assert {entry["best_index"] for entry in ceiling["naive"].values()} == {0}
+    assert (report["summary"]["largest_point"]["m"], summary["measured"]) == (64, False)
+
+
 def first_case(report):
     return report["correctness"]["cases"][1]
 
