@@ -101,6 +101,8 @@ def test_planned_work_counts_the_run_with_its_own_batch_sizes():
         (("correctness", "fma_steps"), 60, "multiple of 8"),
         (("correctness", "threads"), 1024, "multiple of the fma group size"),
         (("correctness", "stream_float4"), 4096, "past the data"),
+        # 1024 float4 values in walks of 4 fill exactly one copy threadgroup.
+        (("correctness", "stream_float4"), 1024, "stream_copy threads past the data"),
         (("fma", "chain_counts"), [1, 3], "must come from 1, 2, 4, 8, 16, 32"),
         (("fma", "chain_counts"), [4, 1], "strictly increasing"),
         (("fma", "chain_counts"), [], "must hold 1 to 6 values"),

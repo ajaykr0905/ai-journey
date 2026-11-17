@@ -53,8 +53,9 @@ def test_every_pinned_correctness_launch_has_threads_past_the_data():
 
     assert cases.threads % config.fma.group_size
     assert cases.threads % config.bank.group_size
-    walkers = stream_threads(
-        cases.stream_float4, config.bandwidth.reduce_float4_per_thread
-    )
-    assert walkers % config.bandwidth.group_size
+    for kernel in ("stream_copy", "stream_read_reduce"):
+        walkers = stream_threads(
+            cases.stream_float4, config.bandwidth.per_thread(kernel)
+        )
+        assert walkers % config.bandwidth.group_size, kernel
     assert cases.fma_steps % 8 == 0

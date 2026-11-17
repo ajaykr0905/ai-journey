@@ -272,7 +272,7 @@ limits, the load averages and the labels.
 | `seed` | 74 | 0 to 2^32 - 1 |
 | `correctness.threads` | 1000 | 1 to 65536, not a multiple of a group size |
 | `correctness.fma_steps` | 256 | a multiple of 8, up to 16384 |
-| `correctness.stream_float4` | 4099 | 1 to 2^20 float4 values, with read-reduce threads past the data |
+| `correctness.stream_float4` | 4099 | 1 to 2^20 float4 values, with copy and read-reduce threads past the data |
 | `correctness.bank_trips` | 9 | 1 to 65536 |
 | `fma.group_size` | 256 | 1 to 1024 |
 | `fma.threads` | 1048576 | 1 to 2^24 |

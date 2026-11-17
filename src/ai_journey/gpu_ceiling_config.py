@@ -394,14 +394,15 @@ class GpuCeilingConfig:
                     f"correctness threads must not be a multiple of the {label} "
                     f"group size {group}, so the guard runs"
                 )
-        walkers = stream_threads(
-            self.correctness.stream_float4, self.bandwidth.reduce_float4_per_thread
-        )
-        if walkers % self.bandwidth.group_size == 0:
-            raise GpuCeilingError(
-                "correctness stream_float4 must leave read-reduce threads past the "
-                "data in the last bandwidth threadgroup"
+        for kernel in STREAM_KERNELS:
+            walkers = stream_threads(
+                self.correctness.stream_float4, self.bandwidth.per_thread(kernel)
             )
+            if walkers % self.bandwidth.group_size == 0:
+                raise GpuCeilingError(
+                    f"correctness stream_float4 must leave {kernel} threads past "
+                    "the data in the last bandwidth threadgroup"
+                )
         work = self.planned_work()
         for value, limit, label in (
             (work.calls, MAX_RUN_CALLS, "kernel calls"),
