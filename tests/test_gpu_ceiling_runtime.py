@@ -209,6 +209,42 @@ def test_workloads_bind_one_point_and_return_its_latest_output():
 
 
 @requires_metal
+def test_a_stream_workload_refuses_a_source_its_walk_would_overrun_or_misread():
+    import torch
+
+    runtime = ceiling_runtime()
+    source = copy_source(74, 1, 512)
+    device = runtime.upload(source)
+    bad_sources = (
+        runtime.upload(source[: 4 * 256]),
+        runtime.upload(source.view(numpy.int32)),
+        runtime.upload(source.reshape(512, 4)),
+        runtime.upload(numpy.repeat(source, 2))[::2],
+        torch.from_numpy(source),
+        source,
+    )
+
+    for bad in bad_sources:
+        with pytest.raises(GpuCeilingError, match="at least 2048 float32 values"):
+            runtime.stream_workload(
+                "stream_copy",
+                bad,
+                launch(runtime, "stream_copy", 512),
+                float4_count=512,
+                per_thread=1,
+            )
+    workload = runtime.stream_workload(
+        "stream_copy",
+        device,
+        launch(runtime, "stream_copy", 512),
+        float4_count=512,
+        per_thread=1,
+    )
+    workload.run()
+    assert numpy.array_equal(workload.output(), source)
+
+
+@requires_metal
 def test_launches_must_suit_the_kernel_that_runs_them():
     runtime = ceiling_runtime()
     start = fma_start_values(74)

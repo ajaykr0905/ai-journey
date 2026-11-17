@@ -258,6 +258,30 @@ class CeilingRuntime:
         call = self._kernel(name, launch, output, source, float4_count, threads)
         return call, output
 
+    def _device_source(self, source: object, float4_count: int) -> object:
+        """Refuse a device source that the walk would read past or misread.
+
+        The kernel gets only a buffer address, so Metal would not stop a read
+        past a short tensor, and it would read another dtype or a strided view
+        as raw float32 values.
+        """
+
+        torch = self._torch
+        values = 4 * float4_count
+        if (
+            not isinstance(source, torch.Tensor)
+            or source.device.type != "mps"
+            or source.dtype != torch.float32
+            or source.dim() != 1
+            or not source.is_contiguous()
+            or source.numel() < values
+        ):
+            raise GpuCeilingError(
+                "a stream workload needs a contiguous 1D float32 tensor on the "
+                f"MPS device with at least {values} float32 values"
+            )
+        return source
+
     def _check_walk(self, float4_count: int, per_thread: int, launch: object) -> None:
         """Require ``ceil(count / per_thread)`` active threads, the CPU's walk."""
 
@@ -307,8 +331,9 @@ class CeilingRuntime:
         """
 
         self._check_walk(float4_count, per_thread, launch)
+        values = self._device_source(source, float4_count)
         call, output = self._stream_call(
-            name, source, float4_count, launch, guarded=False
+            name, values, float4_count, launch, guarded=False
         )
 
         def latest() -> numpy.ndarray:
