@@ -1461,3 +1461,118 @@ jobs:
             ${{ runner.temp }}/kernel-metal-evidence/
             ${{ runner.temp }}/kernel-metal-dist/
           if-no-files-found: error
+  matmul-model-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install matmul-model verification tools
+        run: |
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check the naive matmul model lab contracts
+        run: |
+          ruff check src/ai_journey/matmul_model_*.py tests/test_matmul_model_*.py
+          ruff format --check src/ai_journey/matmul_model_*.py tests/test_matmul_model_*.py
+          python -m compileall -q src/ai_journey/matmul_model_*.py tests/test_matmul_model_*.py
+          python -m pytest -q tests/test_matmul_model_*.py
+      - name: Build and install isolated matmul-model wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/matmul-model-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/matmul-model-installed" "$RUNNER_TEMP"/matmul-model-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/matmul-model-evidence"
+      - name: Run and verify the pinned plan with the installed command
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/matmul-model-installed
+        run: |
+          export PATH="$RUNNER_TEMP/matmul-model-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/matmul-model-installed/")'
+          ai-journey-matmul-model run --config "$GITHUB_WORKSPACE/config/day-74-matmul-model.json" --output "$RUNNER_TEMP/matmul-model-evidence/report.json"
+          ai-journey-matmul-model verify --report "$RUNNER_TEMP/matmul-model-evidence/report.json" --config "$GITHUB_WORKSPACE/config/day-74-matmul-model.json"
+      - name: Retain matmul-model evidence and package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matmul-model-evidence
+          path: |
+            ${{ runner.temp }}/matmul-model-evidence/
+            ${{ runner.temp }}/matmul-model-dist/
+          if-no-files-found: error
+  metal-roofline-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Day 74 Metal lab contract tools and CPU-only PyTorch
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check the matmul-metal, ceiling, launch-sweep and gap contracts without an Apple GPU
+        run: |
+          ruff check src/ai_journey/matmul_metal_*.py src/ai_journey/gpu_ceiling_*.py src/ai_journey/metal_launch_sweep_*.py src/ai_journey/matmul_roofline_*.py tests/test_matmul_metal_*.py tests/test_gpu_ceiling_*.py tests/test_metal_launch_sweep_*.py tests/test_matmul_roofline_*.py
+          ruff format --check src/ai_journey/matmul_metal_*.py src/ai_journey/gpu_ceiling_*.py src/ai_journey/metal_launch_sweep_*.py src/ai_journey/matmul_roofline_*.py tests/test_matmul_metal_*.py tests/test_gpu_ceiling_*.py tests/test_metal_launch_sweep_*.py tests/test_matmul_roofline_*.py
+          python -m compileall -q src/ai_journey/matmul_metal_*.py src/ai_journey/gpu_ceiling_*.py src/ai_journey/metal_launch_sweep_*.py src/ai_journey/matmul_roofline_*.py tests/test_matmul_metal_*.py tests/test_gpu_ceiling_*.py tests/test_metal_launch_sweep_*.py tests/test_matmul_roofline_*.py
+          python -m pytest -q -rs tests/test_matmul_metal_*.py tests/test_gpu_ceiling_*.py tests/test_metal_launch_sweep_*.py tests/test_matmul_roofline_*.py
+      - name: Build and install isolated Day 74 Metal lab wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/metal-roofline-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/metal-roofline-installed" "$RUNNER_TEMP"/metal-roofline-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/metal-roofline-evidence"
+      - name: Check that each installed Metal command stops where MPS is not available
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/metal-roofline-installed
+        run: |
+          export PATH="$RUNNER_TEMP/metal-roofline-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/metal-roofline-installed/")'
+          python -c 'import torch; assert not torch.backends.mps.is_available()'
+          status=0
+          ai-journey-matmul-metal run --config "$GITHUB_WORKSPACE/config/day-74-matmul-metal.json" --output "$RUNNER_TEMP/metal-roofline-evidence/matmul-metal.json" 2> "$RUNNER_TEMP/metal-roofline-evidence/matmul-metal-unavailable.txt" || status=$?
+          cat "$RUNNER_TEMP/metal-roofline-evidence/matmul-metal-unavailable.txt"
+          test "$status" -eq 3
+          grep -F "matmul-metal run unavailable: Metal kernels run only on macOS (unsupported_operating_system)" "$RUNNER_TEMP/metal-roofline-evidence/matmul-metal-unavailable.txt"
+          test ! -e "$RUNNER_TEMP/metal-roofline-evidence/matmul-metal.json"
+          status=0
+          ai-journey-gpu-ceilings run --config "$GITHUB_WORKSPACE/config/day-74-gpu-ceilings.json" --output "$RUNNER_TEMP/metal-roofline-evidence/gpu-ceilings.json" 2> "$RUNNER_TEMP/metal-roofline-evidence/gpu-ceilings-unavailable.txt" || status=$?
+          cat "$RUNNER_TEMP/metal-roofline-evidence/gpu-ceilings-unavailable.txt"
+          test "$status" -eq 3
+          grep -F "gpu-ceiling run unavailable: Metal kernels run only on macOS (unsupported_operating_system)" "$RUNNER_TEMP/metal-roofline-evidence/gpu-ceilings-unavailable.txt"
+          test ! -e "$RUNNER_TEMP/metal-roofline-evidence/gpu-ceilings.json"
+          status=0
+          ai-journey-metal-launch-sweep run --config "$GITHUB_WORKSPACE/config/day-74-metal-launch-sweep.json" --output "$RUNNER_TEMP/metal-roofline-evidence/metal-launch-sweep.json" 2> "$RUNNER_TEMP/metal-roofline-evidence/metal-launch-sweep-unavailable.txt" || status=$?
+          cat "$RUNNER_TEMP/metal-roofline-evidence/metal-launch-sweep-unavailable.txt"
+          test "$status" -eq 3
+          grep -F "metal-launch-sweep run unavailable: Metal kernels run only on macOS (unsupported_operating_system)" "$RUNNER_TEMP/metal-roofline-evidence/metal-launch-sweep-unavailable.txt"
+          test ! -e "$RUNNER_TEMP/metal-roofline-evidence/metal-launch-sweep.json"
+      - name: Verify the recorded Apple GPU gap with the installed command
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/metal-roofline-installed
+        run: |
+          export PATH="$RUNNER_TEMP/metal-roofline-installed/bin:$PATH"
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_matmul_roofline_recorded import RECORDED_GAP_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_GAP_JSON + "\n")' "$RUNNER_TEMP/metal-roofline-evidence/recorded-gap.json"
+          ai-journey-matmul-roofline verify --report "$RUNNER_TEMP/metal-roofline-evidence/recorded-gap.json"
+      - name: Retain the refused runs, the recorded gap and the package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metal-roofline-contracts-evidence
+          path: |
+            ${{ runner.temp }}/metal-roofline-evidence/
+            ${{ runner.temp }}/metal-roofline-dist/
+          if-no-files-found: error
