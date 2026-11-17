@@ -411,3 +411,22 @@ def test_the_threadgroup_cost_hypothesis_names_the_rank_that_weighs_against_it()
         "Its IQR was below the IQRs of 32x8, 64x4 and 4x64, which have 256 "
         "threadgroups. Thus the count of threadgroups alone does not set the ranks."
     ) in hypotheses
+
+
+def test_the_guide_defines_both_kinds_of_best_rate_that_a_report_holds():
+    text = flat(guide())
+    report = recorded_report()
+
+    for sweep, rate in (("matmul", "gflops_per_second"), ("vector", "gb_per_second")):
+        for point in report["benchmark"][sweep]:
+            for shape in point["shapes"]:
+                fastest = point["work_per_sample"] / shape["timing"]["min_ns"]
+                assert shape[f"best_{rate}"] == fastest
+    # The fastest sample of a shape beats every median of the run.
+    short = report["benchmark"]["vector"][0]
+    best_sample = max(shape["best_gb_per_second"] for shape in short["shapes"])
+    assert best_sample > report["summary"]["best_vector_gb_per_second"]
+    assert "A best rate is the highest median rate that one run measured" not in text
+    assert "The `best_` rate of a shape uses the fastest sample of the shape." in text
+    assert "The best rates of the summary are the highest median rates." in text
+    assert "That sentence describes the best rates of the summary." in text

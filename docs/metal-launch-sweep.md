@@ -6,8 +6,8 @@ threadgroup shapes of a naive float32 matmul and the group sizes of a vector
 add. It checks every shape, times every shape and ranks the shapes.
 
 Every timing is a measurement on the Apple GPU of one host. Nothing here runs
-a CUDA kernel or uses an NVIDIA GPU. The lab quotes no vendor peak. A best
-rate is the highest median rate that one run measured on this host.
+a CUDA kernel or uses an NVIDIA GPU. The lab quotes no vendor peak. Each best
+rate in this lab is a rate that one run measured on this host.
 
 The lab reuses the Day 73 Metal lab. It reuses the probe, the runtime, the
 `vector_add` kernel, the launch geometry, the vector-add check and the timing
@@ -200,6 +200,10 @@ The matmul target counts `2 m n k` FLOPs for each call. The vector target
 counts 12 compulsory bytes for each element. The report keeps the raw
 samples and gives the nearest-rank median and IQR of each shape. It also
 gives the median time of each call, the rate and the rank.
+
+The `best_` rate of a shape uses the fastest sample of the shape. The best
+rates of the summary are the highest median rates. No best rate is a vendor
+peak.
 
 The ranking orders the shapes by their median sample. The spread is the
 slowest median divided by the fastest median. The report marks a point as
@@ -447,6 +451,10 @@ the highest median rate that this run measured, not a vendor peak. The layout
 probe shows which SIMD group and lane ran each thread, not how the GPU
 schedules SIMD groups. These timings do not measure or predict CUDA, NVIDIA,
 distributed or production performance."
+
+The boundary sentence about a best rate is part of each sealed report. That
+sentence describes the best rates of the summary. The `best_` rate of each
+shape uses its fastest sample, as the timing method states.
 
 The lab reads no hardware counters. It does not record the GPU model, the
 clock frequency, the thermal state or the other jobs on the host. It records
