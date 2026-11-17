@@ -206,6 +206,47 @@ def tamper_measured_load(report):
     report["run"]["load_average_after"] = None
 
 
+def tamper_measured_platform(report):
+    claim_measured(report)
+    report["environment"]["platform_system"] = "Linux"
+
+
+def tamper_probe_width(report):
+    # The layout records still follow the width of the admitting pipelines.
+    report["pipelines"]["simd_layout_probe"]["thread_execution_width"] = 16
+
+
+def tamper_limit_ceiling(report):
+    # Every shape stays admitted, but no Metal pipeline reports 2048 threads.
+    for limits in report["pipelines"].values():
+        limits["max_threads_per_threadgroup"] = 2048
+
+
+def tamper_ratio_above_bound(report):
+    report["correctness"]["matmul"][1]["max_bound_ratio"] = 1.5
+    report["summary"]["matmul_max_bound_ratio"] = 1.5
+
+
+def tamper_load_precision(report):
+    report["run"]["load_average_before"] = [1.234, 2.0, 3.0]
+
+
+def tamper_over_budget(report):
+    report["run"]["elapsed_ns"] = report["run"]["max_runtime_ns"] + 1
+
+
+def tamper_repeats(report):
+    # Ask for one more repeat than each shape was timed, and keep the config
+    # digest, the planned work and the repeat field of each point in step.
+    mapping = copy.deepcopy(report["config"])
+    mapping["timing"]["repeats"] += 1
+    config = config_from_mapping(mapping)
+    report.update(config=mapping, config_sha256=config.fingerprint())
+    report["planned_work"] = config.planned_work().to_mapping()
+    for point in (*report["benchmark"]["matmul"], *report["benchmark"]["vector"]):
+        point["repeats"] = config.timing.repeats
+
+
 def tamper_extra_field(report):
     report["notes"] = "faster than a CUDA GPU"
 
@@ -236,6 +277,13 @@ def tamper_extra_field(report):
         (tamper_measured, "only the host timer"),
         (tamper_measured_rule, "do not require whole SIMD groups"),
         (tamper_measured_load, "measurement must record the host load averages"),
+        (tamper_measured_platform, "Apple GPU measurement must come from macOS"),
+        (tamper_probe_width, "probe pipeline must see the width"),
+        (tamper_limit_ceiling, "limits are outside what the API can report"),
+        (tamper_ratio_above_bound, "error maxima do not cover the lattice or exceed"),
+        (tamper_load_precision, "run time or load averages"),
+        (tamper_over_budget, "run time or load averages"),
+        (tamper_repeats, "samples_ns must hold 4 positive integers"),
         (tamper_extra_field, "report fields do not match"),
     ],
 )
