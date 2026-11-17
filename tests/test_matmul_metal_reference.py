@@ -1,4 +1,5 @@
 import itertools
+from fractions import Fraction
 from hashlib import sha256
 
 import numpy
@@ -11,6 +12,7 @@ from ai_journey.matmul_metal_reference import (
     CORRECTNESS_STREAM,
     error_bound,
     float64_reference,
+    fma_replay,
     gamma,
     matmul_inputs,
     matrix_sha256,
@@ -30,6 +32,55 @@ def sequential_python_sum(left, right):
             total += float(left[row, step]) * float(right[step, column])
         result[row, column] = total
     return result
+
+
+def exact_fma(a, b, c):
+    """Round the exact ``a * b + c`` to the nearest float32, ties to even."""
+
+    exact = Fraction(float(a)) * Fraction(float(b)) + Fraction(float(c))
+    guess = numpy.float32(float(exact))
+    candidates = [
+        numpy.nextafter(guess, numpy.float32(-numpy.inf)),
+        guess,
+        numpy.nextafter(guess, numpy.float32(numpy.inf)),
+    ]
+    return min(
+        candidates,
+        key=lambda value: (
+            abs(Fraction(float(value)) - exact),
+            int(numpy.float32(value).view(numpy.uint32)) & 1,
+        ),
+    )
+
+
+def fraction_replay(left, right):
+    rows, inner = left.shape
+    result = numpy.zeros((rows, right.shape[1]), dtype=numpy.float32)
+    for row, column in itertools.product(range(rows), range(right.shape[1])):
+        total = numpy.float32(0.0)
+        for step in range(inner):
+            total = exact_fma(left[row, step], right[step, column], total)
+        result[row, column] = total
+    return result
+
+
+# A 1 x 1 output with K = 2: the first step loads c, and the second adds a
+# product of 2**-24 plus or minus 2**-54. In float64 the sum lands exactly on
+# a float32 midpoint, so a second rounding to float32 would go the wrong way.
+# 1025 * 1047553 = 2**30 + 1 and 21483 * 49981 = 2**30 - 1.
+TRAPS = (
+    (1.0, 1025 * 2.0**-27, 1047553 * 2.0**-27, 1 + 2.0**-23, 1.0),
+    (1 + 2.0**-23, 21483 * 2.0**-27, 49981 * 2.0**-27, 1 + 2.0**-23, 1 + 2.0**-22),
+    # Exact ties round to even.
+    (1.0, 2.0**-12, 2.0**-12, 1.0, 1.0),
+    (1 + 2.0**-23, 2.0**-12, 2.0**-12, 1 + 2.0**-22, 1 + 2.0**-22),
+)
+
+
+def trap_operands(start, a, b):
+    left = numpy.array([[1.0, a]], dtype=numpy.float32)
+    right = numpy.array([[start], [b]], dtype=numpy.float32)
+    return left, right
 
 
 def test_inputs_are_seeded_standard_normal_float32_per_case():
@@ -126,3 +177,29 @@ def test_digests_hash_little_endian_bytes_and_tell_bits_apart():
     assert matrix_sha256(flipped) != matrix_sha256(values)
     with pytest.raises(MatmulMetalError, match="only float32 and float64"):
         matrix_sha256(values.astype(numpy.float16))
+
+
+@pytest.mark.parametrize(("start", "a", "b", "fused", "twice_rounded"), TRAPS)
+def test_the_replay_rounds_each_step_once_even_next_to_a_midpoint(
+    start, a, b, fused, twice_rounded
+):
+    left, right = trap_operands(start, a, b)
+
+    replayed = fma_replay(left, right)
+
+    assert replayed.dtype == numpy.float32
+    assert replayed[0, 0] == numpy.float32(fused)
+    assert replayed[0, 0] == exact_fma(a, b, numpy.float32(start))
+    widened = numpy.float64(a) * numpy.float64(b) + numpy.float64(start)
+    assert numpy.float32(widened) == numpy.float32(twice_rounded)
+
+
+def test_the_replay_matches_exact_rational_fma_steps():
+    left, right = matmul_inputs(74, CORRECTNESS_STREAM, 2, matmul_shape(3, 4, 40))
+
+    replayed = fma_replay(left, right)
+
+    expected = fraction_replay(left, right)
+    assert numpy.array_equal(replayed.view(numpy.uint32), expected.view(numpy.uint32))
+    reference, magnitude = float64_reference(left, right)
+    assert max_relative_error(replayed, reference, magnitude) <= error_bound(40)

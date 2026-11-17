@@ -23,8 +23,10 @@ relative error of an element is ``|C - R| / (|A| @ |B|)``, and a case
 records the largest one. The bound grows linearly in K; it is a worst case,
 and random rounding errors usually stay far below it.
 
-Digests hash the C-order little-endian bytes of an array, so equal digests
-mean bit-identical arrays.
+``fma_replay`` replays the kernels' arithmetic on the CPU bit for bit, so a
+report can name the exact bits each Metal output must hold. Digests hash the
+C-order little-endian bytes of an array, so equal digests mean bit-identical
+arrays.
 """
 
 from __future__ import annotations
@@ -116,6 +118,56 @@ def float64_reference(
         numpy.abs(product, out=product)
         magnitude += product
     return reference, magnitude
+
+
+def _round_fused(product: numpy.ndarray, total: numpy.ndarray) -> numpy.ndarray:
+    """Round each exact ``product + total`` once to float32, ties to even.
+
+    ``product`` holds exact float64 products and ``total`` float32 values
+    widened to float64. ``s = fl64(product + total)`` is the double nearest
+    the exact sum ``x``, and TwoSum gives ``e = x - s`` exactly. Rounding is
+    monotonic and every float32 midpoint is a double, so ``s`` and ``x`` round
+    to the same float32 unless ``s`` is a midpoint itself. Then the sign of
+    ``e`` picks the side of ``x``, and ``e == 0`` is a true tie, which the
+    plain conversion already rounds to even.
+    """
+
+    near = product + total
+    virtual = near - product
+    error = (product - (near - virtual)) + (total - virtual)
+    rounded = near.astype(numpy.float32)
+    rounded64 = rounded.astype(numpy.float64)
+    up = numpy.nextafter(rounded, numpy.float32(numpy.inf))
+    down = numpy.nextafter(rounded, numpy.float32(-numpy.inf))
+    offset = near - rounded64
+    above = (offset > 0) & (2 * offset == up.astype(numpy.float64) - rounded64)
+    below = (offset < 0) & (-2 * offset == rounded64 - down.astype(numpy.float64))
+    raise_up = above & (error > 0)
+    lower = below & (error < 0)
+    rounded[raise_up] = up[raise_up]
+    rounded[lower] = down[lower]
+    return rounded
+
+
+def fma_replay(left: numpy.ndarray, right: numpy.ndarray) -> numpy.ndarray:
+    """Replay ``sum = fma(a[i, k], b[k, j], sum)`` for k in increasing order.
+
+    This is the loop of both kernels: one rounding per step, starting from
+    0. A product of two float32 values is exact in float64, so each step
+    needs only the exact rounding of one sum. Standard-normal operands make
+    a subnormal partial sum, where a GPU may flush to zero, vanishingly
+    unlikely.
+    """
+
+    a, b = _operands(left, right)
+    a64, b64 = a.astype(numpy.float64), b.astype(numpy.float64)
+    shape = (a.shape[0], b.shape[1])
+    total = numpy.zeros(shape, dtype=numpy.float32)
+    product = numpy.empty(shape, dtype=numpy.float64)
+    for step in range(a.shape[1]):
+        numpy.multiply.outer(a64[:, step], b64[step, :], out=product)
+        total = _round_fused(product, total.astype(numpy.float64))
+    return total
 
 
 def gamma(inner: int, unit_roundoff: float) -> float:
