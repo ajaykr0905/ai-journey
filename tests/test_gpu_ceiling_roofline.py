@@ -95,7 +95,18 @@ def test_a_tampered_report_sets_no_ceiling():
         roofline_from_report(report)
 
 
-@pytest.mark.parametrize("value", [0, -1.0, float("nan"), float("inf"), True, "8"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        0,
+        -1.0,
+        float("nan"),
+        float("inf"),
+        True,
+        "8",
+        pytest.param(10**400, id="integer-no-float-holds"),
+    ],
+)
 def test_intensities_and_rates_must_be_positive_finite_numbers(value):
     line = roofline()
 

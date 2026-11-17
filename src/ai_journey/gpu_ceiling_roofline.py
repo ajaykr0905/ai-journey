@@ -32,9 +32,17 @@ _SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
 def _positive(value: object, name: str) -> float:
-    if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+    """Return a positive finite float; an integer no float holds is refused too."""
+
+    if type(value) not in (int, float):
         raise GpuCeilingError(f"{name} must be a positive finite number")
-    return float(value)
+    try:
+        number = float(value)
+    except OverflowError:
+        number = math.inf
+    if not math.isfinite(number) or number <= 0:
+        raise GpuCeilingError(f"{name} must be a positive finite number")
+    return number
 
 
 @dataclass(frozen=True)
