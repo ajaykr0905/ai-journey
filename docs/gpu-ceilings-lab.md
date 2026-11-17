@@ -408,6 +408,20 @@ With the ceilings of run 1, a kernel at 8 FLOPs per byte can reach at most
 GFLOP/s. The fraction of the ceiling is the achieved rate divided by the
 attainable rate. A fraction from these ceilings describes this host only.
 
+The module `gpu_ceiling_roofline.py` does this comparison in Python:
+
+- `load_roofline` reads a report through the verified loader, and
+  `roofline_from_report` verifies a report that is already in memory.
+- `attainable_gflops_per_second` gives the lower ceiling at an intensity, and
+  `bound` names the ceiling that limits the kernel.
+- `below_ceiling` gives the achieved rate, the attainable rate, the fraction,
+  the bound, and the digest and label of the ceiling report.
+
+A tampered report gives no roofline, because the verifier rejects it first. A
+synthetic report gives a roofline with `measured: false`. A fraction can be
+more than 1, because a ceiling is the best rate of the kernels of this lab,
+not a hardware limit.
+
 ## Evidence boundary and exclusions
 
 The boundary of a measured report states: "These are wall-clock timings on

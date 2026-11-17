@@ -3,7 +3,7 @@ import re
 import shlex
 from pathlib import Path
 
-from ai_journey import gpu_ceiling_cli
+from ai_journey import gpu_ceiling_cli, gpu_ceiling_roofline
 from ai_journey.gpu_ceiling_analysis import FINDINGS, FIXED_SHARE_LIMIT, SLOWDOWN_LIMIT
 from ai_journey.gpu_ceiling_config import (
     MAX_RUN_ACCESSES,
@@ -185,3 +185,15 @@ def test_guide_describes_the_host_of_the_recorded_report():
         f"and PyTorch {environment['torch_version']}."
     ) in text
     assert f"Darwin {environment['platform_machine']} host" in text
+
+
+def test_guide_names_the_roofline_helpers_that_compare_a_kernel():
+    text = flat(guide())
+    assert "`gpu_ceiling_roofline.py`" in text
+    for name in ("load_roofline", "roofline_from_report"):
+        assert callable(getattr(gpu_ceiling_roofline, name))
+        assert f"`{name}`" in text, name
+    for name in ("attainable_gflops_per_second", "bound", "below_ceiling"):
+        assert callable(getattr(gpu_ceiling_roofline.MeasuredRoofline, name))
+        assert f"`{name}`" in text, name
+    assert "A tampered report gives no roofline" in text
