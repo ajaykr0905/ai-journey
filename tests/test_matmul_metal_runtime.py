@@ -10,6 +10,7 @@ import pytest
 
 from ai_journey.kernel_metal_geometry import CheckedLaunch, PipelineLimits
 from ai_journey.kernel_metal_reference import FLOAT32_SENTINEL_BITS
+from ai_journey.matmul_metal_benchmark import agreement_bound
 from ai_journey.matmul_metal_mapping import (
     X_COLUMNS,
     X_ROWS,
@@ -177,6 +178,31 @@ def test_a_workload_times_every_side_and_checks_their_agreement():
     assert list(workload.sides) == list(SIDES)
     assert check.naive_same_bits is True
     assert 0.0 <= check.torch_disagreement <= 2 * error_bound(129)
+
+
+@requires_metal
+def test_the_workload_check_sees_outputs_that_moved():
+    # The check is the only guard on the timed outputs, so it must notice a
+    # torch.matmul output that moved and naive outputs that differ in a bit.
+    import torch
+
+    runtime = matmul_runtime()
+    shape = matmul_shape(65, 47, 129)
+    left, right = matmul_inputs(74, CORRECTNESS_STREAM, 1, shape)
+    workload = runtime.workload(left, right, launches(runtime, shape))
+    for name in SIDES:
+        workload.sides[name]()
+    rows = workload.sides["matmul_x_rows"].args[0]
+    product = workload.sides[TORCH_MATMUL].keywords["out"]
+
+    product[3, 5] += 1.0
+    moved_torch = workload.check()
+    rows.view(torch.int32)[0, 0] += 1
+    moved_rows = workload.check()
+
+    assert moved_torch.naive_same_bits is True
+    assert moved_torch.torch_disagreement > agreement_bound(shape.k)
+    assert moved_rows.naive_same_bits is False
 
 
 @requires_metal
