@@ -60,8 +60,9 @@ The exit codes are:
   before it measured anything.
 
 On the development host, one run of the pinned config took about 30 seconds,
-with the torch import. It wrote a report of about 50 KB. The `verify` command
-took about 2 seconds for that report.
+with the torch import. The load averages were about 8 to 9 during that run. The
+run wrote a report of about 50 KB. The `verify` command took about 2 seconds
+for that report.
 
 ## Requirements and hosts without MPS
 
