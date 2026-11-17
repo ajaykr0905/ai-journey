@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy
 import pytest
 
+from ai_journey.kernel_metal_geometry import PipelineLimits
 from ai_journey.memory_access_plan import canonical_json_bytes
 from ai_journey.memory_access_report import report_digest
 from ai_journey.metal_launch_sweep_config import config_from_mapping
@@ -74,6 +75,38 @@ def test_a_stand_in_report_verifies_as_synthetic_and_binds_its_config():
         verify_report(report, config=other)
     with pytest.raises(TypeError, match="MetalLaunchSweepConfig"):
         verify_report(report, config=make_config_mapping())
+
+
+def test_a_report_that_rejects_shapes_by_both_rules_verifies():
+    config = config_from_mapping(make_config_mapping())
+    backend = StandInBackend(
+        PipelineLimits(128, 32, 0), requires_whole_simd_groups=True
+    )
+    report = json.loads(
+        canonical_json_bytes(
+            measure_report(
+                config, backend=backend, clock=itertools.count(0, 1_000).__next__
+            )
+        )
+    )
+
+    summary = verify_report(report, config=config)
+
+    assert (summary["admitted_shapes"], summary["rejected_shapes"]) == (2, 5)
+    reasons = {
+        entry["reason"] for entries in report["admission"].values() for entry in entries
+    }
+    assert reasons == {
+        None,
+        "exceeds_max_threads_per_threadgroup",
+        "not_whole_simd_groups",
+    }
+    # Of the sizes 8, 32, 48 and 256, only 32 is admitted, and its case keeps
+    # the index 1 that its inputs were drawn with.
+    assert [case["index"] for case in report["correctness"]["vector_add"]] == [1]
+    report["correctness"]["vector_add"][0]["index"] = 0
+    with pytest.raises(MetalLaunchSweepVerificationError, match="vector_add case 1"):
+        verify_report(reseal(report))
 
 
 def tamper_limits(report):
