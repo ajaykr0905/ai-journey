@@ -4,18 +4,25 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import numpy
 import pytest
 
+from ai_journey.kernel_metal_report import (
+    MEASUREMENT_LABEL,
+    MEASUREMENT_SCOPE,
+    SYNTHETIC_SCOPE,
+)
 from ai_journey.matmul_metal_config import config_from_mapping
-from ai_journey.matmul_metal_report import measure_report
+from ai_journey.matmul_metal_report import MEASUREMENT_BOUNDARY, measure_report
 from ai_journey.matmul_metal_verify import (
     MatmulMetalVerificationError,
     _replay,
     verify_report,
 )
+from ai_journey.memory_access_benchmark import TIMER
 from ai_journey.memory_access_report import DIGEST_FIELD, report_digest
 from test_matmul_metal_config import make_config_mapping
 from test_matmul_metal_recorded import RECORDED_REPORT_JSON, RecordedBackend
@@ -74,6 +81,25 @@ def flip_differing(output):
 
 def shorten_first_sample(side):
     side["samples_ns"][0] = 7
+
+
+def overcount_differing(report):
+    """Claim more differing elements than C holds, with a summary to match."""
+
+    case = first_case(report)
+    case["outputs"][2].update(
+        buffer_sha256="0" * 64, differing_elements=case["m"] * case["n"] + 1
+    )
+    report["summary"]["torch_cases_with_other_bits"]["torch_matmul/mps"] = sum(
+        entry["outputs"][2]["differing_elements"] > 0
+        for entry in report["correctness"]["cases"]
+    )
+
+
+def raise_both_thread_limits(report):
+    # A launch depends only on the SIMD width, so it still rebuilds.
+    for kernel in report["shaders"]["kernels"]:
+        kernel["limits"]["max_threads_per_threadgroup"] = 2048
 
 
 TAMPERS = {
@@ -178,6 +204,51 @@ TAMPERS = {
         lambda r: r["config"]["benchmark"].update(repeats=2),
         "repeats must be in",
     ),
+    "config digest": (
+        lambda r: r.update(config_sha256="0" * 64),
+        "config digest does not match the embedded config",
+    ),
+    "kind": (lambda r: r.update(kind="matmul_metal_other"), "unexpected report kind"),
+    "schema version": (
+        lambda r: r.update(schema_version=2),
+        "unsupported report schema",
+    ),
+    "timer": (
+        lambda r: r.update(timer="time.monotonic_ns"),
+        "measurement method fields were changed",
+    ),
+    "environment field": (
+        lambda r: r["environment"].update(host_name="lab-mac"),
+        "environment fields do not match the host record",
+    ),
+    "timed total": (
+        lambda r: r["run"].update(timed_ns=r["run"]["timed_ns"] + 1),
+        "run time does not cover its samples",
+    ),
+    "budget": (
+        lambda r: r["run"].update(max_runtime_ns=2 * r["run"]["max_runtime_ns"]),
+        "run time does not cover its samples",
+    ),
+    "elapsed over budget": (
+        lambda r: r["run"].update(elapsed_ns=r["run"]["max_runtime_ns"] + 1),
+        "run time does not cover its samples",
+    ),
+    "torch guard": (
+        lambda r: first_case(r)["outputs"][2].update(guard_elements=5),
+        "torch_matmul on mps is malformed",
+    ),
+    "torch device": (
+        lambda r: first_case(r)["outputs"][2].update(device="cpu"),
+        "torch_matmul on mps is malformed",
+    ),
+    "torch count above the output": (
+        overcount_differing,
+        "differing elements consistently",
+    ),
+    "limits above the API": (
+        raise_both_thread_limits,
+        "outside what the API can report",
+    ),
 }
 
 
@@ -188,6 +259,71 @@ def test_every_resealed_tamper_is_caught_by_recomputation(name):
 
     with pytest.raises(MatmulMetalVerificationError, match=message):
         verify_report(resealed(report, change))
+
+
+def test_a_measurement_must_come_from_macos():
+    report = json.loads(RECORDED_REPORT_JSON)
+
+    tampered = resealed(
+        report, lambda r: r["environment"].update(platform_system="Linux")
+    )
+
+    with pytest.raises(MatmulMetalVerificationError, match="must come from macOS"):
+        verify_report(tampered)
+
+
+def claim_a_measurement(report):
+    report.update(
+        measured=True,
+        measurement_scope=MEASUREMENT_SCOPE,
+        label=MEASUREMENT_LABEL,
+        evidence_boundary=dict(MEASUREMENT_BOUNDARY),
+    )
+    report["summary"]["label"] = MEASUREMENT_LABEL
+
+
+def test_a_stand_in_timed_by_the_host_timer_is_never_a_measurement():
+    config = config_from_mapping(make_config_mapping())
+    report = measure_report(
+        config, backend=RecordedBackend(), clock=time.perf_counter_ns
+    )
+
+    summary = verify_report(report, config=config)
+
+    assert (report["timer"], report["backend"]) == (TIMER, "injected")
+    assert (summary["measured"], summary["scope"]) == (False, SYNTHETIC_SCOPE)
+    with pytest.raises(
+        MatmulMetalVerificationError,
+        match="only the host timer and torch.mps.compile_shader",
+    ):
+        verify_report(resealed(report, claim_a_measurement))
+
+
+def claim_three_repeats(report):
+    """Relabel a four-repeat report as the three-repeat config, as a forger could."""
+
+    config = config_from_mapping(make_config_mapping())
+    repeats = config.benchmark.repeats
+    report.update(
+        config=config.to_mapping(),
+        config_sha256=config.fingerprint(),
+        planned_work=config.planned_work().to_mapping(),
+    )
+    points = report["benchmark"]["points"]
+    for point in points:
+        for side in point["sides"].values():
+            side["repeats"] = repeats
+    report["summary"]["timed_samples"] = 3 * len(points) * repeats
+
+
+def test_each_side_must_hold_exactly_the_configured_repeats():
+    four = {**make_config_mapping()["benchmark"], "repeats": 4}
+    _, report = synthetic_report(benchmark=four)
+
+    tampered = resealed(report, claim_three_repeats)
+
+    with pytest.raises(MatmulMetalVerificationError, match="hold 3 positive integers"):
+        verify_report(tampered)
 
 
 @pytest.mark.parametrize("sign", [1.0, -1.0])
