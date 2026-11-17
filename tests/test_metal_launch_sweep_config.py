@@ -160,6 +160,22 @@ def test_config_refuses_oversized_batches_and_runs():
     heavy["timing"]["repeats"] = 50
     with pytest.raises(MetalLaunchSweepError, match="matmul FLOPs; the bound is"):
         config_from_mapping(heavy)
+    timing = {"warmup": 10, "repeats": 50, "max_runtime_seconds": 60}
+    # 16 shapes of 4096 and 3856 calls per sample for 60 samples: 7.6M calls.
+    busy = changed(("timing",), timing)
+    busy["matmul"]["group_shapes"] = [[2, 2 + step] for step in range(16)]
+    busy["matmul"]["sizes"] = [[16, 16, 16], [16, 16, 17]]
+    busy["matmul"]["target_flops_per_sample"] = 1 << 25
+    with pytest.raises(
+        MetalLaunchSweepError, match="kernel calls; the bound is 4194304"
+    ):
+        config_from_mapping(busy)
+    # 4 sizes of 3 calls for 60 samples, each call 12 * 2**25 bytes: 2.9e11.
+    wide = changed(("timing",), timing)
+    wide["vector"]["lengths"] = [1 << 25]
+    wide["vector"]["target_bytes_per_sample"] = 1 << 30
+    with pytest.raises(MetalLaunchSweepError, match="vector bytes; the bound is"):
+        config_from_mapping(wide)
 
 
 def test_config_files_are_bounded_strict_regular_json(tmp_path):
