@@ -7,6 +7,7 @@ import pytest
 from ai_journey.kernel_metal_geometry import KernelMetalError
 from ai_journey.matmul_metal_config import (
     MAX_CONFIG_BYTES,
+    MAX_RUN_CALLS,
     PlannedWork,
     config_from_mapping,
     load_config,
@@ -151,6 +152,25 @@ def test_sweeps_must_fit_the_batch_and_work_bounds():
         config_from_mapping({**make_config_mapping(), "benchmark": tiny})
     with pytest.raises(MatmulMetalError, match="FLOPs; the bound is"):
         config_from_mapping({**make_config_mapping(), "benchmark": huge})
+
+
+def test_sweeps_must_fit_the_run_call_bound():
+    # Each shape does 256 FLOPs, so the 2**20 target needs 4096 calls per
+    # sample, and 60 samples of 3 sides cost 737280 calls per shape.
+    shapes = [[1, 1, 128], [1, 2, 64], [1, 4, 32], [1, 8, 16], [1, 16, 8], [1, 32, 4]]
+    benchmark = {**make_config_mapping()["benchmark"], "warmup": 10, "repeats": 50}
+
+    def sweep(count):
+        return {
+            **make_config_mapping(),
+            "benchmark": {**benchmark, "shapes": shapes[:count]},
+        }
+
+    calls = config_from_mapping(sweep(5)).planned_work().calls
+    assert calls == 5 * 3 * 60 * 4096 <= MAX_RUN_CALLS
+    over = f"{6 * 3 * 60 * 4096} kernel calls; the bound is {MAX_RUN_CALLS}"
+    with pytest.raises(MatmulMetalError, match=over):
+        config_from_mapping(sweep(6))
 
 
 def test_config_files_are_read_strictly(tmp_path):
