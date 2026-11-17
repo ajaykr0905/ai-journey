@@ -267,6 +267,20 @@ def test_reports_are_verified_before_they_are_written(tmp_path, capsys):
 
 
 @requires_metal
+def test_a_gpu_run_without_load_averages_exits_two(tmp_path, capsys, monkeypatch):
+    from ai_journey import metal_launch_sweep_report
+
+    monkeypatch.setattr(metal_launch_sweep_report, "load_average", lambda: None)
+    config = write_config(tmp_path / "config.json")
+    output = tmp_path / "report.json"
+
+    argv = ["run", "--config", str(config), "--output", str(output)]
+    assert main(argv) == EXIT_INVALID
+    assert "must record the load averages" in capsys.readouterr().err
+    assert not output.exists()
+
+
+@requires_metal
 def test_a_run_on_this_gpu_is_a_labeled_measurement_that_verifies(tmp_path, capsys):
     config = write_config(tmp_path / "config.json")
     output = tmp_path / "report.json"

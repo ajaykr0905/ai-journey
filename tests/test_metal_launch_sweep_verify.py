@@ -168,6 +168,11 @@ def tamper_measured_rule(report):
     tamper_rule(report)
 
 
+def tamper_measured_load(report):
+    claim_measured(report)
+    report["run"]["load_average_after"] = None
+
+
 def tamper_extra_field(report):
     report["notes"] = "faster than a CUDA GPU"
 
@@ -197,6 +202,7 @@ def tamper_extra_field(report):
         (tamper_source, "this lab's Metal sources"),
         (tamper_measured, "only the host timer"),
         (tamper_measured_rule, "do not require whole SIMD groups"),
+        (tamper_measured_load, "measurement must record the host load averages"),
         (tamper_extra_field, "report fields do not match"),
     ],
 )

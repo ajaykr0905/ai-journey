@@ -18,9 +18,11 @@ the run, the planned work, the elapsed and timed nanoseconds, and a summary.
 
 Only the real ``MetalLaunchSweepRuntime`` timed with ``time.perf_counter_ns``
 makes a measurement, with the Day 73 scope and label of a host-specific
-Apple GPU (Metal) measurement. Its boundary rules out CUDA, NVIDIA,
-distributed, production, vendor-peak and scheduler claims. Any other backend
-or clock makes the report synthetic. The SHA-256 seal follows
+Apple GPU (Metal) measurement. Every such timing carries the load averages,
+so a host that gives none stops the run before its first launch. Its
+boundary rules out CUDA, NVIDIA, distributed, production, vendor-peak and
+scheduler claims. Any other backend or clock makes the report synthetic, and
+a synthetic run may go without load averages. The SHA-256 seal follows
 ``memory_access_report``: it detects drift and tampering, but it is not a
 signature and cannot prove that a timing was observed.
 """
@@ -44,7 +46,12 @@ from .kernel_metal_report import (
 from .kernel_metal_runtime import BACKEND
 from .kernel_metal_source import KERNELS, VECTOR_ADD
 from .kernel_metal_source import source_sha256 as day_73_source_sha256
-from .memory_access_benchmark import INJECTED_TIMER, PERCENTILE_METHOD, TIMER
+from .memory_access_benchmark import (
+    INJECTED_TIMER,
+    PERCENTILE_METHOD,
+    TIMER,
+    timer_name,
+)
 from .memory_access_report import seal_report
 from .metal_launch_sweep_benchmark import (
     SweepPoint,
@@ -141,6 +148,22 @@ def load_average() -> list[float] | None:
     return [round(float(value), 2) for value in values]
 
 
+def _host_load(measuring: bool) -> list[float] | None:
+    """Read the load averages; a measurement cannot be labeled without them.
+
+    The check runs before the first launch and again after the last sample,
+    so a host that gives no load averages stops before anything is timed.
+    """
+
+    loads = load_average()
+    if measuring and loads is None:
+        raise MetalLaunchSweepError(
+            "a measurement must record the load averages of the host, and this "
+            "host gives none"
+        )
+    return loads
+
+
 def _summary_point(point: dict[str, object]) -> dict[str, object]:
     rate = (
         "median_gflops_per_second"
@@ -213,7 +236,9 @@ def build_report(
     if not isinstance(config, MetalLaunchSweepConfig):
         raise TypeError("config must be a MetalLaunchSweepConfig")
     backend = MetalLaunchSweepRuntime() if backend is None else backend
-    before = load_average()
+    real = type(backend) is MetalLaunchSweepRuntime
+    measuring = real and timer_name(clock) == TIMER
+    before = _host_load(measuring)
     timing = config.timing
     budget = RunBudget(timing.max_runtime_seconds, clock)
     rule = backend.requires_whole_simd_groups
@@ -289,11 +314,10 @@ def build_report(
         for index, length in enumerate(config.vector.lengths)
     ]
     elapsed = budget.check()
-    after = load_average()
+    after = _host_load(measuring)
     timers = {point.timer for point in points}
     if len(timers) != 1 or not timers <= {TIMER, INJECTED_TIMER}:
         raise MetalLaunchSweepError("every sample must share one known timer")
-    real = type(backend) is MetalLaunchSweepRuntime
     measured = timers == {TIMER} and real
     label = MEASUREMENT_LABEL if measured else SYNTHETIC_LABEL
     admission = {

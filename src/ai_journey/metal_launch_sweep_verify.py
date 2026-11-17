@@ -25,8 +25,10 @@ vector-case helpers. It calls no module that made the report and never
 imports torch, so a host without torch or MPS can verify a report.
 
 Only a ``time.perf_counter_ns`` report from ``torch.mps.compile_shader``
-verifies as a measurement. A matching digest shows internal consistency; it
-cannot prove that a timing was observed or that a GPU ran.
+verifies as a measurement, and only with the host load averages from before
+and after its run, the context every Metal timing of the lab carries. A
+matching digest shows internal consistency; it cannot prove that a timing
+was observed or that a GPU ran.
 """
 
 from __future__ import annotations
@@ -818,6 +820,11 @@ def _verify(
         and _load(run["load_average_before"])
         and _load(run["load_average_after"]),
         "run time or load averages do not hold",
+    )
+    _require(
+        not measured
+        or None not in (run["load_average_before"], run["load_average_after"]),
+        "a measurement must record the host load averages before and after its run",
     )
     entries = [*admission["matmul"], *admission["vector"]]
     matmul_rows = [_summary_row(point) for point in matmul]

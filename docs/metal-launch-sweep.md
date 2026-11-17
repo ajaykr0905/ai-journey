@@ -385,6 +385,10 @@ verifier cannot observe a timing again, so it checks the timings for
 structure only. Each section must match the rebuilt section as canonical
 JSON, so `1`, `1.0` and `true` stay different.
 
+A measured report must hold the load averages from before and after its run.
+If the host gives no load averages, `run` stops with code 2 before the first
+launch.
+
 ## Controls
 
 | Field | Pinned | Allowed |

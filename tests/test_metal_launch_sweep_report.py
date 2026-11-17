@@ -162,6 +162,41 @@ def test_load_averages_are_rounded_or_absent(monkeypatch):
     assert load_average() is None
 
 
+def test_a_synthetic_run_may_go_without_load_averages(monkeypatch):
+    monkeypatch.setattr(metal_launch_sweep_report, "load_average", lambda: None)
+
+    report = stand_in_report()
+
+    run = report["run"]
+    assert (run["load_average_before"], run["load_average_after"]) == (None, None)
+    assert report["measured"] is False
+
+
+@requires_metal
+def test_a_measured_run_without_load_averages_is_never_sealed(monkeypatch):
+    from test_metal_launch_sweep_runtime import sweep_runtime
+
+    runtime = sweep_runtime()
+    config = config_from_mapping(make_config_mapping())
+
+    def launched(group):
+        raise AssertionError("a kernel ran although the load averages were unknown")
+
+    # The real runtime with the host timer makes a measurement, and every
+    # measurement must record the load averages before and after its run.
+    monkeypatch.setattr(metal_launch_sweep_report, "load_average", lambda: None)
+    with monkeypatch.context() as patch:
+        patch.setattr(runtime, "simd_layout", launched)
+        with pytest.raises(MetalLaunchSweepError, match="must record the load"):
+            measure_report(config, backend=runtime)
+    readings = iter(([1.0, 2.0, 3.0], None))
+    monkeypatch.setattr(
+        metal_launch_sweep_report, "load_average", lambda: next(readings)
+    )
+    with pytest.raises(MetalLaunchSweepError, match="must record the load"):
+        measure_report(config, backend=runtime)
+
+
 def test_the_measurement_boundary_denies_every_claim_beyond_this_host():
     for key in (
         "cuda_kernel_executed",
