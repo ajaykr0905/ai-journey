@@ -104,10 +104,12 @@ The two kernels differ only in the two lines that read the position:
 The guard, the loop and the store come from one template in the source module.
 When `row < m && column < n`, the kernel sets `sum` to 0. For each i from 0 to
 k - 1, it applies `sum = fma(a[row * k + i], b[i * n + column], sum);`. Then it
-stores `sum` in `c[row * n + column]`. The parameter k holds K. The Metal Shading Language defines `fma(a, b,
-c)` as `a * b + c` with one rounding. Thus the source alone decides each
-rounding of each output. The Day 73 probe showed that the compiler on this
-host fuses `x * y + z` on its own. The explicit call removes that choice.
+stores `sum` in `c[row * n + column]`. The parameter k holds K.
+
+The Metal Shading Language defines `fma(a, b, c)` as `a * b + c` with one
+rounding. Thus the source alone decides each rounding of each output. The Day
+73 probe showed that the compiler on this host fuses `x * y + z` on its own.
+The explicit call removes that choice.
 
 The parameters `m`, `n` and `k` are 32-bit `constant uint&` values. PyTorch
 2.15.0 passes a Python integer as 64 bits unless `arg_casts` gives another
@@ -344,10 +346,12 @@ occurred or that a GPU ran.
 The writer checks a report before it writes it. It writes a temporary file,
 flushes the file to the disk, and moves it into place with `os.replace`. It
 refuses an output that aliases the config through a path, a symbolic link or a
-hard link. The readers accept only regular files that are not symbolic links.
-The limit is 64 KiB for a config and 1 MiB for a report. The readers refuse
-duplicate JSON keys, `NaN`, `Infinity`, unknown fields and missing fields. They
-also refuse booleans or floats in place of integers.
+hard link.
+
+The readers accept only regular files that are not symbolic links. The limit
+is 64 KiB for a config and 1 MiB for a report. The readers refuse duplicate
+JSON keys, `NaN`, `Infinity`, unknown fields and missing fields. They also
+refuse booleans or floats in place of integers.
 
 The verifier uses only NumPy and its own code. It does not call the modules
 that made the report. It shares the config parser, which only checks bounds.
@@ -364,13 +368,14 @@ digests:
    error to the bound.
 
 The replay of the run repairs the midpoints, and the replay of the verifier
-rounds to odd. Thus the two methods check each other. A `torch.matmul` output
-has an unknown summation order, so the verifier cannot rebuild it. For these
-outputs, the verifier checks the digest format and holds the recorded error to
-the bound. It also requires a count of 0 differing elements exactly when the
-digest is the digest of the replay. When the digest is the digest of the
-replay, the output has the bits of the replay. Then the verifier also requires
-the error of the replay.
+rounds to odd. Thus the two methods check each other.
+
+A `torch.matmul` output has an unknown summation order, so the verifier cannot
+rebuild it. For these outputs, the verifier checks the digest format and holds
+the recorded error to the bound. It also requires a count of 0 differing
+elements exactly when the digest is the digest of the replay. When the digest
+is the digest of the replay, the output has the bits of the replay. Then the
+verifier also requires the error of the replay.
 
 The verifier cannot observe a timing again, so it checks the timings for
 structure only. It checks the sample counts, the positive integer values, and
