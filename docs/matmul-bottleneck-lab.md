@@ -287,6 +287,43 @@ These are the results:
   times as fast as `x_rows`.
 - No point was `memory-bound`, `compute-bound` or `indeterminate`.
 
+### Margins of the thresholds
+
+The config declares each threshold as a choice. No threshold is a fit to the
+recorded data.
+Each threshold has one of these reasons:
+
+- The dispatch threshold of 0.5 means that at least half of one call lies
+  outside the steady time.
+- The near-roof share of 0.7 puts a rate on a roof only when it is near
+  that roof.
+- The timing tolerance of 0.05 accepts a difference of 5 percent between
+  separate runs.
+- The roof tolerance of 0.05 accepts a rate up to 5 percent above a measured
+  roof.
+- The agreement ratio of 1.5 accepts a one-call GPU time that differs from
+  the steady time by noise, but not by a factor of 2.
+- The slower ratio of 1.1 needs a difference of 10 percent before a verdict
+  calls one mapping slower.
+
+This table gives the range of each threshold that keeps all 18 recorded
+names and all 9 verdicts. A test classifies the recorded points again at
+each end of each range.
+
+| Threshold | Pinned value | Range that keeps the recorded results |
+| --- | --- | --- |
+| `rule.dispatch_overhead_share_min` | 0.5 | 0.167 to 0.515 |
+| `rule.timing_tolerance` | 0.05 | 0.031 to 1 |
+| `rule.gpu_agreement_max_ratio` | 1.5 | 1.199 to 10 |
+| `rule.roof_excess_tolerance` | 0.05 | 0 to 1 |
+| `rule.near_roof_share_min` | 0.7 | 0.085 to 1 |
+| `mapping.slower_ratio_min` | 1.1 | 1 to 1.567 |
+
+The 512 cubed `x_columns` point sets the top of the dispatch range. A
+dispatch threshold of 0.52 changes its name to `indeterminate`, because its
+GPU time is 1.75 times its steady time and step 4 applies. The other
+ranges are wide.
+
 ### Limits of the event timing
 
 The `torch.mps.Event` pair does not read a GPU clock. The torch 2.15 headers

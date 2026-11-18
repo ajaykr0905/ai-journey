@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import re
 import shlex
@@ -9,7 +10,8 @@ from ai_journey import (
     matmul_metal_cli,
     matmul_roofline_cli,
 )
-from ai_journey.matmul_bottleneck_rule import BOTTLENECKS
+from ai_journey.matmul_bottleneck_config import load_config
+from ai_journey.matmul_bottleneck_rule import BOTTLENECKS, PointInputs, classify
 from test_matmul_bottleneck_recorded import GAP_SHA256, RECORDED_REPORT, REPORT_SHA256
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +19,7 @@ GUIDE = ROOT / "docs/matmul-bottleneck-lab.md"
 CONFIG = ROOT / "config/day-75-matmul-bottleneck.json"
 NAIVE = ("matmul_x_columns", "matmul_x_rows")
 CONFIG_RULE = json.loads(CONFIG.read_bytes())["rule"]
+CONFIG_PINNED = load_config(CONFIG)
 
 
 def guide():
@@ -203,3 +206,90 @@ def test_the_guide_quotes_the_event_check_run_against_the_recorded_steady_times(
         f"{without:.2f} without it." in text
     )
     assert without < CONFIG_RULE["dispatch_overhead_share_min"] <= min(small)
+
+
+def recorded_results(rule=None, slower_ratio_min=None):
+    """Classify the recorded points again, with one threshold replaced."""
+
+    rule = rule or CONFIG_PINNED.rule
+    slower = slower_ratio_min or CONFIG_PINNED.mapping.slower_ratio_min
+    bound = {
+        kernel: call["median_host_ns"]
+        for kernel, call in RECORDED_REPORT["sources"]["timing"][
+            "fastest_calls"
+        ].items()
+    }
+    names, verdicts = [], []
+    for point in RECORDED_REPORT["points"]:
+        for kernel in NAIVE:
+            numbers = point["kernels"][kernel]["decision"]["numbers"]
+            inputs = PointInputs(
+                steady_ns_per_call=numbers["steady_ns_per_call"],
+                rate_gflops_per_second=numbers["rate_gflops_per_second"],
+                gpu_ns=int(numbers["gpu_ns"]),
+                host_ns=int(numbers["host_ns"]),
+                dispatch_ns=int(numbers["dispatch_ns"]),
+                fma_ceiling_gflops_per_second=numbers["fma_ceiling_gflops_per_second"],
+                fma_scales_with_work=RECORDED_REPORT["ceilings"][
+                    "fma_scales_with_work"
+                ],
+                bandwidth_roof_gflops_per_second=numbers[
+                    "bandwidth_roof_gflops_per_second"
+                ],
+                fixed_cost_bound_ns=bound[kernel],
+            )
+            names.append(classify(inputs, rule).bottleneck)
+        mapping = point["mapping"]
+        verdicts.append(mapping["x_columns_to_x_rows_rate_ratio"] >= slower)
+    return names, verdicts
+
+
+def test_the_recorded_results_keep_their_names_over_each_documented_range():
+    recorded = recorded_results()
+    rows = dict(
+        re.findall(
+            r"^\| `([a-z_]+\.[a-z_]+)` \| [0-9.]+ \| ([0-9.]+ to [0-9.]+) \|$",
+            guide(),
+            flags=re.M,
+        )
+    )
+    numeric = [
+        "dispatch_overhead_share_min",
+        "timing_tolerance",
+        "gpu_agreement_max_ratio",
+        "roof_excess_tolerance",
+        "near_roof_share_min",
+    ]
+
+    assert recorded[0] == [
+        point["kernels"][kernel]["decision"]["bottleneck"]
+        for point in RECORDED_REPORT["points"]
+        for kernel in NAIVE
+    ]
+    assert all(recorded[1])
+    assert set(rows) == {f"rule.{name}" for name in numeric} | {
+        "mapping.slower_ratio_min"
+    }
+    for name in numeric:
+        low, high = (float(value) for value in rows[f"rule.{name}"].split(" to "))
+        for value in (low, high):
+            rule = dataclasses.replace(CONFIG_PINNED.rule, **{name: value})
+            assert recorded_results(rule) == recorded, (name, value)
+    low, high = (
+        float(value) for value in rows["mapping.slower_ratio_min"].split(" to ")
+    )
+    assert recorded_results(slower_ratio_min=low) == recorded
+    assert recorded_results(slower_ratio_min=high) == recorded
+    assert recorded_results(slower_ratio_min=high + 0.001) != recorded
+    # The top of the dispatch range is a real edge: one step past it, a name changes.
+    past = dataclasses.replace(CONFIG_PINNED.rule, dispatch_overhead_share_min=0.52)
+    names = recorded_results(past)[0]
+    changed = [
+        (index, before, after)
+        for index, (before, after) in enumerate(zip(recorded[0], names))
+        if before != after
+    ]
+    assert changed == [(4, "dispatch-bound", "indeterminate")]
+    assert "A dispatch threshold of 0.52 changes its name to `indeterminate`" in flat(
+        guide()
+    )
