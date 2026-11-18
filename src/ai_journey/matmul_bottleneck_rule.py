@@ -11,8 +11,9 @@ step that applies sets the name:
    per call above it by more than the timing tolerance.
 2. ``dispatch-bound`` when at least the pinned share of one call's host time
    lies outside the steady-state time per call. The timings cannot split that
-   time into host dispatch, completion wait, GPU launch latency or a lower
-   GPU clock in an isolated call, so the name covers all of them.
+   time into host dispatch, completion wait, GPU launch latency, a lower GPU
+   clock in an isolated call or the cost of the timing events themselves, so
+   the name covers all of them.
 3. ``indeterminate`` when the timing input cannot rule out such a fixed cost.
    A fixed cost is at most the smallest one-call host time of the kernel in
    the timing input, if that cost does not depend on the shape. When that
@@ -183,8 +184,9 @@ def point_numbers(inputs: PointInputs) -> dict[str, float]:
     The overhead share splits into two parts that the rule records but does
     not compare: ``host_outside_gpu_share``, the host time outside the GPU
     timeline of the call, and ``gpu_excess_share``, the GPU time above the
-    steady-state time. A large second part can be a GPU launch latency or a
-    lower clock in an isolated call, and only a counter could tell them apart.
+    steady-state time. A large second part can be a GPU launch latency, a
+    lower clock in an isolated call or the signal latency of the events that
+    bound the GPU time, and only a counter could tell them apart.
     """
 
     host = inputs.host_ns

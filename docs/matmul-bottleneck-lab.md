@@ -96,7 +96,7 @@ kernel, the file holds three medians of one call, in nanoseconds:
 
 | Field | Meaning |
 | --- | --- |
-| `median_gpu_ns` | GPU time of one call, for example between two `torch.mps.Event` records |
+| `median_gpu_ns` | GPU time of one call, for example between two `torch.mps.Event` records. Such an interval also holds the event signals. |
 | `median_host_ns` | host time from an idle queue until the host sees the call complete |
 | `median_dispatch_ns` | host time to issue the call, before the host waits |
 
@@ -277,14 +277,47 @@ These are the results:
   cubed points were near the threshold, with overhead shares of 0.515 and
   0.546.
 - At the 256 and 512 cubed points, the GPU time was 1.75 to 4.92 times the
-  steady time. Thus most of their overhead was inside the GPU time. A lower
-  GPU clock in an isolated call can cause part of it.
+  steady time. Thus most of their overhead was inside the event interval.
+  The event signals, a GPU launch latency or a lower GPU clock in an
+  isolated call can cause it.
 - At the other 6 shapes, both kernels used at most 0.084 of the FMA ceiling.
   The ideal-reuse roof was above the FMA ceiling at these shapes.
 - At all 9 shapes, the verdict was `x_rows_worse_as_modeled`. The model gave
   `x_rows` 6.60 to 6.61 times as many sectors. `x_columns` ran 1.57 to 3.24
   times as fast as `x_rows`.
 - No point was `memory-bound`, `compute-bound` or `indeterminate`.
+
+### Limits of the event timing
+
+The `torch.mps.Event` pair does not read a GPU clock. The torch 2.15 headers
+show that each event keeps a completion time that the host records. Thus
+`median_gpu_ns` is a host interval between two event signals. It includes
+the signal latency, so it is longer than the kernel time.
+
+The scratch capture read the host clock before the first event record and
+after the wait. Thus `median_host_ns` and `median_dispatch_ns` include the
+cost of the two event records. The steady time does not include it, so the
+event records increase the overhead share.
+
+A check run measured that cost on 2026-11-18 from 08:54 IST. It held the GPU
+lock and timed each naive kernel 21 times, with and without the event pair.
+The `uptime` load averages were 22.12, 17.36 and 15.02 before it and 24.43,
+17.92 and 15.23 after it. This load was about two times the load of the
+recorded run. The repository does not keep the check script or its output.
+
+The check run gave these results:
+
+- At 128, 256 and 512 cubed, the event pair added 38 to 211 microseconds to
+  the median host time of one call.
+- At 128 and 256 cubed, the overhead shares without the event pair were at
+  least 0.81. At 512 cubed, the `x_columns` share was 0.54.
+- At 512 cubed, one `x_rows` call took 2.51 ms, against 3.65 ms in the
+  recorded file. Its overhead share was 0.34 with the event pair and 0.33 without it.
+
+Thus the `dispatch-bound` name of the 512 cubed `x_rows` point did not
+repeat in the check run. The two runs had different loads, so the check run
+does not replace the recorded result. The names at 128 and 256 cubed did not
+change.
 
 The tests also join this timing file with the small Day 74 fixture from
 2026-11-17. That fixture holds one call per sample at 256 x 256 x 256. Step 3

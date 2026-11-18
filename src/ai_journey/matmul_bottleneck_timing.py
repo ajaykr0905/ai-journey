@@ -6,7 +6,8 @@ The bottleneck rule also needs that fixed cost, so it reads one more input:
 for each shape and kernel, the medians of three one-call times.
 
 * ``median_gpu_ns``: the GPU time of one call, for example between two
-  ``torch.mps.Event`` records around it;
+  ``torch.mps.Event`` records around it. Such an event keeps a completion
+  time that the host records, so the interval holds the signal latency too;
 * ``median_host_ns``: the host wall-clock time of one call, from the moment
   the queue is idle until the host sees the call complete;
 * ``median_dispatch_ns``: the host time to issue that call, before it waits.

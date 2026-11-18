@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 GUIDE = ROOT / "docs/matmul-bottleneck-lab.md"
 CONFIG = ROOT / "config/day-75-matmul-bottleneck.json"
 NAIVE = ("matmul_x_columns", "matmul_x_rows")
+CONFIG_RULE = json.loads(CONFIG.read_bytes())["rule"]
 
 
 def guide():
@@ -152,3 +153,53 @@ def test_the_guide_quotes_the_recorded_digests_ceilings_and_load_averages():
         top = RECORDED_REPORT["summary"]["top_bottleneck"][kernel]
         assert (top["top"], top["top_points"]) == ("latency or occupancy-bound", 6)
     assert "was `latency or occupancy-bound`, at 6 of 9 shapes." in text
+
+
+# Median one-call host times in ns of the event check run on 2026-11-18 at
+# 08:54 IST, with and without the torch.mps.Event pair, 21 repeats each.
+EVENT_CHECK = {
+    (128, "matmul_x_columns"): (343250, 299083),
+    (128, "matmul_x_rows"): (484167, 377833),
+    (256, "matmul_x_columns"): (797416, 714000),
+    (256, "matmul_x_rows"): (1606083, 1479125),
+    (512, "matmul_x_columns"): (1849500, 1638708),
+    (512, "matmul_x_rows"): (2510333, 2472667),
+}
+
+
+def test_the_guide_quotes_the_event_check_run_against_the_recorded_steady_times():
+    text = flat(guide())
+    steady = {
+        (point["m"], kernel): point["kernels"][kernel]["decision"]["numbers"][
+            "steady_ns_per_call"
+        ]
+        for point in RECORDED_REPORT["points"]
+        if point["m"] == point["n"] == point["k"]
+        for kernel in NAIVE
+    }
+    added = [(with_ - without) / 1000 for with_, without in EVENT_CHECK.values()]
+    share = {
+        key: (1 - steady[key] / with_, 1 - steady[key] / without)
+        for key, (with_, without) in EVENT_CHECK.items()
+    }
+    small = [share[key][1] for key in share if key[0] < 512]
+    rows = RECORDED_REPORT["points"][2]["kernels"]["matmul_x_rows"]
+
+    assert "The `torch.mps.Event` pair does not read a GPU clock." in text
+    assert (
+        f"the event pair added {min(added):.0f} to {max(added):.0f} microseconds"
+        in text
+    )
+    assert (
+        f"the overhead shares without the event pair were at least {min(small):.2f}"
+        in text
+    )
+    assert f"the `x_columns` share was {share[512, 'matmul_x_columns'][1]:.2f}." in text
+    with_, without = share[512, "matmul_x_rows"]
+    assert (
+        f"one `x_rows` call took {EVENT_CHECK[512, 'matmul_x_rows'][0] / 1e6:.2f} ms, "
+        f"against {rows['inputs']['median_host_ns'] / 1e6:.2f} ms in the recorded "
+        f"file. Its overhead share was {with_:.2f} with the event pair and "
+        f"{without:.2f} without it." in text
+    )
+    assert without < CONFIG_RULE["dispatch_overhead_share_min"] <= min(small)
