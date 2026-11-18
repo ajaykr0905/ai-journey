@@ -5,8 +5,9 @@ GPU runs it later. So "how long did the kernel take" has three answers, and
 this lab records all three for every sample side:
 
 - ``mps_event``: ``torch.mps.Event(enable_timing=True)`` recorded just before
-  and just after the launch. It times the interval between two points in the
-  MPS command stream, so host-side Python cost outside the stream is absent.
+  and just after the launch. It is not GPU time alone: host time spent between
+  the two records, including the launch call itself, falls inside the
+  interval, as a runtime test with a host sleep between them shows.
 - ``host_synchronized``: ``time.perf_counter_ns`` before the launch and after
   the ``torch.mps.synchronize()`` that follows it. It is what a caller waits.
 - ``host_dispatch``: ``time.perf_counter_ns`` around the launch call alone,

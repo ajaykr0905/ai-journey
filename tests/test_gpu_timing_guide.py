@@ -2,7 +2,7 @@ import re
 import shlex
 from pathlib import Path
 
-from ai_journey import gpu_timing_cli
+from ai_journey import gpu_timing_cli, gpu_timing_clocks
 from ai_journey.gpu_timing_clocks import CLOCK_DOMAINS
 from ai_journey.gpu_timing_config import MAX_TINY_FLOPS, load_config
 from ai_journey.kernel_metal_runtime import UNAVAILABLE_REASONS
@@ -120,3 +120,12 @@ def test_guide_controls_and_planned_work_match_the_pinned_config():
         f"The planned work has {work.sides} sides, {work.timed_samples} timed "
         f"samples, {work.launches} launches and {work.flops} FLOPs."
     ) in flat(text)
+
+
+def test_guide_says_the_event_interval_holds_host_time():
+    text = flat(guide())
+
+    assert "The event clock is device-side" not in text
+    assert "host time between the two `record()` calls" in text
+    assert "The event interval is not GPU time only." in text
+    assert "cost outside the stream is absent" not in flat(gpu_timing_clocks.__doc__)

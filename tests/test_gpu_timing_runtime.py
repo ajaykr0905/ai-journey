@@ -3,6 +3,7 @@ import math
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -155,3 +156,41 @@ def test_the_workload_binds_the_three_day_74_sides():
 
     assert tuple(workload.sides) == SIDES
     assert check.naive_same_bits is True
+
+
+@requires_metal
+def test_an_event_interval_holds_the_host_time_between_its_records():
+    # The guide says the event clock is not GPU time alone; this is the proof.
+    runtime = timing_runtime()
+    side = runtime.empty_side(
+        CheckedLaunch(empty_launch(), runtime.limits[EMPTY_KERNEL])
+    )
+    pair = runtime.event_pair()
+
+    runtime.synchronize()
+    pair.start()
+    time.sleep(0.02)
+    side()
+    pair.stop()
+    runtime.synchronize()
+
+    assert pair.elapsed_ms() >= 15.0
+
+
+@requires_metal
+def test_an_event_pair_brackets_the_gpu_work_of_a_heavy_launch():
+    # x_rows at 1024 cubed takes about 11 ms here; an end event that did not
+    # wait for the kernel would read near the 0.07 ms of the empty kernel.
+    runtime = timing_runtime()
+    shape = matmul_shape(1024, 1024, 1024)
+    left, right = matmul_inputs(75, BENCHMARK_STREAM, 0, shape)
+    workload = runtime.workload(left, right, launches(runtime, shape))
+    pair = runtime.event_pair()
+
+    workload.synchronize()
+    pair.start()
+    workload.sides["matmul_x_rows"]()
+    pair.stop()
+    workload.synchronize()
+
+    assert pair.elapsed_ms() >= 1.0

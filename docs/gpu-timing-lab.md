@@ -84,11 +84,15 @@ lab records the first event, launches the kernel, records the second event
 and then waits for the queue. Then it reads `elapsed_time` in milliseconds. The report keeps
 the raw milliseconds and the integer nanoseconds from `round(ms * 1e6)`.
 
-The event clock is device-side: it times two points in the MPS command
-stream. The PyTorch header says that a completion handler of the command
-buffer stores the time of each event. The header does not name the clock that
-the handler reads. Thus the lab treats the event clock as a different domain
-from `time.perf_counter_ns`.
+The PyTorch header says that a completion handler of the command buffer
+stores the time of each event. The header does not name the clock that the
+handler reads. Thus the lab treats the event clock as a different domain from
+`time.perf_counter_ns`.
+
+The event interval is not GPU time only. It also holds the host time between
+the two `record()` calls, and that time includes the launch call. A test in
+`tests/test_gpu_timing_runtime.py` shows it. The test waits 20 ms on the host
+between the two calls, and the event interval is then 15 ms or more.
 
 The lab never subtracts an event time from a host time without a label. It
 does one such subtraction, `host_minus_event`. Its record has
@@ -239,7 +243,7 @@ GPU (Metal) measurements, not portable figures.
 | 1 | 08:32:09 to 08:33:27 | 9.87, 13.62, 12.65 | 10.53, 12.82, 12.41 |
 | 2 | 08:33:54 to 08:35:10 | 11.40, 12.80, 12.42 | 11.66, 13.06, 12.58 |
 
-Each run took about 78 seconds, with the torch import. Each report was about
+Each run took 76 to 78 seconds, with the torch import. Each report was about
 98 KB, and `verify` accepted both reports as measurements.
 
 ### The launch floor
@@ -252,7 +256,8 @@ Each run took about 78 seconds, with the torch import. Each report was about
 The dispatch call of the empty kernel took about 5 to 6 us. The caller
 waited about 115 to 137 us for a kernel that did no work. The event interval
 was about 65 to 70 us. Thus the event interval includes more than the
-kernel. On this host, it probably includes a part of the submission path of
+kernel. It includes the launch call on the host, as the section about the
+three clocks shows. It probably also includes a part of the submission path of
 the MPS stream.
 
 ### Medians of run 1
