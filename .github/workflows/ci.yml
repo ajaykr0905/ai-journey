@@ -1623,7 +1623,7 @@ jobs:
           ai-journey-profile-trace capture --config "$GITHUB_WORKSPACE/config/day-75-profile-trace.json" --output-dir "$RUNNER_TEMP/profile-sim-evidence/capture" 2> "$RUNNER_TEMP/profile-sim-evidence/capture-unavailable.txt" || status=$?
           cat "$RUNNER_TEMP/profile-sim-evidence/capture-unavailable.txt"
           test "$status" -eq 3
-          grep -F "profile-trace capture unavailable: PyTorch cannot be imported (torch_not_importable)" "$RUNNER_TEMP/profile-sim-evidence/capture-unavailable.txt"
+          grep -F "profile-trace capture unavailable: Metal kernels run only on macOS (unsupported_operating_system)" "$RUNNER_TEMP/profile-sim-evidence/capture-unavailable.txt"
           test ! -e "$RUNNER_TEMP/profile-sim-evidence/capture"
           python -c 'import os, pathlib, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_profile_trace_recorded import write_recorded; directory = pathlib.Path(sys.argv[1]); directory.mkdir(); write_recorded(directory)' "$RUNNER_TEMP/profile-sim-evidence/recorded-capture"
           ai-journey-profile-trace verify --report "$RUNNER_TEMP/profile-sim-evidence/recorded-capture/report.json"

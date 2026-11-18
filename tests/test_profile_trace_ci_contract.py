@@ -7,6 +7,7 @@ and check the recorded Apple GPU (Metal) capture.
 """
 
 import os
+import platform
 import shlex
 import subprocess
 import sys
@@ -23,7 +24,14 @@ TESTS = " ".join(f"tests/test_{lab}_*.py" for lab in LABS)
 EVIDENCE = "$RUNNER_TEMP/profile-sim-evidence/"
 SIM_CONFIG = "config/day-75-sim-profile.json"
 TRACE_CONFIG = "config/day-75-profile-trace.json"
+# The runtime reads the operating system before it imports torch. The Linux
+# runner therefore refuses for the operating system, and a Mac with torch
+# blocked refuses because torch cannot be imported.
 REFUSAL = (
+    "profile-trace capture unavailable: Metal kernels run only on macOS "
+    "(unsupported_operating_system)"
+)
+MACOS_REFUSAL = (
     "profile-trace capture unavailable: PyTorch cannot be imported "
     "(torch_not_importable)"
 )
@@ -133,7 +141,8 @@ def test_ci_requires_the_installed_capture_to_stop_without_a_report(tmp_path):
         env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
     )
     assert completed.returncode == profile_trace_cli.EXIT_UNAVAILABLE
-    assert completed.stderr.startswith(REFUSAL)
+    expected = MACOS_REFUSAL if platform.system() == "Darwin" else REFUSAL
+    assert completed.stderr.startswith(expected)
     assert not output.exists()
 
 
