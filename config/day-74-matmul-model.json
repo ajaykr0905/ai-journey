@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "name": "day-74-matmul-model",
+  "statement": "Inputs for a pure-Python CPU model of the Day 74 naive matmul exercise under compute capability 8.0 limits. The ceilings are declared model inputs, not measurements, and the register counts are assumptions. No GPU runs, no CUDA source is compiled, and no time is measured.",
+  "compute_capability": "8.0",
+  "block": [
+    32,
+    8
+  ],
+  "cases": [
+    {
+      "name": "ragged",
+      "m": 37,
+      "n": 45,
+      "k": 29,
+      "input_seed": 74
+    },
+    {
+      "name": "aligned",
+      "m": 32,
+      "n": 64,
+      "k": 16,
+      "input_seed": 74
+    }
+  ],
+  "permuted_order_seeds": [
+    1,
+    2,
+    3
+  ],
+  "accounting_shapes": [
+    {
+      "m": 1024,
+      "n": 1024,
+      "k": 1024
+    },
+    {
+      "m": 4096,
+      "n": 4096,
+      "k": 4096
+    }
+  ],
+  "registers_per_thread": [
+    32,
+    40,
+    64,
+    128
+  ],
+  "ceilings": [
+    {
+      "label": "declared-ridge-4",
+      "compute_gflops": "4",
+      "bandwidth_gbps": "1"
+    },
+    {
+      "label": "declared-ridge-16",
+      "compute_gflops": "16",
+      "bandwidth_gbps": "1"
+    }
+  ]
+}

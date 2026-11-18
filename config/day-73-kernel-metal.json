@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "name": "day-73-kernel-metal",
+  "seed": 73,
+  "launch": {
+    "vector_add_group_size": 256,
+    "rgb_to_gray_group_size": [16, 16]
+  },
+  "correctness": {
+    "vector_add_lengths": [1, 255, 256, 257, 1000, 65537, 1048579],
+    "rgb_to_gray_shapes": [[1, 1], [15, 17], [16, 16], [480, 641], [1023, 1025]],
+    "rgb_to_gray_all_triples": true
+  },
+  "benchmark": {
+    "vector_add_lengths": [4096, 16384, 65536, 262144, 1048576, 4194304, 16777216],
+    "rgb_to_gray_shapes": [[64, 64], [256, 256], [512, 512], [1080, 1920], [2048, 2048], [4096, 4096]],
+    "warmup": 2,
+    "repeats": 11,
+    "target_bytes_per_sample": 33554432,
+    "max_runtime_seconds": 120
+  }
+}
