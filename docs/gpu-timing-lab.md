@@ -223,7 +223,7 @@ The pinned config is `config/day-75-gpu-timing.json`.
 | `sweep.warmup` | 3 | 0 to 10 |
 | `sweep.repeats` | 15 | 3 to 50 |
 | `sweep.max_runtime_seconds` | 600 | 1 to 600 |
-| `reference.fma_ceiling_gflops_per_second` | 4618.0 | a float above 0 |
+| `reference.fma_ceiling_gflops_per_second` | 4618.0 | a float above 0 and at most 10000000 |
 
 The pinned sweep uses the cubes 1, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048
 and 4096. The planned work has 37 sides, 1665 timed samples, 1998 launches and

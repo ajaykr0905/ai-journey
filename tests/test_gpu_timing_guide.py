@@ -4,7 +4,11 @@ from pathlib import Path
 
 from ai_journey import gpu_timing_cli, gpu_timing_clocks
 from ai_journey.gpu_timing_clocks import CLOCK_DOMAINS
-from ai_journey.gpu_timing_config import MAX_TINY_FLOPS, load_config
+from ai_journey.gpu_timing_config import (
+    MAX_CEILING_GFLOPS,
+    MAX_TINY_FLOPS,
+    load_config,
+)
 from ai_journey.kernel_metal_runtime import UNAVAILABLE_REASONS
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -129,3 +133,9 @@ def test_guide_says_the_event_interval_holds_host_time():
     assert "host time between the two `record()` calls" in text
     assert "The event interval is not GPU time only." in text
     assert "cost outside the stream is absent" not in flat(gpu_timing_clocks.__doc__)
+
+
+def test_guide_states_both_bounds_of_the_ceiling():
+    bound = f"a float above 0 and at most {int(MAX_CEILING_GFLOPS)} |"
+
+    assert bound in guide()
