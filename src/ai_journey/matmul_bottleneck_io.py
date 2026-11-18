@@ -1,7 +1,9 @@
 """Build, load and publish only verified, canonical bottleneck reports.
 
 ``report_from_files`` reads the three Day 74 reports through their own
-verified loaders, parses the timing input and seals the report. Reads reuse
+verified loaders, reads the timing input and seals the report. The timing
+file is either the declared schema or a sealed gpu-timing report, which must
+pass its own verifier first. Reads reuse
 the bounded reader of ``memory_access_report_io``, and a loaded report must
 pass the verifier and be canonical JSON followed by one newline. Given all
 four input paths, the loader also rebuilds the report from them, and the
@@ -26,9 +28,9 @@ from .matmul_bottleneck_config import (
     MatmulBottleneckVerificationError,
     config_from_mapping,
 )
+from .matmul_bottleneck_gpu_timing import load_timing_source
 from .matmul_bottleneck_report import build_report
 from .matmul_bottleneck_sources import sources_from_files
-from .matmul_bottleneck_timing import load_timing
 from .matmul_bottleneck_verify import verify_report
 from .memory_access_plan import canonical_json_bytes
 from .memory_access_report_io import (
@@ -58,12 +60,12 @@ class InputPaths:
 
 
 def report_from_files(paths: InputPaths, config: BottleneckConfig) -> dict:
-    """Verify the Day 74 sources, parse the timing and seal the report."""
+    """Verify the Day 74 sources, read the timing and seal the report."""
 
     sources = sources_from_files(
         paths.matmul_report, paths.ceiling_report, paths.gap_report
     )
-    return build_report(sources, load_timing(paths.timing), config)
+    return build_report(sources, load_timing_source(paths.timing, sources), config)
 
 
 def load_report(

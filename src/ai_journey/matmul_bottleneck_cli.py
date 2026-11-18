@@ -2,7 +2,9 @@
 
 ``classify`` reads the sealed matmul-metal, gpu-ceilings and roofline gap
 reports of Day 74, verifies each with its own verifier, joins the gap with a
-one-call timing input, applies the pinned rule and seals the report. It
+one-call timing input, applies the pinned rule and seals the report. The
+``--timing`` file is the declared timing schema or a sealed gpu-timing
+report, which must pass the gpu-timing verifier. It
 prints one line per naive kernel and point with the name, its reason and the
 numbers behind it, one line per point for the two mappings, and the top name
 of each kernel. ``verify`` recomputes a report; given all four inputs, it also

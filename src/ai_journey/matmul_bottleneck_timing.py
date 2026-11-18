@@ -12,8 +12,9 @@ for each shape and kernel, the medians of three one-call times.
   the queue is idle until the host sees the call complete;
 * ``median_dispatch_ns``: the host time to issue that call, before it waits.
 
-A separate gpu-timing workstream produces the real input; the tests use a
-recorded one. An input is a measurement only with ``measured: true``, the
+A sealed gpu-timing report is the other real input, through
+``matmul_bottleneck_gpu_timing``; the recorded input here came from a
+scratch capture. An input is a measurement only with ``measured: true``, the
 Metal measurement label and macOS in its environment, and it records the
 load averages of its run. It need not be canonical JSON, because another
 tool writes it, so its digest covers the canonical form of the parsed

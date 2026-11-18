@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ai_journey import (
     gpu_ceiling_cli,
+    gpu_timing_cli,
     matmul_bottleneck_cli,
     matmul_metal_cli,
     matmul_roofline_cli,
@@ -50,7 +51,7 @@ def loads(values):
 
 
 def test_documented_commands_read_the_outputs_of_the_day_74_guides():
-    classify, verify = documented(GUIDE, matmul_bottleneck_cli)
+    classify, verify, _ = documented(GUIDE, matmul_bottleneck_cli)
     metal, _ = documented(ROOT / "docs/matmul-metal-lab.md", matmul_metal_cli)
     ceiling, _ = documented(ROOT / "docs/gpu-ceilings-lab.md", gpu_ceiling_cli)
     gap, _ = documented(ROOT / "docs/matmul-roofline-gap.md", matmul_roofline_cli)
@@ -293,3 +294,55 @@ def test_the_recorded_results_keep_their_names_over_each_documented_range():
     assert "A dispatch threshold of 0.52 changes its name to `indeterminate`" in flat(
         guide()
     )
+
+
+# Digests of the joined run on 2026-11-18 from 09:14:56 IST, under the GPU lock.
+JOINED_DIGESTS = {
+    "gpu-timing": "45786bd734735ac4b6164b8bdf95e82031784acfdee89cc8774fb0cd8cb11547",
+    "gpu-ceilings": "677ec40de39f20f50fc8964e3bbd3972ef84698ed7cd2228fce6adb9d73ca0d6",
+    "matmul-metal, cubes": (
+        "08b837a9cd8369020351f69110ff67aced937977bb6412aa214b297da4341eb0"
+    ),
+    "roofline gap, cubes": (
+        "a39f31eccedaa4930fa9022c02653c76af9ad6e2cb284d9b19ce6ac4f672368d"
+    ),
+    "joined bottleneck": (
+        "e1a9af3b8558c3d924369fb57c8c9da9cc13ad0a364d4719748cab400d76e8ae"
+    ),
+}
+
+
+def test_the_joined_commands_chain_the_gpu_timing_and_cube_reports():
+    *_, joined = documented(GUIDE, matmul_bottleneck_cli)
+    (cubes,) = documented(GUIDE, matmul_metal_cli)
+    (gap,) = documented(GUIDE, matmul_roofline_cli)
+    timing, _ = documented(ROOT / "docs/gpu-timing-lab.md", gpu_timing_cli)
+    ceiling, _ = documented(ROOT / "docs/gpu-ceilings-lab.md", gpu_ceiling_cli)
+    cube_config = json.loads((ROOT / cubes.config).read_bytes())
+    day_74 = json.loads((ROOT / "config/day-74-matmul-metal.json").read_bytes())
+
+    assert joined.timing == timing.output
+    assert joined.matmul_report == gap.matmul_report == cubes.output
+    assert joined.ceiling_report == gap.ceiling_report == ceiling.output
+    assert joined.gap_report == gap.output
+    assert joined.config == Path(CONFIG.relative_to(ROOT))
+    timed = json.loads((ROOT / timing.config).read_bytes())["sweep"]["shapes"]
+    assert cube_config["benchmark"]["shapes"] == [
+        shape for shape in day_74["benchmark"]["shapes"] if shape in timed
+    ]
+    assert len(cube_config["benchmark"]["shapes"]) == 6
+    assert {**cube_config, "name": None, "benchmark": None} == {
+        **day_74,
+        "name": None,
+        "benchmark": None,
+    }
+
+
+def test_the_guide_quotes_the_joined_run_digests_and_labels_it():
+    text = flat(guide())
+
+    for name, digest in JOINED_DIGESTS.items():
+        assert f"| {name} | `{digest}` |" in text
+    assert "All numbers are host-specific Apple GPU (Metal) measurements" in text
+    assert "8.90, 8.80 and 10.84 before the ceiling run" in text
+    assert "The top name of each kernel was `latency or occupancy-bound`, at 4" in text

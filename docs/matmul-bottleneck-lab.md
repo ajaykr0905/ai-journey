@@ -90,9 +90,10 @@ verifier before the command uses a number from it:
    sample, the median rate and the roofs of each point. The command builds
    the gap again from the two other reports, and the gap must be equal.
 
-The fourth input is a timing file with a small declared schema. The
-gpu-timing workstream of Day 75 makes the real file. For each shape and
-kernel, the file holds three medians of one call, in nanoseconds:
+The fourth input is a timing file. It is a file with a small declared
+schema, or a sealed report of the [gpu-timing lab](gpu-timing-lab.md). For
+each shape and kernel, the file holds three medians of one call, in
+nanoseconds:
 
 | Field | Meaning |
 | --- | --- |
@@ -361,6 +362,102 @@ The tests also join this timing file with the small Day 74 fixture from
 names that `x_columns` point `indeterminate`. At 129 x 65 x 1000, the steady
 times of the fixture are above the host times of this file. Thus step 1
 names both points `indeterminate`.
+
+## Join with a gpu-timing report
+
+The `--timing` option also accepts a sealed gpu-timing report. The command
+then makes these checks before it uses a number from the report:
+
+1. The report must pass the gpu-timing verifier.
+2. The file must be canonical JSON.
+3. The threadgroup size and the float32 matmul precision must be equal to
+   the values in the matmul-metal report.
+
+The command takes three medians of each side from the report:
+
+| Field | Clock of the gpu-timing report |
+| --- | --- |
+| `median_gpu_ns` | `mps_event` |
+| `median_host_ns` | `host_synchronized` |
+| `median_dispatch_ns` | `host_dispatch` |
+
+The gpu-timing lab reads one clock in each sample. Thus no event record is
+inside a host interval. The producer text of the timing source gives the
+digest of the gpu-timing report.
+
+The pinned gpu-timing sweep times cubes only. Two shapes of the Day 74 sweep
+have the same FLOP count, and the gpu-timing config refuses that. Thus the
+joined run uses a matmul-metal config with the six cubes of the Day 74
+sweep. These commands make the joined report:
+
+```bash
+python -m ai_journey.matmul_metal_cli run \
+  --config config/day-75-matmul-metal-cubes.json \
+  --output /tmp/day-75-matmul-metal-cubes.json
+python -m ai_journey.matmul_roofline_cli gap \
+  --matmul-report /tmp/day-75-matmul-metal-cubes.json \
+  --ceiling-report /tmp/day-74-gpu-ceilings.json \
+  --output /tmp/day-75-matmul-roofline-cubes.json
+python -m ai_journey.matmul_bottleneck_cli classify \
+  --matmul-report /tmp/day-75-matmul-metal-cubes.json \
+  --ceiling-report /tmp/day-74-gpu-ceilings.json \
+  --gap-report /tmp/day-75-matmul-roofline-cubes.json \
+  --timing /tmp/day-75-gpu-timing.json \
+  --config config/day-75-matmul-bottleneck.json \
+  --output /tmp/day-75-matmul-bottleneck-joined.json
+```
+
+The gpu-ceilings guide and the gpu-timing guide give the commands for the
+two other reports.
+
+### Joined run on the development host
+
+The joined run was on 2026-11-18 from 09:14:56 IST. It held the GPU lock
+for 112 seconds. It ran the pinned Day 74 gpu-ceilings config, the cube
+matmul-metal config and the pinned gpu-timing config. All numbers are
+host-specific Apple GPU (Metal) measurements:
+
+- The `uptime` load averages were 8.90, 8.80 and 10.84 before the ceiling
+  run and 7.53, 8.19 and 10.35 after the timing run.
+- The gpu-timing report recorded 7.32, 8.39 and 10.60 before its run.
+- The FMA ceiling was 4797.8 GFLOP/s, and the bandwidth ceiling was 110.92
+  GB/s.
+
+The joined report gave these names:
+
+| Shape | `x_columns` | `x_rows` |
+| --- | --- | --- |
+| 128 cubed | `dispatch-bound` (0.880) | `dispatch-bound` (0.817) |
+| 256 cubed | `dispatch-bound` (0.543) | `latency or occupancy-bound` (0.400) |
+| 512 cubed | `latency or occupancy-bound` (0.046) | `latency or occupancy-bound` (0.145) |
+| 1024 cubed | `latency or occupancy-bound` | `indeterminate` (step 1) |
+| 2048 cubed | `latency or occupancy-bound` | `latency or occupancy-bound` |
+| 4096 cubed | `latency or occupancy-bound` | `latency or occupancy-bound` |
+
+The numbers in parentheses are overhead shares. The top name of each kernel
+was `latency or occupancy-bound`, at 4 of 6 shapes. At 1024 cubed, the
+`x_rows` steady time was 14.16 ms in the matmul-metal report. The one-call
+host time was 11.57 ms. Thus step 1 named the point `indeterminate`. The
+verdict was `x_rows_worse_as_modeled` at all 6 shapes.
+
+The 512 cubed points were not `dispatch-bound` in the joined run. The host
+interval of the gpu-timing lab holds no event records, and this can be one
+cause. The load was also lower than in the recorded run. These two runs do
+not show which cause had the larger effect.
+
+The run made these digests:
+
+| Report | Digest |
+| --- | --- |
+| gpu-timing | `45786bd734735ac4b6164b8bdf95e82031784acfdee89cc8774fb0cd8cb11547` |
+| gpu-ceilings | `677ec40de39f20f50fc8964e3bbd3972ef84698ed7cd2228fce6adb9d73ca0d6` |
+| matmul-metal, cubes | `08b837a9cd8369020351f69110ff67aced937977bb6412aa214b297da4341eb0` |
+| roofline gap, cubes | `a39f31eccedaa4930fa9022c02653c76af9ad6e2cb284d9b19ce6ac4f672368d` |
+| joined bottleneck | `e1a9af3b8558c3d924369fb57c8c9da9cc13ad0a364d4719748cab400d76e8ae` |
+
+The `verify` command with all four inputs accepted the joined report. The
+repository does not keep these reports. The tests join a synthetic
+gpu-timing report with the recorded Day 74 fixture instead.
 
 ## Reports and verification
 
