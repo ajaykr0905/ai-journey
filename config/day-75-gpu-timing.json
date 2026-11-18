@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "name": "day-75-gpu-timing",
+  "seed": 75,
+  "launch": {
+    "group_size": [32, 8]
+  },
+  "sweep": {
+    "shapes": [[1, 1, 1], [4, 4, 4], [8, 8, 8], [16, 16, 16], [32, 32, 32], [64, 64, 64], [128, 128, 128], [256, 256, 256], [512, 512, 512], [1024, 1024, 1024], [2048, 2048, 2048], [4096, 4096, 4096]],
+    "warmup": 3,
+    "repeats": 15,
+    "max_runtime_seconds": 600
+  },
+  "reference": {
+    "fma_ceiling_gflops_per_second": 4618.0,
+    "source": "docs/gpu-ceilings-lab.md run 1 FMA ceiling: host-specific Apple GPU (Metal) measurement, 2026-11-17, load averages 10.66, 9.62, 8.81 before"
+  }
+}
