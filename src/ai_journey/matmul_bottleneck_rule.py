@@ -164,7 +164,14 @@ class Decision:
 
 
 def point_numbers(inputs: PointInputs) -> dict[str, float]:
-    """Derive every share and ratio that the rule compares."""
+    """Derive every share and ratio that the rule compares.
+
+    The overhead share splits into two parts that the rule records but does
+    not compare: ``host_outside_gpu_share``, the host time outside the GPU
+    timeline of the call, and ``gpu_excess_share``, the GPU time above the
+    steady-state time. A large second part can be a GPU launch latency or a
+    lower clock in an isolated call, and only a counter could tell them apart.
+    """
 
     host = inputs.host_ns
     steady = inputs.steady_ns_per_call
@@ -179,6 +186,7 @@ def point_numbers(inputs: PointInputs) -> dict[str, float]:
         "dispatch_ns": float(inputs.dispatch_ns),
         "overhead_share": 1.0 - steady / host,
         "host_outside_gpu_share": 1.0 - inputs.gpu_ns / host,
+        "gpu_excess_share": (inputs.gpu_ns - steady) / host,
         "dispatch_share": inputs.dispatch_ns / host,
         "gpu_to_steady_ratio": inputs.gpu_ns / steady,
         "rate_gflops_per_second": rate,

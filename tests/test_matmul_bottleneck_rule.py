@@ -44,6 +44,7 @@ def test_a_large_naive_point_sits_below_both_roofs_with_its_numbers():
     assert numbers["overhead_share"] == 1.0 - 5_712_900.0 / 5_937_709
     assert numbers["host_outside_gpu_share"] == 1.0 - 5_648_875 / 5_937_709
     assert numbers["dispatch_share"] == 122_167 / 5_937_709
+    assert numbers["gpu_excess_share"] == (5_648_875 - 5_712_900.0) / 5_937_709
     assert numbers["gpu_to_steady_ratio"] == 5_648_875 / 5_712_900.0
     # The ideal-reuse roof is above the FMA ceiling, so the FMA ceiling is lower.
     assert numbers["lower_roof_share"] == numbers["fma_ceiling_share"] == 375.9 / 4757.3
@@ -101,6 +102,21 @@ def test_each_step_of_the_rule_names_its_reason(changes, reason, name):
 
     assert (decision.reason, decision.bottleneck) == (reason, name)
     assert REASONS[reason][0] == name
+
+
+def test_the_overhead_splits_into_host_and_gpu_parts():
+    # One call at 512 x 512 x 512: most of the overhead is inside the GPU timeline.
+    decision = classify(
+        point(steady_ns_per_call=1_655_200.0, host_ns=3_647_916, gpu_ns=3_215_583),
+        RULE,
+    )
+    numbers = decision.numbers
+
+    assert decision.bottleneck == DISPATCH_BOUND
+    assert numbers["overhead_share"] == pytest.approx(
+        numbers["host_outside_gpu_share"] + numbers["gpu_excess_share"]
+    )
+    assert numbers["gpu_excess_share"] > numbers["host_outside_gpu_share"]
 
 
 def test_the_first_step_that_applies_wins():
