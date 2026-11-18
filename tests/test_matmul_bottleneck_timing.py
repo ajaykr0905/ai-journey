@@ -32,8 +32,13 @@ ENVIRONMENT = {
 # Synthetic one-call medians for the two shapes of the recorded Day 74
 # matmul-metal fixture: (gpu, host, dispatch) nanoseconds per kernel. Against
 # that fixture's steady-state times, they give each naive kernel one point
-# below both roofs, and one point that is dispatch-bound or indeterminate.
+# below both roofs, and one point that is dispatch-bound or indeterminate. The
+# small shape is not in the fixture; its fast calls bound the fixed cost.
 SYNTHETIC_TIMES = {
+    (16, 16, 16): {
+        "matmul_x_columns": (60_000, 120_000, 20_000),
+        "matmul_x_rows": (60_000, 130_000, 20_000),
+    },
     (256, 256, 256): {
         "matmul_x_columns": (735_000, 760_000, 30_000),
         "matmul_x_rows": (1_300_000, 1_350_000, 30_000),
@@ -97,6 +102,8 @@ def test_a_synthetic_input_parses_round_trips_and_finds_its_entries():
         40_000,
     )
     assert timing.entry(matmul_shape(128, 128, 128), "matmul_x_rows") is None
+    assert timing.fastest_call("matmul_x_rows").host_ns == 130_000
+    assert timing.fastest_call("torch_matmul").host_ns == 60_000
 
 
 def test_a_measurement_needs_its_label_and_macos():

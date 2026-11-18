@@ -70,6 +70,8 @@ def test_each_naive_kernel_at_each_gap_point_joins_its_timing():
         side = point["sides"][item.kernel]
         dims = (item.shape.m, item.shape.n, item.shape.k)
         gpu, host, dispatch = SYNTHETIC_TIMES[dims][item.kernel]
+        fastest = SYNTHETIC_TIMES[(16, 16, 16)][item.kernel][1]
+        assert item.inputs.fixed_cost_bound_ns == fastest
         assert item.inputs.steady_ns_per_call == (
             side["median_sample_ns"] / point["calls_per_sample"]
         )

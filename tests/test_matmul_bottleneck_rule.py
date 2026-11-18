@@ -28,6 +28,7 @@ BASE = PointInputs(
     fma_ceiling_gflops_per_second=4757.3,
     fma_scales_with_work=True,
     bandwidth_roof_gflops_per_second=17_512.0,
+    fixed_cost_bound_ns=460_125,
 )
 
 
@@ -45,6 +46,7 @@ def test_a_large_naive_point_sits_below_both_roofs_with_its_numbers():
     assert numbers["host_outside_gpu_share"] == 1.0 - 5_648_875 / 5_937_709
     assert numbers["dispatch_share"] == 122_167 / 5_937_709
     assert numbers["gpu_excess_share"] == (5_648_875 - 5_712_900.0) / 5_937_709
+    assert numbers["fixed_share_bound"] == 460_125 / 5_937_709
     assert numbers["gpu_to_steady_ratio"] == 5_648_875 / 5_712_900.0
     # The ideal-reuse roof is above the FMA ceiling, so the FMA ceiling is lower.
     assert numbers["lower_roof_share"] == numbers["fma_ceiling_share"] == 375.9 / 4757.3
@@ -71,6 +73,8 @@ def test_a_large_naive_point_sits_below_both_roofs_with_its_numbers():
             "one_call_overhead_dominates",
             DISPATCH_BOUND,
         ),
+        # The fastest call of the kernel could hide a fixed cost of 3 ms.
+        ({"fixed_cost_bound_ns": 3_000_000}, "fixed_cost_not_ruled_out", INDETERMINATE),
         ({"gpu_ns": 3_800_000}, "gpu_time_disagrees_with_steady_time", INDETERMINATE),
         # A GPU time 1.52 times the steady time per call, the other way round.
         (
@@ -119,6 +123,15 @@ def test_the_overhead_splits_into_host_and_gpu_parts():
     assert numbers["gpu_excess_share"] > numbers["host_outside_gpu_share"]
 
 
+def test_a_one_call_sample_needs_a_fast_call_to_rule_out_a_fixed_cost():
+    # One call per Day 74 sample: the steady time holds that call's own sync,
+    # so the overhead share is near 0 whatever the fixed cost is.
+    one_call = point(steady_ns_per_call=741_667.0, host_ns=789_583, gpu_ns=552_708)
+
+    assert classify(one_call, RULE).reason == "fixed_cost_not_ruled_out"
+    assert classify(point(), RULE).reason == "below_both_roofs"
+
+
 def test_the_first_step_that_applies_wins():
     # Overhead dominates and the GPU time also disagrees: dispatch comes first.
     tiny = point(steady_ns_per_call=20_100.0, host_ns=460_125, gpu_ns=249_125)
@@ -163,6 +176,7 @@ def test_every_reason_names_a_declared_bottleneck():
         ({"gpu_ns": 0}, "gpu_ns must be a positive integer"),
         ({"host_ns": 1.0}, "host_ns must be a positive integer"),
         ({"fma_scales_with_work": 1}, "must be a boolean"),
+        ({"fixed_cost_bound_ns": 0}, "fixed_cost_bound_ns must be a positive"),
     ],
 )
 def test_invalid_inputs_are_refused(changes, message):

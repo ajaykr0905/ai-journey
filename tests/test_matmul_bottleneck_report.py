@@ -84,7 +84,8 @@ def test_a_measured_gap_and_timing_make_a_measured_report_that_disclaims_counter
     assert ceiling["load_average_before"] == gap_sources["load_average_before"]
     timing = report["sources"]["timing"]
     assert timing["load_average_before"] == [1.0, 1.5, 2.0]
-    assert (timing["entries"], timing["entries_used"]) == (6, 4)
+    assert (timing["entries"], timing["entries_used"]) == (8, 4)
+    assert timing["fastest_calls"]["matmul_x_columns"]["median_host_ns"] == 120_000
     assert timing["input_sha256"] == measured_timing().digest()
 
 

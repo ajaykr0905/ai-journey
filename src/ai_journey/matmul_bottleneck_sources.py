@@ -11,7 +11,8 @@ verifier before the rule uses a number from it:
 The timing input then joins the gap point by point. It must hold every naive
 kernel at every gap shape and name the same interpreter, libraries and
 platform as the reports. It may hold more entries, such as ``torch_matmul``
-or other shapes; the rule ignores them, and the report counts them.
+or other shapes. The rule names no extra entry, but the smallest host time of
+each naive kernel over all entries bounds its fixed one-call cost.
 
 A source that was read but failed its checks raises
 ``MatmulBottleneckVerificationError``; bad input and sources that do not pair
@@ -167,6 +168,7 @@ def join_points(
     _environment(sources, timing)
     gap = sources.gap_report
     ceilings = gap["ceilings"]
+    fastest = {kernel: timing.fastest_call(kernel) for kernel in NAIVE_SIDES}
     joined = []
     for point in gap["points"]:
         shape = matmul_shape(point["m"], point["n"], point["k"])
@@ -190,6 +192,7 @@ def join_points(
                 fma_ceiling_gflops_per_second=ceilings["fma_gflops_per_second"],
                 fma_scales_with_work=ceilings["fma_scales_with_work"],
                 bandwidth_roof_gflops_per_second=roof,
+                fixed_cost_bound_ns=fastest[kernel].host_ns,
             )
             joined.append(JoinedPoint(point["index"], shape, kernel, inputs, entry))
     return tuple(joined)

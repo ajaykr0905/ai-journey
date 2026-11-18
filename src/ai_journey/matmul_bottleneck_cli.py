@@ -115,6 +115,7 @@ def _lines(report: dict[str, object]) -> list[str]:
                 f"{label} bottleneck {shape} mapping={entry['mapping']} "
                 f'name="{decision["bottleneck"]}" reason={decision["reason"]} '
                 f"overhead_share={numbers['overhead_share']:.3f} "
+                f"fixed_share_bound={numbers['fixed_share_bound']:.3f} "
                 f"gpu_to_steady_ratio={numbers['gpu_to_steady_ratio']:.3f} "
                 f"fma_share={numbers['fma_ceiling_share']:.3g} "
                 f"lower_roof_share={numbers['lower_roof_share']:.3g}"

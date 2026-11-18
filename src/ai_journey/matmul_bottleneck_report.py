@@ -53,6 +53,11 @@ DEFINITIONS = {
     "host_outside_gpu_share": "1 - median_gpu_ns / median_host_ns",
     "gpu_excess_share": "(median_gpu_ns - steady_ns_per_call) / median_host_ns",
     "dispatch_share": "median_dispatch_ns / median_host_ns",
+    "fixed_share_bound": (
+        "the smallest median_host_ns of the kernel over the whole timing input, "
+        "divided by median_host_ns: the largest share that a fixed one-call cost "
+        "can take if it does not depend on the shape"
+    ),
     "gpu_to_steady_ratio": "median_gpu_ns / steady_ns_per_call",
     "bandwidth_roof_gflops_per_second": (
         "the measured bandwidth ceiling in GB/s times the intensity of the "
@@ -175,6 +180,10 @@ def _sources(
             "load_average_after": list(timing.load_average_after),
             "entries": len(timing.entries),
             "entries_used": used,
+            "fastest_calls": {
+                kernel: timing.fastest_call(kernel).to_mapping()
+                for kernel in NAIVE_SIDES
+            },
         },
     }
 

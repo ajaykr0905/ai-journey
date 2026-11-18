@@ -167,6 +167,18 @@ TAMPERS = {
         lambda r: r["sources"]["timing"].update(entries_used=3),
         "one entry per naive kernel",
     ),
+    "faster than the fastest call": (
+        lambda r: r["sources"]["timing"]["fastest_calls"]["matmul_x_rows"].update(
+            median_host_ns=2_000_000
+        ),
+        "faster than the fastest call",
+    ),
+    "changed fastest call": (
+        lambda r: r["sources"]["timing"]["fastest_calls"]["matmul_x_rows"].update(
+            median_host_ns=129_000
+        ),
+        "point 0 does not recompute",
+    ),
     "malformed point": (
         lambda r: r["points"].__setitem__(0, []),
         "point 0 must be a JSON object",

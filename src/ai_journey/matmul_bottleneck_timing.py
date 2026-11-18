@@ -173,6 +173,16 @@ class TimingInput:
                 return entry
         return None
 
+    def fastest_call(self, kernel: str) -> TimingEntry | None:
+        """Return the entry with the smallest one-call host time of a kernel.
+
+        A cost that every call of the kernel pays, whatever its shape, cannot
+        exceed that time. The first entry wins a tie.
+        """
+
+        entries = [entry for entry in self.entries if entry.kernel == kernel]
+        return min(entries, key=lambda entry: entry.host_ns) if entries else None
+
     def to_mapping(self) -> dict[str, object]:
         return {
             "schema_version": TIMING_SCHEMA_VERSION,

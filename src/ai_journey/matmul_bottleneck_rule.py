@@ -13,17 +13,23 @@ step that applies sets the name:
    lies outside the steady-state time per call. The timings cannot split that
    time into host dispatch, completion wait, GPU launch latency or a lower
    GPU clock in an isolated call, so the name covers all of them.
-3. ``indeterminate`` when the one-call GPU time and the steady-state time per
+3. ``indeterminate`` when the timing input cannot rule out such a fixed cost.
+   A fixed cost is at most the smallest one-call host time of the kernel in
+   the timing input, if that cost does not depend on the shape. When that
+   bound is at least the pinned share of the host time, the cost can still
+   dominate. This step matters most when a Day 74 sample holds one call, so
+   its steady-state time includes the call's own synchronization.
+4. ``indeterminate`` when the one-call GPU time and the steady-state time per
    call differ by more than the pinned ratio, so the timing input does not
    corroborate the Day 74 rate.
-4. ``indeterminate`` when the rate sits above the FMA ceiling or above the
+5. ``indeterminate`` when the rate sits above the FMA ceiling or above the
    bandwidth roof by more than the pinned tolerance: that ceiling, or the
    traffic model of the roof, does not hold for the point.
-5. When the rate reaches the pinned share of the lower roof, the name is
+6. When the rate reaches the pinned share of the lower roof, the name is
    ``memory-bound`` if the bandwidth roof is the lower roof, else
    ``compute-bound``. A compute ceiling that the ceiling lab flags as not
    scaling with work gives ``indeterminate`` instead, if the config asks.
-6. Else ``latency or occupancy-bound``: the rate sits below both roofs. That
+7. Else ``latency or occupancy-bound``: the rate sits below both roofs. That
    name is a residual. It says that neither measured roof explains the rate,
    and an unmeasured limit such as on-chip cache bandwidth also fits it.
 
@@ -69,6 +75,11 @@ REASONS = {
         DISPATCH_BOUND,
         "most of the one-call host time lies outside the steady-state time per call",
     ),
+    "fixed_cost_not_ruled_out": (
+        INDETERMINATE,
+        "the smallest one-call host time of this kernel does not rule out a fixed "
+        "cost that fills the pinned share of this call",
+    ),
     "gpu_time_disagrees_with_steady_time": (
         INDETERMINATE,
         "the one-call GPU time and the steady-state time per call differ by more "
@@ -111,6 +122,8 @@ class PointInputs:
     ``steady_ns_per_call`` is the Day 74 median sample time over its calls per
     sample, and ``rate_gflops_per_second`` is the Day 74 median rate. The roof
     is the bandwidth ceiling times the intensity of the config's traffic model.
+    ``fixed_cost_bound_ns`` is the smallest one-call host time of the kernel
+    over the whole timing input.
     """
 
     steady_ns_per_call: float
@@ -121,6 +134,7 @@ class PointInputs:
     fma_ceiling_gflops_per_second: float
     fma_scales_with_work: bool
     bandwidth_roof_gflops_per_second: float
+    fixed_cost_bound_ns: int
 
     def __post_init__(self) -> None:
         for name in (
@@ -132,7 +146,7 @@ class PointInputs:
             value = getattr(self, name)
             if type(value) is not float or not value > 0 or value == float("inf"):
                 raise MatmulBottleneckError(f"{name} must be a positive finite float")
-        for name in ("gpu_ns", "host_ns", "dispatch_ns"):
+        for name in ("gpu_ns", "host_ns", "dispatch_ns", "fixed_cost_bound_ns"):
             value = getattr(self, name)
             if type(value) is not int or value < 1:
                 raise MatmulBottleneckError(f"{name} must be a positive integer")
@@ -188,6 +202,7 @@ def point_numbers(inputs: PointInputs) -> dict[str, float]:
         "host_outside_gpu_share": 1.0 - inputs.gpu_ns / host,
         "gpu_excess_share": (inputs.gpu_ns - steady) / host,
         "dispatch_share": inputs.dispatch_ns / host,
+        "fixed_share_bound": inputs.fixed_cost_bound_ns / host,
         "gpu_to_steady_ratio": inputs.gpu_ns / steady,
         "rate_gflops_per_second": rate,
         "fma_ceiling_gflops_per_second": fma,
@@ -230,6 +245,13 @@ def classify(inputs: PointInputs, rule: BottleneckRule) -> Decision:
             "one_call_overhead_dominates",
             numbers,
             "overhead_share",
+            rule.dispatch_overhead_share_min,
+        )
+    if numbers["fixed_share_bound"] >= rule.dispatch_overhead_share_min:
+        return _decision(
+            "fixed_cost_not_ruled_out",
+            numbers,
+            "fixed_share_bound",
             rule.dispatch_overhead_share_min,
         )
     ratio = numbers["gpu_to_steady_ratio"]

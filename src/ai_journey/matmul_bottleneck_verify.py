@@ -178,6 +178,7 @@ def _sources(sources: object) -> bool:
             "load_average_after",
             "entries",
             "entries_used",
+            "fastest_calls",
         }
         and timing["kind"] == TIMING_KIND
         and type(timing["measured"]) is bool
@@ -203,6 +204,37 @@ def _sources(sources: object) -> bool:
             f"source {field} must be a SHA-256 hex digest",
         )
     return gap["measured"] and timing["measured"]
+
+
+def _fastest_calls(calls: object) -> dict[str, int]:
+    """Check the fastest timing entry of each naive kernel; return its host time."""
+
+    fields = {
+        "m",
+        "n",
+        "k",
+        "kernel",
+        "median_gpu_ns",
+        "median_host_ns",
+        "median_dispatch_ns",
+    }
+    _require(
+        type(calls) is dict
+        and set(calls) == set(_KERNELS)
+        and all(
+            type(entry) is dict
+            and set(entry) == fields
+            and entry["kernel"] == kernel
+            and all(_integer(entry[axis], 1, _MAX_DIMENSION) for axis in "mnk")
+            and all(
+                _integer(entry[name], 1, _MAX_NS)
+                for name in ("median_gpu_ns", "median_host_ns", "median_dispatch_ns")
+            )
+            for kernel, entry in calls.items()
+        ),
+        "source timing fastest_calls do not match the schema",
+    )
+    return {kernel: entry["median_host_ns"] for kernel, entry in calls.items()}
 
 
 def _environment(environment: object, measured: bool) -> None:
@@ -274,7 +306,7 @@ def _intensity(model: str, m: int, n: int, k: int) -> Fraction:
 def _rule(
     steady: float,
     rate: float,
-    times: tuple[int, int, int],
+    times: tuple[int, int, int, int],
     fma: float,
     scales: bool,
     roof: float,
@@ -282,7 +314,7 @@ def _rule(
 ) -> dict:
     """The ordered bottleneck rule, written again from its documented steps."""
 
-    gpu, host, dispatch = times
+    gpu, host, dispatch, bound = times
     lower = roof if roof < fma else fma
     numbers = {
         "steady_ns_per_call": steady,
@@ -293,6 +325,7 @@ def _rule(
         "host_outside_gpu_share": 1.0 - gpu / host,
         "gpu_excess_share": (gpu - steady) / host,
         "dispatch_share": dispatch / host,
+        "fixed_share_bound": bound / host,
         "gpu_to_steady_ratio": gpu / steady,
         "rate_gflops_per_second": rate,
         "fma_ceiling_gflops_per_second": fma,
@@ -319,6 +352,12 @@ def _rule(
             numbers["overhead_share"] >= rule["dispatch_overhead_share_min"],
             "one_call_overhead_dominates",
             "overhead_share",
+            rule["dispatch_overhead_share_min"],
+        ),
+        (
+            numbers["fixed_share_bound"] >= rule["dispatch_overhead_share_min"],
+            "fixed_cost_not_ruled_out",
+            "fixed_share_bound",
             rule["dispatch_overhead_share_min"],
         ),
         (
@@ -469,6 +508,7 @@ def _point(
     config: dict,
     ceilings: tuple[float, float, bool],
     group: tuple[int, int],
+    bounds: dict[str, int],
 ) -> dict:
     _require(type(point) is dict, f"point {index} must be a JSON object")
     m, n, k = point.get("m"), point.get("n"), point.get("k")
@@ -512,6 +552,11 @@ def _point(
             inputs["median_gpu_ns"],
             inputs["median_host_ns"],
             inputs["median_dispatch_ns"],
+            bounds[kernel],
+        )
+        _require(
+            bounds[kernel] <= inputs["median_host_ns"],
+            f"point {index} {kernel} is faster than the fastest call of the timing",
         )
         expected_kernels[kernel] = {
             "mapping": mapping,
@@ -637,8 +682,9 @@ def _verify(
         type(points) is list and 1 <= len(points) <= _MAX_POINTS,
         f"a report holds 1 to {_MAX_POINTS} points",
     )
+    bounds = _fastest_calls(report["sources"][TIMING_SOURCE]["fastest_calls"])
     expected = [
-        _point(point, index, report["config"], ceilings, group)
+        _point(point, index, report["config"], ceilings, group, bounds)
         for index, point in enumerate(points)
     ]
     _require(
