@@ -119,3 +119,119 @@ def top_ops(stats: tuple[OpStats, ...], count: int) -> tuple[OpStats, ...]:
         raise TypeError("stats must be a tuple of OpStats")
     ranked = sorted(stats, key=lambda row: (-row.self_ns, row.name))
     return tuple(ranked[:count])
+
+
+def origin_ns(trace: ParsedTrace) -> int:
+    """Return the start of the earliest op, the zero of every offset in a report.
+
+    Offsets keep a report free of the host's absolute clock values.
+    """
+
+    starts = [item.span.start_ns for item in trace.nested if is_op(item)]
+    if not starts:
+        raise ProfileTraceError("trace holds no op spans")
+    return min(starts)
+
+
+@dataclass(frozen=True)
+class CallGap:
+    """The idle host time on one thread between two consecutive top-level calls."""
+
+    before: str
+    after: str
+    offset_ns: int
+    gap_ns: int
+
+    def to_mapping(self) -> dict[str, object]:
+        """Return the gap as a report records it, ``offset_ns`` at its start."""
+
+        return {
+            "before": self.before,
+            "after": self.after,
+            "offset_ns": self.offset_ns,
+            "gap_ns": self.gap_ns,
+        }
+
+
+@dataclass(frozen=True)
+class ThreadGaps:
+    """The top-level calls of one thread and the gaps between them.
+
+    ``busy_ns`` adds the top-level durations and ``extent_ns`` runs from the
+    first start to the last end, so ``extent_ns - busy_ns`` is the total gap.
+    """
+
+    pid: int | str
+    tid: int | str
+    calls: int
+    busy_ns: int
+    extent_ns: int
+    gaps: tuple[CallGap, ...]
+
+    @property
+    def total_gap_ns(self) -> int:
+        """All idle time between the top-level calls of this thread."""
+
+        return sum(gap.gap_ns for gap in self.gaps)
+
+    def largest(self, count: int) -> tuple[CallGap, ...]:
+        """Return the ``count`` longest gaps, the earliest first among equals."""
+
+        require_integer(count, "gap count", 1, MAX_TOP_N)
+        ranked = sorted(self.gaps, key=lambda gap: (-gap.gap_ns, gap.offset_ns))
+        return tuple(ranked[:count])
+
+    def to_mapping(self, count: int) -> dict[str, object]:
+        """Return the thread's gap summary with its ``count`` longest gaps."""
+
+        return {
+            "pid": self.pid,
+            "tid": self.tid,
+            "top_level_calls": self.calls,
+            "busy_ns": self.busy_ns,
+            "extent_ns": self.extent_ns,
+            "gaps": len(self.gaps),
+            "total_gap_ns": self.total_gap_ns,
+            "max_gap_ns": max((gap.gap_ns for gap in self.gaps), default=0),
+            "largest_gaps": [gap.to_mapping() for gap in self.largest(count)],
+        }
+
+
+def top_level_gaps(trace: ParsedTrace) -> tuple[ThreadGaps, ...]:
+    """Measure the gaps between consecutive top-level op calls on each thread.
+
+    A gap is host time that no profiled call covers: Python between calls,
+    or work the profiler does not record. ``nested`` already orders each
+    thread by start, and nesting makes top-level calls disjoint, so every
+    gap is zero or more.
+    """
+
+    origin = origin_ns(trace)
+    threads: dict[tuple[int | str, int | str], list[NestedSpan]] = {}
+    for item in trace.nested:
+        if item.parent is None and is_op(item):
+            threads.setdefault(item.span.thread, []).append(item)
+    result = []
+    for (pid, tid), calls in threads.items():
+        gaps = tuple(
+            CallGap(
+                before=first.span.name,
+                after=second.span.name,
+                offset_ns=first.span.end_ns - origin,
+                gap_ns=second.span.start_ns - first.span.end_ns,
+            )
+            for first, second in zip(calls, calls[1:])
+        )
+        if any(gap.gap_ns < 0 for gap in gaps):
+            raise ProfileTraceError("top-level calls overlap")
+        result.append(
+            ThreadGaps(
+                pid=pid,
+                tid=tid,
+                calls=len(calls),
+                busy_ns=sum(item.span.duration_ns for item in calls),
+                extent_ns=calls[-1].span.end_ns - calls[0].span.start_ns,
+                gaps=gaps,
+            )
+        )
+    return tuple(result)

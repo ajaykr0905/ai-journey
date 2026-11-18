@@ -4,11 +4,13 @@ from ai_journey.profile_trace_analysis import (
     MAX_TOP_N,
     OpStats,
     op_stats,
+    origin_ns,
     self_times,
+    top_level_gaps,
     top_ops,
 )
 from ai_journey.profile_trace_events import ProfileTraceError, parse_trace
-from test_profile_trace_events import TORCH_LAYOUT, document, span
+from test_profile_trace_events import PID, TID, TORCH_LAYOUT, document, span
 
 from ai_journey.profile_trace_events import parse_trace_bytes
 
@@ -114,3 +116,57 @@ def test_op_stats_are_validated(fields, message):
 def test_self_times_need_a_parsed_trace():
     with pytest.raises(TypeError):
         self_times({})
+
+
+def test_gaps_lie_between_consecutive_top_level_calls_per_thread():
+    trace = parse_trace(
+        document(
+            span("iteration", 10, 100),
+            span("inner", 20, 10),
+            span("iteration", 130, 50),
+            span("iteration", 185, 5),
+            span("other", 0, 3, tid=9),
+            span("window", 0, 500, tid="PyTorch Profiler", cat="Trace"),
+        )
+    )
+    assert origin_ns(trace) == 0
+    main, other = top_level_gaps(trace)
+
+    assert (main.pid, main.tid, main.calls) == (PID, TID, 3)
+    assert main.busy_ns == 155_000
+    assert main.extent_ns == 180_000
+    assert main.total_gap_ns == main.extent_ns - main.busy_ns == 25_000
+    assert [gap.gap_ns for gap in main.gaps] == [20_000, 5_000]
+    first = main.gaps[0]
+    assert (first.before, first.after, first.offset_ns) == (
+        "iteration",
+        "iteration",
+        110_000,
+    )
+    assert main.largest(1) == (first,)
+    summary = main.to_mapping(4)
+    assert summary["gaps"] == 2 and summary["max_gap_ns"] == 20_000
+    assert summary["largest_gaps"][1] == {
+        "before": "iteration",
+        "after": "iteration",
+        "offset_ns": 180_000,
+        "gap_ns": 5_000,
+    }
+    assert other.to_mapping(1)["max_gap_ns"] == 0
+    assert other.gaps == ()
+
+
+def test_equal_gaps_list_the_earliest_first_and_counts_are_bounded():
+    trace = parse_trace(
+        document(span("a", 0, 1), span("b", 2, 1), span("c", 4, 1)),
+    )
+    (thread,) = top_level_gaps(trace)
+    assert [gap.after for gap in thread.largest(2)] == ["b", "c"]
+    with pytest.raises(ProfileTraceError, match="gap count"):
+        thread.largest(0)
+
+
+def test_a_trace_without_ops_has_no_origin():
+    trace = parse_trace(document(span("window", 0, 5, cat="Trace")))
+    with pytest.raises(ProfileTraceError, match="no op spans"):
+        top_level_gaps(trace)
