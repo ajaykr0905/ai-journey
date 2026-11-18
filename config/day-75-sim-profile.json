@@ -34,7 +34,7 @@
   },
   "timing": {
     "warmup": 2,
-    "repeats": 21
+    "repeats": 31
   },
   "rounds": []
 }

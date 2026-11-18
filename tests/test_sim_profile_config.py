@@ -34,7 +34,7 @@ def test_the_pinned_config_round_trips_and_names_three_ragged_workloads():
     assert config.to_mapping() == raw()
     assert config.name == "day-75-sim-profile"
     assert tuple(config.workloads_mapping()) == WORKLOADS
-    assert (config.top_functions, config.warmup, config.repeats) == (10, 2, 21)
+    assert (config.top_functions, config.warmup, config.repeats) == (10, 2, 31)
     assert config.stages[0] == BASELINE
     assert len(config.stages) == len(config.rounds) + 1
     launched = [
@@ -50,7 +50,7 @@ def test_the_workload_digest_ignores_the_rounds_only():
         {"target": "ai_journey.kernel_launch_buffer:to_float32", "change": "x"}
     ]
     assert parse(mapping).workload_sha256 == base
-    mapping["timing"]["repeats"] = 22
+    mapping["timing"]["repeats"] = 32
     assert parse(mapping).workload_sha256 != base
 
 
