@@ -101,3 +101,15 @@ def test_the_guide_makes_no_gpu_or_vendor_claim():
     ):
         assert claim not in text
     assert "no gpu ran" in text
+
+
+def test_the_guide_has_no_stray_indented_prose():
+    # A line that starts with one space after a list joins the last item.
+    lines = GUIDE.read_text(encoding="utf-8").splitlines()
+    fenced = False
+    for number, line in enumerate(lines, start=1):
+        if line.startswith("```"):
+            fenced = not fenced
+        elif not fenced:
+            assert not (line.startswith(" ") and line[1:2] != " "), number
+    assert all(len(line) <= 88 for line in lines if "`" not in line)

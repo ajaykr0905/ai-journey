@@ -126,8 +126,8 @@ Each round used these steps:
 2. Name the top hotspot, and select one target from the ranked list.
 3. Make one focused change to the simulator or its buffers, in one commit.
 4. Run the semantic guard and the Day 73 and Day 74 test suites.
-5. Take snapshots of the old and new trees in turn, three times, and compare
-   the medians.
+5. Take snapshots of the old and new trees in turn, two or three times, and
+   compare the medians.
 
 The baseline profile ranked these functions by self time:
 
@@ -183,8 +183,8 @@ from 1803798 to 1707558.
 ## Measured speedups
 
 The table gives the speedup of the sum of the three medians in each round.
-The paired columns come from three alternating runs of the old and the new
-tree. The sealed columns come from two later sessions that ran all five
+The paired columns come from two or three alternating runs of the old and
+the new tree. The sealed columns come from two later sessions that ran all five
 stages one after the other.
 
 | Round | Paired runs | Sealed session 1 | Sealed session 2 |
@@ -208,8 +208,8 @@ The 1-minute load was 17.2 to 18.4 in session 2 and 14.7 to 17.4 in
 session 1.
 
 The session 1 baseline median, 174.8 ms, is the highest of the lab. The
-other baseline runs gave medians of 122 to 135 ms in total. Thus the overall speedup of session 1 probably
-includes host noise. The rounds report digests are:
+other baseline runs gave medians of 122 to 135 ms in total. Thus the overall
+speedup of session 1 probably includes host noise. The rounds report digests are:
 
 - session 1: `2f5e1e4dc739784bf6421ee4136a86a29760ce683e6e24bad991c404165430a9`
 - session 2: `d458263e3239c23b565e7febcc084ca6f2cb3b3984e7037188c2765657e4cb22`
@@ -221,10 +221,12 @@ These results follow from the measurements:
 
 - Round 3 gave the only large and repeatable gain: 1.29 to 1.40 in each run.
   In session 2 it cut the vector add and grayscale medians by 34% to 41%.
-- Rounds 1 and 2 helped the naive matmul most, because it makes 115200 reads
-  and 115200 roundings. The total gain was about 1.06 to 1.10 in most runs.
-- The gain of round 4 is smaller than the noise at this load. One sealed
-  session shows 0.967.
+- Round 1 helped the naive matmul most in both sealed sessions, because it
+  makes 115200 of the 150100 reads. Round 2 helped the vector add most in
+  session 1 and the naive matmul most in session 2.
+- The total gain of rounds 1 and 2 was about 1.06 to 1.10 in most runs.
+- The gain of round 4 is not separate from the noise at this load. Its runs
+  gave 0.967 to 1.329.
 - The rank of a function did not predict its gain. Round 3 targeted rank 4
   and gave the most. The profiler cost on each call inflates small functions
   that run often.
@@ -239,9 +241,9 @@ A snapshot holds these items:
 - every profiled function of each workload, and the merged profile
 - the ranked hotspots
 - the raw timed samples with their statistics, and a summary
- The environment
-names the Python version, the platform and the machine type only. It names
-no host and no user.
+
+The environment names the Python version, the platform and the machine type
+only. It names no host and no user.
 
 A rounds report holds the full config, one snapshot for each stage, and one
 entry for each round. A round entry names the top hotspot before and after,
