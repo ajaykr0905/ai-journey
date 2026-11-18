@@ -1412,7 +1412,8 @@
     "tests/test_sim_profile_semantics.py",
     "tests/test_sim_profile_snapshot.py",
     "tests/test_sim_profile_timing.py",
-    "tests/test_sim_profile_verify.py"
+    "tests/test_sim_profile_verify.py",
+    "tests/test_matmul_bottleneck_delivery.py"
   ],
   "required_directories": [
     "days",
