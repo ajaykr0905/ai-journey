@@ -53,9 +53,14 @@ from .matmul_bottleneck_report import (
     reasons_mapping,
 )
 from .matmul_bottleneck_rule import BOTTLENECKS, REASONS
-from .matmul_bottleneck_timing import TIMING_KIND
+from .matmul_bottleneck_timing import (
+    MAX_PRODUCER_CHARS,
+    MAX_TIMING_POINTS,
+    TIMING_KIND,
+)
 from .matmul_metal_report import REPORT_KIND as MATMUL_KIND
 from .matmul_roofline_gap import REPORT_KIND as GAP_KIND
+from .memory_access_benchmark import MAX_REPEATS
 from .memory_access_plan import canonical_json_bytes
 from .memory_access_report import DIGEST_FIELD, report_digest
 
@@ -63,6 +68,7 @@ _COLUMNS, _ROWS = "matmul_x_columns", "matmul_x_rows"
 _KERNELS = {_COLUMNS: "x_columns", _ROWS: "x_rows"}
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _TOKEN = re.compile(r"[A-Za-z0-9._+-]{1,64}")
+_PRODUCER = re.compile(r"[ -~]+")
 _LANES = 32
 _SECTOR, _LINE = 32, 128
 _MAX_DIMENSION = 8192
@@ -186,11 +192,12 @@ def _sources(sources: object) -> bool:
         and timing["label"]
         == (MEASUREMENT_LABEL if timing["measured"] else SYNTHETIC_LABEL)
         and type(timing["producer"]) is str
-        and 1 <= len(timing["producer"]) <= 300
-        and _integer(timing["repeats"], 1, 1 << 20)
+        and len(timing["producer"]) <= MAX_PRODUCER_CHARS
+        and _PRODUCER.fullmatch(timing["producer"]) is not None
+        and _integer(timing["repeats"], 1, MAX_REPEATS)
         and _loads(timing["load_average_before"])
         and _loads(timing["load_average_after"])
-        and _integer(timing["entries"], 1, 96)
+        and _integer(timing["entries"], 1, MAX_TIMING_POINTS)
         and _integer(timing["entries_used"], 1, timing["entries"]),
         "source timing does not match the schema",
     )

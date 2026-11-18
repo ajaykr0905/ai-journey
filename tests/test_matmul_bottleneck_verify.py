@@ -13,6 +13,7 @@ from ai_journey.matmul_bottleneck_config import (
 )
 from ai_journey.matmul_bottleneck_report import build_report
 from ai_journey.matmul_bottleneck_verify import verify_report
+from ai_journey.memory_access_benchmark import MAX_REPEATS
 from ai_journey.memory_access_plan import canonical_json_bytes
 from ai_journey.memory_access_report import DIGEST_FIELD, report_digest
 from test_matmul_bottleneck_recorded import RECORDED_REPORT_JSON
@@ -248,3 +249,18 @@ def test_a_fastest_call_at_a_report_shape_must_be_that_points_timing(change):
     assert verify_report(report)["points"] == 9
     with pytest.raises(MatmulBottleneckVerificationError, match="fastest call"):
         verify_report(tampered)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"producer": "line one\nline two"},
+        {"producer": "x" * 301},
+        {"repeats": MAX_REPEATS + 1},
+    ],
+    ids=["control character", "long producer", "too many repeats"],
+)
+def test_the_timing_source_keeps_the_limits_of_the_timing_schema(change):
+    # A timing input with these values does not parse, so no report holds them.
+    with pytest.raises(MatmulBottleneckVerificationError, match="source timing"):
+        verify_report(resealed(lambda r: r["sources"]["timing"].update(change)))
