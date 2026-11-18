@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "name": "day-74-gpu-ceilings",
+  "seed": 74,
+  "correctness": {
+    "threads": 1000,
+    "fma_steps": 256,
+    "stream_float4": 4099,
+    "bank_trips": 9
+  },
+  "fma": {
+    "group_size": 256,
+    "threads": 1048576,
+    "chain_counts": [1, 2, 4, 8, 16, 32],
+    "fma_steps": [32, 128, 512, 2048, 8192]
+  },
+  "bandwidth": {
+    "group_size": 256,
+    "buffer_bytes": [16777216, 67108864, 268435456],
+    "copy_float4_per_thread": 4,
+    "reduce_float4_per_thread": 16,
+    "target_bytes_per_sample": 1073741824
+  },
+  "bank": {
+    "group_size": 256,
+    "threads": 1048576,
+    "strides": [1, 2, 4, 8, 16, 32],
+    "trips": 256
+  },
+  "timing": {
+    "warmup": 2,
+    "repeats": 11,
+    "max_runtime_seconds": 300
+  }
+}
