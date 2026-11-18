@@ -264,8 +264,11 @@ def _check_shape(
         stored["sha256"] == sha256(payload).hexdigest(),
         f"{label} trace digest differs from the report",
     )
-    trace = parse_trace_bytes(payload)
-    check_layout(trace, config.iterations)
+    try:
+        trace = parse_trace_bytes(payload)
+        check_layout(trace, config.iterations)
+    except ProfileTraceError as error:
+        raise ProfileTraceVerificationError(f"{label} trace: {error}") from error
     _same(stored["events"], trace.event_count, f"{label} event count")
     device = entry["device_event_ns"]
     _require(

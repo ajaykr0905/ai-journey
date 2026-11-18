@@ -10,7 +10,6 @@ from ai_journey.profile_trace_events import (
     parse_trace,
     parse_trace_bytes,
 )
-from ai_journey.profile_trace_layout import TraceLayoutError
 from ai_journey.profile_trace_verify import (
     ProfileTraceVerificationError,
     sweep_gaps,
@@ -94,7 +93,7 @@ def test_a_rebound_trace_still_needs_the_recorded_analysis(tmp_path):
     forged = copy.deepcopy(report)
     forged["shapes"][0]["trace"]["sha256"] = sha256(payload).hexdigest()
     forged["shapes"][0]["trace"]["bytes"] = len(payload)
-    with pytest.raises(ProfileTraceError):
+    with pytest.raises(ProfileTraceVerificationError):
         verify_report(reseal(forged), trace_dir=tmp_path)
 
 
@@ -176,5 +175,7 @@ def test_a_trace_without_the_layout_is_refused_even_when_rebound(tmp_path):
     forged["shapes"][1]["trace"].update(
         sha256=sha256(changed).hexdigest(), bytes=len(changed)
     )
-    with pytest.raises(TraceLayoutError, match="torch_matmul"):
+    with pytest.raises(
+        ProfileTraceVerificationError, match="shape 1 trace: .*torch_matmul"
+    ):
         verify_report(reseal(forged), trace_dir=tmp_path)
