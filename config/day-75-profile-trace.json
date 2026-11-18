@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "day-75-profile-trace",
+  "seed": 75,
+  "group_size": [32, 8],
+  "shapes": [[256, 256, 256], [1024, 1024, 1024], [2048, 2048, 2048]],
+  "warmup": 2,
+  "iterations": 5,
+  "analysis": {
+    "top_n": 8,
+    "gap_count": 4,
+    "timeline_width": 96,
+    "timeline_depth": 3
+  },
+  "day_74_ceilings": {
+    "fma_gflops_per_second": 4618.0,
+    "bandwidth_gb_per_second": 100.7,
+    "torch_matmul_gflops_per_second": 3963.0
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "name": "day-75-sim-profile",
+  "statement": "Inputs for profiling the pure-Python Day 73 launch simulator on the CPU with cProfile and time.perf_counter_ns. The workloads are the Day 73 vector add and grayscale kernels and the Day 74 naive matmul. No GPU runs, and no CUDA source is compiled.",
+  "workloads": {
+    "vector_add": {
+      "n": 8000,
+      "threads_per_block": 256,
+      "input_seed": 75
+    },
+    "rgb_to_grayscale": {
+      "width": 90,
+      "height": 70,
+      "block": [
+        16,
+        16
+      ],
+      "input_seed": 75
+    },
+    "naive_matmul": {
+      "m": 40,
+      "n": 45,
+      "k": 32,
+      "block": [
+        16,
+        16
+      ],
+      "mapping": "x_columns",
+      "input_seed": 75
+    }
+  },
+  "profile": {
+    "top_functions": 10
+  },
+  "timing": {
+    "warmup": 2,
+    "repeats": 31
+  },
+  "rounds": [
+    {
+      "target": "ai_journey.kernel_launch_buffer:DeviceBuffer.__getitem__",
+      "change": "Record each read inside DeviceBuffer.__getitem__ itself, with the same checks in the same order, instead of through _recorder_for, _record_read and _running."
+    },
+    {
+      "target": "ai_journey.kernel_launch_buffer:to_float32",
+      "change": "Round through one precompiled struct.Struct('<f') instead of the module-level struct.pack and struct.unpack, which look up the format on every call."
+    },
+    {
+      "target": "ai_journey.kernel_launch_config:Index3.__post_init__",
+      "change": "Build the ThreadRef values of AccessRecorder.finish only for elements in a write or read-write conflict, instead of two Index3 values for every written element."
+    },
+    {
+      "target": "ai_journey.kernel_launch_buffer:_check_value",
+      "change": "Test that a float32 store is exact with one Struct pack and unpack in _check_value, instead of a nested to_float32 call that repeats the type and finiteness checks."
+    }
+  ]
+}

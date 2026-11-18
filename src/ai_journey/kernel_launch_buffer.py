@@ -30,6 +30,10 @@ READ = "read"
 WRITE = "write"
 _NAME = re.compile(r"[a-z][a-z0-9_]{0,31}")
 _ZERO = {"float32": 0.0, "uint8": 0}
+# One compiled format: every rounding skips the struct module's format cache.
+_FLOAT32 = struct.Struct("<f")
+_PACK_FLOAT32 = _FLOAT32.pack
+_UNPACK_FLOAT32 = _FLOAT32.unpack
 
 
 def to_float32(value: float) -> float:
@@ -42,7 +46,7 @@ def to_float32(value: float) -> float:
     if type(value) is not float or not math.isfinite(value):
         raise KernelLaunchError(f"float32 rounding needs a finite float, not {value!r}")
     try:
-        return struct.unpack("<f", struct.pack("<f", value))[0]
+        return _UNPACK_FLOAT32(_PACK_FLOAT32(value))[0]
     except OverflowError as error:
         raise KernelLaunchError(f"{value!r} is outside the float32 range") from error
 
@@ -52,11 +56,14 @@ def _check_value(dtype: str, value: object, name: str) -> int | float:
         if type(value) is not int or not 0 <= value <= 255:
             raise KernelLaunchError(f"uint8 buffer {name} cannot store {value!r}")
         return value
+    # Every float32 store and every input element comes through here, so the
+    # value is rounded once in place instead of through to_float32, which
+    # would repeat the type and finiteness checks.
     exact = type(value) is float and math.isfinite(value)
     if exact:
         try:
-            exact = to_float32(value) == value
-        except KernelLaunchError:
+            exact = _UNPACK_FLOAT32(_PACK_FLOAT32(value))[0] == value
+        except OverflowError:
             exact = False
     if not exact:
         raise KernelLaunchError(
@@ -166,11 +173,30 @@ class DeviceBuffer:
         return recorder
 
     def __getitem__(self, index: int) -> int | float:
-        recorder = self._recorder_for(index)
-        if 0 <= index < len(self._values):
-            recorder._record_read(self._name, index)
-            return self._values[index]
-        recorder._record_out_of_bounds(self._name, READ, index)
+        # Reads dominate a kernel's buffer traffic, so an in-bounds read is
+        # recorded here with no helper calls. The checks and the records are
+        # those of _recorder_for and AccessRecorder._running, in that order.
+        recorder = self._recorder
+        if recorder is None:
+            raise KernelLaunchError(
+                f"buffer {self._name} is indexed outside a kernel launch"
+            )
+        if type(index) is not int:
+            raise TypeError(f"buffer {self._name} index must be an integer")
+        thread = recorder._thread
+        if thread is None:
+            raise KernelLaunchError("buffers are indexed only by a running thread")
+        values = self._values
+        if 0 <= index < len(values):
+            recorder._reads += 1
+            table = recorder._readers[self._name]
+            readers = table.get(index)
+            if readers is None:
+                table[index] = {thread}
+            else:
+                readers.add(thread)
+            return values[index]
+        recorder._out_of_bounds.append((thread, self._name, READ, index))
         return _ZERO[self._dtype]
 
     def __setitem__(self, index: int, value: int | float) -> None:
@@ -359,15 +385,6 @@ class AccessRecorder:
             raise KernelLaunchError("buffers are indexed only by a running thread")
         return self._thread
 
-    def _record_read(self, name: str, index: int) -> None:
-        thread = self._running()
-        self._reads += 1
-        readers = self._readers[name].get(index)
-        if readers is None:
-            self._readers[name][index] = {thread}
-        else:
-            readers.add(thread)
-
     def _record_write(self, name: str, index: int) -> None:
         thread = self._running()
         self._writes += 1
@@ -412,11 +429,17 @@ class AccessRecorder:
             )
             for index in sorted(writers):
                 ordered = sorted(writers[index])
-                writing = tuple(self._ref(thread) for thread in ordered)
-                if len(ordered) > 1:
-                    write_conflicts.append(WriteConflict(name, index, writing))
                 reading = readers.get(index)
-                if reading and (len(ordered) > 1 or reading != {ordered[0]}):
+                racing = len(ordered) > 1
+                read_race = bool(reading) and (racing or reading != {ordered[0]})
+                if not racing and not read_race:
+                    # A race-free element needs no ThreadRef; most elements
+                    # of a correct launch are race-free.
+                    continue
+                writing = tuple(self._ref(thread) for thread in ordered)
+                if racing:
+                    write_conflicts.append(WriteConflict(name, index, writing))
+                if read_race:
                     read_write_conflicts.append(
                         ReadWriteConflict(
                             name,

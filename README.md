@@ -833,6 +833,97 @@ the [matmul model lab guide](docs/matmul-model-lab.md), the
 [launch-sweep guide](docs/metal-launch-sweep.md) and the
 [gap guide](docs/matmul-roofline-gap.md).
 
+## Profile the naive matmul and name its top bottleneck
+
+The Day 75 labs profile the Day 74 kernels and name a bottleneck from the
+measurements. Four commands do this work:
+
+- `ai-journey-sim-profile` profiles the pure-Python launch simulator with
+  `cProfile` and times it on the CPU. It seals one snapshot for each
+  optimization round.
+- `ai-journey-profile-trace` captures `torch.profiler` traces of the naive
+  Metal kernels and `torch.matmul`. It parses, analyzes and verifies the
+  Chrome trace files.
+- `ai-journey-gpu-timing` times each launch on three clocks: MPS events, the
+  host wait and the host dispatch.
+- `ai-journey-matmul-bottleneck` names a bottleneck for each naive kernel at
+  each shape. It reads three Day 74 reports and a one-call timing input.
+
+Each command seals a report, and each `verify` checks a report again. These
+commands profile the kernels on a Mac and name the bottleneck:
+
+```bash
+ai-journey-sim-profile run \
+  --config config/day-75-sim-profile.json \
+  --stage round-4 --output /tmp/day-75-round-4.json
+ai-journey-profile-trace capture \
+  --config config/day-75-profile-trace.json \
+  --output-dir /tmp/day-75-profile-trace
+ai-journey-profile-trace verify \
+  --report /tmp/day-75-profile-trace/report.json \
+  --config config/day-75-profile-trace.json
+ai-journey-gpu-timing run \
+  --config config/day-75-gpu-timing.json \
+  --output /tmp/day-75-gpu-timing.json
+ai-journey-gpu-timing verify \
+  --report /tmp/day-75-gpu-timing.json \
+  --config config/day-75-gpu-timing.json
+ai-journey-matmul-bottleneck classify \
+  --matmul-report /tmp/day-75-matmul-metal-cubes.json \
+  --ceiling-report /tmp/day-74-gpu-ceilings.json \
+  --gap-report /tmp/day-75-matmul-roofline-cubes.json \
+  --timing /tmp/day-75-gpu-timing.json \
+  --config config/day-75-matmul-bottleneck.json \
+  --output /tmp/day-75-matmul-bottleneck-joined.json
+```
+
+The `classify` command reads the sealed gpu-timing report. That report must
+pass its own verifier first. The bottleneck guide gives the commands for the
+cube matmul-metal report and its gap.
+
+On the development host, the profiler trace at 2048 x 2048 x 2048 named
+`matmul_x_rows/synchronize` as the top op. It had a share of 0.685 of the
+iteration host time. The load averages were 11.00, 12.79 and 12.49 before
+that capture.
+
+The gpu-timing lab measured an empty-kernel event median of 64.9 us and 69.6
+us in two runs. At 4096 cubed, `torch.matmul` reached 0.834 and 0.850 of the
+4618 GFLOP/s FMA ceiling that Day 74 measured. The load averages were 9.87,
+13.62 and 12.65 before run 1.
+
+The joined bottleneck report named `latency or occupancy-bound` as the top
+name of each naive kernel, at 4 of 6 shapes. At 128 cubed, both kernels were
+`dispatch-bound`. The load averages were 8.90, 8.80 and 10.84 before the
+joined run. All values in these three paragraphs are host-specific Apple GPU
+(Metal) measurements from one shared host, not portable figures.
+
+On the CPU, round 3 of the simulator profiling gave the only repeatable
+gain, 1.29 to 1.40 in each run. The sealed sessions gave overall speedups of
+2.079 and 1.508 at a 1-minute load of 14.7 to 18.4.
+
+All four commands exit 0 on success and 1 when a report fails verification.
+They exit 2 for usage errors, unreadable or invalid inputs, or a refused
+output. The bottleneck command also exits 2 for inputs that do not pair.
+Code 3 means that the host cannot run Metal kernels through PyTorch. Then
+`capture` or `run` stops before it measures anything.
+
+Evidence boundary: each bottleneck name is an inference from timings and
+from the ceilings that Day 74 measured on the same host. The labs read no
+hardware counter and used no Nsight and no Instruments. `torch.profiler`
+records host spans only, so GPU work shows as host wait time. The timings
+do not measure or predict CUDA, NVIDIA, distributed or production
+performance.
+
+CI job `profile-sim-cpu` runs the trace and sim-profile tests without torch.
+It also runs and verifies the pinned sim-profile stage from an installed
+wheel. CI job `gpu-timing-contracts` runs the timing and bottleneck tests on
+Linux with CPU torch. It also requires each installed Apple GPU command to
+exit 3 and write no report. See the
+[simulator profiling guide](docs/simulator-profiling.md), the
+[profile-trace lab guide](docs/profile-trace-lab.md), the
+[gpu-timing lab guide](docs/gpu-timing-lab.md) and the
+[bottleneck lab guide](docs/matmul-bottleneck-lab.md).
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with
