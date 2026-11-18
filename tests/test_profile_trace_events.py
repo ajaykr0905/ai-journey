@@ -304,3 +304,53 @@ def test_files_are_read_with_the_bounded_regular_file_reader(tmp_path):
         handle.truncate(MAX_TRACE_BYTES + 1)
     with pytest.raises(TraceSizeError, match="exceeds"):
         load_trace(big)
+
+
+def test_spans_nest_per_thread_with_parents_and_depths():
+    trace = parse_trace(
+        document(
+            span("child", 2, 3),
+            span("other thread", 0, 100, tid=7),
+            span("root", 1, 10),
+            span("grandchild", 2, 1),
+            span("next", 11, 4),
+            span("touching", 15, 0),
+        )
+    )
+
+    rows = [(item.span.name, item.parent, item.depth) for item in trace.nested]
+    assert rows == [
+        ("root", None, 0),
+        ("child", 0, 1),
+        ("grandchild", 1, 2),
+        ("next", None, 0),
+        ("touching", None, 0),
+        ("other thread", None, 0),
+    ]
+    assert {item.span for item in trace.nested} == set(trace.spans)
+
+
+def test_equal_bounds_nest_in_file_order_and_zero_length_spans_hold_nothing():
+    trace = parse_trace(
+        document(span("first", 1, 5), span("second", 1, 5), span("empty", 3, 0))
+    )
+    assert [(item.span.name, item.parent) for item in trace.nested] == [
+        ("first", None),
+        ("second", 0),
+        ("empty", 1),
+    ]
+    marks = parse_trace(document(span("a", 1, 0), span("b", 1, 0)))
+    assert [item.parent for item in marks.nested] == [None, None]
+
+
+def test_partial_overlap_on_one_thread_is_refused():
+    with pytest.raises(TraceNestingError, match="'late' at 5000 ns overlaps 'early'"):
+        parse_trace(document(span("early", 1, 5), span("late", 5, 3)))
+    # The same intervals on two threads do not interact.
+    parse_trace(document(span("early", 1, 5), span("late", 4, 3, tid=1)))
+
+
+def test_nesting_depth_is_bounded():
+    events = [span(f"level {depth}", depth, 1000 - 2 * depth) for depth in range(257)]
+    with pytest.raises(TraceNestingError, match="deeper than 256"):
+        parse_trace(document(*events))

@@ -36,6 +36,7 @@ MAX_NAME_CHARS = 512
 # 2**62 ns is about 146 years, far past any monotonic clock torch reads.
 MAX_TIME_NS = 1 << 62
 MAX_INTEGER_ID = (1 << 63) - 1
+MAX_DEPTH = 256
 NANOSECONDS_PER_MICROSECOND = 1000
 
 COMPLETE = "X"
@@ -246,10 +247,68 @@ class TraceMetadata:
 
 
 @dataclass(frozen=True)
+class NestedSpan:
+    """One span with its place in its thread's call tree.
+
+    ``parent`` is the position in ``ParsedTrace.nested`` of the innermost
+    span that contains this one on the same thread, or ``None`` for a
+    top-level call.
+    """
+
+    span: TraceSpan
+    parent: int | None
+    depth: int
+
+
+def nest_spans(spans: tuple[TraceSpan, ...]) -> tuple[NestedSpan, ...]:
+    """Order spans by thread and start, and refuse any overlap that does not nest.
+
+    A profiler records calls on one thread as a stack, so two spans on one
+    thread either nest or are disjoint; a partial overlap means the trace
+    was edited or merged wrongly, and self time would be undefined. Threads
+    keep the order of their first span in the file. At one start, the
+    longer span is the parent, and spans with equal positive bounds nest in
+    file order. Spans are half-open, so a span that starts at another's end
+    is disjoint from it, and a zero-length span contains nothing.
+    """
+
+    threads: dict[tuple[int | str, int | str], list[tuple[int, TraceSpan]]] = {}
+    for position, span in enumerate(spans):
+        if not isinstance(span, TraceSpan):
+            raise TypeError("spans must be TraceSpan values")
+        threads.setdefault(span.thread, []).append((position, span))
+    nested: list[NestedSpan] = []
+    for (pid, tid), members in threads.items():
+        members.sort(key=lambda item: (item[1].start_ns, -item[1].duration_ns, item[0]))
+        stack: list[int] = []
+        for _, span in members:
+            while stack and nested[stack[-1]].span.end_ns <= span.start_ns:
+                stack.pop()
+            if stack and span.end_ns > nested[stack[-1]].span.end_ns:
+                outer = nested[stack[-1]].span
+                raise TraceNestingError(
+                    f"span {span.name!r} at {span.start_ns} ns overlaps "
+                    f"{outer.name!r} on pid {pid!r} tid {tid!r} without nesting"
+                )
+            if len(stack) >= MAX_DEPTH:
+                raise TraceNestingError(f"spans nest deeper than {MAX_DEPTH} levels")
+            nested.append(
+                NestedSpan(span, stack[-1] if stack else None, depth=len(stack))
+            )
+            stack.append(len(nested) - 1)
+    return tuple(nested)
+
+
+@dataclass(frozen=True)
 class ParsedTrace:
-    """The accepted content of one trace, in file order within each kind."""
+    """The accepted content of one trace, in file order within each kind.
+
+    ``nested`` holds the same spans as ``spans``, ordered by thread and
+    start, each with its parent and depth.
+    """
 
     spans: tuple[TraceSpan, ...]
+    nested: tuple[NestedSpan, ...]
     instants: tuple[TraceInstant, ...]
     metadata: tuple[TraceMetadata, ...]
     event_count: int
@@ -413,6 +472,7 @@ def parse_trace(document: dict[str, object]) -> ParsedTrace:
             )
     return ParsedTrace(
         spans=tuple(spans),
+        nested=nest_spans(tuple(spans)),
         instants=tuple(instants),
         metadata=tuple(metadata),
         event_count=len(events),
