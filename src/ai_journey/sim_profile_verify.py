@@ -32,7 +32,7 @@ from .sim_profile_config import (
     SimProfileVerificationError,
 )
 from .sim_profile_harness import RANKING
-from .sim_profile_semantics import SEMANTICS_SHA256
+from .sim_profile_semantics import SEMANTICS_SHA256, SEMANTICS_TOTALS
 from .sim_profile_snapshot import (
     GETITEM,
     MEASUREMENT_BOUNDARY,
@@ -286,11 +286,9 @@ def _check_labels(report: Mapping) -> bool:
 def _check_semantics(value: object) -> None:
     semantics = require_fields(value, _SEMANTICS_FIELDS, "semantics")
     require_equal(SEMANTICS_SHA256, semantics["sha256"], "semantics.sha256")
-    for key in _SEMANTICS_FIELDS - {"sha256"}:
-        if key.endswith("order_free"):
-            require_equal(True, semantics[key], f"semantics.{key}")
-        else:
-            require_count(semantics[key], f"semantics.{key}")
+    for key in sorted(_SEMANTICS_FIELDS - {"sha256"}):
+        expected = True if key.endswith("order_free") else SEMANTICS_TOTALS[key]
+        require_equal(expected, semantics[key], f"semantics.{key}")
 
 
 def _check_workload(

@@ -41,6 +41,15 @@ MATMUL_SHAPE = MatmulShape(m=9, n=7, k=5)
 CASES = ("vector-add-unguarded", "grayscale-unguarded", "stencil", "matmul-guarded")
 # Taken on the base simulator, before round 1; see the module docstring.
 SEMANTICS_SHA256 = "7b6d751094724ef06dca5adbeed4a4a0c38fbbf8a4b0a0cd7f497cc498456a24"
+# The totals of those records. They follow from the digest, so a verifier
+# pins them too: a report cannot keep the digest and claim fewer records.
+SEMANTICS_TOTALS = {
+    "runs": 8,
+    "out_of_bounds_reads": 826,
+    "out_of_bounds_writes": 308,
+    "write_conflicts": 464,
+    "read_write_conflicts": 140,
+}
 
 
 def stencil_kernel(t: ThreadContext, x: DeviceBuffer) -> None:

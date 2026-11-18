@@ -7,6 +7,7 @@ from ai_journey.sim_profile_config import SimProfileError
 from ai_journey.sim_profile_semantics import (
     CASES,
     SEMANTICS_SHA256,
+    SEMANTICS_TOTALS,
     checked_semantics,
     semantic_runs,
     semantics_summary,
@@ -31,6 +32,7 @@ def test_the_misuse_records_match_the_digest_pinned_before_round_one(runs):
         "canonical_records_order_free": True,
         "guarded_output_order_free": True,
     }
+    assert {key: summary[key] for key in SEMANTICS_TOTALS} == SEMANTICS_TOTALS
     assert [run["case"] for run in runs] == [case for case in CASES for _ in "ab"]
     assert [run["order"]["kind"] for run in runs] == ["canonical", "permuted"] * 4
 

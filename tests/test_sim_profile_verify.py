@@ -144,3 +144,20 @@ def test_a_snapshot_binds_only_to_its_own_workloads_and_stages(sealed):
         verify_snapshot(sealed, config="config")
     with pytest.raises(SimProfileVerificationError, match="JSON object"):
         verify_snapshot([sealed])
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("out_of_bounds_reads", 0),
+        ("out_of_bounds_writes", 309),
+        ("write_conflicts", 0),
+        ("read_write_conflicts", 139),
+        ("runs", 2),
+    ],
+)
+def test_resealed_misuse_totals_must_match_the_pinned_digest(sealed, key, value):
+    # The totals follow from the pinned records, so a snapshot that keeps the
+    # digest but reports fewer races or out-of-bounds accesses is tampered.
+    with pytest.raises(SimProfileVerificationError, match=f"semantics.{key}"):
+        verify_snapshot(reseal(sealed, set_path("semantics", key, value=value)))
