@@ -749,6 +749,90 @@ tests skip. It also requires the installed `run` to exit 3 and write no
 report. See the [kernel-launch lab guide](docs/kernel-launch-lab.md) and the
 [Metal kernel lab guide](docs/kernel-metal-lab.md).
 
+## Model a naive matmul and compare it with measured Apple GPU ceilings
+
+The Day 74 labs write a naive matmul kernel, time it and compare its rate with
+ceilings that the same host measured. Five commands do this work:
+
+- `ai-journey-matmul-model` runs the naive kernel in a pure-Python launch
+  simulator on the CPU. It counts the memory requests of each warp, the FLOPs
+  and the bytes. It also checks the structure of pinned CUDA C source without
+  a compiler.
+- `ai-journey-matmul-metal` times two naive Metal kernels and `torch.matmul`
+  on the Apple GPU of a Mac.
+- `ai-journey-gpu-ceilings` measures an FMA ceiling and a bandwidth ceiling on
+  the same GPU.
+- `ai-journey-metal-launch-sweep` times the naive kernel at 7 threadgroup
+  shapes and vector add at 9 group sizes.
+- `ai-journey-matmul-roofline` compares a matmul-metal report with a ceiling
+  report and seals the gap between them.
+
+Each command seals a report, and each `verify` checks a report again. These
+commands model the kernel and measure its gap on a Mac:
+
+```bash
+ai-journey-matmul-model run \
+  --config config/day-74-matmul-model.json \
+  --output /tmp/day-74-matmul-model-report.json
+ai-journey-matmul-model verify \
+  --report /tmp/day-74-matmul-model-report.json \
+  --config config/day-74-matmul-model.json
+ai-journey-matmul-metal run \
+  --config config/day-74-matmul-metal.json \
+  --output /tmp/day-74-matmul-metal.json
+ai-journey-gpu-ceilings run \
+  --config config/day-74-gpu-ceilings.json \
+  --output /tmp/day-74-gpu-ceilings.json
+ai-journey-matmul-roofline gap \
+  --matmul-report /tmp/day-74-matmul-metal.json \
+  --ceiling-report /tmp/day-74-gpu-ceilings.json \
+  --output /tmp/day-74-matmul-roofline.json
+ai-journey-matmul-roofline verify \
+  --report /tmp/day-74-matmul-roofline.json \
+  --matmul-report /tmp/day-74-matmul-metal.json \
+  --ceiling-report /tmp/day-74-gpu-ceilings.json
+```
+
+On the pinned plan, all 16 model runs match the reference bit for bit, and all
+16 CUDA checks pass. Both model commands print one line with the report digest
+`85f0aa8ddefb7e99d0e9de81047663a1e2e3d43332347a51560b1a19b34b1136`.
+
+In this section, "peak" means a ceiling that the gpu-ceilings lab measured on
+this host. On the development host, the naive `matmul_x_columns` kernel
+reached at most 406 GFLOP/s. That rate is 0.088 of the measured FMA ceiling of
+4618 GFLOP/s. `torch.matmul` reached 3963 GFLOP/s, 0.858 of the same ceiling.
+At all 9 sizes, both naive kernels ran 4.79 to 16.15 times above the no-reuse
+bandwidth roof. Thus caches probably served part of their loads. The labs read
+no hardware counters, so they do not measure this traffic.
+
+The 1-minute load averages were 7.98 to 10.72 before and after the two runs.
+These values are host-specific Apple GPU (Metal) measurements from one shared
+host, not portable figures.
+
+All five commands exit 0 on success and 1 when a report fails verification.
+They exit 2 for usage errors, unreadable or invalid inputs, or a refused
+output. The gap command also exits 2 for two reports that do not pair. For the
+three Metal commands, code 2 also marks a run that failed a check, had a
+device error or exceeded its time budget. Code 3 means that the host cannot
+run Metal kernels through PyTorch. Then `run` stops before it measures
+anything.
+
+Evidence boundary: the model lab runs no GPU and compiles no CUDA source. Its
+CUDA C text is source for a later run on an NVIDIA GPU. Each ceiling is a rate
+that the ceiling lab's own kernels reached on this host, not a vendor peak.
+The Metal timings do not measure or predict CUDA, NVIDIA, distributed or
+production performance.
+
+CI job `matmul-model-cpu` runs and verifies the pinned plan from an installed
+wheel without torch, NumPy or matplotlib. CI job `metal-roofline-contracts`
+runs the tests of the other four labs on Linux, where the GPU tests skip. It
+also requires each installed Metal `run` to exit 3 and write no report. See
+the [matmul model lab guide](docs/matmul-model-lab.md), the
+[matmul-metal lab guide](docs/matmul-metal-lab.md), the
+[gpu-ceilings lab guide](docs/gpu-ceilings-lab.md), the
+[launch-sweep guide](docs/metal-launch-sweep.md) and the
+[gap guide](docs/matmul-roofline-gap.md).
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with
