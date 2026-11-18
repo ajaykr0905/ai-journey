@@ -31,7 +31,7 @@ from .kernel_launch_simulator import LaunchOrder, LaunchResult, ThreadContext, l
 from .matmul_model_kernels import X_ROWS, run_naive_matmul
 from .matmul_model_reference import matmul_inputs
 from .memory_access_tiling import MatmulShape
-from .sim_profile_config import SimProfileError
+from .sim_profile_config import SimProfileVerificationError
 
 SEMANTICS_SEED = 75
 ORDER_SEED = 75
@@ -163,7 +163,7 @@ def checked_semantics() -> dict[str, object]:
 
     summary = semantics_summary(semantic_runs())
     if summary["sha256"] != SEMANTICS_SHA256:
-        raise SimProfileError(
+        raise SimProfileVerificationError(
             "the simulator's misuse records differ from the pinned digest "
             f"{SEMANTICS_SHA256}; an optimization changed a semantic"
         )
