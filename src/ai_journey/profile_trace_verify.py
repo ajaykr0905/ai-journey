@@ -5,7 +5,8 @@ shape, the steps are:
 
 1. Read the named trace file from the trace directory with the bounded
    reader, and require its byte count and SHA-256 digest.
-2. Parse it with the strict parser and require the capture layout.
+2. Parse it with the strict parser, require the capture layout, and require
+   the redacted host name and export path that the capture writes.
 3. Recompute the analysis, the timeline and the bottleneck from the bytes,
    and require each section to match the report as canonical JSON.
 4. Cross-check the op times and the gaps with a second method: a sweep over
@@ -31,11 +32,13 @@ from .memory_access_plan import canonical_json_bytes
 from .memory_access_report import DIGEST_FIELD
 from .profile_trace_analysis import WINDOW_CATEGORY, analyze_trace
 from .profile_trace_bottleneck import bottleneck
+from .profile_trace_capture import REDACTED_HOST
 from .profile_trace_config import ProfileTraceConfig, config_from_mapping
 from .profile_trace_events import (
     ParsedTrace,
     ProfileTraceError,
     TraceSpan,
+    decode_trace_json,
     parse_trace_bytes,
     read_trace_bytes,
 )
@@ -242,6 +245,21 @@ def _check_header(report: dict[str, object]) -> bool:
     return measured
 
 
+def _check_redacted(document: dict[str, object], name: str, label: str) -> None:
+    """Require the host fields that the capture replaces to hold its values.
+
+    A digest only binds bytes, so without this check a stored trace that
+    still names the host or a local path would verify.
+    """
+
+    expected = {"host_name": REDACTED_HOST, "traceName": name}
+    for key, value in expected.items():
+        _require(
+            document.get(key, value) == value,
+            f"{label} trace {key} must be redacted to {value!r}",
+        )
+
+
 def _check_shape(
     config: ProfileTraceConfig, index: int, entry: object, trace_dir: Path
 ) -> None:
@@ -277,6 +295,7 @@ def _check_shape(
         check_layout(trace, config.iterations)
     except ProfileTraceError as error:
         raise ProfileTraceVerificationError(f"{label} trace: {error}") from error
+    _check_redacted(decode_trace_json(payload), name, label)
     _same(stored["events"], trace.event_count, f"{label} event count")
     device = entry["device_event_ns"]
     _require(

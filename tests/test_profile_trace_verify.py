@@ -225,3 +225,24 @@ def test_a_trace_without_the_layout_is_refused_even_when_rebound(tmp_path):
         ProfileTraceVerificationError, match="shape 1 trace: .*torch_matmul"
     ):
         verify_report(reseal(forged), trace_dir=tmp_path)
+
+
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        (b'"host_name": "redacted-host"', b'"host_name": "Private-MacBook.local"'),
+        (b'"traceName": "trace-0-', b'"traceName": "/Users/someone/trace-0-'),
+    ],
+)
+def test_a_trace_that_names_the_host_or_a_path_is_refused(tmp_path, old, new):
+    _, report, captured = stored(tmp_path)
+    path = tmp_path / captured[0].file_name
+    payload = captured[0].trace_bytes
+    assert payload.count(old) == 1
+    leaked = payload.replace(old, new)
+    path.write_bytes(leaked)
+    tampered = copy.deepcopy(report)
+    tampered["shapes"][0]["trace"]["sha256"] = sha256(leaked).hexdigest()
+    tampered["shapes"][0]["trace"]["bytes"] = len(leaked)
+    with pytest.raises(ProfileTraceVerificationError, match="redacted"):
+        verify_report(reseal(tampered), trace_dir=tmp_path)

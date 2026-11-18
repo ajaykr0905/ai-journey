@@ -193,7 +193,8 @@ anything. Then it writes each trace and the report last, each with an atomic
 replace. The verifier does not import torch. For each shape, the steps are:
 
 1. Read the trace file and check its size and its SHA-256 digest.
-2. Parse the trace and check the annotation layout.
+2. Parse the trace and check the annotation layout. Make sure that the trace
+   holds the replaced host name and export path.
 3. Calculate the analysis, the timeline and the bottleneck again from the
    bytes. Each section must match the report as canonical JSON.
 4. Calculate the op times and the gaps with a second method, an interval
