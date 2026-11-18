@@ -30,16 +30,18 @@ ENVIRONMENT = {
     "torch_version": "2.15.0",
 }
 # Synthetic one-call medians for the two shapes of the recorded Day 74
-# matmul-metal fixture: (gpu, host, dispatch) nanoseconds per kernel.
+# matmul-metal fixture: (gpu, host, dispatch) nanoseconds per kernel. Against
+# that fixture's steady-state times, they give each naive kernel one point
+# below both roofs, and one point that is dispatch-bound or indeterminate.
 SYNTHETIC_TIMES = {
     (256, 256, 256): {
-        "matmul_x_columns": (110_000, 130_000, 20_000),
-        "matmul_x_rows": (270_000, 290_000, 20_000),
+        "matmul_x_columns": (735_000, 760_000, 30_000),
+        "matmul_x_rows": (1_300_000, 1_350_000, 30_000),
         "torch_matmul": (40_000, 60_000, 15_000),
     },
     (129, 65, 1000): {
-        "matmul_x_columns": (100_000, 900_000, 40_000),
-        "matmul_x_rows": (110_000, 950_000, 40_000),
+        "matmul_x_columns": (700_000, 1_500_000, 40_000),
+        "matmul_x_rows": (400_000, 1_250_000, 40_000),
         "torch_matmul": (90_000, 700_000, 40_000),
     },
 }
@@ -90,8 +92,8 @@ def test_a_synthetic_input_parses_round_trips_and_finds_its_entries():
     assert timing.digest() == sha256(canonical_json_bytes(mapping)).hexdigest()
     entry = timing.entry(matmul_shape(129, 65, 1000), "matmul_x_rows")
     assert (entry.gpu_ns, entry.host_ns, entry.dispatch_ns) == (
-        110_000,
-        950_000,
+        400_000,
+        1_250_000,
         40_000,
     )
     assert timing.entry(matmul_shape(128, 128, 128), "matmul_x_rows") is None
