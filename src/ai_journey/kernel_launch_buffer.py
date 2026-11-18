@@ -30,6 +30,10 @@ READ = "read"
 WRITE = "write"
 _NAME = re.compile(r"[a-z][a-z0-9_]{0,31}")
 _ZERO = {"float32": 0.0, "uint8": 0}
+# One compiled format: every rounding skips the struct module's format cache.
+_FLOAT32 = struct.Struct("<f")
+_PACK_FLOAT32 = _FLOAT32.pack
+_UNPACK_FLOAT32 = _FLOAT32.unpack
 
 
 def to_float32(value: float) -> float:
@@ -42,7 +46,7 @@ def to_float32(value: float) -> float:
     if type(value) is not float or not math.isfinite(value):
         raise KernelLaunchError(f"float32 rounding needs a finite float, not {value!r}")
     try:
-        return struct.unpack("<f", struct.pack("<f", value))[0]
+        return _UNPACK_FLOAT32(_PACK_FLOAT32(value))[0]
     except OverflowError as error:
         raise KernelLaunchError(f"{value!r} is outside the float32 range") from error
 

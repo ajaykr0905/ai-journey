@@ -40,6 +40,10 @@
     {
       "target": "ai_journey.kernel_launch_buffer:DeviceBuffer.__getitem__",
       "change": "Record each read inside DeviceBuffer.__getitem__ itself, with the same checks in the same order, instead of through _recorder_for, _record_read and _running."
+    },
+    {
+      "target": "ai_journey.kernel_launch_buffer:to_float32",
+      "change": "Round through one precompiled struct.Struct('<f') instead of the module-level struct.pack and struct.unpack, which look up the format on every call."
     }
   ]
 }
