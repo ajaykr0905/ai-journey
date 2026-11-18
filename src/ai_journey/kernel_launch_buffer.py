@@ -426,11 +426,17 @@ class AccessRecorder:
             )
             for index in sorted(writers):
                 ordered = sorted(writers[index])
-                writing = tuple(self._ref(thread) for thread in ordered)
-                if len(ordered) > 1:
-                    write_conflicts.append(WriteConflict(name, index, writing))
                 reading = readers.get(index)
-                if reading and (len(ordered) > 1 or reading != {ordered[0]}):
+                racing = len(ordered) > 1
+                read_race = bool(reading) and (racing or reading != {ordered[0]})
+                if not racing and not read_race:
+                    # A race-free element needs no ThreadRef; most elements
+                    # of a correct launch are race-free.
+                    continue
+                writing = tuple(self._ref(thread) for thread in ordered)
+                if racing:
+                    write_conflicts.append(WriteConflict(name, index, writing))
+                if read_race:
                     read_write_conflicts.append(
                         ReadWriteConflict(
                             name,

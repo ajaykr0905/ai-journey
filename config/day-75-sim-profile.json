@@ -44,6 +44,10 @@
     {
       "target": "ai_journey.kernel_launch_buffer:to_float32",
       "change": "Round through one precompiled struct.Struct('<f') instead of the module-level struct.pack and struct.unpack, which look up the format on every call."
+    },
+    {
+      "target": "ai_journey.kernel_launch_config:Index3.__post_init__",
+      "change": "Build the ThreadRef values of AccessRecorder.finish only for elements in a write or read-write conflict, instead of two Index3 values for every written element."
     }
   ]
 }
