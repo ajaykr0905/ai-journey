@@ -112,6 +112,14 @@ class TraceNestingError(ProfileTraceError):
     """Raised when spans on one thread overlap without nesting, or B and E differ."""
 
 
+def require_integer(value: object, name: str, minimum: int, maximum: int) -> int:
+    """Return a true integer inside ``[minimum, maximum]``, never a JSON bool."""
+
+    if type(value) is not int or not minimum <= value <= maximum:
+        raise ProfileTraceError(f"{name} must be an integer in [{minimum}, {maximum}]")
+    return value
+
+
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
