@@ -235,3 +235,129 @@ def top_level_gaps(trace: ParsedTrace) -> tuple[ThreadGaps, ...]:
             )
         )
     return tuple(result)
+
+
+@dataclass(frozen=True)
+class IterationTime:
+    """The host time of one iteration span and how its direct children split it.
+
+    ``children`` adds the durations of the direct children by name, and
+    ``uncovered_ns`` is the iteration's self time: host time in it that no
+    child call covers.
+    """
+
+    index: int
+    offset_ns: int
+    host_ns: int
+    children: tuple[tuple[str, int], ...]
+    uncovered_ns: int
+
+    def to_mapping(self) -> dict[str, object]:
+        """Return the iteration as a report records it."""
+
+        return {
+            "index": self.index,
+            "offset_ns": self.offset_ns,
+            "host_ns": self.host_ns,
+            "children_ns": dict(self.children),
+            "uncovered_ns": self.uncovered_ns,
+        }
+
+
+def iteration_times(trace: ParsedTrace, name: str) -> tuple[IterationTime, ...]:
+    """Return the host time of every span called ``name``, in start order.
+
+    The capture wraps each profiled iteration in one span of this name, so
+    its duration is the host time of the iteration, including the host's
+    waits for the GPU inside it.
+    """
+
+    if type(name) is not str or not name:
+        raise ProfileTraceError("an iteration name must be a non-empty string")
+    origin = origin_ns(trace)
+    selves = self_times(trace)
+    positions = [
+        position
+        for position, item in enumerate(trace.nested)
+        if item.span.name == name and is_op(item)
+    ]
+    children: dict[int, dict[str, int]] = {position: {} for position in positions}
+    for item in trace.nested:
+        if item.parent in children:
+            split = children[item.parent]
+            split[item.span.name] = split.get(item.span.name, 0) + item.span.duration_ns
+    ordered = sorted(
+        positions, key=lambda position: trace.nested[position].span.start_ns
+    )
+    return tuple(
+        IterationTime(
+            index=index,
+            offset_ns=trace.nested[position].span.start_ns - origin,
+            host_ns=trace.nested[position].span.duration_ns,
+            children=tuple(sorted(children[position].items())),
+            uncovered_ns=selves[position],
+        )
+        for index, position in enumerate(ordered)
+    )
+
+
+def median_low(values: tuple[int, ...]) -> int:
+    """Return the lower median, so a median of integer nanoseconds stays exact."""
+
+    if not values:
+        raise ProfileTraceError("a median needs at least one value")
+    ordered = sorted(values)
+    return ordered[(len(ordered) - 1) // 2]
+
+
+@dataclass(frozen=True)
+class TraceAnalysis:
+    """Every derived figure of one trace that a report records."""
+
+    origin_ns: int
+    ops: tuple[OpStats, ...]
+    top: tuple[OpStats, ...]
+    threads: tuple[ThreadGaps, ...]
+    iterations: tuple[IterationTime, ...]
+    iteration_name: str
+    gap_count: int
+
+    def to_mapping(self) -> dict[str, object]:
+        """Return the analysis as canonical-JSON-ready data, offsets not clocks."""
+
+        hosts = tuple(item.host_ns for item in self.iterations)
+        return {
+            "ops": [row.to_mapping() for row in self.ops],
+            "top_ops_by_self_time": [row.to_mapping() for row in self.top],
+            "threads": [thread.to_mapping(self.gap_count) for thread in self.threads],
+            "iteration_name": self.iteration_name,
+            "iterations": [item.to_mapping() for item in self.iterations],
+            "iteration_host_ns": {
+                "count": len(hosts),
+                "min": min(hosts),
+                "median_low": median_low(hosts),
+                "max": max(hosts),
+                "total": sum(hosts),
+            },
+        }
+
+
+def analyze_trace(
+    trace: ParsedTrace, *, iteration_name: str, top_n: int, gap_count: int
+) -> TraceAnalysis:
+    """Analyze one trace: op times, the top ops, gaps and iteration host time."""
+
+    stats = op_stats(trace)
+    require_integer(gap_count, "gap count", 1, MAX_TOP_N)
+    iterations = iteration_times(trace, iteration_name)
+    if not iterations:
+        raise ProfileTraceError(f"trace holds no {iteration_name!r} spans")
+    return TraceAnalysis(
+        origin_ns=origin_ns(trace),
+        ops=stats,
+        top=top_ops(stats, top_n),
+        threads=top_level_gaps(trace),
+        iterations=iterations,
+        iteration_name=iteration_name,
+        gap_count=gap_count,
+    )

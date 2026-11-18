@@ -2,6 +2,9 @@ import pytest
 
 from ai_journey.profile_trace_analysis import (
     MAX_TOP_N,
+    analyze_trace,
+    iteration_times,
+    median_low,
     OpStats,
     op_stats,
     origin_ns,
@@ -170,3 +173,64 @@ def test_a_trace_without_ops_has_no_origin():
     trace = parse_trace(document(span("window", 0, 5, cat="Trace")))
     with pytest.raises(ProfileTraceError, match="no op spans"):
         top_level_gaps(trace)
+
+
+def test_iterations_report_host_time_and_the_split_of_their_children():
+    first, second = iteration_times(two_iterations(), "iteration")
+
+    assert first.to_mapping() == {
+        "index": 0,
+        "offset_ns": 0,
+        "host_ns": 100_000,
+        "children_ns": {"side/dispatch": 20_000, "side/synchronize": 60_000},
+        "uncovered_ns": 20_000,
+    }
+    assert (second.index, second.offset_ns, second.host_ns) == (1, 130_000, 50_000)
+    assert second.uncovered_ns == 10_000
+    assert iteration_times(two_iterations(), "absent") == ()
+    with pytest.raises(ProfileTraceError, match="non-empty"):
+        iteration_times(two_iterations(), "")
+
+
+def test_median_low_stays_an_exact_integer():
+    assert median_low((5, 1, 3)) == 3
+    assert median_low((4, 1, 3, 2)) == 2
+    with pytest.raises(ProfileTraceError, match="at least one"):
+        median_low(())
+
+
+def test_the_whole_analysis_maps_to_report_data():
+    analysis = analyze_trace(
+        two_iterations(), iteration_name="iteration", top_n=2, gap_count=1
+    )
+    mapping = analysis.to_mapping()
+
+    assert analysis.origin_ns == 0
+    assert [row["name"] for row in mapping["top_ops_by_self_time"]] == [
+        "side/synchronize",
+        "iteration",
+    ]
+    assert len(mapping["ops"]) == 4
+    (thread,) = mapping["threads"]
+    assert thread["largest_gaps"] == [
+        {
+            "before": "iteration",
+            "after": "iteration",
+            "offset_ns": 100_000,
+            "gap_ns": 30_000,
+        }
+    ]
+    assert mapping["iteration_name"] == "iteration"
+    assert mapping["iteration_host_ns"] == {
+        "count": 2,
+        "min": 50_000,
+        "median_low": 50_000,
+        "max": 100_000,
+        "total": 150_000,
+    }
+    with pytest.raises(ProfileTraceError, match="no 'absent' spans"):
+        analyze_trace(two_iterations(), iteration_name="absent", top_n=1, gap_count=1)
+    with pytest.raises(ProfileTraceError, match="gap count"):
+        analyze_trace(
+            two_iterations(), iteration_name="iteration", top_n=1, gap_count=0
+        )
