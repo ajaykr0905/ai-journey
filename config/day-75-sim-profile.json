@@ -48,6 +48,10 @@
     {
       "target": "ai_journey.kernel_launch_config:Index3.__post_init__",
       "change": "Build the ThreadRef values of AccessRecorder.finish only for elements in a write or read-write conflict, instead of two Index3 values for every written element."
+    },
+    {
+      "target": "ai_journey.kernel_launch_buffer:_check_value",
+      "change": "Test that a float32 store is exact with one Struct pack and unpack in _check_value, instead of a nested to_float32 call that repeats the type and finiteness checks."
     }
   ]
 }

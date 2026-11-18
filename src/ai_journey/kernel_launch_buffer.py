@@ -56,11 +56,14 @@ def _check_value(dtype: str, value: object, name: str) -> int | float:
         if type(value) is not int or not 0 <= value <= 255:
             raise KernelLaunchError(f"uint8 buffer {name} cannot store {value!r}")
         return value
+    # Every float32 store and every input element comes through here, so the
+    # value is rounded once in place instead of through to_float32, which
+    # would repeat the type and finiteness checks.
     exact = type(value) is float and math.isfinite(value)
     if exact:
         try:
-            exact = to_float32(value) == value
-        except KernelLaunchError:
+            exact = _UNPACK_FLOAT32(_PACK_FLOAT32(value))[0] == value
+        except OverflowError:
             exact = False
     if not exact:
         raise KernelLaunchError(
