@@ -36,5 +36,10 @@
     "warmup": 2,
     "repeats": 31
   },
-  "rounds": []
+  "rounds": [
+    {
+      "target": "ai_journey.kernel_launch_buffer:DeviceBuffer.__getitem__",
+      "change": "Record each read inside DeviceBuffer.__getitem__ itself, with the same checks in the same order, instead of through _recorder_for, _record_read and _running."
+    }
+  ]
 }

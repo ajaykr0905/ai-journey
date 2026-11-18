@@ -166,11 +166,30 @@ class DeviceBuffer:
         return recorder
 
     def __getitem__(self, index: int) -> int | float:
-        recorder = self._recorder_for(index)
-        if 0 <= index < len(self._values):
-            recorder._record_read(self._name, index)
-            return self._values[index]
-        recorder._record_out_of_bounds(self._name, READ, index)
+        # Reads dominate a kernel's buffer traffic, so an in-bounds read is
+        # recorded here with no helper calls. The checks and the records are
+        # those of _recorder_for and AccessRecorder._running, in that order.
+        recorder = self._recorder
+        if recorder is None:
+            raise KernelLaunchError(
+                f"buffer {self._name} is indexed outside a kernel launch"
+            )
+        if type(index) is not int:
+            raise TypeError(f"buffer {self._name} index must be an integer")
+        thread = recorder._thread
+        if thread is None:
+            raise KernelLaunchError("buffers are indexed only by a running thread")
+        values = self._values
+        if 0 <= index < len(values):
+            recorder._reads += 1
+            table = recorder._readers[self._name]
+            readers = table.get(index)
+            if readers is None:
+                table[index] = {thread}
+            else:
+                readers.add(thread)
+            return values[index]
+        recorder._out_of_bounds.append((thread, self._name, READ, index))
         return _ZERO[self._dtype]
 
     def __setitem__(self, index: int, value: int | float) -> None:
@@ -358,15 +377,6 @@ class AccessRecorder:
         if self._thread is None:
             raise KernelLaunchError("buffers are indexed only by a running thread")
         return self._thread
-
-    def _record_read(self, name: str, index: int) -> None:
-        thread = self._running()
-        self._reads += 1
-        readers = self._readers[name].get(index)
-        if readers is None:
-            self._readers[name][index] = {thread}
-        else:
-            readers.add(thread)
 
     def _record_write(self, name: str, index: int) -> None:
         thread = self._running()
