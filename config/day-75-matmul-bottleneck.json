@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "name": "day-75-matmul-bottleneck",
+  "rule": {
+    "intensity_model": "ideal_reuse",
+    "dispatch_overhead_share_min": 0.5,
+    "near_roof_share_min": 0.7,
+    "timing_tolerance": 0.05,
+    "gpu_agreement_max_ratio": 1.5,
+    "roof_excess_tolerance": 0.05,
+    "require_fma_scales_with_work": true
+  },
+  "mapping": {
+    "slower_ratio_min": 1.1
+  }
+}
