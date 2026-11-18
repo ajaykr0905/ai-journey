@@ -69,6 +69,7 @@ _MAX_DIMENSION = 8192
 _MAX_POINTS = 64
 _MAX_NS = 1 << 40
 _CLASSES = ("single", "broadcast", "coalesced", "strided")
+_TIMES = ("median_gpu_ns", "median_host_ns", "median_dispatch_ns")
 _FIELDS = {
     "schema_version",
     "kind",
@@ -226,15 +227,31 @@ def _fastest_calls(calls: object) -> dict[str, int]:
             and set(entry) == fields
             and entry["kernel"] == kernel
             and all(_integer(entry[axis], 1, _MAX_DIMENSION) for axis in "mnk")
-            and all(
-                _integer(entry[name], 1, _MAX_NS)
-                for name in ("median_gpu_ns", "median_host_ns", "median_dispatch_ns")
-            )
+            and all(_integer(entry[name], 1, _MAX_NS) for name in _TIMES)
             for kernel, entry in calls.items()
         ),
         "source timing fastest_calls do not match the schema",
     )
     return {kernel: entry["median_host_ns"] for kernel, entry in calls.items()}
+
+
+def _same_fastest_calls(calls: dict, points: list[dict]) -> None:
+    """A fastest call at a report shape is that point's timing entry.
+
+    The timing input holds one entry per kernel and shape, so a fastest call
+    with other times than the point at its shape cannot come from one input.
+    """
+
+    for kernel, call in calls.items():
+        times = {name: call[name] for name in _TIMES}
+        shape = [call[axis] for axis in "mnk"]
+        for point in points:
+            if [point[axis] for axis in "mnk"] == shape:
+                _require(
+                    _exact(point["kernels"][kernel]["inputs"], times),
+                    f"the fastest call of {kernel} differs from the timing of "
+                    f"point {point['index']} at its shape",
+                )
 
 
 def _environment(environment: object, measured: bool) -> None:
@@ -682,11 +699,13 @@ def _verify(
         type(points) is list and 1 <= len(points) <= _MAX_POINTS,
         f"a report holds 1 to {_MAX_POINTS} points",
     )
-    bounds = _fastest_calls(report["sources"][TIMING_SOURCE]["fastest_calls"])
+    calls = report["sources"][TIMING_SOURCE]["fastest_calls"]
+    bounds = _fastest_calls(calls)
     expected = [
         _point(point, index, report["config"], ceilings, group, bounds)
         for index, point in enumerate(points)
     ]
+    _same_fastest_calls(calls, expected)
     _require(
         report["sources"][TIMING_SOURCE]["entries_used"] == 2 * len(points),
         "the timing input must have given one entry per naive kernel and point",

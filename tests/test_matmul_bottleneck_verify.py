@@ -1,4 +1,5 @@
 import copy
+import json
 import dataclasses
 from hashlib import sha256
 from pathlib import Path
@@ -14,6 +15,7 @@ from ai_journey.matmul_bottleneck_report import build_report
 from ai_journey.matmul_bottleneck_verify import verify_report
 from ai_journey.memory_access_plan import canonical_json_bytes
 from ai_journey.memory_access_report import DIGEST_FIELD, report_digest
+from test_matmul_bottleneck_recorded import RECORDED_REPORT_JSON
 from test_matmul_bottleneck_report import measured_timing, synthetic_report
 from test_matmul_bottleneck_sources import recorded_sources, synthetic_timing
 
@@ -224,3 +226,25 @@ def test_a_rebuilt_report_must_match_byte_for_byte():
 
 def synthetic_report_with(config):
     return build_report(recorded_sources(), synthetic_timing(), config)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"median_gpu_ns": 1}, {"median_dispatch_ns": 999_999_999}],
+    ids=["gpu time", "dispatch time"],
+)
+def test_a_fastest_call_at_a_report_shape_must_be_that_points_timing(change):
+    # The recorded fastest calls sit at 128 x 128 x 128, which is point 0.
+    report = json.loads(RECORDED_REPORT_JSON)
+    fastest = report["sources"]["timing"]["fastest_calls"]["matmul_x_columns"]
+    assert (fastest["m"], fastest["n"], fastest["k"]) == (128, 128, 128)
+    tampered = resealed(
+        lambda r: r["sources"]["timing"]["fastest_calls"]["matmul_x_columns"].update(
+            change
+        ),
+        report,
+    )
+
+    assert verify_report(report)["points"] == 9
+    with pytest.raises(MatmulBottleneckVerificationError, match="fastest call"):
+        verify_report(tampered)
