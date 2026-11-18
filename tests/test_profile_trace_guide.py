@@ -109,3 +109,19 @@ def test_analyze_and_verify_run_without_torch(tmp_path):
         )
         assert completed.returncode == 0, completed.stderr
     assert "top 1 name=matmul_x_rows/synchronize" in completed.stdout
+
+
+def test_the_guide_scopes_analyze_to_the_phases_the_parser_accepts(tmp_path, capsys):
+    # A flow event is a valid Chrome trace phase that this parser refuses.
+    trace = tmp_path / "flow.json"
+    trace.write_text(
+        '{"traceEvents": [{"ph": "s", "id": 1, "name": "flow", "cat": "ac2g", '
+        '"pid": 1, "tid": 1, "ts": 1}]}'
+    )
+    code = profile_trace_cli.main(["analyze", "--trace", str(trace)])
+    assert code == profile_trace_cli.EXIT_INVALID
+    assert "phase 's'" in capsys.readouterr().err
+    text = flat(GUIDE.read_text(encoding="utf-8"))
+    assert "reads any Chrome trace" not in text
+    assert "It refuses a trace with other event phases" in text
+    assert "any trace file" not in profile_trace_cli.__doc__

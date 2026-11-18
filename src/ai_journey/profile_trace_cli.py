@@ -3,9 +3,10 @@
 ``capture`` loads a config, profiles both naive Metal kernels and
 ``torch.matmul`` on this host's Apple GPU through the MPS backend, seals a
 report, verifies it, and publishes it with its trace files in one output
-directory. ``analyze`` reads any trace file that ``torch.profiler`` exported
-and prints its top ops by self time, its top-level gaps, the host time per
-iteration and a text timeline. ``verify`` checks a report against the traces
+directory. ``analyze`` reads one trace in the phases the strict parser
+accepts, such as a ``ProfilerActivity.CPU`` export, and prints its top ops
+by self time, its top-level gaps, the host time per iteration and a text
+timeline. ``verify`` checks a report against the traces
 beside it. ``analyze`` and ``verify`` never import torch.
 
 ``ProfilerActivity.CPU`` records only host-side dispatch and the host's wait

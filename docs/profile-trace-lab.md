@@ -67,7 +67,9 @@ In a measured run, the lines have the prefix `apple_gpu_metal_measurement`.
 The summary line has the prefix `profile_trace_measurement=`. A run with a
 stand-in session uses `synthetic_timing` instead.
 
-The `analyze` command reads any Chrome trace that `torch.profiler` exported.
+The `analyze` command reads a Chrome trace with the event phases of the
+parser, for example a `torch.profiler` export with `ProfilerActivity.CPU`.
+It refuses a trace with other event phases, for example flow events.
 It prints the top ops by self time, the gaps between top-level calls, the
 host time of each iteration and a text timeline. The `verify` command checks
 a report against the trace files in its directory. With `--config`, the
@@ -257,7 +259,8 @@ These are the results of the capture:
 - At 1024 and 2048, the synchronize span held 98% to 99.9% of the host time
   of each naive side. The dispatch took 38 to 140 us.
 - At 2048, the MPS events of each side were within 0.5% of the synchronize
-  time. Thus the host wait gives the time of the GPU work at that size.
+  time. Thus, at that size, the host wait probably shows the time of the
+  GPU work. Neither timer reads a hardware counter, so this is an inference.
 - At 256, a synchronize call took 288 to 1269 us, but a naive kernel needs
   much less time at the Day 74 rates. The fixed cost of the command and
   the wait probably sets the time at that size.
