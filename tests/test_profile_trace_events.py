@@ -130,6 +130,32 @@ def test_microseconds_convert_exactly_and_refuse_fractions_of_a_nanosecond():
             microseconds_to_ns(value, "ts")
 
 
+def test_long_decimals_are_never_rounded_into_whole_nanoseconds():
+    # 28 significant digits is the default decimal precision, so a product
+    # with more digits would round to a whole nanosecond in silence.
+    for text in (
+        "1.0000000000000000000000000001",
+        "4114107541161.3560000000000001",
+    ):
+        with pytest.raises(TraceTimeError, match="whole number of nanoseconds"):
+            microseconds_to_ns(Decimal(text), "ts")
+    assert microseconds_to_ns(Decimal("1.000" + "0" * 40), "ts") == 1000
+    assert microseconds_to_ns(Decimal("-0.000"), "ts") == 0
+
+
+def test_huge_exponents_are_refused_fast_as_trace_time_errors(tmp_path):
+    for text in ("1e1000000", "1e999990", "1e-1000000", "-1e1000000"):
+        payload = encode_raw(
+            f'{{"ph": "i", "name": "a", "pid": 1, "tid": 1, "ts": {text}}}'
+        )
+        with pytest.raises(TraceTimeError):
+            parse_trace_bytes(payload)
+
+
+def encode_raw(event):
+    return ('{"traceEvents": [' + event + "]}").encode("utf-8")
+
+
 def test_begin_and_end_pairs_become_spans_in_stack_order():
     trace = parse_trace(
         document(

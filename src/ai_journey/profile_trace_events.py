@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from pathlib import Path
 
 from .memory_access_pattern import MemoryAccessError
@@ -178,22 +178,38 @@ def microseconds_to_ns(value: object, label: str) -> int:
     """Convert a JSON microsecond value to exact integer nanoseconds."""
 
     if type(value) is int:
-        exact = Decimal(value)
+        nanoseconds = value * NANOSECONDS_PER_MICROSECOND
     elif type(value) is Decimal:
-        exact = value
+        nanoseconds = _decimal_to_ns(value, label)
     else:
         raise TraceFieldError(f"{label} must be a JSON number")
-    try:
-        scaled = exact * NANOSECONDS_PER_MICROSECOND
-        whole = scaled.to_integral_value()
-    except InvalidOperation as error:
-        raise TraceTimeError(f"{label} is not a finite number") from error
-    if not exact.is_finite() or scaled != whole:
-        raise TraceTimeError(f"{label} must be a whole number of nanoseconds")
-    nanoseconds = int(whole)
     if not 0 <= nanoseconds <= MAX_TIME_NS:
         raise TraceTimeError(f"{label} must be from 0 to {MAX_TIME_NS} ns")
     return nanoseconds
+
+
+def _decimal_to_ns(exact: Decimal, label: str) -> int:
+    """Scale a decimal by 1000 on its digits, never in a rounding context.
+
+    Decimal arithmetic rounds to 28 digits and can overflow, and ``int`` of
+    a huge exponent takes seconds. The digit tuple avoids all three, and the
+    range check runs before any digit is joined.
+    """
+
+    if not exact.is_finite():
+        raise TraceTimeError(f"{label} is not a finite number")
+    sign, digits, exponent = exact.as_tuple()
+    if not any(digits):
+        return 0
+    if sign or exact.adjusted() + 3 > len(str(MAX_TIME_NS)):
+        raise TraceTimeError(f"{label} must be from 0 to {MAX_TIME_NS} ns")
+    shift = exponent + 3
+    if shift < 0:
+        if len(digits) < -shift or any(digits[shift:]):
+            raise TraceTimeError(f"{label} must be a whole number of nanoseconds")
+        digits = digits[:shift]
+        shift = 0
+    return int("".join(map(str, digits)) or "0") * 10**shift
 
 
 @dataclass(frozen=True)
