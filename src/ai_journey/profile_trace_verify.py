@@ -20,6 +20,7 @@ config parser is shared, and it only checks bounds.
 
 from __future__ import annotations
 
+import heapq
 import math
 from hashlib import sha256
 from pathlib import Path
@@ -131,14 +132,21 @@ def sweep_op_times(trace: ParsedTrace) -> dict[str, tuple[int, int, int, int]]:
             {span.start_ns for _, span in members}
             | {span.end_ns for _, span in members}
         )
+        # A max-heap of the started spans; one that has ended leaves only
+        # when it reaches the top, so each span enters and leaves once.
+        starting = sorted(members, key=lambda item: item[1].start_ns)
+        heap: list[tuple[int, int, int, int, str]] = []
+        cursor = 0
         for low, high in zip(points, points[1:]):
-            open_spans = [
-                (span.start_ns, -span.duration_ns, position, span.name)
-                for position, span in members
-                if span.start_ns <= low and high <= span.end_ns
-            ]
-            if open_spans:
-                rows[max(open_spans)[3]][2] += high - low
+            while cursor < len(starting) and starting[cursor][1].start_ns <= low:
+                position, span = starting[cursor]
+                key = (-span.start_ns, span.duration_ns, -position)
+                heapq.heappush(heap, (*key, span.end_ns, span.name))
+                cursor += 1
+            while heap and heap[0][3] < high:
+                heapq.heappop(heap)
+            if heap:
+                rows[heap[0][4]][2] += high - low
     return {name: tuple(values) for name, values in rows.items()}
 
 

@@ -1,10 +1,13 @@
 import copy
 import json
+import random
+import time
 from hashlib import sha256
 
 import pytest
 
 from ai_journey.memory_access_report import DIGEST_FIELD, seal_report
+from ai_journey.profile_trace_analysis import op_stats
 from ai_journey.profile_trace_events import (
     ProfileTraceError,
     parse_trace,
@@ -65,6 +68,49 @@ def test_the_sweep_agrees_with_the_stack_on_a_nested_trace():
     assert sweep_op_times(equal)["b"][2] == 4_000
     assert sweep_op_times(equal)["a"][2] == 0
     assert sweep_gaps(equal) == {(PID, TID): (1_000, 1_000)}
+
+
+def random_nested_events(seed, count):
+    """Nested spans on two threads, with equal bounds and zero lengths."""
+
+    rng = random.Random(seed)
+    events = []
+    for tid in (TID, TID + 1):
+
+        def fill(start, end, depth):
+            cursor = start
+            while cursor < end and len(events) < count:
+                length = rng.choice((0, 1, 2, 5, end - cursor))
+                length = min(length, end - cursor)
+                events.append(span(f"op{rng.randrange(4)}", cursor, length, tid=tid))
+                if depth < 4 and length:
+                    fill(cursor, cursor + length, depth + 1)
+                cursor += length + rng.choice((0, 0, 1, 3))
+
+        fill(0, 400, 0)
+    return events
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_the_sweep_agrees_with_the_stack_on_random_nested_traces(seed):
+    trace = parse_trace(document(*random_nested_events(seed, 300)))
+    stacked = {
+        row.name: (row.calls, row.total_ns, row.self_ns, row.max_ns)
+        for row in op_stats(trace)
+    }
+    assert sweep_op_times(trace) == stacked
+
+
+def test_the_sweep_stays_fast_at_many_spans():
+    # The old sweep scanned every span for each interval: about 25 s here.
+    count = 40_000
+    trace = parse_trace(
+        document(*(span(f"op{i % 7}", i * 10, 5) for i in range(count)))
+    )
+    started = time.perf_counter()
+    swept = sweep_op_times(trace)
+    assert time.perf_counter() - started < 5.0
+    assert sum(row[2] for row in swept.values()) == count * 5_000
 
 
 def test_a_changed_trace_file_is_refused(tmp_path):
