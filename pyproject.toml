@@ -83,6 +83,10 @@ ai-journey-matmul-metal = "ai_journey.matmul_metal_cli:main"
 ai-journey-gpu-ceilings = "ai_journey.gpu_ceiling_cli:main"
 ai-journey-metal-launch-sweep = "ai_journey.metal_launch_sweep_cli:main"
 ai-journey-matmul-roofline = "ai_journey.matmul_roofline_cli:main"
+ai-journey-sim-profile = "ai_journey.sim_profile_cli:main"
+ai-journey-profile-trace = "ai_journey.profile_trace_cli:main"
+ai-journey-gpu-timing = "ai_journey.gpu_timing_cli:main"
+ai-journey-matmul-bottleneck = "ai_journey.matmul_bottleneck_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

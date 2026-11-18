@@ -28,8 +28,9 @@ python -m ai_journey.sim_profile_cli verify \
   --report /tmp/day-75-rounds.json --config config/day-75-sim-profile.json
 ```
 
-The parser uses the program name `ai-journey-sim-profile`. The commands
-import neither torch nor NumPy.
+The parser uses the program name `ai-journey-sim-profile`. An installed
+wheel gives the same commands under that name. The commands import neither
+torch nor NumPy.
 
 The `run` command profiles and times the current tree at one stage. A stage
 is `baseline` or `round-N`, and the config must list round N. The command

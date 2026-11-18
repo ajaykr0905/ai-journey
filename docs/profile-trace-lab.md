@@ -49,7 +49,8 @@ python -m ai_journey.profile_trace_cli analyze \
   --trace /tmp/day-75-profile-trace/trace-2-2048x2048x2048.json
 ```
 
-The parser uses the program name `ai-journey-profile-trace`.
+The parser uses the program name `ai-journey-profile-trace`. An installed
+wheel gives the same commands under that name.
 
 The `capture` command profiles each shape of the config. It seals a report,
 checks the report, and writes the report with its trace files into the

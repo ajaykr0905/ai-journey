@@ -22,8 +22,8 @@ python -m ai_journey.gpu_timing_cli verify \
   --config config/day-75-gpu-timing.json
 ```
 
-The parser uses the program name `ai-journey-gpu-timing`. The lab has no
-console script yet, so use `python -m`.
+The parser uses the program name `ai-journey-gpu-timing`. An installed
+wheel gives the same commands under that name.
 
 The `run` command compiles the kernels, times them, checks its own report and
 writes the report. It prints these lines:

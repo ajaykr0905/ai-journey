@@ -43,7 +43,8 @@ The three Day 74 paths are the output paths in the guides of the
 [matmul-metal lab](matmul-metal-lab.md), the
 [gpu-ceilings lab](gpu-ceilings-lab.md) and the
 [roofline gap](matmul-roofline-gap.md). The parser uses the program name
-`ai-journey-matmul-bottleneck`.
+`ai-journey-matmul-bottleneck`. An installed wheel gives the same commands
+under that name.
 
 The `classify` command prints these lines:
 
