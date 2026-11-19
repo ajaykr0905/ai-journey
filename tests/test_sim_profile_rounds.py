@@ -6,7 +6,12 @@ from ai_journey.kernel_launch_report import report_digest, seal_report
 from ai_journey.sim_profile_config import SimProfileConfig, SimProfileError
 from ai_journey.sim_profile_rounds import build_rounds, rounds_report, speedup
 from ai_journey.sim_profile_snapshot import snapshot
-from test_sim_profile_fixtures import fixed_load, small_config, stepping_clock
+from test_sim_profile_fixtures import (
+    fixed_load,
+    round_targets,
+    small_config,
+    stepping_clock,
+)
 
 
 def take(config, stage, step):
@@ -16,8 +21,7 @@ def take(config, stage, step):
 @pytest.fixture(scope="module")
 def loop():
     baseline = take(small_config(), "baseline", 12)
-    first = baseline["profile"]["hotspots"][0]["function"]
-    second = baseline["profile"]["hotspots"][1]["function"]
+    first, second = round_targets(baseline, 2)
     config = small_config(
         [
             {"target": first, "change": "First change."},
@@ -45,9 +49,11 @@ def test_rounds_compare_each_stage_with_the_one_before(loop):
     assert report["measured"] is False
     assert [stage["stage"] for stage in report["stages"]] == list(config.stages)
     first, second = report["rounds"]
+    baseline = snapshots[0]
+    ranks = {spot["function"]: spot["rank"] for spot in baseline["profile"]["hotspots"]}
     assert (first["before_stage"], first["after_stage"]) == ("baseline", "round-1")
-    assert first["target"] == first["top_hotspot_before"]
-    assert first["target_before"]["rank"] == 1
+    assert first["top_hotspot_before"] == baseline["summary"]["top_hotspot"]
+    assert first["target_before"]["rank"] == ranks[first["target"]]
     assert second["target_before"]["rank"] is not None
     assert first["total"] == {
         "before_median_ns": 36,
@@ -59,6 +65,23 @@ def test_rounds_compare_each_stage_with_the_one_before(loop):
     assert report["snapshots"] == snapshots
     calls = first["target_before"]["calls"]
     assert calls == first["target_after"]["calls"] > 0
+
+
+def test_round_targets_skip_ranked_entries_that_no_round_may_target():
+    # The harness sums every generated dataclass __init__ into one entry, so
+    # it can rank first in a small profile. No round may target it.
+    names = [
+        "<string>:__init__",
+        "builtins:<method 'add' of 'set' objects>",
+        "ai_journey.kernel_launch_config:Index3.__post_init__",
+        "ai_journey.kernel_launch_simulator:launch",
+        "ai_journey.kernel_launch_buffer:DeviceBuffer.__getitem__",
+    ]
+    report = {"profile": {"hotspots": [{"function": name} for name in names]}}
+
+    assert round_targets(report, 2) == names[2:4]
+    with pytest.raises(SimProfileError, match="module:qualname"):
+        small_config([{"target": names[0], "change": "One change."}])
 
 
 def test_a_target_that_the_profile_did_not_rank_is_refused(loop):

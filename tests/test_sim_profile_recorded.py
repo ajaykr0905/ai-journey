@@ -19,18 +19,21 @@ TARGETS = [
     f"{BUFFER}:_check_value",
 ]
 # Exact cProfile counts of one pass of each pinned workload after round 4.
+# "<string>:__init__" adds the generated __init__ of every dataclass:
+# 18176 ThreadContext, 1678 Index3 and 28 others.
 FINAL_CALLS = {
     f"{BUFFER}:DeviceBuffer.__getitem__": 150100,
     f"{BUFFER}:DeviceBuffer.__setitem__": 16100,
     f"{BUFFER}:to_float32": 123200,
     f"{BUFFER}:_check_value": 85920,
     "ai_journey.kernel_launch_config:Index3.__post_init__": 1678,
+    "<string>:__init__": 19882,
 }
 REMOVED = (
     f"{BUFFER}:AccessRecorder._record_read",
     f"{BUFFER}:AccessRecorder._ref",
 )
-FINAL_TOTAL_CALLS = 1707558
+FINAL_TOTAL_CALLS = 1727437
 ROUNDS_SHA256 = (
     "2f5e1e4dc739784bf6421ee4136a86a29760ce683e6e24bad991c404165430a9",
     "d458263e3239c23b565e7febcc084ca6f2cb3b3984e7037188c2765657e4cb22",
