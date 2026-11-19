@@ -29,7 +29,7 @@ refusal is data in the report, and a refused variant never launches.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 
@@ -217,3 +217,24 @@ class VariantAdmission:
             "declared_threadgroup_bytes": self.variant.threadgroup_bytes,
             "static_threadgroup_bytes": self.limits.static_threadgroup_memory_bytes,
         }
+
+
+def require_admitted(
+    admissions: Mapping[str, VariantAdmission], variants: object
+) -> tuple[TiledVariant, ...]:
+    """Return ``variants`` once each one's pipeline admitted it.
+
+    A refused variant is already a record of the run, so asking to launch
+    it is an error.
+    """
+
+    if type(variants) is not tuple or not all(
+        isinstance(variant, TiledVariant) for variant in variants
+    ):
+        raise TypeError("variants must be a tuple of TiledVariant values")
+    for variant in variants:
+        if not admissions[variant.name].admitted:
+            raise MatmulTiledError(
+                f"{variant.name} was refused by its pipeline and never launches"
+            )
+    return variants

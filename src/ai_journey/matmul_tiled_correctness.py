@@ -40,7 +40,7 @@ from .matmul_metal_reference import (
 )
 from .matmul_tiled_runtime import NAIVE_KERNEL
 from .matmul_tiled_source import MatmulTiledError
-from .matmul_tiled_variants import K_ORDER_FMA, TiledVariant
+from .matmul_tiled_variants import K_ORDER_FMA, TiledVariant, require_admitted
 from .memory_access_tiling import MatmulShape
 
 
@@ -142,15 +142,7 @@ def check_case(
     require_integer(index, "case index", 0, MAX_CASE_INDEX)
     if not isinstance(shape, MatmulShape):
         raise TypeError("shape must be a MatmulShape")
-    if type(variants) is not tuple or not all(
-        isinstance(variant, TiledVariant) for variant in variants
-    ):
-        raise TypeError("variants must be a tuple of TiledVariant values")
-    for variant in variants:
-        if not backend.admissions[variant.name].admitted:
-            raise MatmulTiledError(
-                f"{variant.name} was refused by its pipeline and never launches"
-            )
+    variants = require_admitted(backend.admissions, variants)
     shape = matmul_shape(shape.m, shape.n, shape.k)
     left, right = matmul_inputs(seed, CORRECTNESS_STREAM, index, shape)
     reference, magnitude = float64_reference(left, right)
