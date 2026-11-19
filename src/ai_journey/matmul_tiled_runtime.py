@@ -152,6 +152,7 @@ class MatmulTiledRuntime:
         naive = _compile(torch, SHADER_SOURCE, "the Day 74 naive source")
         tiled = _compile(torch, tiled_source, "the tiled source")
         self._torch = torch
+        self.tiled_source = tiled_source
         self.variants = {variant.name: variant for variant in variants}
         self._functions = {name: getattr(naive, name) for name in KERNELS}
         self._functions.update({name: getattr(tiled, name) for name in self.variants})

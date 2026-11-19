@@ -18,12 +18,13 @@ from ai_journey.matmul_tiled_report import (
     warning_records,
 )
 from ai_journey.matmul_tiled_runtime import NAIVE_KERNEL
+from ai_journey.matmul_tiled_source import MatmulTiledError
 from ai_journey.matmul_tiled_variants import VARIANTS, library_source, text_sha256
 from ai_journey.memory_access_report import report_digest
 from test_kernel_metal_runtime import requires_metal
 from test_matmul_tiled_config import make_config_mapping
 from test_matmul_tiled_correctness import StandInBackend
-from test_matmul_tiled_runtime import tiled_runtime
+from test_matmul_tiled_runtime import fake_runtime, tiled_runtime
 
 LOAD = (1.5, 2.25, 3.0)
 
@@ -182,6 +183,21 @@ def test_the_mps_switches_come_from_the_backend_and_bad_loads_are_refused():
             backend=StandInBackend(),
             clock=scripted_clock(),
             load_average=lambda: (1.0, 2.0),
+        )
+
+
+def test_a_runtime_that_compiled_other_tiles_cannot_make_the_report():
+    runtime = fake_runtime()
+    mapping = make_config_mapping()
+    mapping["variants"] = ["matmul_tiled_8"]
+
+    assert runtime.tiled_source == library_source(tuple(VARIANTS.values()))
+    with pytest.raises(MatmulTiledError, match="another tiled library"):
+        measure_report(
+            config_from_mapping(mapping),
+            backend=runtime,
+            clock=scripted_clock(),
+            load_average=lambda: LOAD,
         )
 
 

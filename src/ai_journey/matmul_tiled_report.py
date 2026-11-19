@@ -266,6 +266,21 @@ def _summary(
     }
 
 
+def _require_compiled(backend: object, config: MatmulTiledConfig) -> None:
+    """Refuse a real runtime whose tiled library is not the config's library.
+
+    The report records the library text that the config names, so a measured
+    report must come from a runtime that compiled exactly that text.
+    """
+
+    if type(backend) is MatmulTiledRuntime and backend.tiled_source != library_source(
+        config.tiled_variants()
+    ):
+        raise MatmulTiledError(
+            "the runtime compiled another tiled library than the config names"
+        )
+
+
 def _measure(
     config: MatmulTiledConfig,
     backend: object,
@@ -342,6 +357,7 @@ def build_report(
         torch_imported = sys.modules.get("torch") is not None
         if backend is None:
             backend = MatmulTiledRuntime(config.tiled_variants())
+        _require_compiled(backend, config)
         run = _measure(config, backend, clock, load_average)
     captured = warning_records(
         caught, torch_imported=torch_imported, home=os.path.expanduser("~")
