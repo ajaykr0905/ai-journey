@@ -3,8 +3,14 @@ import shlex
 from pathlib import Path
 
 from ai_journey import gpu_ceiling_cli, matmul_tiled_cli, matmul_tiled_gap_cli
+from ai_journey.gpu_ceiling_analysis import FIXED_SHARE_LIMIT
 from ai_journey.matmul_bottleneck_config import load_config as load_rule_config
-from ai_journey.matmul_tiled_gap import DEFINITIONS, MEASUREMENT_BOUNDARY, RULE_MODEL
+from ai_journey.matmul_tiled_gap import (
+    DEFINITIONS,
+    GAP_ENVIRONMENT_FIELDS,
+    MEASUREMENT_BOUNDARY,
+    RULE_MODEL,
+)
 from ai_journey.matmul_tiled_gap_timing import (
     FLOOR_SHAPE,
     REPORT_SCHEMA_VERSION,
@@ -131,3 +137,23 @@ def test_the_gap_section_quotes_the_report_model_and_pins_the_recorded_digests()
     assert "4 * (2 * M * N * K + M * N) bytes" in DEFINITIONS["traffic"]
     assert f"`{recorded()['report_sha256']}`" in text
     assert f"`{RECORDED_GAP_SHA256}`" in text
+
+
+def test_the_gap_section_states_the_ceiling_flag_and_what_the_sources_omit():
+    text = flat(guide())
+    limit = round(FIXED_SHARE_LIMIT * 100)
+
+    # The flag bounds the fixed cost of the ceiling call. No rate grows with it.
+    assert "increases with the work" not in text
+    assert (
+        "The ceiling report sets `fma_scales_with_work` to true. Thus the fixed "
+        f"cost of one call was at most {limit} percent of the time of the ceiling "
+        "call."
+    ) in text
+    # No source names its host, and the timing report has no warning record.
+    assert not any(
+        "host" in field or "gpu" in field for field in GAP_ENVIRONMENT_FIELDS
+    )
+    assert "Thus the `gap` command cannot show that one host made all three." in text
+    assert "warnings" not in recorded()
+    assert "The timing report has no record of Python warnings" in text

@@ -82,7 +82,7 @@ The `verify` command and the report reader never import torch, so they work on
 any host with NumPy.
 
 The tests that need the GPU skip on other hosts and report the reason. The
-other tests use a NumPy stand-in for the GPU and one short measured report from
+other tests use a NumPy stand-in for the GPU and short measured reports from
 the development host. The stand-in returns the CPU replay of the fma chain,
 which is what the GPU returned on that host.
 
@@ -366,8 +366,10 @@ flushes the file to the disk, and moves it into place with `os.replace`. It
 refuses an output that aliases the config. The readers accept only regular
 files that are not symbolic links, and they refuse duplicate JSON keys.
 
-The verifier uses only NumPy and its own code. It does not call the modules
-that made the report. It does these checks:
+The verifier uses NumPy and its own code. It also uses the config parser and
+the variant registry of the run. The parser checks the bounds, and the
+registry gives the kernel text. The verifier calls no function that measures,
+and it does not import torch. It does these checks:
 
 1. It draws the operands again from the seed and calculates the reference
    again.
@@ -583,8 +585,9 @@ the timing run. The timing report recorded 10.14, 10.55 and 12.98 before its
 run. The tiled run at 11:43 IST recorded 9.93, 11.62 and 14.06 before its run.
 
 The FMA ceiling was 4836.8 GFLOP/s, and the bandwidth ceiling was 124.58 GB/s.
-Thus the ridge point was 38.82 FLOPs for each byte. The ceiling report flags
-its FMA ceiling as one that increases with the work.
+Thus the ridge point was 38.82 FLOPs for each byte. The ceiling report sets
+`fma_scales_with_work` to true. Thus the fixed cost of one call was at most 5
+percent of the time of the ceiling call. In this run, it was 0.20 percent.
 
 | Report | SHA-256 |
 | --- | --- |
@@ -664,8 +667,13 @@ and `portable_performance_claim`.
 
 The gap has these limits:
 
-- The three reports come from separate runs on one host, at different loads.
-  A name can change when the load changes.
+- The three reports come from separate runs, at different loads. A name can
+  change when the load changes.
+- The reports record no host name and no GPU model. Thus the `gap` command
+  cannot show that one host made all three. It compares only the software and
+  platform tokens.
+- The timing report has no record of Python warnings, as in the gpu-timing
+  lab. Only the tiled report records the warnings of its run.
 - An MPS event interval holds the signal latency of its events. Thus
   `median_gpu_ns` is longer than the kernel.
 - The traffic comes from models that count no cache. The lab did not measure

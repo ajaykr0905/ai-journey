@@ -2,7 +2,12 @@ import re
 import shlex
 from pathlib import Path
 
-from ai_journey import matmul_tiled_cli
+from ai_journey import (
+    matmul_tiled_cli,
+    matmul_tiled_config,
+    matmul_tiled_variants,
+    matmul_tiled_verify,
+)
 from ai_journey.kernel_metal_runtime import UNAVAILABLE_REASONS
 from ai_journey.matmul_metal_mapping import matmul_shape
 from ai_journey.matmul_metal_source import source_sha256
@@ -152,3 +157,17 @@ def test_guide_controls_and_planned_work_match_the_pinned_config():
         f"{work.timed_samples} timed samples, {work.calls} calls and "
         f"{work.flops} FLOPs."
     ) in flat(text)
+
+
+def test_guide_names_the_two_modules_that_the_verifier_shares_with_the_run():
+    text = flat(guide())
+
+    # The verifier parses the config and reads the kernel text as the run does.
+    assert matmul_tiled_verify.config_from_mapping is (
+        matmul_tiled_config.config_from_mapping
+    )
+    assert matmul_tiled_verify.VARIANTS is matmul_tiled_variants.VARIANTS
+    assert "uses only NumPy and its own code" not in text
+    assert (
+        "It also uses the config parser and the variant registry of the run."
+    ) in text
