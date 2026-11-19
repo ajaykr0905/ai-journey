@@ -924,6 +924,92 @@ exit 3 and write no report. See the
 [gpu-timing lab guide](docs/gpu-timing-lab.md) and the
 [bottleneck lab guide](docs/matmul-bottleneck-lab.md).
 
+## Tile the matmul and compare the naive, tiled and vendor rates
+
+The Day 76 labs tile the Day 74 matmul with threadgroup memory, the Metal
+counterpart of CUDA shared memory. Three commands do this work:
+
+- `ai-journey-matmul-tiled` checks three tiled Metal kernels, with tiles of 8,
+  16 and 32. It times them with the naive Day 74 kernel and `torch.matmul` on
+  the Apple GPU of a Mac.
+- `python -m ai_journey.matmul_tiled_gap_cli` times one call of each side. It
+  compares each side with the Day 74 ceilings and gives the Day 75 bottleneck
+  name.
+- `python -m ai_journey.gpu_tiled_cli` writes a tiled CUDA kernel and one
+  cuBLAS SGEMM call as source text. It checks the texts without a compiler,
+  and it runs the kernel schedule in a CPU simulator.
+
+Each command seals a report, and each `verify` checks a report again. These
+commands run the Metal lab on a Mac and check the CUDA texts on any host:
+
+```bash
+ai-journey-matmul-tiled run \
+  --config config/day-76-matmul-tiled.json \
+  --output /tmp/day-76-matmul-tiled.json
+ai-journey-matmul-tiled verify \
+  --report /tmp/day-76-matmul-tiled.json \
+  --config config/day-76-matmul-tiled.json
+python -m ai_journey.gpu_tiled_cli run \
+  --output /tmp/day-76-gpu-tiled-cuda.json
+python -m ai_journey.gpu_tiled_cli verify \
+  --report /tmp/day-76-gpu-tiled-cuda.json
+```
+
+The gap commands read the tiled report, a gpu-ceilings report and a one-call
+timing report. The tiled lab guide gives these commands in order.
+
+On the development host, one run of the pinned config gave these numbers. Each
+value is the median GFLOP/s of 11 samples, and the guide gives the IQR range of
+each median. The tiled column gives the best tile, which was tile 32 at each
+shape. The vendor column gives `torch.matmul` on the MPS device.
+
+| M x N x K | Naive | Tiled | Vendor | cuBLAS |
+| --- | --- | --- | --- | --- |
+| 1000 x 1000 x 1000 | 369.1 | 324.2 | 2160.0 | not measured |
+| 1024 x 1024 x 1024 | 380.2 | 338.5 | 2294.1 | not measured |
+| 2048 x 2048 x 2048 | 387.3 | 339.6 | 3608.8 | not measured |
+| 4096 x 4096 x 4096 | 369.4 | 353.5 | 3940.1 | not measured |
+| 2000 x 3000 x 1000 | 393.8 | 342.3 | 3448.9 | not measured |
+
+The tiled kernels were not faster than the naive kernel. Tile 32 was slower at
+4 shapes, and the rule found no clear difference at 4096 x 4096 x 4096.
+`torch.matmul` was 6.7 to 11.1 times as fast as the best tile. The report
+recorded load averages of 9.93, 11.62 and 14.06 before the run and 9.70, 11.40
+and 13.90 after it.
+
+The gap run gave `latency or occupancy-bound` as the top name of the naive
+kernel and of each tile. Each kernel used at most 0.082 of the measured FMA
+ceiling of 4836.8 GFLOP/s. The `uptime` command printed 9.81, 10.52 and 13.03
+before the ceiling run. All values in the table and in these two paragraphs
+are host-specific Apple GPU (Metal) measurements from one shared host, not
+portable figures.
+
+On the pinned CUDA plan, all 297 CUDA checks and all 63 cuBLAS checks pass. The
+CPU simulator gives the replay bits in all 27 runs. Both CUDA commands print
+the report digest
+`2419f0bfedcffd5eaa363e07640023e4e81a4bcfc752a415fd8a30158f06ffae`.
+
+The Metal commands exit 0 on success and 1 when a report fails verification.
+They exit 2 for usage errors, unreadable or invalid inputs, or a refused
+output. The gap command also exits 2 for reports that do not pair. Code 2 also
+marks a run that failed a check, had a device error or exceeded its time
+budget. Code 3 means that the host cannot run Metal kernels through PyTorch.
+The CUDA command needs no GPU, so it uses only the codes 0, 1 and 2.
+
+Evidence boundary: the Metal numbers come from one Apple GPU through Metal on
+one host. PyTorch does not name the kernel of `torch.matmul`, so the vendor
+number names the call, not a kernel. No CUDA kernel ran, the labs used no
+NVIDIA GPU, and they did not measure cuBLAS. Nothing compiled or ran the CUDA
+and cuBLAS texts. Each bottleneck name is an inference from timings and
+measured ceilings, not from hardware counters.
+
+CI job `matmul-tiled-contracts` runs the tiled and gap tests on Linux with CPU
+torch. It also requires each installed Apple GPU command to exit 3 and write no
+report. Then it verifies the recorded reports and builds their gap again from
+the installed wheel. CI job `nvidia-preflight-contracts` runs the CUDA contract
+tests. See the [tiled matmul lab guide](docs/matmul-tiled-lab.md) and the
+[tiled CUDA contract guide](docs/gpu-tiled-cuda-contract.md).
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with

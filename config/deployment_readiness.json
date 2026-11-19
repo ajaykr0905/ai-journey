@@ -1469,7 +1469,8 @@
     "tests/test_matmul_tiled_runtime.py",
     "tests/test_matmul_tiled_source.py",
     "tests/test_matmul_tiled_variants.py",
-    "tests/test_matmul_tiled_verify.py"
+    "tests/test_matmul_tiled_verify.py",
+    "tests/test_matmul_tiled_delivery.py"
   ],
   "required_directories": [
     "days",
