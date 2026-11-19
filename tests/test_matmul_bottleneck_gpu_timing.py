@@ -138,6 +138,21 @@ def test_a_gpu_timing_report_needs_every_gap_shape(tmp_path, capsys):
     assert "no matmul_x_columns entry at 129 x 65 x 1000" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    ("make", "version"),
+    [(gap_timing_report, 2), (recorded_gpu_timing, 1)],
+    ids=["new-schema-2", "recorded-schema-1"],
+)
+def test_the_join_reads_a_report_file_of_either_schema_version(make, version, tmp_path):
+    report = make()
+    inputs = write_gap_inputs(tmp_path, report)
+
+    timing = load_timing_source(inputs.timing, recorded_sources())
+
+    assert report["schema_version"] == version
+    assert timing == timing_from_gpu_timing_report(report, recorded_sources())
+
+
 def test_the_declared_timing_schema_still_loads_through_the_same_path(tmp_path):
     inputs = write_inputs(tmp_path)
 
