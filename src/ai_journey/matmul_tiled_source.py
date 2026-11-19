@@ -20,9 +20,10 @@ Three rules keep the arithmetic equal to ``fma_replay``:
 - Only the store is guarded, so every thread of a group reaches both
   barriers of every phase, as ``threadgroup_barrier`` requires.
 
-A ``compile_shader`` launch takes only ``threads``, ``group_size`` and
-``arg_casts``, so a launch cannot size threadgroup memory. Each tile size is
-therefore its own kernel with arrays of a fixed size, ``2 * T * T * 4`` bytes.
+A ``compile_shader`` launch takes the keywords ``threads``, ``group_size``,
+``arg_casts`` and ``error_buf_idx`` in PyTorch 2.15.0, and none of them sizes
+threadgroup memory. Each tile size is therefore its own kernel with arrays of
+a fixed size, ``2 * T * T * 4`` bytes.
 The buffers and the 32-bit scalars in slots 3 to 5 are bound exactly as in
 the Day 74 kernels.
 """
