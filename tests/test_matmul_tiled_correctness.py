@@ -71,7 +71,8 @@ class StandInBackend:
         self._refuse(name)
         self.runs.append((name, launch))
         output = fma_replay(left, right).reshape(-1).copy()
-        if name in self.drift:
+        # At K = 1 the bound is about half an ulp, so one ulp can break it.
+        if name in self.drift and left.shape[1] > 1:
             output[0] = numpy.nextafter(output[0], numpy.float32(numpy.inf))
         if name in self.scale:
             output *= numpy.float32(self.scale[name])

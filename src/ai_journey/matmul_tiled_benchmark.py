@@ -102,6 +102,7 @@ class TiledPoint:
             "index": self.index,
             **self.shape.to_mapping(),
             "flops_per_call": self.shape.flops,
+            "side_order": list(self.sides),
             "launches": {
                 name: launch.to_mapping()
                 for name, launch in zip(kernels, self.launches)

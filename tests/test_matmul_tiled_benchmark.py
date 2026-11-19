@@ -91,7 +91,7 @@ def test_a_point_records_its_rates_checks_and_modeled_loads():
 
     mapping = point(StandInBackend(), shape).to_mapping()
 
-    assert list(mapping["sides"]) == SIDES
+    assert list(mapping["sides"]) == mapping["side_order"] == SIDES
     assert list(mapping["launches"]) == SIDES[:-1]
     assert mapping["launches"]["matmul_tiled_32"]["group_size"] == [32, 32]
     entry = mapping["sides"]["matmul_tiled_16"]
