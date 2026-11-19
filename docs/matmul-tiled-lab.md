@@ -432,6 +432,250 @@ FLOPs of the matmul, not the instructions of the GPU. The results come from one
 Apple GPU on one host. They are not evidence of CUDA, NVIDIA or cuBLAS
 performance, lecture viewing, completed exercises or learner understanding.
 
+## Gap to the measured ceilings
+
+The tiles were not faster than the naive kernel. This part of the lab compares
+each side with the ceilings that the [gpu-ceilings lab](gpu-ceilings-lab.md)
+measured on the same host. It also gives the Day 75 bottleneck name of each
+side, from the rule of the [bottleneck lab](matmul-bottleneck-lab.md).
+
+Each name is an inference from timings and measured ceilings, not from
+hardware counters. The lab read no counter, so it did not observe a stall, a
+cache hit or the occupancy of the GPU. Every Metal number in this part is a
+host-specific Apple GPU (Metal) measurement.
+
+### Gap commands
+
+```bash
+python -m ai_journey.gpu_ceiling_cli run \
+  --config config/day-74-gpu-ceilings.json \
+  --output /tmp/day-74-gpu-ceilings.json
+python -m ai_journey.matmul_tiled_gap_cli timing \
+  --config config/day-76-matmul-tiled.json \
+  --output /tmp/day-76-one-call-timing.json
+python -m ai_journey.matmul_tiled_gap_cli verify-timing \
+  --report /tmp/day-76-one-call-timing.json \
+  --config config/day-76-matmul-tiled.json
+python -m ai_journey.matmul_tiled_gap_cli gap \
+  --tiled-report /tmp/day-76-matmul-tiled.json \
+  --ceiling-report /tmp/day-74-gpu-ceilings.json \
+  --timing-report /tmp/day-76-one-call-timing.json \
+  --rule-config config/day-75-matmul-bottleneck.json \
+  --output /tmp/day-76-matmul-tiled-gap.json
+python -m ai_journey.matmul_tiled_gap_cli verify \
+  --report /tmp/day-76-matmul-tiled-gap.json \
+  --rule-config config/day-75-matmul-bottleneck.json \
+  --tiled-report /tmp/day-76-matmul-tiled.json \
+  --ceiling-report /tmp/day-74-gpu-ceilings.json \
+  --timing-report /tmp/day-76-one-call-timing.json
+```
+
+The tiled report is the output of the `run` command above. The gap parser uses
+the program name `ai-journey-matmul-tiled-gap`. This change adds no console
+script, so run the module with `python -m`.
+
+The `timing` command needs an Apple GPU, as the `run` command does. The `gap`
+and `verify` commands run no kernel and do not import torch. With the three
+reports and `--rule-config`, `verify` also builds the gap again and requires
+the same bytes. Its summary line then says `sources_checked=true`. The `verify`
+command takes the three report paths together or none of them.
+
+The commands use the exit codes of the `run` and `verify` commands. Code 3 is
+only for `timing`. A measured line has the prefix `apple_gpu_metal_measurement`.
+The summary lines have the prefixes `matmul_tiled_one_call_measurement=` and
+`matmul_tiled_gap_measurement=`. A synthetic report uses
+`matmul_tiled_one_call_synthetic_timing=` or `matmul_tiled_gap_synthetic_timing=`
+instead.
+
+### One-call timing
+
+The Day 75 rule needs three times for one call of each side:
+
+- `median_gpu_ns`: the interval between two MPS events around the call.
+- `median_host_ns`: the host time from an idle queue until the call is
+  complete.
+- `median_dispatch_ns`: the host time to issue the call, before the host
+  waits.
+
+The tiled report times batches between two synchronizations, so it does not
+hold these times. The `timing` command measures them with the method of the
+[gpu-timing lab](gpu-timing-lab.md). Each sample holds one launch and reads one
+clock, and the order of the sides and the clocks shifts at each repeat.
+
+The `timing` command uses the tiled config, so it times the same sides on the
+operands of the tiled run. These steps occur:
+
+1. Each side runs at a 1 x 1 x 1 floor. The host time of this call is an upper
+   limit for a fixed cost that each call of the side pays.
+2. Each side runs at each sweep shape. On each clock, it runs 2 samples that
+   are not timed and 11 timed samples.
+3. After each shape, each output must agree with the naive output within the
+   bound of the benchmark. If an output does not agree, the run stops.
+
+The verifier calculates each statistic again from the raw samples. It does
+not import torch.
+
+New `timing` reports have `schema_version` 2 and seal the version 2
+event-domain text of the gpu-timing lab. The timing reports in this guide and
+in the tests are version 1 records with the old "device-side" text. The
+verifier accepts each version only with its own text.
+
+### Inputs of the gap
+
+The `gap` command reads three sealed reports. Each report must pass its own
+verifier before the command uses a number from it:
+
+- The tiled report gives the median sample time and the median rate of each
+  side.
+- The gpu-ceilings report gives the FMA ceiling and the bandwidth ceiling.
+- The timing report gives the one-call medians and the fastest host time of
+  each side.
+
+The command refuses reports that do not pair:
+
+- The three reports must name the same Python, NumPy, PyTorch and platform
+  tokens.
+- The tiled report and the timing report must come from one config. They must
+  also have the same float32 matmul precision, MPS switches and admitted
+  tiles.
+- The rule config must use the `ideal_reuse` traffic model.
+
+### Values for each side
+
+For each sweep point and side, the gap report gives these values:
+
+- The FMA share: the median rate divided by the measured FMA ceiling.
+- The modeled traffic and intensity of the kernel. The naive kernel uses the
+  no-reuse model, `4 * (2 * M * N * K + M * N)` bytes. Each tile uses
+  `TiledMatmulTraffic` of the memory-access lab. The models count loads from
+  device memory, and they model no cache.
+- The attainable rate of `MeasuredRoofline` at the modeled intensity. This rate
+  is the lower of the FMA ceiling and the bandwidth ceiling times the
+  intensity. The modeled share is the median rate divided by this rate.
+- The Day 75 name from `matmul_bottleneck_rule.classify`, with the thresholds
+  of `config/day-75-matmul-bottleneck.json`.
+
+PyTorch does not name the kernel of `torch.matmul`, so no traffic model
+applies to it. The rule uses the ideal-reuse roof for each side. That model
+moves each element one time, and no kernel moves fewer bytes. Thus its roof is
+an upper limit for each side, also for `torch.matmul`.
+
+A modeled share above 1 has two possible causes:
+
+- The kernel moved fewer device bytes than the model counts. For example, a
+  cache served repeated loads.
+- The measured bandwidth ceiling is less than the true limit of the host.
+
+### One gap run on the development host
+
+The gap used the pinned tiled report of the run above. Two more runs held the
+GPU lock on 2026-11-19 from 13:05:05 IST:
+
+1. The gpu-ceilings command ran the pinned Day 74 config for 16 seconds.
+2. The `timing` command ran the pinned tiled config for 88 seconds.
+
+Then the `gap` command and the `verify` command with all inputs ran on the
+CPU. Each command took about 4 seconds.
+
+The `uptime` command printed 9.81, 10.52 and 13.03 before the ceiling run. It
+printed 9.80, 10.49 and 12.97 after that run, and 6.95, 9.38 and 12.30 after
+the timing run. The timing report recorded 10.14, 10.55 and 12.98 before its
+run. The tiled run at 11:43 IST recorded 9.93, 11.62 and 14.06 before its run.
+
+The FMA ceiling was 4836.8 GFLOP/s, and the bandwidth ceiling was 124.58 GB/s.
+Thus the ridge point was 38.82 FLOPs for each byte. The ceiling report flags
+its FMA ceiling as one that increases with the work.
+
+| Report | SHA-256 |
+| --- | --- |
+| tiled | `371d65363ce5c53813c34a6edfc9db4725445bf4ffea605b7c81e0076fc03427` |
+| gpu-ceilings | `8485a7be3370e07964941fa448ed1f93664d22fd48c2f5767a3b7478e4b88161` |
+| one-call timing | `da32f7a857d98b4b4da645cd564189734eaf98a5d316619c52eb242fba688592` |
+| gap | `be916ab18444905fafc32c28f2660be780b85eec89ed014dcd1d390a583bb652` |
+
+The table gives the range of each value over the 5 sweep points:
+
+| Side | FMA share | Modeled FLOPs for each byte | Modeled attainable GFLOP/s | Modeled share |
+| --- | --- | --- | --- | --- |
+| naive `matmul_x_columns` | 0.076 to 0.081 | 0.250 | 31.1 | 11.9 to 12.7 |
+| `matmul_tiled_8` | 0.054 to 0.057 | 1.99 to 2.00 | 248.2 to 248.9 | 1.05 to 1.10 |
+| `matmul_tiled_16` | 0.062 to 0.065 | 3.94 to 3.99 | 490.5 to 497.4 | 0.61 to 0.64 |
+| `matmul_tiled_32` | 0.067 to 0.073 | 7.69 to 7.97 | 958.3 to 992.8 | 0.34 to 0.36 |
+| `torch.matmul` | 0.447 to 0.815 | no model | no model | no model |
+
+The rule gave these names. The number in parentheses is the FMA share:
+
+| M x N x K | Naive | Tile 8 | Tile 16 | Tile 32 | `torch.matmul` |
+| --- | --- | --- | --- | --- | --- |
+| 1000 x 1000 x 1000 | latency or occupancy-bound | latency or occupancy-bound | latency or occupancy-bound | latency or occupancy-bound | indeterminate (step 1) |
+| 1024 x 1024 x 1024 | latency or occupancy-bound | latency or occupancy-bound | latency or occupancy-bound | latency or occupancy-bound | latency or occupancy-bound (0.474) |
+| 2048 x 2048 x 2048 | latency or occupancy-bound | indeterminate (step 1) | indeterminate (step 1) | indeterminate (step 1) | compute-bound (0.746) |
+| 4096 x 4096 x 4096 | latency or occupancy-bound | latency or occupancy-bound | latency or occupancy-bound | latency or occupancy-bound | compute-bound (0.815) |
+| 2000 x 3000 x 1000 | latency or occupancy-bound | latency or occupancy-bound | latency or occupancy-bound | latency or occupancy-bound | compute-bound (0.713) |
+
+These are the results of the gap run:
+
+- Each kernel used at most 0.082 of the FMA ceiling. The top name of the naive
+  kernel and of each tile was `latency or occupancy-bound`.
+- That name is a residual. It says that no measured roof explains the rate. It
+  does not prove that latency or occupancy is the cause.
+- The naive kernel ran 11.9 to 12.7 times as fast as the roof of its no-reuse
+  traffic. To move all of these bytes from device memory, it would need about
+  12 times the measured bandwidth ceiling.
+- Tile 8 ran at 1.05 to 1.10 of its modeled roof. Tiles 16 and 32 ran at 0.61
+  to 0.64 and at 0.34 to 0.36 of their modeled roofs.
+- `torch.matmul` used 0.713 to 0.815 of the FMA ceiling at the three largest
+  shapes. The rule named these points `compute-bound`.
+- At 2048 x 2048 x 2048, the steady time of each tile was 6.1 to 7.0 percent
+  more than its one-call host time. Thus step 1 named these points
+  `indeterminate`. The naive kernel was 4.7 percent more, within the tolerance
+  of 5 percent.
+
+Step 1 also named `torch.matmul` at 1000 x 1000 x 1000 `indeterminate`. Its
+steady time was 11.6 percent more than its one-call host time. The steady
+times come from the tiled run at 11:43 IST, and the host times come from the
+timing run at 13:05 IST. The loads were different, so the two times can differ
+by more than the tolerance.
+
+These results agree with the probable cause in the run above. A cache probably
+served most of the repeated loads of the naive kernel. Tile 8 ran near the roof
+of its modeled traffic, so the device bandwidth can limit it. Tiles 16 and 32
+ran at no more than 0.64 of their modeled roofs and below 0.08 of the FMA
+ceiling. A cost that the labs did not measure probably limits them, for example
+the barriers or the reads of threadgroup memory. Only hardware counters can
+show which cost it is.
+
+The repository does not keep these four reports. The tests keep one short
+timing report from 2026-11-19 at 13:04 IST, with digest
+`ec4525e7fd121ee74774e2dda992a8b9f48ab5f8dccd86d887a338af496750d6`. It times
+the recorded tiled config of the tests. With the recorded tiled and
+gpu-ceilings reports, it makes one measured gap with digest
+`5d70138982e33407fe0f58437834091dce3e1b7b17aa3759544af9af18cbf7ca`. A host
+without torch can build this gap again and check it.
+
+### Evidence boundary of the gap
+
+A measured gap report has these true fields: `apple_gpu_metal_this_host`,
+`host_specific` and `inference_from_timings`. These fields are false:
+`hardware_counters_used`, `nsight_used`, `instruments_used`,
+`vendor_peak_used`, `traffic_measured`, `cuda_kernel_executed`,
+`nvidia_gpu_used`, `cublas_measured`, `distributed_claim`, `production_claim`
+and `portable_performance_claim`.
+
+The gap has these limits:
+
+- The three reports come from separate runs on one host, at different loads.
+  A name can change when the load changes.
+- An MPS event interval holds the signal latency of its events. Thus
+  `median_gpu_ns` is longer than the kernel.
+- The traffic comes from models that count no cache. The lab did not measure
+  bytes.
+- A measured ceiling is a rate that the kernels of the ceiling lab reached. It
+  is not a vendor peak and not a hardware limit.
+- No CUDA kernel ran, the lab used no NVIDIA GPU, and it did not measure
+  cuBLAS. The values do not measure or predict CUDA, NVIDIA, cuBLAS,
+  distributed or production performance.
+
 ## Sources
 
 - GPU MODE lectures, https://github.com/gpu-mode/lectures: Lecture 5, "Going
