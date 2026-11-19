@@ -313,6 +313,16 @@ def set_warmup(report):
     report["floor"]["sides"][NAIVE_KERNEL]["warmup"] = 0
 
 
+def set_same_bits(report):
+    # Equal bits leave no difference, but the stand-in torch side sits 2**-30 away.
+    report["floor"]["checks"][TORCH_MATMUL]["same_bits_as_naive"] = True
+
+
+def set_naive_limit(report):
+    # The naive group of the config holds 32 * 8 = 256 threads.
+    report["kernels"]["limits"][NAIVE_KERNEL]["max_threads_per_threadgroup"] = 64
+
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
@@ -333,6 +343,8 @@ def set_warmup(report):
         (set_load, "host_load"),
         (drop_side, "must time the naive kernel"),
         (set_warmup, "does not recompute"),
+        (set_same_bits, "cannot hold the naive bits"),
+        (set_naive_limit, "naive group"),
     ],
 )
 def test_every_resealed_tamper_is_caught_by_recomputation(report, mutate, message):

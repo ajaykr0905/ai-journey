@@ -18,7 +18,8 @@ A sample holds the fewest whole calls whose FLOPs reach
 last sample, every side's latest output is compared on the device with the
 naive output. It must stay within ``agreement_bound(K) = 4 gamma_K(2**-24)``
 of it, relative to ``|A| @ |B|``, or the run stops. Whether a side holds the
-naive bits is recorded, not required.
+naive bits is recorded, not required. Equal bits subtract to 0, so a check
+that claims the naive bits with a nonzero disagreement stops the run too.
 
 Each point also records the analytical global element loads per output of
 each kernel side, from the Day 74 traffic model: ``2 K`` for the naive kernel
@@ -148,6 +149,12 @@ def _checks(
             raise MatmulTiledError(
                 f"{label}: {name} sits {disagreement!r} from the naive output; "
                 f"the agreement bound is {bound!r}"
+            )
+        # Equal bits subtract to 0, so a check that claims both is broken.
+        if check.same_bits_as_naive and disagreement != 0.0:
+            raise MatmulTiledError(
+                f"{label}: {name} cannot hold the naive bits and sit "
+                f"{disagreement!r} from them"
             )
         checks[name] = check
     return checks

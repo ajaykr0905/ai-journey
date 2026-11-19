@@ -134,6 +134,19 @@ def test_a_side_past_the_agreement_bound_or_a_partial_check_stops_the_run():
         point(LoggingBackend(check=lambda: nan))
 
 
+def test_a_check_with_the_naive_bits_and_a_nonzero_disagreement_stops_the_run():
+    # Equal bits subtract to 0, so the device check cannot give both values.
+    claimed = {name: SideCheck(True, 0.0) for name in (*VARIANTS, TORCH_MATMUL)} | {
+        TORCH_MATMUL: SideCheck(True, 2.0**-30)
+    }
+    signed_zero = {name: SideCheck(False, 0.0) for name in (*VARIANTS, TORCH_MATMUL)}
+
+    with pytest.raises(MatmulTiledError, match="torch_matmul cannot hold the naive"):
+        point(LoggingBackend(check=lambda: claimed))
+    # Other bits with no difference stay valid: -0.0 and +0.0 differ only in bits.
+    assert point(LoggingBackend(check=lambda: signed_zero)).checks == signed_zero
+
+
 def test_a_sweep_times_only_admitted_variants_within_its_budget():
     backend = StandInBackend(threads={"matmul_tiled_32": 512})
     admitted = ALL_VARIANTS[:2]

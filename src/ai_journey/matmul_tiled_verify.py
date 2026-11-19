@@ -17,12 +17,13 @@ each variant's digest, mode, limits and a verdict that this module derives
 again from those limits. Timings cannot be observed again either, so they
 are checked for structure: sample counts, positive integers, and the
 statistics, rates, batch sizes, modeled loads, checks, three numbers, step
-verdicts, run totals and summary derived from them. The warnings, the MPS
-switches, the load averages, the environment and the labels are checked
-for form. Every section must match its rebuild byte for byte as canonical
-JSON, so ``1``, ``1.0`` and ``true`` stay distinct. No measuring module is
-called (the shared config parser only validates bounds), and torch is never
-imported.
+verdicts, run totals and summary derived from them. A check that claims the
+naive bits must sit exactly 0 from them, because equal bits subtract to 0.
+The warnings, the MPS switches, the load averages, the environment and the
+labels are checked for form. Every section must match its rebuild byte for
+byte as canonical JSON, so ``1``, ``1.0`` and ``true`` stay distinct. No
+measuring module is called (the shared config parser only validates bounds),
+and torch is never imported.
 
 Only a ``time.perf_counter_ns`` report from ``torch.mps.compile_shader``
 verifies as a measurement; any ``injected`` backend or timer verifies only as
@@ -551,6 +552,12 @@ def _checks(entry: object, sides: list[str], agreement: float) -> dict:
             and math.isfinite(check["disagreement"])
             and 0.0 <= check["disagreement"] <= agreement,
             f"{name} must agree with the naive output within the agreement bound",
+        )
+        # Equal bits subtract to 0, so a record cannot claim both.
+        _require(
+            not check["same_bits_as_naive"] or check["disagreement"] == 0.0,
+            f"{name} cannot hold the naive bits and sit "
+            f"{check['disagreement']!r} from them",
         )
     return entry
 

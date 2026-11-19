@@ -4,12 +4,14 @@ Timings cannot be observed again, so they are checked for structure, and
 every number that derives from them is rebuilt with this module's own code:
 each event sample from its raw milliseconds, each nearest-rank statistic,
 the rule that a dispatch median stays within its synchronized median, the
-agreement bound of each output check, the run totals and the summary. The
-kernel section must name the Day 74 source by its digest and the tiled
-library that the registry rebuilds for the config's variants, and each
-verdict must follow from the recorded pipeline limits. The shared helpers
-come from the tiled verifier, not from a measuring module, and torch is
-never imported.
+agreement bound of each output check, the run totals and the summary. A
+check that claims the naive bits must sit exactly 0 from them, because equal
+bits subtract to 0. The kernel section must name the Day 74 source by its
+digest and the tiled library that the registry rebuilds for the config's
+variants. The naive pipeline must admit the naive group, because the run
+checks every launch against its pipeline, and each verdict must follow from
+the recorded pipeline limits. The shared helpers come from the tiled
+verifier, not from a measuring module, and torch is never imported.
 
 Only a ``time.perf_counter_ns`` report from ``torch.mps.compile_shader``
 verifies as a measurement. A matching digest shows internal consistency; it
@@ -135,6 +137,12 @@ def _kernels(section: object, config: MatmulTiledConfig) -> list[str]:
         "kernels must hold the limits of the naive kernel and every variant",
     )
     checked = {name: _limits(limits[name]) for name in (_NAIVE, *names)}
+    # Every naive call is a launch checked against this limit before it runs.
+    group = math.prod(config.naive.group_size)
+    _require(
+        checked[_NAIVE]["max_threads_per_threadgroup"] >= group,
+        f"the naive pipeline allows fewer threads than the naive group of {group}",
+    )
     admissions = [
         _admission(name, VARIANTS[name].tile, checked[name]) for name in names
     ]
@@ -220,6 +228,12 @@ def _checks(entry: object, sides: list[str], bound: float, label: str) -> dict:
             and math.isfinite(check["disagreement"])
             and 0.0 <= check["disagreement"] <= bound,
             f"{label} {name} must agree with the naive output within the bound",
+        )
+        # Equal bits subtract to 0, so a record cannot claim both.
+        _require(
+            not check["same_bits_as_naive"] or check["disagreement"] == 0.0,
+            f"{label} {name} cannot hold the naive bits and sit "
+            f"{check['disagreement']!r} from them",
         )
     return entry
 

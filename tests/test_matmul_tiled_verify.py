@@ -214,6 +214,11 @@ def set_order(report):
     first_point(report)["side_order"].reverse()
 
 
+def set_same_bits(report):
+    # Equal bits leave no difference, but the stand-in torch side sits 2**-30 away.
+    first_point(report)["checks"]["torch_matmul"]["same_bits_as_naive"] = True
+
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
@@ -246,6 +251,7 @@ def set_order(report):
         (set_field, "fields do not match the schema"),
         (set_loads, "point 0 .* does not recompute"),
         (set_order, "point 0 .* does not recompute"),
+        (set_same_bits, "cannot hold the naive bits"),
     ],
 )
 def test_every_resealed_tamper_is_caught_by_recomputation(report, mutate, message):
