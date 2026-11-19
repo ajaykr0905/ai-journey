@@ -146,13 +146,37 @@ def test_the_shared_size_is_read_from_the_text_and_the_grid_from_the_shape():
 
 
 def test_formatting_and_comments_do_not_change_the_structure():
-    spaced = re.sub(r"([(),;<>+*?:\[\]])", r" \1 ", PINNED)
+    # Spaces go around whole tokens: "+ +phase" is another text, below.
+    spaced = re.sub(r"(\+\+|<<<|>>>|[(),;<>+*?:\[\]])", r" \1 ", PINNED)
     commented = PINNED.replace("{\n", "{ /* block */\n").replace(";\n", "; // end\n")
 
     assert check(spaced).passed
     assert check(commented).passed
     assert check_cublas(re.sub(r"([(),;&])", r" \1 ", CUBLAS)).passed
     assert check_cublas(CUBLAS.replace(";\n", "; /* end */\n")).passed
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("++phase", "+ +phase"),
+        ("++i", "+ +i"),
+        ("++i", "+\n+i"),
+        ("++i", "+/* split */+i"),
+        ("<<<grid", "< <<grid"),
+        ("row < m && col < n", "row < m & & col < n"),
+    ],
+)
+def test_a_space_inside_an_operator_fails_every_check(old, new):
+    # A compiler reads "+ +phase" as two unary plus signs and no increment,
+    # so that loop never ends, but a comparison without spaces reads "++".
+    assert PINNED.count(old) == 1
+    result = check(PINNED.replace(old, new))
+
+    assert result.failures == TILED_CHECK_NAMES
+    assert result.launch is None and result.shared_memory_bytes is None
+    split = CUBLAS.replace("status != CUBLAS", "status ! = CUBLAS", 1)
+    assert check_cublas(split).failures == CUBLAS_CHECK_NAMES
 
 
 @pytest.mark.parametrize(

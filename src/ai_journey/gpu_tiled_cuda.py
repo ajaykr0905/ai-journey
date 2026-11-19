@@ -22,12 +22,12 @@ the cuBLAS documentation, and a later run must check it on the NVIDIA host.
 
 This lab never compiles, links or runs either text. The checkers read a text
 back with the Day 73 checker's helpers: comments as a compiler reads them, no
-line splice or trigraph, and only the pinned definitions, because one extra
-statement, overload or macro can change what a function does. They check the
-shared tiles and their size, the loads, the barrier placement, the k order of
-the fma, the guards and the host grid. The cuBLAS check also evaluates the
-parsed call under the column-major rules, so a swapped argument fails even
-when the text is well formed.
+line splice or trigraph, no space inside an operator such as ``++``, and only
+the pinned definitions, because one extra statement, overload or macro can
+change what a function does. They check the shared tiles and their size, the
+loads, the barrier placement, the k order of the fma, the guards and the host
+grid. The cuBLAS check also evaluates the parsed call under the column-major
+rules, so a swapped argument fails even when the text is well formed.
 """
 
 from __future__ import annotations
@@ -119,6 +119,18 @@ _SGEMM_CALL = re.compile(
 # Pairwise distinct extents, so a call that swaps two of them reads or writes
 # other elements. The second probe permutes the extents of the first.
 _PROBES = (MatmulShape(2, 3, 5), MatmulShape(5, 2, 3))
+# The first two characters of each C++ and CUDA operator that is longer than
+# one character, such as ++, && and <<<.
+_OPERATOR_STARTS = (
+    "-> ++ -- += -= *= /= %= ^= &= |= << >> <= >= == != && || "
+    ":: .* .. ## <: :> <% %> %:"
+).split()
+_SPLIT_OPERATOR = re.compile(
+    "|".join(
+        re.escape(first) + r"\s+" + re.escape(second)
+        for first, second in _OPERATOR_STARTS
+    )
+)
 
 
 class GpuTiledError(ValueError):
@@ -312,6 +324,20 @@ cublasStatus_t sgemm_row_major(
 """
 
 
+def _comparable_code(text: str) -> str | None:
+    """Return the text with each comment as a space, or ``None`` if unsafe.
+
+    ``_code`` refuses a line splice and a trigraph. The checks then compare
+    text without the spaces next to symbols, so ``+ +i`` would read as
+    ``++i``. A compiler reads two unary plus signs there and no increment,
+    and the loop never ends. Thus a space or a comment inside an operator
+    fails every check.
+    """
+
+    code = _code(text)
+    return None if code is None or _SPLIT_OPERATOR.search(code) else code
+
+
 def _definitions(source: str, signatures: tuple[str, ...]) -> tuple[str, ...] | None:
     """Return the function bodies if the text is exactly these definitions."""
 
@@ -461,7 +487,7 @@ def check_tiled_source(text: str, *, tile: int, shape: MatmulShape) -> TiledCuda
     width = require_tile(tile)
     checked = require_shape(shape)
     expected_launch = matmul_launch(checked, (width, width), X_COLUMNS)
-    code = _code(text)
+    code = _comparable_code(text)
     signatures = (_CDIV, _kernel_signature(width), _launcher_signature(width))
     bodies = None if code is None else _definitions(_normalize(code), signatures)
     if bodies is None:
@@ -735,7 +761,7 @@ def check_cublas_source(text: str, *, shape: MatmulShape) -> CublasCheck:
     if type(text) is not str:
         raise TypeError("cuBLAS source must be a string")
     checked = require_shape(shape)
-    code = _code(text)
+    code = _comparable_code(text)
     split = None if code is None else _cublas_body(code)
     bodies = None if split is None else _definitions(_normalize(split[1]), (_SGEMM,))
     statements = None if bodies is None else _top_statements(bodies[0])

@@ -117,10 +117,10 @@ later run compiles each file as its own translation unit.
 
 `check_tiled_source` parses a text with the helpers of the Day 73
 checker. It reads comments as a compiler reads them. It refuses a line
-splice and a trigraph, and it accepts only the three pinned functions. One
-extra statement, overload or macro can change the kernel. Thus such text
-fails the check of its part, or it fails every check. The 11 checks are
-these:
+splice, a trigraph, and a space or a comment inside an operator such as
+`++`. It accepts only the three pinned functions, because one extra
+statement, overload or macro can change the kernel. Such text fails the
+check of its part, or it fails every check. The 11 checks are these:
 
 - `cdiv_definition` and `tiled_signature`: the pinned `cdiv` and the pinned
   kernel signature.
@@ -144,7 +144,8 @@ these:
 
 The tests change one statement at a time. For example, a text without the
 first barrier fails `tiled_barriers`. A text with `i < 16` fails
-`tiled_inner_loop`.
+`tiled_inner_loop`. A text with `+ +i` fails every check. A compiler reads
+two unary plus signs there and no increment, so the loop does not stop.
 
 ## Row-major cuBLAS call
 
