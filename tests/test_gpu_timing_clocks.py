@@ -1,4 +1,5 @@
 import math
+from hashlib import sha256
 
 import pytest
 
@@ -9,6 +10,7 @@ from ai_journey.gpu_timing_clocks import (
     DEVICE_DOMAIN,
     DISPATCH,
     DOMAIN_DEFINITIONS,
+    DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION,
     EVENT,
     HOST_DOMAIN,
     SYNCHRONIZED,
@@ -19,6 +21,25 @@ from ai_journey.gpu_timing_clocks import (
     require_same_domain,
 )
 from ai_journey.matmul_metal_mapping import MatmulMetalError
+from ai_journey.memory_access_plan import canonical_json_bytes
+
+# SHA-256 of the canonical JSON that each schema_version seals as
+# clocks.domain_definitions. The builder and the verifier read one table, and
+# no recorded report holds the version 2 texts, so only this pin sees an edit
+# that breaks every version 2 report. A new text needs a new schema_version.
+SEALED_DOMAIN_TEXTS_SHA256 = {
+    1: "ec0f7bfe4e90d9e52edadd2d1cbcd0b994c7d87c7879069a010994101e3926b1",
+    2: "e48848765ca006188a78ef71bd20d5a30f48b87fd9762a49cb8718f840e23e1b",
+}
+
+
+def test_the_sealed_domain_texts_of_each_schema_version_never_change():
+    digests = {
+        version: sha256(canonical_json_bytes(texts)).hexdigest()
+        for version, texts in DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION.items()
+    }
+
+    assert digests == SEALED_DOMAIN_TEXTS_SHA256
 
 
 def test_each_clock_names_one_domain_and_one_definition():
