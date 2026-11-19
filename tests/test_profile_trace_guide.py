@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ai_journey import profile_trace_cli
+from ai_journey import profile_trace_capture, profile_trace_cli
 from ai_journey.profile_trace_config import load_config
 from ai_journey.profile_trace_layout import ITERATION, phase_region, side_region
 from ai_journey.profile_trace_report import MEASURED_LABEL
@@ -125,3 +125,15 @@ def test_the_guide_scopes_analyze_to_the_phases_the_parser_accepts(tmp_path, cap
     assert "reads any Chrome trace" not in text
     assert "It refuses a trace with other event phases" in text
     assert "any trace file" not in profile_trace_cli.__doc__
+
+
+def test_the_event_figure_is_not_called_device_side():
+    # The gpu-timing lab shows host time inside an MPS event interval.
+    text = flat(GUIDE.read_text(encoding="utf-8"))
+    docstring = flat(profile_trace_capture.__doc__)
+
+    assert "one device-side figure" not in text
+    assert "only device-side figure" not in docstring
+    assert "It is not GPU time only." in text
+    assert "host time between the two `record()` calls" in text
+    assert "host time between the two ``record()`` calls" in docstring

@@ -19,8 +19,10 @@ its own pipeline. For each shape, the steps are:
 the host's wait inside ``torch.mps.synchronize()``. It records no GPU kernel
 and no GPU kernel time; this torch build has no MPS profiler activity. Each
 side also records a pair of ``torch.mps.Event(enable_timing=True)`` events
-around its dispatch, and their elapsed time is the only device-side figure
-of the capture. Torch is imported only when a real session starts.
+around its dispatch span. Their elapsed time is the only figure of the
+capture from the MPS stream, and it is not GPU time alone: it can also hold
+the host time between the two ``record()`` calls, which includes the
+dispatch span. Torch is imported only when a real session starts.
 """
 
 from __future__ import annotations

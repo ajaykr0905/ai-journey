@@ -32,9 +32,12 @@ records no GPU kernel and no GPU kernel time. A kernel from
 `torch.mps.compile_shader` does not appear as an op in the trace at all.
 Thus the GPU work of a kernel shows only as host wait time.
 
-The lab adds one device-side figure. For each call, it records two MPS
+The lab adds one figure from MPS events. For each call, it records two MPS
 events around the dispatch and reads their elapsed time. That time comes from
-the MPS stream, not from a hardware counter.
+the MPS stream, not from a hardware counter. It is not GPU time only. It can
+also hold the host time between the two `record()` calls, which includes the
+`<side>/dispatch` span. The [gpu-timing lab](gpu-timing-lab.md) shows this
+with a host sleep between the two calls.
 
 ## Commands
 
