@@ -27,8 +27,8 @@ python -m ai_journey.matmul_tiled_cli verify \
   --config config/day-76-matmul-tiled.json
 ```
 
-The parser uses the program name `ai-journey-matmul-tiled`. This change adds
-no console script, so run the module with `python -m`.
+The parser uses the program name `ai-journey-matmul-tiled`. An installed wheel
+gives the same commands under that name.
 
 The `run` command compiles the kernels, checks them, times them, checks its own
 report and writes the report. It prints these lines:
@@ -473,8 +473,8 @@ python -m ai_journey.matmul_tiled_gap_cli verify \
 ```
 
 The tiled report is the output of the `run` command above. The gap parser uses
-the program name `ai-journey-matmul-tiled-gap`. This change adds no console
-script, so run the module with `python -m`.
+the program name `ai-journey-matmul-tiled-gap`. The package has no console
+script for these commands, so run the module with `python -m`.
 
 The `timing` command needs an Apple GPU, as the `run` command does. The `gap`
 and `verify` commands run no kernel and do not import torch. With the three

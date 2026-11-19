@@ -87,6 +87,7 @@ ai-journey-sim-profile = "ai_journey.sim_profile_cli:main"
 ai-journey-profile-trace = "ai_journey.profile_trace_cli:main"
 ai-journey-gpu-timing = "ai_journey.gpu_timing_cli:main"
 ai-journey-matmul-bottleneck = "ai_journey.matmul_bottleneck_cli:main"
+ai-journey-matmul-tiled = "ai_journey.matmul_tiled_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
