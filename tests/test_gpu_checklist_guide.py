@@ -8,7 +8,11 @@ import numpy
 
 from ai_journey import gpu_checklist_cli
 from ai_journey.gpu_checklist_blocksim import ChecklistTraffic, run_blocks, vector_flags
-from ai_journey.gpu_checklist_check import BLOCKED_CHECK_NAMES, COARSENED_CHECK_NAMES
+from ai_journey.gpu_checklist_check import (
+    BLOCKED_CHECK_NAMES,
+    COARSENED_CHECK_NAMES,
+    check_cuda_source,
+)
 from ai_journey.gpu_checklist_cuda import (
     CUBLAS_FILE,
     PINNED_BLOCKED,
@@ -105,6 +109,21 @@ def test_the_guide_states_each_digest_tile_and_check():
         f"The coarsened kernel has {len(COARSENED_CHECK_NAMES)} checks, and the "
         f"blocked kernel has {len(BLOCKED_CHECK_NAMES)} checks"
     ) in flat(text)
+
+
+def test_the_documented_extra_guard_fails_only_the_loads_check():
+    guard = "if (tx == 0) { k = 0; }"
+    kernel = PINNED_COARSENED[1]
+    marker = "        for (int j = 0; j < 4; ++j) {\n            int col"
+    source = cuda_source(kernel)
+    edited = source.replace(marker, f"        {guard}\n{marker}")
+    text = flat(guide())
+
+    assert f"a text can add `{guard}` before the loop over the B tiles." in text
+    assert "and the text fails `coarsened_loads` only." in text
+    assert source.count(marker) == 1
+    result = check_cuda_source(edited, kernel=kernel, shape=MatmulShape(37, 45, 29))
+    assert result.failures == ("coarsened_loads",)
 
 
 def test_the_load_table_is_the_declared_closed_form():

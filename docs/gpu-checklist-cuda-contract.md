@@ -167,8 +167,11 @@ Day 76 checker. It reads comments as a compiler reads them. It refuses a line
 splice, a trigraph, and a space or a comment inside an operator. It accepts only
 the three pinned functions. Then it parses the kernel body into a tree of
 statements, loops and guards. It also parses the pinned text with the same
-parser. Each check compares one part of the two trees, so a changed statement
-fails the check of its part.
+parser.
+
+Each check compares one part of the two trees, and each node of a tree is in
+one part. Thus a changed statement, or an extra loop, guard or flag, fails the
+check of its part.
 
 The coarsened kernel has 11 checks, and the blocked kernel has 12 checks:
 
@@ -178,13 +181,15 @@ The coarsened kernel has 11 checks, and the blocked kernel has 12 checks:
   `__shared__ float` tiles. The check reads their extents from the text. The
   size must be the declared size, and it must be inside the 48 KB static limit
   of compute capability 8.0.
-- `coarsened_index` and `blocked_index`: the thread and block index statements.
+- `coarsened_index` and `blocked_index`: the thread and block index statements,
+  and each other statement before the loops that no other check covers.
 - `blocked_vector_alignment`: the two float4 flags, each float4 load in the
   branch of its flag, and the statements that give its offset.
 - `coarsened_phase_loop` and `blocked_phase_loop`: one phase loop with the
   pinned header, between the setup statements and the stores.
 - `coarsened_loads` and `blocked_loads`: the guarded loads and their zero fill.
   For the coarsened kernel, this check also covers the loop over the B tiles.
+  It also covers each other statement, loop and guard of a phase.
 - `coarsened_barriers` and `blocked_barriers`: the barriers of the pinned
   text, and three rules that do not use the pinned text.
 - `coarsened_inner_loop` and `blocked_inner_loop`: the header
@@ -201,8 +206,9 @@ These are the three barrier rules:
 
 1. No barrier is inside an `if`.
 2. Each loop around a barrier uses only `k`, `m`, `n`, constants and the
-   variables of such loops. Thus every thread reaches each barrier equally
-   often.
+   variables of such loops. The pinned text does not change these values, and
+   the other checks compare each statement with it. Thus every thread reaches
+   each barrier equally often.
 3. A static scan runs each loop body twice, so the last access of one iteration
    meets the first access of the next. It requires a barrier between each write
    of a shared tile and a later read of it. It also requires a barrier between
@@ -213,6 +219,14 @@ other use of a shared tile as a read. The tests change one statement at a time.
 For example, a text without the first barrier fails `coarsened_barriers` only.
 A text with `__fmaf_rz` fails `coarsened_fma_order` only. A text with
 `bool b_vector = true;` fails `blocked_vector_alignment` only.
+
+The scan finds no hazard in an extra loop or guard that touches no tile. It
+also finds none in one that only writes a tile between the same two barriers as
+the loads. Such code can still change a tile, `k` or a loop counter. Thus the
+loads check compares each part of a phase with the pinned text, except the
+barriers and the inner loop. For example, a text can add
+`if (tx == 0) { k = 0; }` before the loop over the B tiles. Then thread 0 skips
+the barriers of each later phase, and the text fails `coarsened_loads` only.
 
 ## CPU block simulator
 

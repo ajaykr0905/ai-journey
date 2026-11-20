@@ -281,6 +281,45 @@ def test_an_extra_statement_fails_only_the_checks_of_its_part(
     assert check(mutate(text, old, new), kernel).failures == failures
 
 
+@pytest.mark.parametrize(
+    ("kernel", "old", "new", "failures"),
+    [
+        (COARSENED, "        for (int j = 0; j < 4; ++j) {\n            int col = col0", "        for (int q = 0; q < 1; ++q) {\n            As[ty][tx] = 0.0f;\n        }\n        for (int j = 0; j < 4; ++j) {\n            int col = col0", ("coarsened_loads",)),
+        (COARSENED, "        for (int j = 0; j < 4; ++j) {\n            int col = col0", "        if (tx == 0) {\n            k = 0;\n        }\n        for (int j = 0; j < 4; ++j) {\n            int col = col0", ("coarsened_loads",)),
+        (COARSENED, "b[b_row * n + col] : 0.0f;\n", "b[b_row * n + col] : 0.0f;\n            if (tx == 0) {\n                j = 3;\n            }\n", ("coarsened_loads",)),
+        (COARSENED, "b[b_row * n + col] : 0.0f;\n", "b[b_row * n + col] : 0.0f;\n            for (int q = 0; q < 1; ++q) {\n                Bs[ty][tx] = 1.0f;\n            }\n", ("coarsened_loads",)),
+        (COARSENED, "    float sum[4];\n", "    bool moved = (row = 0) == 0;\n    float sum[4];\n", ("coarsened_index",)),
+        (BLOCKED, "        __syncthreads();\n        for (int i", "        for (int q = 0; q < 4; ++q) {\n            As[a_c + q][a_r] = 0.0f;\n        }\n        __syncthreads();\n        for (int i", ("blocked_loads",)),
+        (BLOCKED, "        __syncthreads();\n        for (int i", "        for (int q = 0; q < 1; ++q) {\n            if (tx == 0) {\n                k = 0;\n            }\n        }\n        __syncthreads();\n        for (int i", ("blocked_loads",)),
+    ],
+)  # fmt: skip
+def test_an_extra_loop_guard_or_flag_fails_the_check_of_its_block(
+    kernel, old, new, failures
+):
+    # Each edit changes a tile, an index, k or j before a barrier, so the
+    # hazard scan sees no race. With k = 0 or j = 3, thread 0 skips barriers.
+    text = cuda_source(kernel)
+
+    assert check(mutate(text, old, new), kernel).failures == failures
+
+
+@pytest.mark.parametrize("kernel", PINNED_KERNELS, ids=lambda item: item.name)
+@pytest.mark.parametrize(
+    "extra", ["if (tx == 0) { k = 0; }", "for (int q = 0; q < 1; ++q) { k = 0; }"]
+)
+def test_an_extra_loop_or_guard_on_any_line_of_a_kernel_fails_a_check(kernel, extra):
+    # Thread 0 then leaves its phase loop early and skips barriers.
+    lines = cuda_source(kernel).splitlines(keepends=True)
+    start = next(
+        index for index, line in enumerate(lines) if line.startswith("__global__")
+    )
+    end = lines.index("}\n", start)
+
+    for position in range(start + 2, end + 1):
+        text = "".join([*lines[:position], f"{extra}\n", *lines[position:]])
+        assert check(text, kernel).failures, (position, lines[position - 1])
+
+
 def test_the_hazard_scan_names_the_race_that_each_missing_barrier_leaves():
     first = "            __syncthreads();\n            for"
     second = "            }\n            __syncthreads();\n        }"

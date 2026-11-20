@@ -5,8 +5,9 @@ No compiler exists on this host, so the checker reads a text the way the Day
 or space inside an operator, and only the three pinned definitions. It then
 parses the kernel body into a tree of statements, ``for`` loops and ``if``
 blocks, and it parses the pinned text of the same kernel with the same
-parser. Each named check compares one part of the two trees, so a changed
-statement fails the check of its part.
+parser. Each named check compares one part of the two trees, and each node
+of a tree is in one part. Thus a changed statement, or an extra loop, guard
+or flag, fails the check of its part.
 
 Some checks also apply a rule that does not use the pinned text:
 
@@ -242,6 +243,23 @@ def _statements(nodes: tuple[Node, ...]) -> tuple[str, ...]:
 
     return tuple(
         node.head for node in nodes if node.kind == "statement" and node.head != BARRIER
+    )
+
+
+def _steps(nodes: tuple[Node, ...], prefix: str) -> tuple[Node, ...]:
+    """Return a block without its barriers, and each loop of ``prefix`` as a mark.
+
+    The barrier check owns the barriers, and the loop of ``prefix`` has its own
+    comparison. Each other node stays, so a check that compares the block
+    also compares an extra loop or guard, which the hazard scan can miss.
+    """
+
+    return tuple(
+        Node("for", prefix)
+        if node.kind == "for" and node.head.startswith(prefix)
+        else node
+        for node in nodes
+        if node.kind != "statement" or node.head != BARRIER
     )
 
 
@@ -565,13 +583,24 @@ def _shared_memory_check(pair: _Pair) -> bool:
 
 
 def _index_check(pair: _Pair) -> bool:
-    """The top-level index statements: not a tile, a flag or an accumulator."""
+    """The top-level statements that no other check owns, such as the indices.
+
+    The shared memory check owns the tiles and the fma check the accumulators.
+    Only the blocked kernel has flags, which its alignment check owns, so a
+    ``bool`` statement in the coarsened kernel stays in this check.
+    """
+
+    owned = (
+        ("__shared__", "bool ")
+        if type(pair.kernel) is BlockedKernel
+        else ("__shared__",)
+    )
 
     def index(nodes: tuple[Node, ...]) -> tuple[str, ...]:
         return tuple(
             item
             for item in _statements(nodes)
-            if not item.startswith(("__shared__", "bool "))
+            if not item.startswith(owned)
             and not any(_names(item, name) for name in pair.accumulators)
         )
 
@@ -640,10 +669,9 @@ def _coarsened_parts(pair: _Pair) -> dict[str, bool]:
     # The loop over the B tiles sets which accumulators get loads and fmas.
     loads = (
         split is not None
-        and phase.body[-1] is split
         and split.head == pinned_split.head
-        and _statements(phase.body) == _statements(pinned_phase.body)
-        and _statements(split.body) == _statements(pinned_split.body)
+        and _steps(phase.body, "for(int j=") == _steps(pinned_phase.body, "for(int j=")
+        and _steps(split.body, "for(int i=") == _steps(pinned_split.body, "for(int i=")
     )
     return {
         "coarsened_loads": loads,
@@ -682,12 +710,9 @@ def _blocked_parts(pair: _Pair) -> dict[str, bool]:
     inner = None if phase is None else _single(phase.body, "for(int i=")
     pinned_inner = _single(pinned_phase.body, "for(int i=")
 
-    def loads(nodes: tuple[Node, ...]) -> tuple | None:
+    def loads(nodes: tuple[Node, ...]) -> tuple[Node, ...] | None:
         found = _phase(nodes)
-        if found is None:
-            return None
-        guards = tuple(node for node in found.body if node.kind == "if")
-        return _statements(found.body), guards
+        return None if found is None else _steps(found.body, "for(int i=")
 
     return {
         "blocked_vector_alignment": pair.same(_alignment)
