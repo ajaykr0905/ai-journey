@@ -27,6 +27,7 @@ from ai_journey.gpu_reduce_source import (
     library_source,
 )
 from ai_journey.kernel_metal_geometry import KernelMetalError
+from ai_journey.kernel_metal_report import host_environment
 from ai_journey.matmul_tiled_report import MAX_WARNING_TEXT
 from ai_journey.memory_access_report import report_digest
 from test_gpu_reduce_config import make_config_mapping
@@ -197,8 +198,14 @@ def test_a_run_past_its_budget_stops_without_a_report(ceiling):
 
 @requires_metal
 def test_a_real_run_is_a_labeled_apple_gpu_measurement(ceiling):
+    runtime = reduce_runtime()
+    # A measured run refuses a ceiling from another environment, and the
+    # recorded Day 74 ceiling names the development host's versions.
+    if not ceiling.same_environment(host_environment(runtime.torch_version)):
+        pytest.skip("the recorded Day 74 ceiling comes from another environment")
+
     report = measure_report(
-        config_from_mapping(make_config_mapping()), ceiling, backend=reduce_runtime()
+        config_from_mapping(make_config_mapping()), ceiling, backend=runtime
     )
 
     assert report["measured"] is True
