@@ -1,3 +1,4 @@
+import itertools
 import re
 import shlex
 from pathlib import Path
@@ -11,6 +12,9 @@ from ai_journey.matmul_checklist_variants import VARIANTS, checklist_library
 from ai_journey.matmul_metal_source import source_sha256
 from ai_journey.matmul_tiled_comparison import CUBLAS, vendor_label
 from ai_journey.matmul_tiled_variants import text_sha256
+from test_matmul_checklist_cli import run_argv, stand_in_main, write_config
+from test_matmul_checklist_config import make_config_mapping
+from test_matmul_checklist_correctness import StandInBackend
 
 ROOT = Path(__file__).resolve().parents[1]
 GUIDE = ROOT / "docs/matmul-checklist-lab.md"
@@ -65,6 +69,53 @@ def test_guide_states_the_exit_codes_and_line_prefixes():
     ):
         assert phrase in text, phrase
     assert "unsupported_operating_system" in UNAVAILABLE_REASONS
+
+
+# The phrase of each kind of line in the guide's numbered list, and the word
+# after the label that starts that kind of printed line.
+LINE_KINDS = (
+    ("checklist step", "checklist"),
+    ("load averages", "load_average"),
+    ("refused", "refused"),
+    ("correctness case", "correctness"),
+    ("sweep point, with the median", "benchmark"),
+    ("step kernel", "speedup"),
+    ("fastest kernel", "best"),
+    ("Python warnings", "warnings"),
+    ("summary line", "summary"),
+)
+
+
+def documented_line_kinds(text, points):
+    """Read the numbered list of printed lines; repeat a per-point item."""
+
+    block = text.split("Then it prints these lines:\n\n", 1)[1].split("\n\n", 1)[0]
+    kinds = []
+    for item in re.split(r"\n(?=\d+\. )", block):
+        item = flat(re.sub(r"^\d+\. ", "", item))
+        named = sorted(
+            (item.index(phrase), kind) for phrase, kind in LINE_KINDS if phrase in item
+        )
+        repeats = points if item.startswith("For each sweep point") else 1
+        kinds += [kind for _, kind in named] * repeats
+    return kinds
+
+
+def test_the_numbered_list_gives_the_printed_lines_in_their_order(tmp_path, capsys):
+    config = write_config(tmp_path / "config.json")
+    backend = StandInBackend(threads={"matmul_s6_group_32x32": 512})
+
+    assert stand_in_main(run_argv(config, tmp_path / "r.json"), backend) == 0
+    lines = capsys.readouterr().out.splitlines()
+    printed = [
+        "summary" if line.startswith("matmul_checklist_") else line.split()[1]
+        for line in lines
+    ]
+    runs = [kind for kind, _ in itertools.groupby(printed)]
+    points = len(make_config_mapping()["benchmark"]["shapes"])
+
+    assert runs.count("refused") == 1 and points == 2
+    assert documented_line_kinds(guide(), points) == runs
 
 
 def test_guide_keeps_the_evidence_boundary_and_names_no_cublas_number():

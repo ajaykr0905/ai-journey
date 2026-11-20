@@ -49,11 +49,11 @@ report and writes the report. Then it prints these lines:
    the CPU replay.
 5. One line for each sweep point, with the median GFLOP/s and the IQR range of
    each side.
-6. One line for each step kernel at each sweep point, with the two step ratios,
-   the fraction of `torch.matmul` and the result of the hypothesis.
-7. One line for each sweep point with the fastest kernel.
-8. One line with the count of Python warnings that the run caught.
-9. A summary line with the report digest.
+6. For each sweep point, one line for each step kernel, with the two step
+   ratios, the fraction of `torch.matmul` and the result of the hypothesis.
+   Then one line with the fastest kernel at that point.
+7. One line with the count of Python warnings that the run caught.
+8. A summary line with the report digest.
 
 In a measured run, each line before the summary has the prefix
 `apple_gpu_metal_measurement`. The summary line has the prefix
