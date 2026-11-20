@@ -26,9 +26,12 @@ element of a later block. These rules hold in every kernel:
 
 - Every thread loads its value or the identity 0, so a ragged last block
   scans like a full one, and only the stores are guarded.
-- Every barrier sits in the kernel body or in a loop whose bounds are the
-  same for every thread, never under a condition on the thread, and no
-  kernel returns early. ``barrier_heads`` reads the text to check this.
+- Every barrier is the line ``BARRIER`` alone, in the kernel body or in a
+  loop whose bounds are the same for every thread, never under a condition
+  on the thread. A kernel with a barrier defines one function, never
+  returns early, never uses ``break``, ``continue`` or ``goto``, and never
+  lets a loop body change its loop variable. ``uniform_barriers`` reads
+  the text to check this.
 - Scalars are 32-bit ``constant uint&`` values, passed with ``arg_casts``
   as in the Day 73 to 77 Metal labs.
 
@@ -72,6 +75,10 @@ UNIFORM_LOOPS = {
 }
 KERNEL_BODY = "kernel"
 _NAME = re.compile(r"scan_[a-z0-9_]{1,48}")
+_BARRIER_CALL = re.compile(r"\b(?:threadgroup|simdgroup)_barrier\b")
+_EARLY_EXIT = re.compile(r"\b(?:break|continue|goto)\b")
+_LOOP_VARIABLE = re.compile(r"for \(uint (\w+) = ")
+_STATEMENT_ENDS = ("{", ";", "}")
 
 
 class GpuScanError(KernelMetalError):
@@ -157,17 +164,87 @@ def barrier_heads(source: str) -> tuple[tuple[str, ...], ...]:
     return tuple(found)
 
 
+def _may_change(name: str, line: str) -> bool:
+    """Whether one line can change ``name``: a write, or an address or reference.
+
+    A single ``&`` on a line that names the variable counts, so a pointer or
+    a reference cannot change it on a later line; ``&&`` does not count.
+    """
+
+    word = rf"\b{name}\b"
+    if re.search(r"(?<!&)&(?![&=])", line) and re.search(word, line):
+        return True
+    pattern = rf"(?:\+\+|--)\s*{word}|{word}\s*(?:\+\+|--|(?:[-+*/%&|^]|<<|>>)?=(?!=))"
+    return re.search(pattern, line) is not None
+
+
+def _require_straight_flow(source: str) -> None:
+    """Refuse each way that a text can let one thread pass a barrier line.
+
+    The block heads alone miss an exit from a loop, a loop that changes its
+    own variable, an ``if`` without braces that holds a barrier or a whole
+    loop, a barrier with other memory flags and a helper function that
+    waits for its caller. Any of them lets some threads of a group skip a
+    barrier that the other threads wait at.
+    """
+
+    if re.search(r"\breturn\b", source):
+        raise GpuScanError("a kernel with a barrier must not return early")
+    if _EARLY_EXIT.search(source):
+        raise GpuScanError(
+            "a kernel with a barrier must not use break, continue or goto"
+        )
+    previous, functions = "", 0
+    variables: list[str | None] = []
+    for raw in source.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("//"):
+            continue
+        # A line that follows an open if, else, for or while head without a
+        # brace is the body of that head, so only some threads may run it.
+        follows = previous.endswith(_STATEMENT_ENDS)
+        previous = line
+        if _BARRIER_CALL.search(line) and (line != BARRIER or not follows):
+            raise GpuScanError(
+                f"each barrier must be the line {BARRIER!r} alone, after a complete "
+                "statement or an opening brace"
+            )
+        if line.startswith("}"):
+            variables.pop()
+            line = line[1:].strip()
+        for name in variables:
+            if name is not None and _may_change(name, line):
+                raise GpuScanError(
+                    "a uniform loop must not write or alias its loop variable "
+                    f"{name!r} in its body"
+                )
+        if line.endswith("{"):
+            if variables and not follows:
+                raise GpuScanError(
+                    "in a kernel with a barrier, each block must open after a "
+                    "complete statement or an opening brace"
+                )
+            functions += not variables
+            if functions > 1:
+                raise GpuScanError(
+                    "a kernel text with a barrier must define one function, the kernel"
+                )
+            loop = _LOOP_VARIABLE.match(line) if line in UNIFORM_LOOPS else None
+            variables.append(None if loop is None else loop.group(1))
+
+
 def uniform_barriers(source: str) -> int:
     """Count the barriers one group waits at, after checking that each is uniform.
 
     A barrier may sit only in the kernel body or in a ``UNIFORM_LOOPS`` loop,
-    and a kernel with a barrier may not return early, so every thread of a
-    group reaches every barrier the same number of times.
+    and ``_require_straight_flow`` refuses each other path past a barrier
+    line, so every thread of a group reaches every barrier the same number
+    of times.
     """
 
     heads = barrier_heads(source)
-    if heads and re.search(r"\breturn\b", source):
-        raise GpuScanError("a kernel with a barrier must not return early")
+    if _BARRIER_CALL.search(source):
+        _require_straight_flow(source)
     total = 0
     for stack in heads:
         if not stack or stack[0] != KERNEL_BODY:

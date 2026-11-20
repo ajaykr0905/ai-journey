@@ -100,9 +100,71 @@ def test_every_barrier_sits_in_the_body_or_a_loop_with_uniform_bounds():
     assert barrier_heads(ADD_SOURCE) == ()
 
 
+def _in_step(*lines):
+    """Insert lines into the S0 step loop, after its buffer swap and before its barrier."""
+
+    added = "".join(f"        {line}\n" for line in lines)
+    return lambda text: text.replace(
+        "        source ^= 1u;\n", f"        source ^= 1u;\n{added}"
+    )
+
+
 @pytest.mark.parametrize(
     ("change", "message"),
     [
+        # Each of the next nine texts compiles with Metal and lets a thread skip
+        # a barrier that the other threads of its group wait at.
+        (_in_step("if (t < offset) {", "    break;", "}"), "break, continue or goto"),
+        (
+            _in_step("if (t < offset) {", "    continue;", "}"),
+            "break, continue or goto",
+        ),
+        (
+            _in_step("if (t == 0u) {", "    offset = 1024u;", "}"),
+            "write or alias its loop variable 'offset'",
+        ),
+        (
+            _in_step(
+                "thread uint* step = &offset;",
+                "if (t == 0u) {",
+                "    *step = 1024u;",
+                "}",
+            ),
+            "write or alias its loop variable 'offset'",
+        ),
+        (
+            lambda text: text.replace(
+                "    for (uint offset", "    if (t < 512u)\n    for (uint offset"
+            ),
+            "block must open after a complete statement or an opening brace",
+        ),
+        (
+            lambda text: text.replace(
+                f"        {BARRIER}\n    }}\n",
+                f"        if (t < 512u)\n            {BARRIER}\n    }}\n",
+            ),
+            "alone, after a complete statement or an opening brace",
+        ),
+        (
+            lambda text: text.replace(
+                f"        {BARRIER}\n    }}\n",
+                f"        if (t < 512u) {BARRIER}\n    }}\n",
+            ),
+            "alone, after a complete statement or an opening brace",
+        ),
+        (
+            _in_step(
+                "if (t < 512u) {",
+                "    threadgroup_barrier(mem_flags::mem_none);",
+                "}",
+            ),
+            "alone, after a complete statement or an opening brace",
+        ),
+        (
+            lambda text: f"void wait_here() {{\n    {BARRIER}\n}}\n"
+            + _in_step("if (t < 512u) {", "    wait_here();", "}")(text),
+            "must define one function",
+        ),
         (
             lambda text: text.replace(
                 "        if (t >= offset) {\n",
@@ -137,6 +199,14 @@ def test_the_barrier_check_refuses_a_barrier_that_some_threads_skip(change, mess
         ScanKernel(
             S0_HILLIS_STEELE, "hillis_steele", 1024, 1, 8192, None, 10, True, text
         )
+
+
+def test_the_flow_rules_bind_only_a_kernel_that_waits_at_a_barrier():
+    early = "kernel void scan_x(uint i [[thread_position_in_grid]]) {\n"
+    early += "    if (i > 7u) {\n        return;\n    }\n}\n"
+
+    assert uniform_barriers(early) == 0
+    assert uniform_barriers(ADD_SOURCE) == 0
 
 
 def _hillis_steele_depth() -> numpy.ndarray:

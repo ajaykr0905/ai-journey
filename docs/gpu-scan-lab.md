@@ -119,10 +119,13 @@ These rules apply to every kernel:
 
 - Each thread loads its value or 0, so a ragged last block scans like a full
   block. Only the stores have guards.
-- Each barrier sits in the kernel body or in a loop with the same bounds in
-  every thread. No barrier sits under a condition on the thread, and no kernel
-  returns early. Thus every thread reaches every barrier. The function
-  `uniform_barriers` reads each kernel text and refuses any other barrier.
+- Each barrier is the line `threadgroup_barrier(mem_flags::mem_threadgroup);`
+  alone, in the kernel body or in a loop with the same bounds in every thread.
+  No barrier sits under a condition on the thread. A kernel with a barrier has
+  one function and no early return. It does not use `break`, `continue` or
+  `goto`, and no loop body can change its loop variable. Thus every thread
+  reaches every barrier. The function `uniform_barriers` reads each kernel
+  text and refuses any other barrier.
 - Each scalar reaches its kernel as a 32-bit integer through `arg_casts`, as in
   the Day 73 to 77 Metal labs.
 
