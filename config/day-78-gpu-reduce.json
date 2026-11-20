@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "day-78-gpu-reduce",
+  "seed": 78,
+  "plan_sha256": "b2134229a87d220e40772e732ca3d3e5d6c6a6ae82a90a475eb0405d87a7217f",
+  "correctness": {
+    "cases": [["normal", 1], ["normal", 31], ["normal", 33], ["normal", 257], ["normal", 1000003], ["normal", 2000003], ["positive", 511], ["positive", 1000003], ["mixed", 513], ["mixed", 300007], ["mixed", 1000003], ["ones", 1000003], ["halves", 1000003]],
+    "runs": 3
+  },
+  "benchmark": {
+    "sizes": [65536, 1048576, 16777216, 67108864, 10000019],
+    "warmup": 2,
+    "repeats": 14,
+    "target_bytes_per_sample": 1073741824,
+    "max_runtime_seconds": 300
+  },
+  "comparison": {
+    "min_faster_ratio": 1.1
+  }
+}
