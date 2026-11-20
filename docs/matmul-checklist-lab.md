@@ -32,9 +32,8 @@ python -m ai_journey.matmul_checklist_cli verify \
   --config config/day-77-matmul-checklist.json
 ```
 
-The parser uses the program name `ai-journey-matmul-checklist`. The package
-has no console script for these commands, so run the module with
-`python -m`.
+The parser uses the program name `ai-journey-matmul-checklist`. An installed
+wheel gives the same commands under that name.
 
 The `run` command compiles the kernels, checks them, times them, checks its own
 report and writes the report. Then it prints these lines:
