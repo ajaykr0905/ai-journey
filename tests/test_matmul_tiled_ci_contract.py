@@ -89,13 +89,14 @@ def local(word, evidence):
     return word
 
 
-def test_the_tiled_job_is_the_last_job_of_the_workflow():
+def test_the_tiled_job_follows_the_gpu_timing_job_in_the_workflow():
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     jobs = re.findall(
         r"^  ([a-z0-9-]+):$", workflow.split("\njobs:\n", 1)[1], flags=re.MULTILINE
     )
 
-    assert jobs[-1] == JOB
+    # The Day 76 job was appended after the Day 75 job. Later jobs follow it.
+    assert jobs[jobs.index("gpu-timing-contracts") + 1] == JOB
     assert jobs.count(JOB) == 1
     assert jobs[jobs.index("moe-cpu-lab") + 1] == "nvidia-preflight-contracts"
 

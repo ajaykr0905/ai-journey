@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "name": "day-77-matmul-checklist",
+  "seed": 77,
+  "checklist_sha256": "cb5e3164e0d37716699dc9381b587faeeb40c2ca4f1a52d75b8ec586379323dc",
+  "naive": {
+    "group_size": [32, 8]
+  },
+  "correctness": {
+    "shapes": [[1, 1, 1], [17, 33, 9], [32, 32, 16], [31, 47, 129], [129, 65, 1000], [255, 257, 511], [64, 48, 4096], [3, 1000, 2048], [1000, 999, 100], [130, 196, 1000]]
+  },
+  "benchmark": {
+    "shapes": [[1024, 1024, 1024], [2048, 2048, 2048], [4096, 4096, 4096], [2000, 3000, 1000]],
+    "warmup": 2,
+    "repeats": 11,
+    "target_flops_per_sample": 1073741824,
+    "max_runtime_seconds": 300
+  },
+  "comparison": {
+    "min_faster_ratio": 1.1
+  }
+}

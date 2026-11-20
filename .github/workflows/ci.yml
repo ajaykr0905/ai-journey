@@ -1774,3 +1774,73 @@ jobs:
             ${{ runner.temp }}/matmul-tiled-evidence/
             ${{ runner.temp }}/matmul-tiled-dist/
           if-no-files-found: error
+  matmul-checklist-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Day 77 checklist lab contract tools and CPU-only PyTorch
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check the checklist and checklist bound contracts without an Apple GPU
+        run: |
+          ruff check src/ai_journey/matmul_checklist_*.py tests/test_matmul_checklist_*.py
+          ruff format --check src/ai_journey/matmul_checklist_*.py tests/test_matmul_checklist_*.py
+          python -m compileall -q src/ai_journey/matmul_checklist_*.py tests/test_matmul_checklist_*.py
+          python -m pytest -q -rs tests/test_matmul_checklist_*.py
+      - name: Build and install isolated Day 77 checklist lab wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/matmul-checklist-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/matmul-checklist-installed" "$RUNNER_TEMP"/matmul-checklist-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/matmul-checklist-evidence"
+      - name: Check that each installed Apple GPU command stops where MPS is not available
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/matmul-checklist-installed
+        run: |
+          export PATH="$RUNNER_TEMP/matmul-checklist-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/matmul-checklist-installed/")'
+          python -c 'import torch; assert not torch.backends.mps.is_available()'
+          status=0
+          ai-journey-matmul-checklist run --config "$GITHUB_WORKSPACE/config/day-77-matmul-checklist.json" --output "$RUNNER_TEMP/matmul-checklist-evidence/matmul-checklist.json" 2> "$RUNNER_TEMP/matmul-checklist-evidence/matmul-checklist-unavailable.txt" || status=$?
+          cat "$RUNNER_TEMP/matmul-checklist-evidence/matmul-checklist-unavailable.txt"
+          test "$status" -eq 3
+          grep -F "matmul-checklist run unavailable: Metal kernels run only on macOS (unsupported_operating_system)" "$RUNNER_TEMP/matmul-checklist-evidence/matmul-checklist-unavailable.txt"
+          test ! -e "$RUNNER_TEMP/matmul-checklist-evidence/matmul-checklist.json"
+          status=0
+          python -m ai_journey.matmul_checklist_bound_cli timing --config "$GITHUB_WORKSPACE/config/day-77-matmul-checklist.json" --output "$RUNNER_TEMP/matmul-checklist-evidence/one-call-timing.json" 2> "$RUNNER_TEMP/matmul-checklist-evidence/one-call-timing-unavailable.txt" || status=$?
+          cat "$RUNNER_TEMP/matmul-checklist-evidence/one-call-timing-unavailable.txt"
+          test "$status" -eq 3
+          grep -F "matmul-checklist-bound timing unavailable: Metal kernels run only on macOS (unsupported_operating_system)" "$RUNNER_TEMP/matmul-checklist-evidence/one-call-timing-unavailable.txt"
+          test ! -e "$RUNNER_TEMP/matmul-checklist-evidence/one-call-timing.json"
+      - name: Verify the recorded Apple GPU reports and rebuild their bound with the installed package
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/matmul-checklist-installed
+        run: |
+          export PATH="$RUNNER_TEMP/matmul-checklist-installed/bin:$PATH"
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_matmul_checklist_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/matmul-checklist-evidence/recorded-matmul-checklist.json"
+          ai-journey-matmul-checklist verify --report "$RUNNER_TEMP/matmul-checklist-evidence/recorded-matmul-checklist.json"
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_matmul_checklist_bound_recorded import RECORDED_TIMING_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_TIMING_JSON + "\n")' "$RUNNER_TEMP/matmul-checklist-evidence/recorded-one-call-timing.json"
+          python -m ai_journey.matmul_checklist_bound_cli verify-timing --report "$RUNNER_TEMP/matmul-checklist-evidence/recorded-one-call-timing.json"
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_gpu_ceiling_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/matmul-checklist-evidence/recorded-gpu-ceilings.json"
+          python -m ai_journey.matmul_checklist_bound_cli bound --checklist-report "$RUNNER_TEMP/matmul-checklist-evidence/recorded-matmul-checklist.json" --ceiling-report "$RUNNER_TEMP/matmul-checklist-evidence/recorded-gpu-ceilings.json" --timing-report "$RUNNER_TEMP/matmul-checklist-evidence/recorded-one-call-timing.json" --rule-config "$GITHUB_WORKSPACE/config/day-75-matmul-bottleneck.json" --output "$RUNNER_TEMP/matmul-checklist-evidence/recorded-bound.json"
+          python -m ai_journey.matmul_checklist_bound_cli verify --report "$RUNNER_TEMP/matmul-checklist-evidence/recorded-bound.json" --checklist-report "$RUNNER_TEMP/matmul-checklist-evidence/recorded-matmul-checklist.json" --ceiling-report "$RUNNER_TEMP/matmul-checklist-evidence/recorded-gpu-ceilings.json" --timing-report "$RUNNER_TEMP/matmul-checklist-evidence/recorded-one-call-timing.json" --rule-config "$GITHUB_WORKSPACE/config/day-75-matmul-bottleneck.json"
+      - name: Retain the refused runs, the recorded reports, their bound and the package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matmul-checklist-contracts-evidence
+          path: |
+            ${{ runner.temp }}/matmul-checklist-evidence/
+            ${{ runner.temp }}/matmul-checklist-dist/
+          if-no-files-found: error
