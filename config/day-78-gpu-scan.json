@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "day-78-gpu-scan",
+  "seed": 78,
+  "plan_sha256": "13f7eead88f966d08046b82eaa2693e6956feac22558321f5d65d256ffafec66",
+  "correctness": {
+    "cases": [[1, "standard_normal"], [31, "standard_normal"], [32, "small_integers"], [1000, "standard_normal"], [1024, "standard_normal"], [1025, "small_integers"], [4097, "standard_normal"], [65536, "standard_normal"], [1048577, "standard_normal"], [1048577, "small_integers"], [5000003, "standard_normal"]],
+    "runs": 3
+  },
+  "benchmark": {
+    "lengths": [65536, 1048576, 16777216, 5000003],
+    "warmup": 2,
+    "repeats": 11,
+    "target_bytes_per_sample": 1073741824,
+    "max_runtime_seconds": 300
+  },
+  "comparison": {
+    "min_faster_ratio": 1.1
+  }
+}
