@@ -46,7 +46,8 @@ class StandInBackend:
     S0 and S1 return their CPU replays, the bits the development GPU gave in
     every case. S2 and ``torch.cumsum`` return the float64 sum rounded once.
     ``leak`` kernels write into their tail, ``scale`` kernels multiply their
-    output, and ``wobble`` sides move one element by one ulp on odd runs.
+    output, ``wobble`` sides move one element by one ulp on odd runs, and
+    ``nudge`` sides move it on every run of an input that is not all integers.
     """
 
     backend = "stand-in"
@@ -74,6 +75,7 @@ class StandInBackend:
         self.leak = set(faults.get("leak", ()))
         self.scale = dict(faults.get("scale", {}))
         self.wobble = set(faults.get("wobble", ()))
+        self.nudge = set(faults.get("nudge", ()))
         self.vendor_nan = faults.get("vendor_nan", False)
         self.runs = []
 
@@ -85,7 +87,8 @@ class StandInBackend:
         if name in self.scale:
             data = data * numpy.float32(self.scale[name])
         count = sum(1 for side, _ in self.runs if side == name)
-        if name in self.wobble and count % 2:
+        whole = numpy.array_equal(values, numpy.round(values))
+        if (name in self.wobble and count % 2) or (name in self.nudge and not whole):
             data[-1] = numpy.nextafter(data[-1], numpy.float32(numpy.inf))
         self.runs.append((name, values.size))
         return data
