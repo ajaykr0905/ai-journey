@@ -16,15 +16,24 @@ from ai_journey.matmul_checklist_bound_cli import (
     build_parser,
     main,
 )
+from ai_journey.matmul_checklist_bound_io import load_bound_report
 from ai_journey.matmul_checklist_bound_timing_io import load_timing_report
 from ai_journey.matmul_checklist_cli import short_name
+from ai_journey.matmul_checklist_steps import CHECKLIST
 from ai_journey.matmul_checklist_variants import VARIANTS
 from ai_journey.memory_access_plan import canonical_json_bytes
+from test_gpu_ceiling_recorded import RECORDED_REPORT_JSON as CEILING_JSON
+from test_matmul_checklist_bound import timing_report
 from test_matmul_checklist_bound_timing import TimingStandIn
 from test_matmul_checklist_config import make_config_mapping
+from test_matmul_checklist_recorded import RECORDED_CONFIG
+from test_matmul_checklist_recorded import RECORDED_REPORT_JSON as CHECKLIST_JSON
 
 ROOT = Path(__file__).resolve().parents[1]
 PINNED = ROOT / "config/day-77-matmul-checklist.json"
+RULE = ROOT / "config/day-75-matmul-bottleneck.json"
+RATE = r"\d+\.\d"
+SHARE = r"\d+\.\d{3}"
 LOAD = (1.5, 2.25, 3.0)
 SHORTS = [short_name(name) for name in (*VARIANTS, "torch_matmul")]
 ONE_CALL = r"one_call m=\d+ n=\d+ k=\d+ " + " ".join(
@@ -189,3 +198,145 @@ def test_timing_refuses_an_output_that_aliases_its_config(tmp_path, capsys):
     assert stand_in_main(timing_argv(config, config)) == EXIT_INVALID
     assert "must not alias the config" in capsys.readouterr().err
     assert config.read_bytes() == before
+
+
+def write_sources(tmp_path, timing=None):
+    """Write the recorded checklist and ceiling reports and a timing report."""
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    paths = {}
+    for name, report in (
+        ("checklist", json.loads(CHECKLIST_JSON)),
+        ("ceilings", json.loads(CEILING_JSON)),
+        ("timing", timing or timing_report()),
+    ):
+        paths[name] = tmp_path / f"{name}.json"
+        paths[name].write_bytes(canonical_json_bytes(report) + b"\n")
+    return paths
+
+
+def source_argv(paths):
+    return [
+        "--checklist-report",
+        str(paths["checklist"]),
+        "--ceiling-report",
+        str(paths["ceilings"]),
+        "--timing-report",
+        str(paths["timing"]),
+        "--rule-config",
+        str(RULE),
+    ]
+
+
+def test_bound_prints_each_side_and_step_and_verify_rebuilds_it(tmp_path, capsys):
+    paths = write_sources(tmp_path)
+    output = tmp_path / "bound.json"
+
+    assert main(["bound", *source_argv(paths), "--output", str(output)]) == EXIT_OK
+    lines = capsys.readouterr().out.splitlines()
+    report, summary = load_bound_report(output)
+
+    label = "synthetic_timing"
+    sides, rows = len(VARIANTS) + 1, sum(len(step.variants) for step in CHECKLIST)
+    assert len(lines) == 1 + 3 + 2 * (1 + sides) + 2 * rows + sides + 1
+    assert re.fullmatch(
+        rf"{label} ceilings fma_gflops=\d+\.\d bandwidth_gb_per_second=\d+\.\d\d "
+        r"ridge_flops_per_byte=\d+\.\d\d fma_scales_with_work=false",
+        lines[0],
+    )
+    assert lines[1].startswith(f"{label} source name=matmul_checklist report=")
+    assert lines[4].startswith(f"{label} roof m=256 n=256 k=256 ")
+    assert re.fullmatch(
+        rf"{label} bound m=256 n=256 k=256 side=s7_interior gflops={RATE} "
+        rf"fma_share={SHARE} model=tile_64x64x16_thread_4x4 "
+        rf"flops_per_byte=\d+\.\d{{6}} attainable_gflops={RATE} "
+        rf"attainable_share={SHARE} device_gb_per_second={RATE} "
+        rf'threadgroup_reads_per_ns={RATE} name="[a-z -]+" reason=\w+',
+        lines[14],
+    )
+    assert " side=x_columns " in lines[5] and " model=no_reuse " in lines[5]
+    assert "threadgroup_reads_per_ns=none" in lines[5]
+    assert " model=none " in lines[15] and " side=torch " in lines[15]
+    steps = [line for line in lines if " step step=" in line]
+    assert len(steps) == 2 * rows
+    assert steps[0].startswith(
+        f"{label} step step=S0 m=256 n=256 k=256 kernel=x_columns base=x_rows "
+        "device_bytes_ratio=1.000000 load_operations_ratio=1.000000 "
+        "threadgroup_reads_per_fma=none->none to_base="
+    )
+    assert "threadgroup_reads_per_fma=2.000000->1.250000" in steps[4]
+    assert lines[-2].startswith(f'{label} top side=torch name="')
+    assert lines[-1] == (
+        f"matmul_checklist_bound_synthetic_timing={report['report_sha256']} points=2 "
+        "sources_checked=true scope=synthetic_backend_or_clock measured=false "
+        "counters=false nsight=false instruments=false cuda=false nvidia=false "
+        "cublas=false"
+    )
+    assert summary["sources_checked"] is False
+    argv = ["verify", "--report", str(output), *source_argv(paths)]
+    assert main(argv) == EXIT_OK
+    assert capsys.readouterr().out == f"verified_{lines[-1]}\n"
+    assert main(["verify", "--report", str(output)]) == EXIT_OK
+    assert "sources_checked=false" in capsys.readouterr().out
+
+
+def test_verify_takes_all_three_sources_with_the_rule_config(tmp_path, capsys):
+    paths = write_sources(tmp_path)
+    report = tmp_path / "bound.json"
+    partial = ["verify", "--report", str(report), "--checklist-report", "c.json"]
+    sources = source_argv(paths)[:-2]
+
+    for argv in (partial, ["verify", "--report", str(report), *sources]):
+        with pytest.raises(SystemExit) as stopped:
+            main(argv)
+        assert stopped.value.code == EXIT_INVALID
+    assert "--rule-config" in capsys.readouterr().err
+
+
+def test_bound_rejects_tampered_sources_and_refuses_unpaired_ones(tmp_path, capsys):
+    paths = write_sources(tmp_path)
+    output = tmp_path / "bound.json"
+    source = json.loads(paths["checklist"].read_text())
+    source["label"] = "synthetic timing, not a measurement"
+    paths["checklist"].write_bytes(canonical_json_bytes(source) + b"\n")
+
+    assert main(["bound", *source_argv(paths), "--output", str(output)]) == (
+        EXIT_REJECTED
+    )
+    assert "rejected: checklist report" in capsys.readouterr().err
+    other = write_sources(
+        tmp_path, timing_report(mapping={**RECORDED_CONFIG, "seed": 78})
+    )
+    assert main(["bound", *source_argv(other), "--output", str(output)]) == (
+        EXIT_INVALID
+    )
+    assert "checklist report's config" in capsys.readouterr().err
+    assert not output.exists()
+
+
+def test_verify_rejects_a_tampered_bound_and_a_rebuild_that_differs(tmp_path, capsys):
+    paths = write_sources(tmp_path)
+    output = tmp_path / "bound.json"
+    assert main(["bound", *source_argv(paths), "--output", str(output)]) == EXIT_OK
+    capsys.readouterr()
+    report = json.loads(output.read_text())
+
+    tampered = tmp_path / "tampered.json"
+    report["points"][0]["calls_per_sample"] = 3
+    tampered.write_bytes(canonical_json_bytes(report) + b"\n")
+    assert main(["verify", "--report", str(tampered)]) == EXIT_REJECTED
+    assert "digest does not match" in capsys.readouterr().err
+    other = write_sources(tmp_path / "other", timing_report(scale={"matmul_x_rows": 2}))
+    argv = ["verify", "--report", str(output), *source_argv(other)]
+    assert main(argv) == EXIT_REJECTED
+    assert "supplied source reports" in capsys.readouterr().err
+
+
+def test_bound_refuses_an_output_that_aliases_an_input(tmp_path, capsys):
+    paths = write_sources(tmp_path)
+    before = paths["timing"].read_bytes()
+
+    argv = ["bound", *source_argv(paths), "--output", str(paths["timing"])]
+    assert main(argv) == EXIT_INVALID
+    assert "must not alias an input" in capsys.readouterr().err
+    assert paths["timing"].read_bytes() == before
