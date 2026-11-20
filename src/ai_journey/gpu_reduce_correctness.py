@@ -10,8 +10,8 @@ These rules apply, and a case that breaks one stops the run:
   quiet-NaN sentinels, so no thread wrote past its slot;
 - the result is finite, because a read past n would add a sentinel of the
   input tail;
-- the result lies within the bound of the kernel's order, and it equals the
-  exact sum when every partial sum of every order is exact.
+- the result of every run lies within the bound of the kernel's order, and
+  it equals the exact sum when every partial sum of every order is exact.
 
 Two facts are measured and recorded, not required. ``same_bits_every_run``
 is true only when every run of a kernel gave the same bits in both whole
@@ -164,7 +164,11 @@ class CaseResult:
 def check_case(
     backend: object, *, seed: int, index: int, case: ReduceCase, runs: int
 ) -> CaseResult:
-    """Run every step kernel ``runs`` times on one case and check each result."""
+    """Run every step kernel ``runs`` times on one case and check each result.
+
+    Each run must hold the bound, not only the first: a later run that
+    leaves it stops the case. The first run's check is the one recorded.
+    """
 
     if not isinstance(case, ReduceCase):
         raise TypeError("case must be a ReduceCase")
@@ -175,27 +179,27 @@ def check_case(
     for name in STEP_KERNELS:
         launch, _ = checked_launches(backend.limits, name, case.n)
         groups = partial_count(name, case.n)
+        depth = summation_depth(name, case.n)
         first: ReductionBuffers | None = None
+        check: ReductionCheck | None = None
         same = True
-        for _ in range(runs):
+        for run in range(1, runs + 1):
             buffers = backend.run(name, values)
-            require_guards(buffers, name, groups, label)
+            result = require_guards(buffers, name, groups, label)
+            this = ReductionCheck(result, depth, sums)
+            if not this.within:
+                raise GpuReduceError(
+                    f"{label}: {name} run {run} sits {float(this.error)!r} from the "
+                    f"exact sum; the bound of its order is {float(this.bound)!r}"
+                    + (" and the sum is exact" if sums.exact_in_any_order else "")
+                )
             if first is None:
-                first = buffers
+                first, check = buffers, this
                 continue
             same = (
                 same
                 and numpy.array_equal(_bits(first.partials), _bits(buffers.partials))
                 and numpy.array_equal(_bits(first.output), _bits(buffers.output))
-            )
-        check = ReductionCheck(
-            float(first.output[0]), summation_depth(name, case.n), sums
-        )
-        if not check.within:
-            raise GpuReduceError(
-                f"{label}: {name} sits {float(check.error)!r} from the exact sum; "
-                f"the bound of its order is {float(check.bound)!r}"
-                + (" and the sum is exact" if sums.exact_in_any_order else "")
             )
         outcomes.append(KernelOutcome(name, launch, runs, same, check))
     return CaseResult(index, case, array_sha256(values), sums, tuple(outcomes))

@@ -203,6 +203,37 @@ def test_an_exact_case_off_by_one_ulp_stops_even_inside_the_bound():
         run_case(StandInBackend(drift={R5}), "ones", 1000003)
 
 
+class LateFaultBackend(StandInBackend):
+    """A stand-in whose runs of one kernel after the first move the result."""
+
+    def __init__(self, name, move):
+        super().__init__()
+        self.name, self.move = name, move
+
+    def run(self, name, values):
+        buffers = super().run(name, values)
+        if name == self.name and self.runs.count(name) > 1:
+            buffers.output[0] = self.move(buffers.output[0])
+        return buffers
+
+
+@pytest.mark.parametrize(
+    ("pattern", "move", "message"),
+    [
+        ("normal", lambda value: value * numpy.float32(1e4), "run 2 sits"),
+        (
+            "ones",
+            lambda value: numpy.nextafter(value, numpy.float32(numpy.inf)),
+            "run 2 sits .* and the sum is exact",
+        ),
+    ],
+)
+def test_a_later_run_outside_its_bound_stops_the_case(pattern, move, message):
+    # Changed bits inside the bound are recorded, but each run holds the bound.
+    with pytest.raises(GpuReduceError, match=message):
+        run_case(LateFaultBackend(R2, move), pattern, 33793, runs=3)
+
+
 def test_changed_bits_between_runs_and_orders_are_recorded_not_refused():
     result = run_case(StandInBackend(flaky={R5}, drift={R3}), "normal", 300007, runs=3)
     outputs = {output["kernel"]: output for output in result.to_mapping()["outputs"]}

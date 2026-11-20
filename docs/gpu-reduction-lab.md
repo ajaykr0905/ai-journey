@@ -378,10 +378,12 @@ these conditions:
   output lost a quiet-NaN sentinel.
 - The result is not finite. The input has a tail of 1024 quiet-NaN sentinels,
   so a read past n gives NaN.
-- The result is outside its bound, or it is not exact in an exact case.
+- The result of one of the runs is outside its bound, or it is not exact in
+  an exact case. The run checks each of the 3 results, not only the first.
 
 The record states if every run of a kernel gave the same bits in both whole
-buffers. A different result does not stop the run. It is a measured fact.
+buffers. A different result inside the bound does not stop the run. It is a
+measured fact.
 
 ## Timing
 
