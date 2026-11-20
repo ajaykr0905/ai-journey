@@ -335,12 +335,21 @@ GPU must do these steps to time the five kernels against cuBLAS:
    digest of its case in `docs/gpu-tiled-cuda-contract.md`.
 7. Run `sgemm_row_major` on each case. Each output must stay inside the error
    bound of its case. Check the TF32 assumption of Day 76 on that host.
-8. Time each kernel and each cuBLAS call after warm-up calls, for example with
-   CUDA events. Use the benchmark shapes of `config/day-74-matmul-metal.json`.
-9. Record the load averages of the host before and after the timing.
-10. Divide `2 * m * n * k` by each median time to get GFLOP/s. Divide the rate
+8. Time each kernel and each cuBLAS call on the same device operands, after
+   warm-up calls, for example with CUDA events. Use the benchmark shapes of
+   `config/day-74-matmul-metal.json`.
+9. In repeat r, time side r mod S first, where S is the number of sides. Thus
+   the order moves by one side at each repeat, as in the Day 76 Metal lab.
+10. Record the load averages of the host before and after the timing.
+11. Divide `2 * m * n * k` by each median time to get GFLOP/s. Divide the rate
     of each kernel by the cuBLAS rate for the same shape.
-11. Seal the times, the host records and the correctness results in a report
+12. Apply the ratio rule of the Day 76 Metal lab. A ratio is `faster` only when
+    it is 1.1 or more and the IQR ranges of the two sides do not overlap. The
+    same test in the other direction gives `slower`. Otherwise the verdict is
+    `no_clear_difference`.
+13. Keep each verdict in the report, also each `slower` and each
+    `no_clear_difference` verdict.
+14. Seal the times, the host records and the correctness results in a report
     that a verifier checks.
 
 A later run that changes a text must run `check` on it again and record its new

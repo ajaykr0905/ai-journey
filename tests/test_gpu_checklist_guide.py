@@ -1,5 +1,6 @@
 """Tests that the Day 77 CUDA guide states what the code does. No CUDA runs."""
 
+import json
 import re
 import shlex
 from pathlib import Path
@@ -28,6 +29,7 @@ from ai_journey.gpu_checklist_occupancy import (
     live_floats,
 )
 from ai_journey.gpu_tiled_blocksim import PHASE_STEPS
+from ai_journey.matmul_tiled_comparison import VERDICTS
 from ai_journey.memory_access_tiling import MatmulShape, TiledMatmulTraffic
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -212,6 +214,31 @@ def test_the_guide_states_the_evidence_boundary_and_the_exit_codes():
         gpu_checklist_cli.EXIT_REJECTED,
         gpu_checklist_cli.EXIT_INVALID,
     ) == (0, 1, 2)
+
+
+def test_the_later_run_keeps_the_speedup_method_of_the_metal_lab():
+    plan = flat(guide().split("\n## What a later NVIDIA run must do\n", 1)[1])
+    plan = plan.split(" ## ", 1)[0]
+    config = json.loads((ROOT / "config/day-76-matmul-tiled.json").read_bytes())
+    minimum = config["comparison"]["min_faster_ratio"]
+
+    # One operand set, an order that moves at each repeat, the Day 76 rule and
+    # every verdict, so a later run cannot report only the faster ratios.
+    for phrase in (
+        "Time each kernel and each cuBLAS call on the same device operands,",
+        "In repeat r, time side r mod S first, where S is the number of sides.",
+        "Thus the order moves by one side at each repeat, as in the Day 76 Metal "
+        "lab.",
+        f"A ratio is `faster` only when it is {minimum} or more and the IQR "
+        "ranges of the two sides do not overlap.",
+        "The same test in the other direction gives `slower`.",
+        "Otherwise the verdict is `no_clear_difference`.",
+        "Keep each verdict in the report, also each `slower` and each "
+        "`no_clear_difference` verdict.",
+    ):
+        assert phrase in plan, phrase
+    assert minimum == 1.1
+    assert VERDICTS == ("faster", "slower", "no_clear_difference")
 
 
 def test_the_nvidia_preflight_job_covers_the_checklist_files():
