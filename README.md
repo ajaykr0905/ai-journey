@@ -1010,6 +1010,112 @@ the installed wheel. CI job `nvidia-preflight-contracts` runs the CUDA contract
 tests. See the [tiled matmul lab guide](docs/matmul-tiled-lab.md) and the
 [tiled CUDA contract guide](docs/gpu-tiled-cuda-contract.md).
 
+## Apply a GPU performance checklist and record the speedup of each step
+
+The Day 77 labs apply a GPU performance checklist to the float32 matmul of the
+Day 74 and Day 76 labs. The items are coalescing, occupancy, tiling,
+arithmetic intensity, memory vs compute bound and control divergence. Three
+commands do this work:
+
+- `ai-journey-matmul-checklist` declares eight steps, S0 to S7, each with one
+  change and one hypothesis. It checks each kernel and times it with
+  `torch.matmul` on the Apple GPU of a Mac.
+- `python -m ai_journey.matmul_checklist_bound_cli` times one call of each
+  side. It compares each rate with the measured Day 74 ceilings and a traffic
+  model, and it gives the Day 75 bottleneck name.
+- `python -m ai_journey.gpu_checklist_cli` writes thread-coarsened and
+  register-blocked CUDA matmul texts. It checks the texts without a compiler.
+
+These commands run the Metal lab on a Mac and check the CUDA texts on any
+host:
+
+```bash
+ai-journey-matmul-checklist run \
+  --config config/day-77-matmul-checklist.json \
+  --output /tmp/day-77-matmul-checklist.json
+ai-journey-matmul-checklist verify \
+  --report /tmp/day-77-matmul-checklist.json \
+  --config config/day-77-matmul-checklist.json
+python -m ai_journey.gpu_checklist_cli sources \
+  --output-dir /tmp/day-77-cuda-sources
+python -m ai_journey.gpu_checklist_cli check \
+  --source-dir /tmp/day-77-cuda-sources
+```
+
+The bound commands read the checklist report, a gpu-ceilings report and a
+one-call timing report. The printable checklist guide gives these commands in
+order. Every hypothesis entered the repository before the first timed run of a
+Day 77 kernel.
+
+On the development host, one run of the pinned config gave these speedups.
+Each cell gives the ratio of the median GFLOP/s of the step kernel to that of
+its base kernel, at one sweep point. Each median comes from 11 samples. The
+word after the ratio is the verdict of the Day 76 rule.
+
+| Step | Item | Kernel | Base kernel | 1024 x 1024 x 1024 | 2048 x 2048 x 2048 | 4096 x 4096 x 4096 | 2000 x 3000 x 1000 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| S0 | coalescing | `matmul_x_columns` | `matmul_x_rows` | 1.983, faster | 2.647, faster | 1.753, faster | 3.296, faster |
+| S1 | tiling | `matmul_tiled_32` | `matmul_x_columns` | 0.914, no clear difference | 0.893, slower | 1.142, faster | 0.889, slower |
+| S2 | arithmetic intensity | `matmul_s2_coarse_4x1` | `matmul_tiled_32` | 1.942, faster | 2.036, faster | 1.807, faster | 2.163, faster |
+| S3 | arithmetic intensity | `matmul_s3_block_4x4` | `matmul_s2_coarse_4x1` | 1.463, no clear difference | 1.662, faster | 1.896, faster | 1.808, faster |
+| S4 | memory vs compute bound | `matmul_s4_vec4` | `matmul_s3_block_4x4` | 1.324, faster | 1.319, faster | 1.350, faster | 1.153, faster |
+| S5 | tiling | `matmul_s5_pad4` | `matmul_s4_vec4` | 1.060, no clear difference | 0.981, no clear difference | 0.986, no clear difference | 1.002, no clear difference |
+| S6 | occupancy | `matmul_s6_group_8x8` | `matmul_s5_pad4` | 0.886, no clear difference | 1.038, no clear difference | 1.025, no clear difference | 1.024, no clear difference |
+| S6 | occupancy | `matmul_s6_group_32x32` | `matmul_s5_pad4` | 0.712, no clear difference | 0.749, slower | 0.779, slower | 0.722, slower |
+| S7 | control divergence | `matmul_s7_interior` | `matmul_s5_pad4` | 1.015, no clear difference | 1.164, faster | 1.182, faster | 1.080, no clear difference |
+
+The rule calls a ratio faster or slower only when it is 1.1 or more in that
+direction and the IQR ranges do not overlap. The steps form one chain, so each
+ratio measures one change on top of the changes before it. The predictions
+held at 24 of 36 points. They failed most for S4 and for the 8 x 8 groups, at
+all four points each.
+
+S7 was the fastest kernel at each point. It reached 1312.0 to 1825.8 GFLOP/s,
+3.70 to 6.16 times the S0 rate. That is 0.518 to 0.584 of the `torch.matmul`
+rate at the same point. The report recorded load averages of 19.21, 21.17 and
+23.01 before the run and 16.63, 20.39 and 22.64 after it. The `uptime` command
+printed 16.11, 20.65 and 22.85 before the lock.
+
+The bound run joined that report with a gpu-ceilings run and a one-call timing
+run of the same day. The FMA ceiling was 4835.1 GFLOP/s. The highest FMA share
+of a kernel was 0.378, for S7 at 4096 cubed. `torch.matmul` reached 0.465 to
+0.728. The rule named 16 of the 44 points `latency or occupancy-bound`, a
+residual name, and the other 28 points `indeterminate`. The `uptime` command
+printed 17.24, 15.91 and 16.75 before the ceiling run.
+
+All values in the table and in the three paragraphs after it come from
+host-specific Apple GPU (Metal) measurements on one shared host. They are not
+portable figures.
+
+The CUDA check runs 11 checks on each coarsened text and 12 checks on each
+blocked text, at each of 18 Day 74 shapes. Each pinned text passes each check.
+The CPU block simulator gives the replay bits in all 45 runs. These results
+come from text checks and a CPU model, not from a GPU.
+
+The Metal commands exit 0 on success and 1 when a report fails verification.
+They exit 2 for usage errors, unreadable or invalid inputs, or a refused
+output. The bound command also exits 2 for reports that do not pair. Code 2
+also marks a run that failed a check, had a device error or exceeded its time
+budget. Code 3 means that the host cannot run Metal kernels through PyTorch.
+The CUDA command needs no GPU, so it uses only the codes 0, 1 and 2.
+
+Evidence boundary: the Metal numbers come from one Apple GPU through Metal on
+one host. PyTorch does not name the kernel of `torch.matmul`, so the vendor
+number names the call, not a kernel. No CUDA kernel ran, the labs used no
+NVIDIA GPU, and they did not measure cuBLAS. Nothing compiled or ran the CUDA
+texts. The labs read no hardware counter, so they did not measure occupancy.
+Each bottleneck name is an inference from timings and measured ceilings, not
+from hardware counters.
+
+CI job `matmul-checklist-contracts` runs the checklist and bound tests on
+Linux with CPU torch. It also requires each installed Apple GPU command to
+exit 3 and write no report. Then it verifies the recorded reports and builds
+their bound again from the installed wheel. CI job
+`nvidia-preflight-contracts` runs the CUDA contract tests. See the
+[checklist lab guide](docs/matmul-checklist-lab.md), the
+[printable GPU checklist](docs/gpu-performance-checklist.md) and the
+[checklist CUDA contract guide](docs/gpu-checklist-cuda-contract.md).
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with

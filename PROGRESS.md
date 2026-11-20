@@ -1,6 +1,6 @@
 # Progress and Evidence
 
-Last updated: 2026-11-19
+Last updated: 2026-11-20
 
 This file separates repository-verifiable work from activities that require the
 learner's own completion evidence.
@@ -57,6 +57,7 @@ learner's own completion evidence.
 | 66 | Stable 5-word shingles, seeded 128-value MinHash signatures, 16-band LSH candidate discovery, exact 0.8 Jaccard acceptance, transitive clustering, deterministic representatives, removal metrics, atomic sealed publication, independent source-byte replay, installed CLI, and CI gate present | Stanford CS336 Lecture 14 and multimodal vision-tower support video pending user confirmation | Learner-run deduplication over the Project 1 corpus, removal-rate interpretation, duplicate-cluster inspection, threshold tradeoff explanation, and personal lecture notes pending |
 | 75 | torch.profiler capture of the Day 74 Metal kernels, MPS event timing, a named bottleneck per matmul shape with stated thresholds, simulator hotspot rounds, sealed reports, independent verifiers, installed commands, and CI gates present | GPU MODE Lecture 1 and the Nsight Systems video pending user confirmation | Learner-run profiler capture, personal reading of the trace, own bottleneck explanation, and confirmation on a second machine pending |
 | 76 | Tiled Metal matmul kernels with threadgroup memory at tiles 8, 16 and 32 present. Naive, tiled and torch.matmul numbers from one Apple GPU run, a one-call timing and a gap to the measured ceilings present. Tiled CUDA and cuBLAS SGEMM texts checked without a compiler and a CPU simulation of the tiled CUDA kernel present. Sealed reports, independent verifiers, an installed command, and CI gates present | GPU MODE Lectures 5 and 16 pending user confirmation | Learner-run tiled kernel, own explanation of why the tiles were not faster, and a CUDA and cuBLAS run on an NVIDIA GPU pending |
+| 77 | A declared performance checklist with one hypothesis for each step, committed before timing, and seven new Metal matmul kernels from one block template present. One Apple GPU run with the speedup of each step over its base kernel, over S0 and against torch.matmul present. A one-call timing and a bound from measured ceilings and a traffic model present. Thread-coarsened and register-blocked CUDA texts checked without a compiler, a CPU block simulation and a declared occupancy present. Sealed reports, independent verifiers, an installed command, and CI gates present | GPU MODE Lectures 8 and 2 pending user confirmation | Learner-printed checklist, learner-run steps on the learner's own matmul, own explanation of the missed hypotheses, and an NVIDIA run of the CUDA texts pending |
 
 “Implemented” means the repository contains executable code and automated checks.
 It does not claim that a video was watched, a notebook was run in a hosted service,

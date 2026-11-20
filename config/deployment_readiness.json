@@ -1528,7 +1528,8 @@
     "tests/test_matmul_checklist_speedup.py",
     "tests/test_matmul_checklist_steps.py",
     "tests/test_matmul_checklist_variants.py",
-    "tests/test_matmul_checklist_verify.py"
+    "tests/test_matmul_checklist_verify.py",
+    "tests/test_matmul_checklist_delivery.py"
   ],
   "required_directories": [
     "days",
