@@ -23,11 +23,13 @@ These rules keep each stored output equal to ``fma_replay`` in principle:
 The switches:
 
 - ``vector_loads``: stage four consecutive floats with one ``float4`` load and
-  one ``float4`` store when K (for A) or N (for B) is a multiple of 4, so
-  every vector address is 16-byte aligned. Otherwise the scalar edge path
-  stages the tile. A float4 that lies past the matrix is zero.
+  one ``float4`` store when K (for A) or N (for B) is a multiple of 4, and on
+  the scalar edge path otherwise. BK and BN must be multiples of 4 too, so
+  every vector address is 16-byte aligned and each float4 holds four floats
+  of one tile row. A float4 that lies past the matrix is zero.
 - ``pad``: add ``pad`` floats to each tile row in threadgroup memory, a bank
-  conflict control. It is a multiple of 4 so that rows stay 16-byte aligned.
+  conflict control. Each padded row holds whole float4 values, so rows stay
+  16-byte aligned, and with vector loads the pad is a multiple of 4.
 - ``interior_path``: a group whose tile lies inside M and N, with K and N
   multiples of 4, runs each full phase with no zero-fill select and a
   constant loop bound, and stores with no guard. Edge groups and the K tail
@@ -103,6 +105,15 @@ class BlockDesign:
         # float4 storage needs every row to hold whole float4 values.
         if self.a_stride % VECTOR_WIDTH or self.b_stride % VECTOR_WIDTH:
             raise MatmulChecklistError("each tile row must hold whole float4 values")
+        # A float4 stage moves four floats of one row of data, not of padding:
+        # with BK or BN off a multiple of 4 it would skip columns and load from
+        # addresses that are not 16-byte aligned.
+        if self.vector_loads and (
+            self.block_k % VECTOR_WIDTH or self.block_n % VECTOR_WIDTH
+        ):
+            raise MatmulChecklistError(
+                "float4 staging needs BK and BN to be multiples of 4"
+            )
         if self.interior_path and not self.vector_loads:
             raise MatmulChecklistError("the interior path needs vector loads")
         if self.threadgroup_bytes > MAX_THREADGROUP_BYTES:

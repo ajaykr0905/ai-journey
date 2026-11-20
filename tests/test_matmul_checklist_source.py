@@ -9,6 +9,7 @@ from ai_journey.matmul_checklist_source import (
     LOOP_STATEMENT,
     MAX_THREADGROUP_BYTES,
     STORE_GUARD,
+    BlockDesign,
     MatmulChecklistError,
     block_kernel_source,
 )
@@ -222,3 +223,24 @@ def test_a_design_is_refused_before_any_text_exists():
         block_kernel_source(base.to_mapping())
     largest = max(design.threadgroup_bytes for design in DESIGNS)
     assert largest <= MAX_THREADGROUP_BYTES == 32768
+
+
+@pytest.mark.parametrize(
+    ("block_m", "block_n", "block_k", "thread_m", "thread_n", "pad"),
+    [(8, 6, 6, 1, 1, 2), (64, 62, 14, 4, 2, 2), (8, 5, 5, 1, 1, 3)],
+)
+def test_a_float4_design_needs_bk_and_bn_in_whole_float4_values(
+    block_m, block_n, block_k, thread_m, thread_n, pad
+):
+    # The padding makes each padded row a whole number of float4 values, but
+    # a float4 stage of BK or BN floats would skip the last BK % 4 or BN % 4
+    # columns of each phase, and a phase or group would start a float4 load
+    # at an address that is not 16-byte aligned.
+    sizes = (block_m, block_n, block_k, thread_m, thread_n)
+    for interior_path in (False, True):
+        with pytest.raises(MatmulChecklistError, match="BK and BN to be multiples"):
+            BlockDesign("matmul_odd", *sizes, True, pad, interior_path)
+    # The scalar path stages one float at a time, so these sizes stay valid.
+    scalar = BlockDesign("matmul_odd", *sizes, False, pad, False)
+    assert scalar.a_stride % 4 == scalar.b_stride % 4 == 0
+    assert "(device const float4*)" not in block_kernel_source(scalar)
