@@ -1704,3 +1704,73 @@ jobs:
             ${{ runner.temp }}/gpu-timing-evidence/
             ${{ runner.temp }}/gpu-timing-dist/
           if-no-files-found: error
+  matmul-tiled-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Day 76 tiled lab contract tools and CPU-only PyTorch
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check the tiled matmul and tiled gap contracts without an Apple GPU
+        run: |
+          ruff check src/ai_journey/matmul_tiled_*.py tests/test_matmul_tiled_*.py
+          ruff format --check src/ai_journey/matmul_tiled_*.py tests/test_matmul_tiled_*.py
+          python -m compileall -q src/ai_journey/matmul_tiled_*.py tests/test_matmul_tiled_*.py
+          python -m pytest -q -rs tests/test_matmul_tiled_*.py
+      - name: Build and install isolated Day 76 tiled lab wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/matmul-tiled-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/matmul-tiled-installed" "$RUNNER_TEMP"/matmul-tiled-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/matmul-tiled-evidence"
+      - name: Check that each installed Apple GPU command stops where MPS is not available
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/matmul-tiled-installed
+        run: |
+          export PATH="$RUNNER_TEMP/matmul-tiled-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/matmul-tiled-installed/")'
+          python -c 'import torch; assert not torch.backends.mps.is_available()'
+          status=0
+          ai-journey-matmul-tiled run --config "$GITHUB_WORKSPACE/config/day-76-matmul-tiled.json" --output "$RUNNER_TEMP/matmul-tiled-evidence/matmul-tiled.json" 2> "$RUNNER_TEMP/matmul-tiled-evidence/matmul-tiled-unavailable.txt" || status=$?
+          cat "$RUNNER_TEMP/matmul-tiled-evidence/matmul-tiled-unavailable.txt"
+          test "$status" -eq 3
+          grep -F "matmul-tiled run unavailable: Metal kernels run only on macOS (unsupported_operating_system)" "$RUNNER_TEMP/matmul-tiled-evidence/matmul-tiled-unavailable.txt"
+          test ! -e "$RUNNER_TEMP/matmul-tiled-evidence/matmul-tiled.json"
+          status=0
+          python -m ai_journey.matmul_tiled_gap_cli timing --config "$GITHUB_WORKSPACE/config/day-76-matmul-tiled.json" --output "$RUNNER_TEMP/matmul-tiled-evidence/one-call-timing.json" 2> "$RUNNER_TEMP/matmul-tiled-evidence/one-call-timing-unavailable.txt" || status=$?
+          cat "$RUNNER_TEMP/matmul-tiled-evidence/one-call-timing-unavailable.txt"
+          test "$status" -eq 3
+          grep -F "matmul-tiled-gap timing unavailable: Metal kernels run only on macOS (unsupported_operating_system)" "$RUNNER_TEMP/matmul-tiled-evidence/one-call-timing-unavailable.txt"
+          test ! -e "$RUNNER_TEMP/matmul-tiled-evidence/one-call-timing.json"
+      - name: Verify the recorded Apple GPU reports and rebuild their gap with the installed package
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/matmul-tiled-installed
+        run: |
+          export PATH="$RUNNER_TEMP/matmul-tiled-installed/bin:$PATH"
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_matmul_tiled_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/matmul-tiled-evidence/recorded-matmul-tiled.json"
+          ai-journey-matmul-tiled verify --report "$RUNNER_TEMP/matmul-tiled-evidence/recorded-matmul-tiled.json"
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_matmul_tiled_gap_recorded import RECORDED_TIMING_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_TIMING_JSON + "\n")' "$RUNNER_TEMP/matmul-tiled-evidence/recorded-one-call-timing.json"
+          python -m ai_journey.matmul_tiled_gap_cli verify-timing --report "$RUNNER_TEMP/matmul-tiled-evidence/recorded-one-call-timing.json"
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_gpu_ceiling_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/matmul-tiled-evidence/recorded-gpu-ceilings.json"
+          python -m ai_journey.matmul_tiled_gap_cli gap --tiled-report "$RUNNER_TEMP/matmul-tiled-evidence/recorded-matmul-tiled.json" --ceiling-report "$RUNNER_TEMP/matmul-tiled-evidence/recorded-gpu-ceilings.json" --timing-report "$RUNNER_TEMP/matmul-tiled-evidence/recorded-one-call-timing.json" --rule-config "$GITHUB_WORKSPACE/config/day-75-matmul-bottleneck.json" --output "$RUNNER_TEMP/matmul-tiled-evidence/recorded-gap.json"
+          python -m ai_journey.matmul_tiled_gap_cli verify --report "$RUNNER_TEMP/matmul-tiled-evidence/recorded-gap.json" --tiled-report "$RUNNER_TEMP/matmul-tiled-evidence/recorded-matmul-tiled.json" --ceiling-report "$RUNNER_TEMP/matmul-tiled-evidence/recorded-gpu-ceilings.json" --timing-report "$RUNNER_TEMP/matmul-tiled-evidence/recorded-one-call-timing.json" --rule-config "$GITHUB_WORKSPACE/config/day-75-matmul-bottleneck.json"
+      - name: Retain the refused runs, the recorded reports, their gap and the package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matmul-tiled-contracts-evidence
+          path: |
+            ${{ runner.temp }}/matmul-tiled-evidence/
+            ${{ runner.temp }}/matmul-tiled-dist/
+          if-no-files-found: error
