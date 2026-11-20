@@ -1,6 +1,8 @@
 """CPU tests of the Day 78 CUDA reduction command. No test compiles or runs CUDA."""
 
+import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +18,7 @@ from ai_journey.gpu_reduce_cuda_cli import (
     SUMS_FILE,
     main,
 )
+from test_gpu_reduce_recorded import RECORDED_CONFIG
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_NAMES = ["reduce_r1_shared.cu", "reduce_warp_shuffle.cu"]
@@ -86,10 +89,16 @@ def test_the_module_runs_as_a_command_with_usage_errors_as_code_2():
     assert command().returncode == 2
     assert command("sources").returncode == 2
     assert command("check").returncode == 2
+    assert command("simulate").returncode == 2
 
 
 @pytest.mark.parametrize(
-    "argv", [["sources", "--output", "x"], ["check", "--source", "x"]]
+    "argv",
+    [
+        ["sources", "--output", "x"],
+        ["check", "--source", "x"],
+        ["simulate", "--conf", "x"],
+    ],
 )
 def test_the_commands_refuse_abbreviated_options(argv):
     with pytest.raises(SystemExit) as raised:
@@ -153,3 +162,36 @@ def test_check_fails_on_a_missing_or_non_ascii_file(tmp_path, capsys):
     (tmp_path / "reduce_r1_shared.cu").write_bytes(b"// caf\xc3\xa9\n")
     assert main(["check", "--source-dir", str(tmp_path)]) == EXIT_INVALID
     assert "must be ASCII text" in capsys.readouterr().err
+
+
+def test_simulate_prints_one_prediction_per_kernel_and_input(tmp_path, capsys):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(RECORDED_CONFIG), encoding="utf-8")
+
+    assert main(["simulate", "--config", str(config)]) == EXIT_OK
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 2 * (6 + 2) + 1
+    assert lines[0] == (
+        "cuda_prediction kernel=reduce_r1_shared input=case-0 pattern=normal n=1 "
+        "output=-0.3776976764202118 bits=0xbec16197 depth=18 bound_ratio=0 "
+        "exact=true race_free=true compiled=false"
+    )
+    assert lines[-2].startswith(
+        "cuda_prediction kernel=reduce_warp_shuffle input=timing-1 pattern=timing "
+        "n=1048576 output=1615.739501953125 bits=0x44c9f7aa depth=20 "
+    )
+    assert re.fullmatch(
+        r"gpu_reduce_cuda_predictions=[0-9a-f]{64} config=[0-9a-f]{12} kernels=2 "
+        r"inputs=8 within_bounds=16/16 race_free=16/16 compiled=false",
+        lines[-1],
+    )
+
+
+def test_simulate_refuses_an_invalid_config(tmp_path, capsys):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({**RECORDED_CONFIG, "plan_sha256": "0" * 64}))
+
+    assert main(["simulate", "--config", str(config)]) == EXIT_INVALID
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("gpu-reduce-cuda simulate failed: plan_sha256")

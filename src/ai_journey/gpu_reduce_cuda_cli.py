@@ -1,4 +1,4 @@
-"""Write the Day 78 CUDA reduction texts, and check them without a compiler.
+"""Write the Day 78 CUDA reduction texts, check them and predict their results.
 
 ``sources`` writes the two texts of ``gpu_reduce_cuda``, each as its own
 ``.cu`` file, and a ``SHA256SUMS`` file that ``sha256sum -c`` reads on the
@@ -8,10 +8,16 @@ correctness sizes and the timing sizes. Each command prints one line for
 each source file, and ``check`` also says whether a file still has its
 pinned digest.
 
+``simulate`` reads a Day 78 config, runs both schedules on the CPU for each
+correctness case and each timing size, and prints one line for each kernel
+and input, with the predicted bits, and a summary line with the digest of
+all predictions. A later NVIDIA run compares its results with these bits.
+
 No command compiles, links or runs CUDA, and none needs a GPU or a clock, so
 the lab has no exit code for a missing device.
 
-Exit codes: 0 success; 1 a text was read but failed a check; 2 usage errors,
+Exit codes: 0 success; 1 a text was read but failed a check, or a predicted
+result broke its bound, its counts or its hazard log; 2 usage errors,
 unreadable or invalid inputs and refused outputs.
 """
 
@@ -28,7 +34,9 @@ from .gpu_reduce_cuda import (
     source_files,
     source_sha256,
 )
+from .gpu_reduce_config import load_config
 from .gpu_reduce_cuda_check import CHECK_SIZES, check_reduce_source
+from .gpu_reduce_cuda_sim import Prediction, predict, predictions_sha256
 from .kernel_launch_io import read_bounded, write_atomic
 
 EXIT_OK = 0
@@ -62,6 +70,12 @@ def build_parser() -> argparse.ArgumentParser:
         allow_abbrev=False,
     )
     check.add_argument("--source-dir", type=Path, required=True)
+    simulate = commands.add_parser(
+        "simulate",
+        help="predict the bits of both kernels for each input of a Day 78 config",
+        allow_abbrev=False,
+    )
+    simulate.add_argument("--config", type=Path, required=True)
     return parser
 
 
@@ -115,6 +129,48 @@ def check_sources(directory: Path) -> tuple[list[str], list[str]]:
     return lines, failures
 
 
+def _flag(value: bool) -> str:
+    return "true" if value else "false"
+
+
+def prediction_line(prediction: Prediction) -> str:
+    """Return the printed line of one predicted result."""
+
+    record = prediction.to_mapping()
+    return (
+        f"cuda_prediction kernel={record['kernel']} input={record['input']} "
+        f"pattern={record['pattern']} n={record['n']} output={record['output']!r} "
+        f"bits={record['output_bits']} depth={record['depth']} "
+        f"bound_ratio={record['bound_ratio']:.3g} "
+        f"exact={_flag(record['exact_result'])} "
+        f"race_free={_flag(record['race_free'])} compiled=false"
+    )
+
+
+def simulate_config(path: Path) -> tuple[list[str], list[str]]:
+    """Predict both kernels on every input of a config; return lines and failures."""
+
+    config = load_config(path)
+    predictions = predict(config)
+    lines = [prediction_line(prediction) for prediction in predictions]
+    failures = [
+        f"{prediction.kernel} on {prediction.input} breaks its bound, counts or log"
+        for prediction in predictions
+        if not prediction.passed
+    ]
+    inputs = len({prediction.input for prediction in predictions})
+    kernels = len({prediction.kernel for prediction in predictions})
+    within = sum(prediction.check.within for prediction in predictions)
+    race_free = sum(prediction.to_mapping()["race_free"] for prediction in predictions)
+    lines.append(
+        f"gpu_reduce_cuda_predictions={predictions_sha256(predictions)} "
+        f"config={config.fingerprint()[:12]} kernels={kernels} inputs={inputs} "
+        f"within_bounds={within}/{len(predictions)} "
+        f"race_free={race_free}/{len(predictions)} compiled=false"
+    )
+    return lines, failures
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one command and return its explicit exit code."""
 
@@ -123,15 +179,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if arguments.command == "sources":
             lines = write_sources(arguments.output_dir)
-        else:
+        elif arguments.command == "check":
             lines, failures = check_sources(arguments.source_dir)
+        else:
+            lines, failures = simulate_config(arguments.config)
     except (OSError, TypeError, ValueError) as error:
         print(f"gpu-reduce-cuda {arguments.command} failed: {error}", file=sys.stderr)
         return EXIT_INVALID
     for line in lines:
         print(line)
     for failure in failures:
-        print(f"gpu-reduce-cuda check rejected: {failure}", file=sys.stderr)
+        print(
+            f"gpu-reduce-cuda {arguments.command} rejected: {failure}", file=sys.stderr
+        )
     return EXIT_REJECTED if failures else EXIT_OK
 
 
