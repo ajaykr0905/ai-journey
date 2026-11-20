@@ -1,14 +1,18 @@
-"""Write the Day 78 CUDA reduction texts for a later NVIDIA run.
+"""Write the Day 78 CUDA reduction texts, and check them without a compiler.
 
 ``sources`` writes the two texts of ``gpu_reduce_cuda``, each as its own
 ``.cu`` file, and a ``SHA256SUMS`` file that ``sha256sum -c`` reads on the
-NVIDIA host. It prints one line for each source file.
+NVIDIA host. ``check`` reads each of those files from a directory and checks
+it with ``gpu_reduce_cuda_check`` for the 14 sizes of the Day 78 config: the
+correctness sizes and the timing sizes. Each command prints one line for
+each source file, and ``check`` also says whether a file still has its
+pinned digest.
 
 No command compiles, links or runs CUDA, and none needs a GPU or a clock, so
 the lab has no exit code for a missing device.
 
-Exit codes: 0 success; 2 usage errors, unreadable or invalid inputs and
-refused outputs.
+Exit codes: 0 success; 1 a text was read but failed a check; 2 usage errors,
+unreadable or invalid inputs and refused outputs.
 """
 
 from __future__ import annotations
@@ -18,13 +22,21 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from .gpu_reduce_cuda import GpuReduceCudaError, source_files, source_sha256
-from .kernel_launch_io import write_atomic
+from .gpu_reduce_cuda import (
+    PINNED_KERNELS,
+    GpuReduceCudaError,
+    source_files,
+    source_sha256,
+)
+from .gpu_reduce_cuda_check import CHECK_SIZES, check_reduce_source
+from .kernel_launch_io import read_bounded, write_atomic
 
 EXIT_OK = 0
+EXIT_REJECTED = 1
 EXIT_INVALID = 2
 PROG = "ai-journey-gpu-reduce-cuda"
 SUMS_FILE = "SHA256SUMS"
+MAX_SOURCE_BYTES = 64 * 1024
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,6 +56,12 @@ def build_parser() -> argparse.ArgumentParser:
         allow_abbrev=False,
     )
     sources.add_argument("--output-dir", type=Path, required=True)
+    check = commands.add_parser(
+        "check",
+        help="check the texts in a directory for the Day 78 sizes",
+        allow_abbrev=False,
+    )
+    check.add_argument("--source-dir", type=Path, required=True)
     return parser
 
 
@@ -62,18 +80,59 @@ def write_sources(directory: Path) -> list[str]:
     return lines
 
 
+def _read_text(path: Path) -> str:
+    payload = read_bounded(path, limit=MAX_SOURCE_BYTES, label=path.name)
+    try:
+        return payload.decode("ascii")
+    except UnicodeDecodeError as error:
+        raise GpuReduceCudaError(f"{path.name} must be ASCII text") from error
+
+
+def check_sources(directory: Path) -> tuple[list[str], list[str]]:
+    """Check each pinned file in ``directory``; return its lines and failures.
+
+    A file that is missing or unreadable raises, because no check ran on it.
+    """
+
+    kernels = {kernel.file_name: kernel for kernel in PINNED_KERNELS}
+    lines, failures = [], []
+    for name, pinned in source_files():
+        text = _read_text(directory / name)
+        results = [
+            check_reduce_source(text, kernel=kernels[name], n=n) for n in CHECK_SIZES
+        ]
+        passed = sum(result for item in results for _, result in item.checks)
+        total = sum(len(item.checks) for item in results)
+        failed = dict.fromkeys(failure for item in results for failure in item.failures)
+        if failed:
+            failures.append(f"{name} fails {', '.join(failed)}")
+        digest = source_sha256(text)
+        lines.append(
+            f"cuda_check={name} sha256={digest} "
+            f"pinned={str(digest == source_sha256(pinned)).lower()} "
+            f"checks={passed}/{total} sizes={len(CHECK_SIZES)} compiled=false"
+        )
+    return lines, failures
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one command and return its explicit exit code."""
 
     arguments = build_parser().parse_args(argv)
+    failures: list[str] = []
     try:
-        lines = write_sources(arguments.output_dir)
+        if arguments.command == "sources":
+            lines = write_sources(arguments.output_dir)
+        else:
+            lines, failures = check_sources(arguments.source_dir)
     except (OSError, TypeError, ValueError) as error:
         print(f"gpu-reduce-cuda {arguments.command} failed: {error}", file=sys.stderr)
         return EXIT_INVALID
     for line in lines:
         print(line)
-    return EXIT_OK
+    for failure in failures:
+        print(f"gpu-reduce-cuda check rejected: {failure}", file=sys.stderr)
+    return EXIT_REJECTED if failures else EXIT_OK
 
 
 if __name__ == "__main__":
