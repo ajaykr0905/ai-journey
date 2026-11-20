@@ -8,6 +8,10 @@ config and its digest, both shader digests, the clock and domain
 definitions, the host environment without identifiers, the load averages,
 the raw samples of every side on every clock, the analysis and a summary.
 
+New reports seal schema version 2. It differs from version 1 only in the
+event-domain text, which no longer calls the interval device-side;
+``gpu_timing_clocks`` keeps the texts of both versions.
+
 Labels keep the evidence honest. Only the real ``GpuTimingRuntime`` with
 host timer ``time.perf_counter_ns`` makes a measurement, with the Day 73
 scope ``apple_gpu_metal_this_host`` and label ``host-specific Apple GPU
@@ -34,7 +38,7 @@ from .gpu_timing_clocks import (
     CLOCK_DOMAINS,
     CLOCKS,
     DISPATCH,
-    DOMAIN_DEFINITIONS,
+    DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION,
     EVENT,
     SYNCHRONIZED,
     GpuTimingError,
@@ -60,7 +64,7 @@ from .matmul_metal_source import KERNELS, source_sha256
 from .memory_access_benchmark import INJECTED_TIMER, PERCENTILE_METHOD, TIMER
 from .memory_access_report import DIGEST_FIELD, seal_report
 
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 REPORT_KIND = "gpu_timing_three_clocks"
 REPORT_DIGEST_FIELD = DIGEST_FIELD
 DEVICE = "mps"
@@ -227,7 +231,9 @@ def build_report(
             "order": list(CLOCKS),
             "definitions": dict(CLOCK_DEFINITIONS),
             "domains": dict(CLOCK_DOMAINS),
-            "domain_definitions": dict(DOMAIN_DEFINITIONS),
+            "domain_definitions": dict(
+                DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION[REPORT_SCHEMA_VERSION]
+            ),
             "schedule": SCHEDULE,
         },
         "planned_work": config.planned_work().to_mapping(),

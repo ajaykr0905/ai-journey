@@ -21,6 +21,12 @@ no event value is ever subtracted from a host value without the explicit
 ``cross_domain_difference`` record, which names both domains and says what
 the difference does and does not mean.
 
+Reports seal the domain texts of their schema version. Version 1 calls the
+event interval device-side, but the runtime test with a host sleep between
+the two records finds host time inside it, so version 2 says that the
+interval can also hold host time. A version-1 report keeps the words it was
+sealed with and still verifies.
+
 Event times arrive as float milliseconds. They are kept raw beside integer
 nanoseconds from ``round(ms * 1e6)``, so a verifier can redo the conversion
 and every statistic uses the same nearest-rank rule as the Day 73 and 74 labs.
@@ -66,18 +72,41 @@ CLOCK_DEFINITIONS = {
         "before the first reading and after the second"
     ),
 }
-DOMAIN_DEFINITIONS = {
-    DEVICE_DOMAIN: (
-        "device-side: the interval between two points in the MPS command "
-        "stream; the PyTorch MPS header says a command-buffer completion "
-        "handler stores each timed event's completion time and does not name "
-        "the clock it reads, so these values are never subtracted from host "
-        "values without a cross_domain record"
-    ),
-    HOST_DOMAIN: (
-        "host-side: time.perf_counter_ns on the CPU thread that issued the launch"
-    ),
+# The domain texts that each report schema_version seals. A sealed text never
+# changes: a new text needs a new version, and a report verifies only with
+# the texts of its own version.
+DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION = {
+    1: {
+        DEVICE_DOMAIN: (
+            "device-side: the interval between two points in the MPS command "
+            "stream; the PyTorch MPS header says a command-buffer completion "
+            "handler stores each timed event's completion time and does not name "
+            "the clock it reads, so these values are never subtracted from host "
+            "values without a cross_domain record"
+        ),
+        HOST_DOMAIN: (
+            "host-side: time.perf_counter_ns on the CPU thread that issued the "
+            "launch"
+        ),
+    },
+    2: {
+        DEVICE_DOMAIN: (
+            "the interval between two points in the MPS command stream, the "
+            "start and end events; it can also hold host time between the two "
+            "record() calls, including the launch call, so it is not GPU time "
+            "alone; the PyTorch MPS header says a command-buffer completion "
+            "handler stores each timed event's completion time and does not name "
+            "the clock it reads, so these values are never subtracted from host "
+            "values without a cross_domain record"
+        ),
+        HOST_DOMAIN: (
+            "host-side: time.perf_counter_ns on the CPU thread that issued the "
+            "launch"
+        ),
+    },
 }
+# The texts of the newest version, which every new report seals.
+DOMAIN_DEFINITIONS = DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION[2]
 CROSS_DOMAIN_MEANING = (
     "cross-domain: the host_synchronized median minus the mps_event median of "
     "the same side, from separate samples on two clocks; an estimate of the "

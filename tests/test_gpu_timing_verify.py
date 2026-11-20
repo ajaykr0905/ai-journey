@@ -7,12 +7,18 @@ from pathlib import Path
 
 import pytest
 
+from ai_journey.gpu_timing_clocks import (
+    DEVICE_DOMAIN,
+    DOMAIN_DEFINITIONS,
+    DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION,
+)
 from ai_journey.gpu_timing_config import config_from_mapping
-from ai_journey.gpu_timing_report import measure_report
+from ai_journey.gpu_timing_report import REPORT_SCHEMA_VERSION, measure_report
 from ai_journey.gpu_timing_verify import GpuTimingVerificationError, verify_report
 from ai_journey.memory_access_plan import canonical_json_bytes
 from ai_journey.memory_access_report import DIGEST_FIELD, seal_report
 from test_gpu_timing_config import small
+from test_gpu_timing_recorded import recorded
 from test_gpu_timing_report import stand_in_report
 from test_gpu_timing_runtime import timing_runtime
 from test_kernel_metal_runtime import requires_metal
@@ -266,3 +272,57 @@ def test_key_order_does_not_matter_because_files_hold_sorted_keys():
     payload = json.loads(canonical_json_bytes(report()))
 
     assert verify_report(payload)["measured"] is False
+
+
+def test_a_new_report_seals_schema_2_and_verifies_with_its_event_text():
+    payload = report()
+    texts = payload["clocks"]["domain_definitions"]
+    old = DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION[1]
+
+    summary = verify_report(payload, config=config_from_mapping(small()))
+
+    assert summary["measured"] is False
+    assert payload["schema_version"] == REPORT_SCHEMA_VERSION == 2
+    assert max(DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION) == REPORT_SCHEMA_VERSION
+    assert texts == DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION[2] == DOMAIN_DEFINITIONS
+    assert {name for name in texts if texts[name] != old[name]} == {DEVICE_DOMAIN}
+    assert "device-side" not in texts[DEVICE_DOMAIN]
+    assert "host time between the two record() calls" in texts[DEVICE_DOMAIN]
+    assert "including the launch call" in texts[DEVICE_DOMAIN]
+
+
+def test_the_recorded_schema_1_report_verifies_with_its_device_side_text():
+    payload = recorded()
+    texts = payload["clocks"]["domain_definitions"]
+
+    summary = verify_report(payload)
+
+    assert summary["measured"] is True
+    assert payload["schema_version"] == 1
+    assert texts == DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION[1]
+    assert texts[DEVICE_DOMAIN].startswith("device-side: ")
+
+
+@pytest.mark.parametrize(
+    ("source", "other"), [(recorded, 2), (report, 1)], ids=["schema-1", "schema-2"]
+)
+def test_each_schema_version_refuses_the_domain_texts_of_the_other(source, other):
+    payload = source()
+    version = payload["schema_version"]
+    payload["clocks"]["domain_definitions"] = dict(
+        DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION[other]
+    )
+
+    with pytest.raises(
+        GpuTimingVerificationError, match=f"clocks of schema_version {version} "
+    ):
+        verify_report(reseal(payload))
+
+
+@pytest.mark.parametrize("version", [0, 3, True, 2.0])
+def test_an_unknown_schema_version_is_refused(version):
+    payload = report()
+    payload["schema_version"] = version
+
+    with pytest.raises(GpuTimingVerificationError, match="must be one of 1, 2$"):
+        verify_report(reseal(payload))

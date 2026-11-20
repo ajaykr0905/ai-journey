@@ -211,6 +211,23 @@ verifies as a measurement, with the label
 `apple_gpu_metal_this_host`. A report from a stand-in or an injected clock
 verifies only as synthetic, with the scope `synthetic_backend_or_clock`.
 
+### Schema versions
+
+New reports have `schema_version` 2. The two versions are different only in
+the sealed text of the `mps_event_stream` domain:
+
+- The version 1 text calls the event interval "device-side". But the
+  section about the three clocks shows that the interval also holds host
+  time.
+- The version 2 text says that the interval is between two points in the MPS
+  command stream. It also says that the interval can hold host time between
+  the two `record()` calls, and that this time includes the launch call.
+
+The verifier accepts each version only with its own text. Thus the recorded
+report in `tests/test_gpu_timing_recorded.py` still verifies as version 1. A
+report with the text of the other version fails the checks. The runs in this
+guide are from 2026-11-18, before version 2, so their reports have version 1.
+
 ## Controls
 
 The pinned config is `config/day-75-gpu-timing.json`.

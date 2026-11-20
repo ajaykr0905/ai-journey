@@ -16,6 +16,9 @@ recomputes everything derived from them with its own code:
 - Launch geometry, shapes, planned work, the shader digests, the clock
   rules, the load averages, the environment tokens and the labels are
   checked too, and run totals must recompute.
+- The clock rules must be those of the report's own schema_version, 1 or
+  2. The versions differ only in the event-domain text, so a version-1
+  report still verifies, and neither version verifies with the other's.
 
 Every rebuilt section must match the stored one byte for byte as canonical
 JSON, so ``1``, ``1.0`` and ``true`` stay distinct. No measuring module is
@@ -38,7 +41,7 @@ from .gpu_timing_benchmark import SCHEDULE
 from .gpu_timing_clocks import (
     CLOCK_DEFINITIONS,
     CROSS_DOMAIN_MEANING,
-    DOMAIN_DEFINITIONS,
+    DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION,
     GpuTimingError,
 )
 from .gpu_timing_config import GpuTimingConfig, config_from_mapping
@@ -542,9 +545,11 @@ def verify_report(
         "report_sha256 must be 64 lowercase hex digits",
     )
     _require(_digest(report) == digest, "report digest does not match its content")
+    version = report["schema_version"]
     _require(
-        report["schema_version"] == 1 and type(report["schema_version"]) is int,
-        "report schema_version must be 1",
+        type(version) is int and version in DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION,
+        "report schema_version must be one of "
+        + ", ".join(str(known) for known in DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION),
     )
     _require(report["kind"] == REPORT_KIND, f"report kind must be {REPORT_KIND}")
     try:
@@ -592,10 +597,10 @@ def verify_report(
             "order": list(_CLOCKS),
             "definitions": CLOCK_DEFINITIONS,
             "domains": _DOMAINS,
-            "domain_definitions": DOMAIN_DEFINITIONS,
+            "domain_definitions": DOMAIN_DEFINITIONS_BY_SCHEMA_VERSION[version],
             "schedule": SCHEDULE,
         },
-        "clocks",
+        f"clocks of schema_version {version}",
     )
     _exact(report["planned_work"], _planned(parsed), "planned_work")
 

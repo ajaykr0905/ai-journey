@@ -9,7 +9,9 @@ from ai_journey.gpu_timing_config import (
     MAX_TINY_FLOPS,
     load_config,
 )
+from ai_journey.gpu_timing_report import REPORT_SCHEMA_VERSION
 from ai_journey.kernel_metal_runtime import UNAVAILABLE_REASONS
+from test_gpu_timing_recorded import recorded
 
 ROOT = Path(__file__).resolve().parents[1]
 GUIDE = ROOT / "docs/gpu-timing-lab.md"
@@ -133,6 +135,16 @@ def test_guide_says_the_event_interval_holds_host_time():
     assert "host time between the two `record()` calls" in text
     assert "The event interval is not GPU time only." in text
     assert "cost outside the stream is absent" not in flat(gpu_timing_clocks.__doc__)
+
+
+def test_guide_says_which_schema_version_seals_which_event_text():
+    text = flat(guide())
+
+    assert f"New reports have `schema_version` {REPORT_SCHEMA_VERSION}." in text
+    assert 'The version 1 text calls the event interval "device-side".' in text
+    assert "The verifier accepts each version only with its own text." in text
+    assert "`tests/test_gpu_timing_recorded.py` still verifies as version 1." in text
+    assert recorded()["schema_version"] == 1
 
 
 def test_guide_states_both_bounds_of_the_ceiling():
