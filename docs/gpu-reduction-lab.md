@@ -734,6 +734,13 @@ or the other jobs on the host. The results come from one Apple GPU on one
 host. They are not evidence of lecture viewing, completed exercises or learner
 understanding.
 
+## CUDA texts for a later NVIDIA run
+
+The guide `docs/gpu-reduce-cuda-contract.md` writes R1 and R3 as CUDA C++ text
+for a later run on an NVIDIA GPU. Each text adds the pairs of its Metal twin in
+the same order, and a CPU simulator predicts the bits of each result. This host
+compiled and ran none of the texts.
+
 ## Learner work
 
 These items stay with the learner:

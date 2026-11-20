@@ -34,6 +34,9 @@ from test_gpu_reduce_recorded import RECORDED_CONFIG, RECORDED_REPORT_JSON
 
 ROOT = Path(__file__).resolve().parents[1]
 SMALL_SIZES = (1, 31, 33, 255, 256, 257, 511, 512, 513, 1025, 4099)
+COMBINE_COUNTS = (1, 2, 1024, 1025, 3072, 3073, 4096, 4097, 9000)
+FLOAT_PATTERNS = ("normal", "mixed")
+FLOAT_SIZES = (1, 33, 513, 4099)
 
 
 class Sym:
@@ -169,15 +172,15 @@ def test_each_tree_is_the_declared_order_of_its_metal_twin(n):
         assert summation_tree(R1_SHARED, n) != shuffle
 
 
-@pytest.mark.parametrize("count", [1, 2, 1024, 1025, 3072, 3073, 4096, 4097, 9000])
+@pytest.mark.parametrize("count", COMBINE_COUNTS)
 def test_the_combine_tree_is_the_metal_combine_order(count):
     values, zero = symbols(count)
 
     assert combine_tree(count) == metal_combine(values, zero).tree
 
 
-@pytest.mark.parametrize("pattern", ["normal", "mixed"])
-@pytest.mark.parametrize("n", [1, 33, 513, 4099])
+@pytest.mark.parametrize("pattern", FLOAT_PATTERNS)
+@pytest.mark.parametrize("n", FLOAT_SIZES)
 def test_the_float_bits_follow_the_metal_order_on_small_inputs(pattern, n):
     values = case_values(78, 9, pattern, n)
     floats, zero = list(values), numpy.float32(0)
