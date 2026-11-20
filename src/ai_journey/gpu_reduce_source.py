@@ -1,8 +1,10 @@
 """Metal Shading Language source of the Day 78 float32 sum reductions R0 to R5.
 
-GPU MODE Lecture 9 builds a sum reduction in steps, each one change on the
-step before it. This module holds one kernel per step, each with its own
-digest, plus one combine kernel that every step shares:
+Curriculum Day 78 asks for a sum reduction kernel and then a faster one with
+warp shuffles; its notes name parallel reduction, warp shuffles and
+divergence. This module builds that path in steps, each one change on the
+step before it. It holds one kernel per step, each with its own digest,
+plus one combine kernel that every step shares:
 
 - R0: one element per thread, then a tree in threadgroup memory with
   interleaved addressing. At stride ``s`` a thread adds only when
@@ -36,9 +38,9 @@ These rules keep every kernel correct and its bound valid:
   active, and only kernels that need it ask for 32-lane SIMD groups.
 
 The tree loops of R0 to R3 and of the combine take their bound from
-``threads_per_threadgroup``, as the lecture's CUDA code takes it from
-``blockDim.x``. The compiler thus keeps the modulo of R0, and the runtime
-launches each kernel only with its declared group size.
+``threads_per_threadgroup``, as the CUDA kernels of M. Harris take it from
+``blockDim.x``. The compiler thus does not see the bound as a constant, and
+the runtime launches each kernel only with its declared group size.
 """
 
 from __future__ import annotations
