@@ -11,7 +11,12 @@ from ai_journey.sim_profile_config import (
 from ai_journey.sim_profile_rounds import rounds_report
 from ai_journey.sim_profile_rounds_verify import verify_rounds
 from ai_journey.sim_profile_snapshot import snapshot
-from test_sim_profile_fixtures import fixed_load, small_config, stepping_clock
+from test_sim_profile_fixtures import (
+    fixed_load,
+    round_targets,
+    small_config,
+    stepping_clock,
+)
 
 
 def take(config, stage, step):
@@ -21,7 +26,7 @@ def take(config, stage, step):
 @pytest.fixture(scope="module")
 def sealed():
     baseline = take(small_config(), "baseline", 9)
-    target = baseline["profile"]["hotspots"][0]["function"]
+    (target,) = round_targets(baseline, 1)
     config = small_config([{"target": target, "change": "One change."}])
     return config, rounds_report(config, [baseline, take(config, "round-1", 6)])
 
