@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -35,8 +36,22 @@ def outer():
 
 
 def code_name(function):
-    code = function.__code__
-    return function_name(code.co_filename, code.co_firstlineno, code.co_name)
+    return function_name(function.__code__)
+
+
+@dataclass(frozen=True)
+class Pair:
+    left: int
+    right: int
+
+
+@dataclass(frozen=True)
+class Single:
+    value: int
+
+
+def countdown(steps):
+    return steps if steps == 0 else countdown(steps - 1)
 
 
 def test_function_names_carry_module_and_qualname():
@@ -49,11 +64,13 @@ def test_function_names_carry_module_and_qualname():
     )
     assert code_name(nested) == "test_sim_profile_harness:outer.<locals>.inner"
     assert code_name(json.dumps) == "json:dumps"
-    assert function_name("~", 0, "<built-in method builtins.len>") == (
+    assert function_name("<built-in method builtins.len>") == (
         "builtins:<built-in method builtins.len>"
     )
-    assert function_name("<string>", 2, "__init__") == "<string>:__init__"
-    assert function_name(str(ROOT / "missing.py"), 1, "gone") == "missing:gone"
+    assert code_name(Single.__init__) == "<string>:__init__"
+    # The qualname comes from the code object, not from the source file.
+    moved = nested.__code__.replace(co_filename=str(ROOT / "missing.py"))
+    assert function_name(moved) == "missing:outer.<locals>.inner"
 
 
 def test_comprehensions_get_their_python_qualnames():
@@ -66,7 +83,8 @@ def test_comprehensions_get_their_python_qualnames():
     assert result == [0, 1, 2]
     prefix = "test_sim_profile_harness:test_comprehensions_get_their_python_qualnames"
     assert f"{prefix}.<locals>.collect.<locals>.<dictcomp>" in names
-    assert f"{prefix}.<locals>.collect.<locals>.<dictcomp>.<locals>.<listcomp>" in names
+    # Python adds no "<locals>" part for a comprehension in a comprehension.
+    assert f"{prefix}.<locals>.collect.<locals>.<dictcomp>.<listcomp>" in names
 
 
 def test_call_counts_are_exact_and_repeat(workloads):
@@ -87,6 +105,25 @@ def test_call_counts_are_exact_and_repeat(workloads):
     assert [record.function for record in first] == sorted(calls)
     gray_calls = {r.function: r.calls for r in profile_call(gray.checked_run)[0]}
     assert gray_calls[GETITEM] == 3 * 90 * 70
+
+
+def test_generated_inits_of_two_dataclasses_add_up():
+    # Both generated __init__ methods have the label ("<string>", 2, "__init__").
+    # pstats keeps one entry per label, so it reports 2 or 3 calls, never 5.
+    records, made = profile_call(
+        lambda: [Pair(1, 2), Pair(3, 4), Single(5), Single(6), Single(7)]
+    )
+    inits = {record.function: record for record in records}["<string>:__init__"]
+
+    assert len(made) == 5
+    assert (inits.calls, inits.primitive_calls) == (5, 5)
+
+
+def test_recursive_calls_are_primitive_only_at_the_outer_call():
+    records, _ = profile_call(lambda: countdown(3))
+    calls = {r.function: (r.calls, r.primitive_calls) for r in records}
+
+    assert calls["test_sim_profile_harness:countdown"] == (4, 1)
 
 
 def record(name, calls, total, cumulative=None):

@@ -19,18 +19,29 @@ TARGETS = [
     f"{BUFFER}:_check_value",
 ]
 # Exact cProfile counts of one pass of each pinned workload after round 4.
+# "<string>:__init__" adds the generated __init__ of every dataclass:
+# 18176 ThreadContext, 1678 Index3 and 28 others.
 FINAL_CALLS = {
     f"{BUFFER}:DeviceBuffer.__getitem__": 150100,
     f"{BUFFER}:DeviceBuffer.__setitem__": 16100,
     f"{BUFFER}:to_float32": 123200,
     f"{BUFFER}:_check_value": 85920,
     "ai_journey.kernel_launch_config:Index3.__post_init__": 1678,
+    "<string>:__init__": 19882,
 }
 REMOVED = (
     f"{BUFFER}:AccessRecorder._record_read",
     f"{BUFFER}:AccessRecorder._ref",
 )
-FINAL_TOTAL_CALLS = 1707558
+FINAL_TOTAL_CALLS = 1727437
+# Total calls of each stage: the new harness, then the old pstats one.
+STAGE_TOTALS = (
+    ("baseline", 2853577, 2785398),
+    ("round 1", 2403277, 2335098),
+    ("round 2", 2403277, 2335098),
+    ("round 3", 1823677, 1803798),
+    ("round 4", FINAL_TOTAL_CALLS, 1707558),
+)
 ROUNDS_SHA256 = (
     "2f5e1e4dc739784bf6421ee4136a86a29760ce683e6e24bad991c404165430a9",
     "d458263e3239c23b565e7febcc084ca6f2cb3b3984e7037188c2765657e4cb22",
@@ -74,7 +85,12 @@ def test_the_guide_states_the_recorded_loop():
     assert "All numbers in this guide are host-specific CPU measurements." in text
     assert "No number comes from hardware counters." in text
     assert "The parser uses the program name `ai-journey-sim-profile`." in text
-    for count in ("2785398 to 2335098", "1803798 to 1707558", "33878 to 1678"):
+    for count in (
+        "2853577 to 2403277",
+        "2403277 to 1823677",
+        "1823677 to 1727437",
+        "33878 to 1678",
+    ):
         assert count in text
     assert "171320 to 123200" in text
     for digest in ROUNDS_SHA256:
@@ -88,6 +104,16 @@ def test_the_guide_states_the_recorded_loop():
     assert (
         "826 out-of-bounds reads, 308 out-of-bounds writes, 464 write conflicts" in text
     )
+
+
+def test_the_guide_gives_the_call_totals_of_both_harnesses():
+    text = guide()
+
+    for stage, new, old in STAGE_TOTALS:
+        assert f"| {stage} | {new} | {old} |" in text
+    assert "48300 in total" in text
+    assert "The digests stay valid as records of that harness." in text
+    assert "Call counts are exact and repeat" not in text
 
 
 def test_the_guide_makes_no_gpu_or_vendor_claim():

@@ -1,15 +1,22 @@
 """Deterministic cProfile runs of the simulator, with stable function names.
 
-``profile_call`` runs one callable under ``cProfile`` and reads the result
-with ``pstats``. Each function gets a name that survives line edits:
-``module:qualname`` for Python code, such as
+``profile_call`` runs one callable under ``cProfile`` and reads every raw
+entry of ``Profile.getstats``. Each function gets a name that survives line
+edits: ``module:qualname`` for Python code, such as
 ``ai_journey.kernel_launch_buffer:DeviceBuffer.__getitem__``, and
 ``builtins:<built-in method _struct.pack>`` for C functions. The qualname
-comes from the module's own syntax tree, because Python 3.11 profiles record
-only the bare function name and the first line.
+is the ``co_qualname`` of the code object that each raw entry carries, so
+the harness reads no source file.
 
-Call counts are exact and repeat from run to run, so tests pin them. The
-times are the profiler's own clock readings. They include its overhead on
+The harness does not read the profile through ``pstats``, which keeps one
+entry per (file, line, name) label. Every generated dataclass ``__init__``
+has the label ``("<string>", 2, "__init__")``, and the entry that ``pstats``
+kept depended on code object addresses, so its call totals changed between
+processes. Here the entries that share a name add up: ``<string>:__init__``
+holds the ``__init__`` calls of every dataclass, and the call counts do not
+depend on the entry order.
+
+The times are the profiler's own clock readings. They include its overhead on
 every call, which inflates small functions, so they only rank functions
 within one profile. Speedups come from unprofiled ``perf_counter_ns``
 timings instead.
@@ -17,14 +24,12 @@ timings instead.
 
 from __future__ import annotations
 
-import ast
 import cProfile
-import functools
-import pstats
 import sysconfig
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from types import CodeType
 
 from .kernel_launch_config import require_int
 from .sim_profile_config import MAX_TOP_FUNCTIONS, SimProfileError
@@ -37,14 +42,6 @@ RANKING = (
     "functions sorted by total (self) time, largest first, ties by name; "
     "share_ppm = floor(total_ns * 1000000 / sum of total_ns of every function)"
 )
-# Code objects without a name of their own, as Python 3.11 names them.
-_ANONYMOUS = {
-    ast.Lambda: "<lambda>",
-    ast.ListComp: "<listcomp>",
-    ast.SetComp: "<setcomp>",
-    ast.DictComp: "<dictcomp>",
-    ast.GeneratorExp: "<genexpr>",
-}
 # The profiler records its own disable call; it is not simulator work.
 _PROFILER_ENTRY = "<method 'disable' of '_lsprof.Profiler' objects>"
 
@@ -63,54 +60,20 @@ def _module_name(path: Path) -> str:
     return ".".join(parts) or path.stem
 
 
-@functools.lru_cache(maxsize=256)
-def _qualnames(filename: str) -> dict[tuple[int, str], str]:
-    """Map (first line, name) of every function in a file to its qualname.
+def function_name(code: CodeType | str) -> str:
+    """Return the stable ``module:qualname`` name of one raw profiler entry.
 
-    A decorated function starts at its first decorator in a code object, so
-    both that line and the ``def`` line map to it. Lambdas and comprehensions
-    get the ``<locals>`` qualname that Python 3.11 gives their code objects.
+    ``code`` is the code object of a Python function. For a C function, the
+    profiler stores only a description string.
     """
 
-    try:
-        tree = ast.parse(Path(filename).read_text(encoding="utf-8"))
-    except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
-        return {}
-    names: dict[tuple[int, str], str] = {}
-
-    def visit(node: ast.AST, prefix: str) -> None:
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                qualname = f"{prefix}{child.name}"
-                lines = {child.lineno, *(item.lineno for item in child.decorator_list)}
-                for line in lines:
-                    names[(line, child.name)] = qualname
-                visit(child, f"{qualname}.<locals>.")
-            elif type(child) in _ANONYMOUS:
-                tag = _ANONYMOUS[type(child)]
-                names[(child.lineno, tag)] = f"{prefix}{tag}"
-                visit(child, f"{prefix}{tag}.<locals>.")
-            elif isinstance(child, ast.ClassDef):
-                visit(child, f"{prefix}{child.name}.")
-            else:
-                visit(child, prefix)
-
-    visit(tree, "")
-    return names
-
-
-def function_name(filename: str, line: int, name: str) -> str:
-    """Return the stable ``module:qualname`` name of one pstats entry."""
-
-    if filename == "~":
-        return f"builtins:{name}"
-    path = Path(filename)
+    if isinstance(code, str):
+        return f"builtins:{code}"
+    path = Path(code.co_filename)
     if path.suffix != ".py" or not path.is_absolute():
         # Code compiled from a string, such as a dataclass __init__.
-        return f"{filename}:{name}"
-    resolved = path.resolve()
-    qualname = _qualnames(str(resolved)).get((line, name), name)
-    return f"{_module_name(resolved)}:{qualname}"
+        return f"{code.co_filename}:{code.co_name}"
+    return f"{_module_name(path.resolve())}:{code.co_qualname}"
 
 
 @dataclass(frozen=True)
@@ -169,26 +132,29 @@ def merge_functions(records: Iterable[FunctionProfile]) -> tuple[FunctionProfile
 def profile_call(
     call: Callable[[], object],
 ) -> tuple[tuple[FunctionProfile, ...], object]:
-    """Run ``call`` once under cProfile; return its functions and its result."""
+    """Run ``call`` once under cProfile; return its functions and its result.
+
+    Every raw entry counts, and entries that share a name add up, so two
+    dataclass ``__init__`` methods never hide each other's calls.
+    """
 
     if not callable(call):
         raise TypeError("call must be callable")
     profiler = cProfile.Profile()
     result = profiler.runcall(call)
-    stats = pstats.Stats(profiler).stats
-    records = [
-        FunctionProfile(
-            function_name(filename, line, name),
-            calls,
-            primitive,
-            _ns(total),
-            _ns(cumulative),
+    records = []
+    for entry in profiler.getstats():
+        if entry.code == _PROFILER_ENTRY:
+            continue
+        records.append(
+            FunctionProfile(
+                function_name(entry.code),
+                entry.callcount,
+                entry.callcount - entry.reccallcount,
+                _ns(entry.inlinetime),
+                _ns(entry.totaltime),
+            )
         )
-        for (filename, line, name), (primitive, calls, total, cumulative, _) in (
-            stats.items()
-        )
-        if not (filename == "~" and name == _PROFILER_ENTRY)
-    ]
     return merge_functions(records), result
 
 

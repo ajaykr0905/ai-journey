@@ -90,20 +90,51 @@ a change.
 ## Harness
 
 The harness runs one checked pass of each workload under `cProfile`. It
-reads the result with `pstats`. Each function gets a stable name of the form
-`module:qualname`, for example
-`ai_journey.kernel_launch_buffer:DeviceBuffer.__getitem__`. The qualname
-comes from the syntax tree of the module, because Python 3.11 profiles keep
-only the bare name and the first line.
+reads each raw entry of the profiler. Each function gets a stable name of
+the form `module:qualname`, for example
+`ai_journey.kernel_launch_buffer:DeviceBuffer.__getitem__`. The qualname is
+the `co_qualname` of the code object in the entry.
 
 The snapshot keeps these values for each function: the calls, the primitive
 calls, the self time and the cumulative time. It also merges the three
-workloads and ranks the functions by self time. Call counts are exact and
-repeat from run to run.
+workloads and ranks the functions by self time.
 
 The profiler adds a cost to each call. That cost makes small functions that
 run often look larger. Thus the profiler times only rank the functions of
 one profile. The speedups come from timed passes with no profiler.
+
+### Calls that the old harness dropped
+
+The old harness read the profile through `pstats`. That module keeps one
+entry for each file, line and function name. Each generated dataclass
+`__init__` has the file `<string>`, line 2 and the name `__init__`. Thus
+`pstats` kept only one of these entries in each workload. The kept entry
+depended on the memory addresses of the code objects, which can change from
+one process to the next.
+
+On this host, the old harness kept an entry with 1 call in each workload.
+One CI run on Linux gave another total, and the test of the pinned total
+failed. The new harness adds all entries that have the same name. Thus
+`<string>:__init__` holds the `__init__` calls of all dataclasses. These are
+the call totals of the three workloads together:
+
+| Stage | New harness | Old harness |
+| --- | ---: | ---: |
+| baseline | 2853577 | 2785398 |
+| round 1 | 2403277 | 2335098 |
+| round 2 | 2403277 | 2335098 |
+| round 3 | 1823677 | 1803798 |
+| round 4 | 1727437 | 1707558 |
+
+No other entries shared a label. Thus on this host, the old harness dropped
+68179 calls before round 3 and 19879 calls after it. For round 4, five
+separate processes with different `PYTHONHASHSEED` values gave the same
+count for each function on this host.
+
+The old harness took each qualname from the syntax tree of the module. A
+`pstats` label holds only the file, the first line and the bare name of a
+function. On this host, both rules gave the same name to each function of
+the five stages.
 
 ## Timing
 
@@ -143,13 +174,23 @@ The baseline profile ranked these functions by self time:
 The first two functions are almost equal. In one of the two sealed sessions,
 `_record_read` ranked first.
 
+This table and the ranks in the round texts come from the old harness. The
+new harness gives the same calls for these five functions, because each one
+has its own entry. The shares are slightly high, because the old total self
+time did not include the dropped entries.
+
+The new harness profiled the baseline and rounds 1 to 3 three times each,
+at a 1-minute load of 14.7 to 22.9. Before round 3, `<string>:__init__`
+ranked fifth to seventh. After round 3, it was not in the first seven. In
+each profile, it ranked below the target of the next round.
+
 ### Round 1: buffer reads
 
 The top hotspot was `DeviceBuffer.__getitem__`, with `_record_read` next to
 it. Each read called three helpers: `_recorder_for`, `_record_read` and
 `_running`. The change records the read inside `__getitem__` itself. The
 checks and the records stay the same, in the same order. The profiled calls
-fell from 2785398 to 2335098.
+fell from 2853577 to 2403277.
 
 ### Round 2: float32 rounding
 
@@ -168,9 +209,12 @@ After round 2, ranks 1 to 3 were the reads, the float32 rounding and
 is the work under simulation. The next hotspot was `Index3.__post_init__`.
 Before round 3, `AccessRecorder.finish` built two `Index3` values for each
 written element, also when no race used them. The change builds a
-`ThreadRef` only for an element in a write or read-write conflict. The
-`Index3` calls fell from 33878 to 1678. The profiled calls fell from 2335098
-to 1803798.
+`ThreadRef` only for an element in a write or read-write conflict.
+
+The `Index3.__post_init__` calls fell from 33878 to 1678. The change also
+removed 16100 `ThreadRef.__init__` calls and 32200 `Index3.__init__` calls,
+48300 in total. The old harness did not show these generated calls. The
+profiled calls fell from 2403277 to 1823677.
 
 ### Round 4: float32 store checks
 
@@ -179,7 +223,7 @@ loop was `_check_value`. Each float32 store and each input element calls it.
 It called `to_float32`, which checked the type and the finiteness a second
 time. The change tests the exact value with one `Struct` pack and unpack.
 The `to_float32` calls fell from 171320 to 123200. The profiled calls fell
-from 1803798 to 1707558.
+from 1823677 to 1727437.
 
 ## Measured speedups
 
@@ -218,6 +262,11 @@ speedup of session 1 probably includes host noise. The rounds report digests are
 The reports are not in the repository, because each one holds raw timings
 of one host at one time. The `run` and `rounds` commands make new reports.
 
+Both sessions ran the old harness, so their reports hold the old call totals
+and shares. The digests stay valid as records of that harness. The timed
+passes ran with no profiler, so the new harness does not change the medians
+or the speedups.
+
 These results follow from the measurements:
 
 - Round 3 gave the only large and repeatable gain: 1.29 to 1.40 in each run.
@@ -230,7 +279,8 @@ These results follow from the measurements:
   gave 0.967 to 1.329.
 - The rank of a function did not predict its gain. Round 3 targeted rank 4
   and gave the most. The profiler cost on each call inflates small functions
-  that run often.
+  that run often. Also, the old harness did not show the 48300 generated
+  `__init__` calls that round 3 removed.
 
 ## Report and verification
 

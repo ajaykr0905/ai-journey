@@ -8,7 +8,7 @@ import pytest
 from ai_journey import sim_profile_semantics
 from ai_journey.kernel_launch_io import canonical_json_bytes
 from ai_journey.sim_profile_cli import EXIT_INVALID, EXIT_OK, EXIT_REJECTED, PROG, main
-from test_sim_profile_fixtures import ROOT, small_config
+from test_sim_profile_fixtures import ROOT, round_targets, small_config
 
 # A None entry in sys.modules makes every import of that name fail.
 WITHOUT_TORCH_OR_NUMPY = """
@@ -32,7 +32,7 @@ def loop(tmp_path_factory):
     baseline = folder / "baseline.json"
     assert main(["run", "--config", str(base_config), "--stage", "baseline", "--output", str(baseline)]) == EXIT_OK  # fmt: skip
     report = json.loads(baseline.read_text())
-    target = report["profile"]["hotspots"][0]["function"]
+    (target,) = round_targets(report, 1)
     config = write_config(folder / "config.json", [{"target": target, "change": "One change."}])  # fmt: skip
     after = folder / "round-1.json"
     assert main(["run", "--config", str(config), "--stage", "round-1", "--output", str(after)]) == EXIT_OK  # fmt: skip
