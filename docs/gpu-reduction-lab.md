@@ -39,8 +39,8 @@ python -m ai_journey.gpu_reduce_cli verify \
 ```
 
 The first command makes a fresh bandwidth ceiling with the Day 74 lab. The
-parser uses the program name `ai-journey-gpu-reduce`. The package has no
-console script for this lab, so the commands use `python -m`.
+parser uses the program name `ai-journey-gpu-reduce`. An installed wheel gives
+the same commands under that name.
 
 The `run` command reads the ceiling report, compiles the kernels, checks
 them, times them, checks its own report and writes the report. Then it prints

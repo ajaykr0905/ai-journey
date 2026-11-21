@@ -54,12 +54,7 @@ def test_documented_commands_parse_and_chain_the_ceiling_to_the_run():
     assert str(run.config) == str(verify.config) == PINNED
     assert run.ceilings == verify.ceilings == made.output
     assert verify.report == run.output
-    text = flat(guide())
-    assert f"the program name `{parser.prog}`" in text
-    assert (
-        "The package has no console script for this lab, so the commands use "
-        "`python -m`."
-    ) in text
+    assert f"the program name `{parser.prog}`" in flat(guide())
 
 
 def test_guide_states_the_exit_codes_and_line_prefixes():

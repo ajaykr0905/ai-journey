@@ -27,8 +27,8 @@ python -m ai_journey.gpu_scan_cli verify \
   --config config/day-78-gpu-scan.json
 ```
 
-The parser uses the program name `ai-journey-gpu-scan`. The package does not
-install a console script for this lab, so run the module with `python -m`.
+The parser uses the program name `ai-journey-gpu-scan`. An installed wheel
+gives the same commands under that name.
 
 The `run` command compiles the kernels, checks them, times them, checks its own
 report and writes the report. Then it prints these lines:
