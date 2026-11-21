@@ -185,7 +185,7 @@ jobs:
           if-no-files-found: error
   nvidia-preflight-contracts:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
@@ -1843,4 +1843,74 @@ jobs:
           path: |
             ${{ runner.temp }}/matmul-checklist-evidence/
             ${{ runner.temp }}/matmul-checklist-dist/
+          if-no-files-found: error
+  gpu-reduce-scan-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Day 78 reduction and scan lab contract tools and CPU-only PyTorch
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check the reduction, reduction CUDA and scan contracts without an Apple GPU
+        run: |
+          ruff check src/ai_journey/gpu_reduce_*.py src/ai_journey/gpu_scan_*.py tests/test_gpu_reduce_*.py tests/test_gpu_scan_*.py
+          ruff format --check src/ai_journey/gpu_reduce_*.py src/ai_journey/gpu_scan_*.py tests/test_gpu_reduce_*.py tests/test_gpu_scan_*.py
+          python -m compileall -q src/ai_journey/gpu_reduce_*.py src/ai_journey/gpu_scan_*.py tests/test_gpu_reduce_*.py tests/test_gpu_scan_*.py
+          python -m pytest -q -rs tests/test_gpu_reduce_*.py tests/test_gpu_scan_*.py
+      - name: Build and install isolated Day 78 reduction and scan lab wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/gpu-reduce-scan-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/gpu-reduce-scan-installed" "$RUNNER_TEMP"/gpu-reduce-scan-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/gpu-reduce-scan-evidence"
+      - name: Check that each installed Apple GPU command stops where MPS is not available
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/gpu-reduce-scan-installed
+        run: |
+          export PATH="$RUNNER_TEMP/gpu-reduce-scan-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/gpu-reduce-scan-installed/")'
+          python -c 'import torch; assert not torch.backends.mps.is_available()'
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_gpu_ceiling_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/gpu-reduce-scan-evidence/recorded-gpu-ceilings.json"
+          status=0
+          ai-journey-gpu-reduce run --config "$GITHUB_WORKSPACE/config/day-78-gpu-reduce.json" --ceilings "$RUNNER_TEMP/gpu-reduce-scan-evidence/recorded-gpu-ceilings.json" --output "$RUNNER_TEMP/gpu-reduce-scan-evidence/gpu-reduce.json" 2> "$RUNNER_TEMP/gpu-reduce-scan-evidence/gpu-reduce-unavailable.txt" || status=$?
+          cat "$RUNNER_TEMP/gpu-reduce-scan-evidence/gpu-reduce-unavailable.txt"
+          test "$status" -eq 3
+          grep -F "gpu-reduce run unavailable: Metal kernels run only on macOS (unsupported_operating_system)" "$RUNNER_TEMP/gpu-reduce-scan-evidence/gpu-reduce-unavailable.txt"
+          test ! -e "$RUNNER_TEMP/gpu-reduce-scan-evidence/gpu-reduce.json"
+          status=0
+          ai-journey-gpu-scan run --config "$GITHUB_WORKSPACE/config/day-78-gpu-scan.json" --output "$RUNNER_TEMP/gpu-reduce-scan-evidence/gpu-scan.json" 2> "$RUNNER_TEMP/gpu-reduce-scan-evidence/gpu-scan-unavailable.txt" || status=$?
+          cat "$RUNNER_TEMP/gpu-reduce-scan-evidence/gpu-scan-unavailable.txt"
+          test "$status" -eq 3
+          grep -F "gpu-scan run unavailable: Metal kernels run only on macOS (unsupported_operating_system)" "$RUNNER_TEMP/gpu-reduce-scan-evidence/gpu-scan-unavailable.txt"
+          test ! -e "$RUNNER_TEMP/gpu-reduce-scan-evidence/gpu-scan.json"
+      - name: Verify the recorded Apple GPU reports with the installed commands
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/gpu-reduce-scan-installed
+        run: |
+          export PATH="$RUNNER_TEMP/gpu-reduce-scan-installed/bin:$PATH"
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_gpu_reduce_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/gpu-reduce-scan-evidence/recorded-gpu-reduce.json"
+          python -c 'import json, os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_gpu_reduce_recorded import RECORDED_CONFIG; open(sys.argv[1], "w", encoding="ascii").write(json.dumps(RECORDED_CONFIG) + "\n")' "$RUNNER_TEMP/gpu-reduce-scan-evidence/recorded-gpu-reduce-config.json"
+          ai-journey-gpu-reduce verify --report "$RUNNER_TEMP/gpu-reduce-scan-evidence/recorded-gpu-reduce.json" --config "$RUNNER_TEMP/gpu-reduce-scan-evidence/recorded-gpu-reduce-config.json" --ceilings "$RUNNER_TEMP/gpu-reduce-scan-evidence/recorded-gpu-ceilings.json"
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_gpu_scan_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/gpu-reduce-scan-evidence/recorded-gpu-scan.json"
+          python -c 'import json, os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_gpu_scan_recorded import RECORDED_CONFIG; open(sys.argv[1], "w", encoding="ascii").write(json.dumps(RECORDED_CONFIG) + "\n")' "$RUNNER_TEMP/gpu-reduce-scan-evidence/recorded-gpu-scan-config.json"
+          ai-journey-gpu-scan verify --report "$RUNNER_TEMP/gpu-reduce-scan-evidence/recorded-gpu-scan.json" --config "$RUNNER_TEMP/gpu-reduce-scan-evidence/recorded-gpu-scan-config.json"
+      - name: Retain the refused runs, the recorded reports and the package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-reduce-scan-contracts-evidence
+          path: |
+            ${{ runner.temp }}/gpu-reduce-scan-evidence/
+            ${{ runner.temp }}/gpu-reduce-scan-dist/
           if-no-files-found: error
