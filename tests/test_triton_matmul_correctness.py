@@ -7,6 +7,7 @@ and each fault must stop the run. A fake ``triton`` module tests the runtime
 probe and the launcher on a host without triton.
 """
 
+import inspect
 import os
 import sys
 import types
@@ -33,9 +34,11 @@ from ai_journey.triton_matmul_correctness import (
     guard_elements,
     sentinel_buffer,
 )
+from ai_journey import triton_matmul_runtime
 from ai_journey.triton_matmul_kernel import (
     AUTOTUNE_CONFIGS,
     CONFIGS_BY_NAME,
+    TRITON_SOURCE,
     TritonConfig,
     TritonMatmulError,
     k_blocks,
@@ -47,6 +50,7 @@ from ai_journey.triton_matmul_runtime import (
     INTERPRET_VARIABLE,
     InterpreterBackend,
     TritonMatmulUnavailableError,
+    source_filename,
 )
 
 SMALL = CONFIGS_BY_NAME["m64_n32_k32_g8_w2_s5"]
@@ -328,6 +332,23 @@ def test_the_backend_sets_the_interpreter_and_launches_the_text(monkeypatch):
         "num_warps": 2,
         "num_stages": 5,
     }
+
+
+def test_each_compiled_text_keeps_its_own_source_name(monkeypatch):
+    keep_environment(monkeypatch)
+    fake_triton(monkeypatch, interpreted_when_enabled)
+    pinned = InterpreterBackend()
+    store = "    tl.store(c_ptrs, acc, mask=c_mask)\n"
+    other = TRITON_SOURCE.replace(store, "    tl.store(c_ptrs, acc)\n")
+    monkeypatch.setattr(triton_matmul_runtime, "TRITON_SOURCE", other)
+    later = InterpreterBackend()
+
+    assert source_filename(TRITON_SOURCE) != source_filename(other)
+    assert source_filename(TRITON_SOURCE).endswith(f"sha256={pinned.source_sha256}>")
+    assert pinned.kernel.fn.__code__.co_filename == source_filename(TRITON_SOURCE)
+    # The source of the first kernel is still the pinned text.
+    assert "mask=c_mask)" in inspect.getsource(pinned.kernel.fn)
+    assert "mask=c_mask)" not in inspect.getsource(later.kernel.fn)
 
 
 def crashing_jit(fn):

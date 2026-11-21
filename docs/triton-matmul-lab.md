@@ -266,8 +266,8 @@ docker rm -f d79-triton-interp
 ```
 
 The container had triton 3.9.0, torch 2.15.0+cpu, NumPy 1.26.4 and pytest
-9.0.2. In the container, all 174 tests of the 10 Triton test modules passed,
-with no skip. On the Mac, 162 tests passed and 2 skipped: the interpreter
+9.0.2. In the container, all 176 tests of the 10 Triton test modules passed,
+with no skip. On the Mac, 163 tests passed and 2 skipped: the interpreter
 module and the CLI test that runs the interpreter.
 
 The check ran on 2026-11-22 at 04:47 IST. It did 108 runs: 9 cases, 6 configs

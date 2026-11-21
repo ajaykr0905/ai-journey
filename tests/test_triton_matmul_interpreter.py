@@ -35,8 +35,8 @@ from ai_journey.triton_matmul_kernel import (  # noqa: E402
     source_sha256,
 )
 from ai_journey.triton_matmul_runtime import (  # noqa: E402
-    SOURCE_FILENAME,
     InterpreterBackend,
+    source_filename,
 )
 from test_triton_matmul_correctness import StandInBackend  # noqa: E402
 
@@ -64,7 +64,8 @@ def test_the_backend_runs_the_pinned_text_as_interpreted_functions(backend):
     assert source.startswith("@triton.jit\ndef matmul_kernel(\n")
     assert source in TRITON_SOURCE
     # The interpreter rewrote the kernel from the text that linecache holds.
-    assert backend.kernel.rewrite().__code__.co_filename == SOURCE_FILENAME
+    filename = backend.kernel.rewrite().__code__.co_filename
+    assert filename == source_filename(TRITON_SOURCE)
 
 
 @pytest.mark.parametrize("index", range(len(SHAPES)))
@@ -101,10 +102,14 @@ def test_the_numpy_stand_in_rebuilds_the_interpreter_bits(backend, config):
             )
 
 
-def test_a_text_without_its_store_mask_writes_into_the_guard(monkeypatch):
+def unmasked_text():
     pinned = "    tl.store(c_ptrs, acc, mask=c_mask)\n"
     assert TRITON_SOURCE.count(pinned) == 1
-    unmasked = TRITON_SOURCE.replace(pinned, "    tl.store(c_ptrs, acc)\n")
+    return TRITON_SOURCE.replace(pinned, "    tl.store(c_ptrs, acc)\n")
+
+
+def test_a_text_without_its_store_mask_writes_into_the_guard(monkeypatch):
+    unmasked = unmasked_text()
     monkeypatch.setattr(triton_matmul_runtime, "TRITON_SOURCE", unmasked)
 
     broken = InterpreterBackend()
@@ -117,6 +122,23 @@ def test_a_text_without_its_store_mask_writes_into_the_guard(monkeypatch):
             shape=MatmulShape(31, 47, 129),
             configs=(CONFIGS_BY_NAME["m64_n32_k32_g8_w2_s5"],),
         )
+
+
+def test_a_later_text_never_replaces_the_source_of_an_earlier_kernel(monkeypatch):
+    # The interpreter reads the kernel source at the first launch, so a
+    # backend compiled before another text must still run its own text.
+    pinned = InterpreterBackend()
+    monkeypatch.setattr(triton_matmul_runtime, "TRITON_SOURCE", unmasked_text())
+    InterpreterBackend()
+
+    case = check_case(
+        pinned,
+        seed=74,
+        index=3,
+        shape=MatmulShape(31, 47, 129),
+        configs=(CONFIGS_BY_NAME["m64_n32_k32_g8_w2_s5"],),
+    )
+    assert [run.rounded_reference_differences for run in case.runs][1] == 0
 
 
 def test_the_declared_configs_wrap_the_kernel_and_tune_nothing(backend):

@@ -16,9 +16,12 @@ checks the indexing, the masks and the K loop of the text. It is not a GPU
 run, and its time is not a performance number.
 
 ``compile_text`` executes ``TRITON_SOURCE`` in a fresh namespace. It first
-registers the text in ``linecache`` under ``SOURCE_FILENAME``, so
+registers the text in ``linecache`` under ``source_filename(text)``, so
 ``inspect.getsource`` reads the kernel as a file: ``triton.jit`` and the
-interpreter read the source of the function that they wrap.
+interpreter read the source of the function that they wrap. The interpreter
+reads that source again at the first launch, so the name holds the digest of
+the text: a second text can never replace the source of a kernel that a
+backend compiled before it.
 
 ``CI_WHEELS`` and ``ci_install_mapping`` record what the PyPI metadata of
 triton 3.9.0 stated on 2026-11-22: one CPython 3.11 wheel for Linux x86_64 and
@@ -49,7 +52,7 @@ from .triton_matmul_kernel import (
 INTERPRETER_BACKEND = "triton_interpreter"
 INTERPRET_VARIABLE = "TRITON_INTERPRET"
 INTERPRETED_TYPE = "InterpretedFunction"
-SOURCE_FILENAME = "<ai_journey.triton_matmul_kernel.TRITON_SOURCE>"
+SOURCE_PREFIX = "<ai_journey.triton_matmul_kernel.TRITON_SOURCE"
 ENVIRONMENT_FIELDS = (
     "python",
     "implementation",
@@ -159,6 +162,12 @@ def _import(name: str, reason: str) -> object:
         ) from error
 
 
+def source_filename(text: str) -> str:
+    """Name one text in ``linecache`` by its digest, so no two texts share it."""
+
+    return f"{SOURCE_PREFIX} sha256={source_sha256(text)}>"
+
+
 def compile_text() -> tuple[str, dict[str, object]]:
     """Execute ``TRITON_SOURCE`` in a fresh namespace; return the text and it.
 
@@ -168,10 +177,11 @@ def compile_text() -> tuple[str, dict[str, object]]:
     """
 
     text = TRITON_SOURCE
+    filename = source_filename(text)
     lines = text.splitlines(keepends=True)
-    linecache.cache[SOURCE_FILENAME] = (len(text), None, lines, SOURCE_FILENAME)
+    linecache.cache[filename] = (len(text), None, lines, filename)
     namespace: dict[str, object] = {"__name__": "ai_journey_triton_matmul_text"}
-    exec(compile(text, SOURCE_FILENAME, "exec"), namespace)
+    exec(compile(text, filename, "exec"), namespace)
     return text, namespace
 
 
