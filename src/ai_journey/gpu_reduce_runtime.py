@@ -149,10 +149,22 @@ class ReductionBuffers:
 
 @dataclass(frozen=True)
 class SideResult:
-    """The latest timed result of one side and whether a repeat kept its bits."""
+    """The latest timed result of one side and the result of one more call.
+
+    Both values come back, so the benchmark can hold the repeat to the bound
+    too; equal bits are a measured fact, not a requirement.
+    """
 
     output: float
-    same_bits_on_repeat: bool
+    repeat: float
+
+    @property
+    def same_bits_on_repeat(self) -> bool:
+        """Whether the extra call gave the float32 bits of the latest result."""
+
+        return numpy.float32(self.output).tobytes() == (
+            numpy.float32(self.repeat).tobytes()
+        )
 
 
 @dataclass(frozen=True)
@@ -162,7 +174,7 @@ class ReduceWorkload:
     ``sides`` holds R0 to R5 and then ``torch.sum``. Each call only queues
     work; ``synchronize`` waits for it. ``check`` waits, reads each side's
     latest result, runs each side once more into a second output and
-    compares the bits.
+    returns both results.
     """
 
     sides: Mapping[str, Callable[[], object]]
@@ -196,9 +208,8 @@ def _compile(torch: object, source: str) -> object:
         ) from error
 
 
-def _first_float(tensor: object) -> tuple[float, int]:
-    value = tensor.reshape(-1)[:1].cpu().numpy()
-    return float(value[0]), int(value.view(numpy.uint32)[0])
+def _first_float(tensor: object) -> float:
+    return float(tensor.reshape(-1)[:1].cpu().numpy()[0])
 
 
 class GpuReduceRuntime:
@@ -330,11 +341,10 @@ class GpuReduceRuntime:
             for call in again.values():
                 call()
             self.synchronize()
-            results = {}
-            for name, (value, bits) in latest.items():
-                _, repeated = _first_float(outputs[name][1])
-                results[name] = SideResult(value, repeated == bits)
-            return results
+            return {
+                name: SideResult(latest[name], _first_float(pair[1]))
+                for name, pair in outputs.items()
+            }
 
         return ReduceWorkload(sides=sides, synchronize=self.synchronize, check=check)
 

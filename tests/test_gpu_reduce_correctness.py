@@ -128,10 +128,8 @@ class StandInBackend:
             return None
 
         def check():
-            return {
-                name: SideResult(float(self._total(name, values)), True)
-                for name in SIDES
-            }
+            totals = {name: float(self._total(name, values)) for name in SIDES}
+            return {name: SideResult(total, total) for name, total in totals.items()}
 
         return ReduceWorkload(
             sides={name: side for name in SIDES},

@@ -22,10 +22,12 @@ reads are not counted.
 After the last sample, the latest result of each side is checked against
 the exact sum of its prefix: a kernel within the bound of its order, and
 ``torch.sum`` within the declared tolerance, or the run stops. Each side
-then runs once more, and the record states whether the repeat kept the
-bits. Only the host timer ``time.perf_counter_ns`` makes a measurement; any
-other clock is named ``injected``. These are host-specific Apple GPU
-(Metal) timings; nothing here measures CUDA or NVIDIA hardware.
+then runs once more. The repeat must pass the same check, and the record
+states whether it kept the bits; other bits inside the bound are a fact,
+not a failure. Only the host timer ``time.perf_counter_ns`` makes a
+measurement; any other clock is named ``injected``. These are
+host-specific Apple GPU (Metal) timings; nothing here measures CUDA or
+NVIDIA hardware.
 """
 
 from __future__ import annotations
@@ -95,6 +97,20 @@ class SideCheck:
         }
 
 
+def _held(
+    value: float, depth: int, sums: ExactSums, side: str, rule: str, when: str = ""
+) -> ReductionCheck:
+    """Check one result of a side by its rule; a result outside it stops the run."""
+
+    check = ReductionCheck(value, depth, sums)
+    if not check.within:
+        raise GpuReduceError(
+            f"{side} sits {float(check.error)!r} from the exact sum{when}; "
+            f"its {rule.replace('_', ' ')} is {float(check.bound)!r}"
+        )
+    return check
+
+
 def _checks(
     results: object, sums: ExactSums, n: int, label: str
 ) -> dict[str, SideCheck]:
@@ -102,21 +118,18 @@ def _checks(
         raise GpuReduceError(f"{label}: the check must cover every side in order")
     checks = {}
     for name, result in results.items():
-        if not isinstance(result, SideResult) or (
-            type(result.same_bits_on_repeat) is not bool
-        ):
+        if not isinstance(result, SideResult):
             raise TypeError("a side result must be a SideResult")
         if name == TORCH_SUM:
             depth, rule = VENDOR_DEPTH, DECLARED_TOLERANCE
         else:
             depth, rule = summation_depth(name, n), ORDER_BOUND
-        check = ReductionCheck(result.output, depth, sums)
-        if not check.within:
-            raise GpuReduceError(
-                f"{label}: {name} sits {float(check.error)!r} from the exact sum; "
-                f"its {rule.replace('_', ' ')} is {float(check.bound)!r}"
-            )
-        checks[name] = SideCheck(check, rule, result.same_bits_on_repeat)
+        side = f"{label}: {name}"
+        latest = _held(result.output, depth, sums, side, rule)
+        # Other bits on the repeat are recorded, but the repeat must hold the
+        # rule too, as each correctness run must.
+        _held(result.repeat, depth, sums, side, rule, " on its repeat")
+        checks[name] = SideCheck(latest, rule, result.same_bits_on_repeat)
     return checks
 
 

@@ -256,9 +256,11 @@ def test_the_workload_binds_every_side_to_one_device_buffer():
 
     assert list(workload.sides) == SIDES and list(results) == SIDES
     for name in STEP_KERNELS:
-        check = ReductionCheck(results[name].output, summation_depth(name, n), sums)
-        assert check.within and results[name].same_bits_on_repeat, name
-    torch_sum = ReductionCheck(results["torch_sum"].output, VENDOR_DEPTH, sums)
-    assert torch_sum.within
+        depth = summation_depth(name, n)
+        for value in (results[name].output, results[name].repeat):
+            assert ReductionCheck(value, depth, sums).within, name
+        assert results[name].same_bits_on_repeat, name
+    for value in (results["torch_sum"].output, results["torch_sum"].repeat):
+        assert ReductionCheck(value, VENDOR_DEPTH, sums).within
     with pytest.raises(GpuReduceError, match="at least 1048577 values"):
         runtime.workload(source, (1 << 20) + 1)

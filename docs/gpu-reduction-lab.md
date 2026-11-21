@@ -411,7 +411,9 @@ the range of each rate.
 After the last sample at a size, the run checks the latest result of each
 side against the exact sum of the prefix. A kernel must stay within the bound
 of its order. `torch.sum` must stay within the declared tolerance. Each side
-then runs once more, and the record states if the repeat kept the bits.
+then runs once more, and the result of that repeat must pass the same check.
+The record states if the repeat kept the bits. Other bits inside the bound do
+not stop the run.
 
 ## The bandwidth ceiling
 
