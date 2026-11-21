@@ -265,8 +265,8 @@ the lanes of the other side wait. This is control divergence.
 In R0, at stride s, only the threads with `t % (2 s) == 0` add. At s = 1, half
 the lanes of every SIMD group add, and the other half wait. At s = 2, one lane
 in four adds. Until s reaches 32, every one of the 8 SIMD groups takes the
-branch with most of its lanes idle. Each thread also calculates `t % (2 s)`,
-and the compiler does not see s as a constant.
+branch with half or more of its lanes idle. Each thread also calculates
+`t % (2 s)`, and the compiler does not see s as a constant.
 
 In R1, at stride s, the threads `t < s` add. While s is 32 or more, s is a
 multiple of 32. Thus the first s / 32 SIMD groups take the branch with all
@@ -472,8 +472,8 @@ facts:
   and 12.58, 11.47 and 12.76 after it.
 
 The reduction report recorded load averages of 12.58, 11.47 and 12.76 before
-the run, and 12.51, 11.51 and 12.74 after the run. The `uptime` command printed
-the same values before and after the run. The report digest is
+the run, and 12.51, 11.51 and 12.74 after the run. Before and after the run,
+the `uptime` command printed the same values as the report. The report digest is
 `5905fe9a28f58e242d669a5489b79a0937dab4595f584567d230818ae987df47`. The values
 are host-specific Apple GPU (Metal) measurements from one run, not portable
 figures.
@@ -586,9 +586,9 @@ R2 to R5 all reached 93.6 to 110.1 GB/s.
 
 ### What did not help
 
-- From 2^24, the ratios of R3, R4 and R5 over their bases were 0.946 to
-  1.176. At 2^26, the ratios were 1.073, 0.995 and 1.003, with no clear
-  difference.
+- At 2^24 and 2^26, the ratios of R3, R4 and R5 over their bases were 0.974
+  to 1.176. At the ragged size, they were 0.946 to 1.025. At 2^26, the ratios
+  were 1.073, 0.995 and 1.003, with no clear difference.
   The data suggest that the device loads set the time there, but no counter
   shows it.
 - The fixed grid (R5) was slower than R4 at 2^16, with a ratio of 0.642.
@@ -695,7 +695,7 @@ host without torch can check it with the verifier.
 | --- | --- | --- |
 | `seed` | 78 | 0 to 2^32 - 1 |
 | `plan_sha256` | the digest of the declared plan | only that digest |
-| `correctness.cases` | 13 [pattern, n] pairs | 1 to 64 different pairs with n up to 2^22, which run every path |
+| `correctness.cases` | 13 [pattern, n] pairs | 1 to 64 different pairs with n up to 2^22 and at most 2^24 elements in all, which run every pattern and every path |
 | `correctness.runs` | 3 | 2 to 5 runs of each kernel on each case |
 | `benchmark.sizes` | 65536, 1048576, 16777216, 67108864 and 10000019 | 1 to 16 different sizes up to 2^26 |
 | `benchmark.warmup` | 2 | 0 to 10 samples that are not timed |

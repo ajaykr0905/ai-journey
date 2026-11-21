@@ -5,7 +5,12 @@ from pathlib import Path
 
 from ai_journey import gpu_ceiling_cli, gpu_reduce_cli
 from ai_journey.gpu_reduce_bound import summation_depth
-from ai_journey.gpu_reduce_config import load_config
+from ai_journey.gpu_reduce_config import (
+    MAX_CASE_ELEMENTS,
+    MAX_CASE_TOTAL,
+    MAX_CASES,
+    load_config,
+)
 from ai_journey.gpu_reduce_plan import PLAN, SIZE_CLASSES, plan_sha256
 from ai_journey.gpu_reduce_report import MEASUREMENT_BOUNDARY
 from ai_journey.gpu_reduce_source import KERNELS, STEP_KERNELS, library_sha256
@@ -182,6 +187,13 @@ def test_guide_controls_and_planned_work_match_the_pinned_config():
     work = config.planned_work()
 
     assert f"| `seed` | {config.seed} |" in text
+    assert (
+        f"| `correctness.cases` | {len(config.correctness.cases)} [pattern, n] pairs "
+        f"| 1 to {MAX_CASES} different pairs with n up to "
+        f"2^{MAX_CASE_ELEMENTS.bit_length() - 1} and at most "
+        f"2^{MAX_CASE_TOTAL.bit_length() - 1} elements in all, which run every "
+        "pattern and every path |"
+    ) in text
     assert f"| `correctness.runs` | {config.correctness.runs} |" in text
     sizes = ", ".join(map(str, benchmark.sizes[:-1])) + f" and {benchmark.sizes[-1]}"
     assert f"| `benchmark.sizes` | {sizes} |" in text
@@ -206,3 +218,32 @@ def test_guide_controls_and_planned_work_match_the_pinned_config():
         f"a sample holds {calls} and {benchmark.calls_per_sample(benchmark.sizes[-1])}"
         " calls."
     ) in flat(text)
+
+
+def test_the_ranges_of_r3_to_r5_are_the_ratios_of_the_size_tables():
+    lines = guide().splitlines()
+    over_base = {}
+    for index, line in enumerate(lines):
+        if line.startswith("| Step | Kernel | Median GB/s (IQR range) |"):
+            n = re.fullmatch(r"### n = (\d+), class \w+", lines[index - 2]).group(1)
+            rows = itertools.takewhile(
+                lambda row: row.startswith("|"), lines[index + 2 :]
+            )
+            cells = [
+                [cell.strip() for cell in row.strip("|").split("|")] for row in rows
+            ]
+            over_base[int(n)] = {
+                row[0]: float(row[4].split(",")[0]) for row in cells if row[4]
+            }
+    late = ("R3", "R4", "R5")
+    large = [over_base[n][step] for n in (1 << 24, 1 << 26) for step in late]
+    ragged = [over_base[10000019][step] for step in late]
+    last = [f"{over_base[1 << 26][step]:.3f}" for step in late]
+
+    assert sorted(over_base) == sorted(load_config(ROOT / PINNED).benchmark.sizes)
+    assert (
+        "At 2^24 and 2^26, the ratios of R3, R4 and R5 over their bases were "
+        f"{min(large):.3f} to {max(large):.3f}. At the ragged size, they were "
+        f"{min(ragged):.3f} to {max(ragged):.3f}. At 2^26, the ratios were "
+        f"{last[0]}, {last[1]} and {last[2]}, with no clear difference."
+    ) in flat(guide())
