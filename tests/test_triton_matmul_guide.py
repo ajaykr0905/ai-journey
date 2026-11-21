@@ -22,6 +22,7 @@ from ai_journey.triton_matmul_performance import (
     PERFORMANCE_SHAPES,
     TRITON_GPU,
 )
+from ai_journey.triton_matmul_report import INTERPRETER_BOUNDARY
 from ai_journey.triton_matmul_runtime import (
     CI_WHEELS,
     CORE_METADATA_SHA256,
@@ -256,3 +257,24 @@ def test_the_guide_names_the_pending_learner_work_and_the_boundary():
         "The repository CI has no job for this lab yet.",
     ):
         assert phrase in text, phrase
+
+
+def test_the_boundary_section_names_each_field_with_its_value():
+    section = guide().split("## Evidence boundary\n", 1)[1].split("\n## ", 1)[0]
+    flags = {
+        name: value
+        for name, value in INTERPRETER_BOUNDARY.items()
+        if name != "statement"
+    }
+    held = sorted(name for name, value in flags.items() if value)
+    refused = [name for name, value in flags.items() if not value]
+
+    assert held == [
+        "metal_rates_copied_from_recorded_reports",
+        "triton_interpreter_on_cpu",
+    ]
+    true_part, false_part = flat(section).split("These fields are false:", 1)
+    for name in held:
+        assert f"`{name}`" in true_part, name
+    for name in refused:
+        assert f"`{name}`" in false_part, name

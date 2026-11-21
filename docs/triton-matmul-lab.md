@@ -266,8 +266,8 @@ docker rm -f d79-triton-interp
 ```
 
 The container had triton 3.9.0, torch 2.15.0+cpu, NumPy 1.26.4 and pytest
-9.0.2. In the container, all 176 tests of the 10 Triton test modules passed,
-with no skip. On the Mac, 163 tests passed and 2 skipped: the interpreter
+9.0.2. In the container, all 177 tests of the 10 Triton test modules passed,
+with no skip. On the Mac, 164 tests passed and 2 skipped: the interpreter
 module and the CLI test that runs the interpreter.
 
 The check ran on 2026-11-22 at 04:47 IST. It did 108 runs: 9 cases, 6 configs
@@ -307,6 +307,13 @@ averages were 0.74, 0.40 and 0.55 before the check, and 2.03, 0.80 and 0.68
 after it. On the Mac, `uptime` printed 7.81, 7.12 and 6.99 before, and 8.18,
 7.35 and 7.08 after. On the Mac, `verify` checked the report in about 1 second,
 without triton.
+
+A second check ran on 2026-11-22 at 05:05 IST in the same container, with the
+final code of this lab. Its report had the digest
+`bcc9859fb1fda754e6c3bb0f11dc8c3d73aef7ab8269ce2726f0747288579c7d`, and the
+repository does not keep that file. Each section was equal to the recorded
+report, except the time stamp, the load averages and the digest. Thus each
+output buffer of the interpreter had the same bits in both checks.
 
 ## A CI install of triton
 
