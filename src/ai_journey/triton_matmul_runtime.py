@@ -220,20 +220,27 @@ class InterpreterBackend:
 
         ``buffer`` holds C and its guard tail as one flat float32 array. The
         kernel gets row-major strides, so a store past the last row of C lands
-        in the tail.
+        in the tail. The interpreter raises its own ``InterpreterError``, and
+        this method names it as a lab error, so a command reports it as a
+        failed check.
         """
 
         chosen = require_config(config)
         torch = self._torch
         rows, inner = left.shape
         columns = right.shape[1]
-        self._launch(
-            torch.from_numpy(numpy.ascontiguousarray(left)),
-            torch.from_numpy(numpy.ascontiguousarray(right)),
-            torch.from_numpy(buffer),
-            rows,
-            columns,
-            inner,
-            **chosen.launcher_arguments(),
-        )
+        try:
+            self._launch(
+                torch.from_numpy(numpy.ascontiguousarray(left)),
+                torch.from_numpy(numpy.ascontiguousarray(right)),
+                torch.from_numpy(buffer),
+                rows,
+                columns,
+                inner,
+                **chosen.launcher_arguments(),
+            )
+        except Exception as error:
+            raise TritonMatmulError(
+                f"the Triton interpreter failed on {chosen.name}: {error}"
+            ) from error
         return buffer

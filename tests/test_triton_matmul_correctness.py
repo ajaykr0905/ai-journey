@@ -330,6 +330,30 @@ def test_the_backend_sets_the_interpreter_and_launches_the_text(monkeypatch):
     }
 
 
+def crashing_jit(fn):
+    class InterpretedFunction:
+        """An interpreted stand-in whose launch fails, as InterpreterError does."""
+
+        def __getitem__(self, grid):
+            def launch(*args, **kwargs):
+                raise RuntimeError("index out of range")
+
+            return launch
+
+    return InterpretedFunction()
+
+
+def test_a_crash_inside_the_interpreter_is_named_as_a_lab_error(monkeypatch):
+    keep_environment(monkeypatch)
+    fake_triton(monkeypatch, crashing_jit)
+    backend = InterpreterBackend()
+    buffer = sentinel_buffer(4)
+    left = numpy.ones((1, 1), dtype=numpy.float32)
+
+    with pytest.raises(TritonMatmulError, match="interpreter failed on m64_n32"):
+        backend.run(left, left, SMALL, buffer)
+
+
 def test_the_unavailable_error_accepts_only_a_known_reason():
     with pytest.raises(ValueError, match="reason"):
         TritonMatmulUnavailableError("no_gpu", "nothing")
