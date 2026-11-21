@@ -1599,7 +1599,8 @@
     "tests/test_gpu_scan_runtime.py",
     "tests/test_gpu_scan_source.py",
     "tests/test_gpu_scan_speedup.py",
-    "tests/test_gpu_scan_verify.py"
+    "tests/test_gpu_scan_verify.py",
+    "tests/test_gpu_reduce_scan_delivery.py"
   ],
   "required_directories": [
     "days",

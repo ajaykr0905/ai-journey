@@ -1116,6 +1116,171 @@ their bound again from the installed wheel. CI job
 [printable GPU checklist](docs/gpu-performance-checklist.md) and the
 [checklist CUDA contract guide](docs/gpu-checklist-cuda-contract.md).
 
+## Speed up a sum reduction step by step and compare three scans
+
+Day 78 of the curriculum names GPU MODE Lecture 9, "Reductions", and Lecture
+20, "Scan Algorithm". Ajay must still watch both lectures and check the labs
+against them. Three commands do this work:
+
+- `ai-journey-gpu-reduce` declares six float32 sum reductions, R0 to R5. Each
+  step makes one change to the step before it and states one hypothesis. The
+  command checks each kernel against the exact sum and a derived error bound.
+  It times each kernel with `torch.sum` on the Apple GPU of a Mac.
+- `python -m ai_journey.gpu_reduce_cuda_cli` writes R1 and a warp-shuffle twin
+  of R3 as CUDA C++ text. It checks the texts without a compiler, and a CPU
+  simulator predicts the bits of each result.
+- `ai-journey-gpu-scan` declares three float32 inclusive scans, S0 to S2, each
+  with one hypothesis. It checks each scan against a float64 reference and a
+  declared bound. It times the scans with `torch.cumsum` and the Day 74 copy
+  kernel on the Apple GPU.
+
+These commands run the Metal labs on a Mac and check the CUDA texts on any
+host:
+
+```bash
+ai-journey-gpu-ceilings run \
+  --config config/day-74-gpu-ceilings.json \
+  --output /tmp/day-74-gpu-ceilings.json
+ai-journey-gpu-reduce run \
+  --config config/day-78-gpu-reduce.json \
+  --ceilings /tmp/day-74-gpu-ceilings.json \
+  --output /tmp/day-78-gpu-reduce.json
+ai-journey-gpu-reduce verify \
+  --report /tmp/day-78-gpu-reduce.json \
+  --config config/day-78-gpu-reduce.json \
+  --ceilings /tmp/day-74-gpu-ceilings.json
+ai-journey-gpu-scan run \
+  --config config/day-78-gpu-scan.json \
+  --output /tmp/day-78-gpu-scan.json
+ai-journey-gpu-scan verify \
+  --report /tmp/day-78-gpu-scan.json \
+  --config config/day-78-gpu-scan.json
+python -m ai_journey.gpu_reduce_cuda_cli sources \
+  --output-dir /tmp/day-78-cuda-sources
+python -m ai_journey.gpu_reduce_cuda_cli check \
+  --source-dir /tmp/day-78-cuda-sources
+python -m ai_journey.gpu_reduce_cuda_cli simulate \
+  --config config/day-78-gpu-reduce.json
+```
+
+The reduction run divides each rate by the bandwidth ceiling of a Day 74
+report, so the first command makes a fresh one. Each hypothesis of both labs
+entered the repository before the first timed run of its kernels. The scan
+plan uses one fact from an untimed correctness check, and the scan guide
+states it.
+
+On the development host, one run of the pinned reduction config gave these
+rates. Each value is the median GB/s of 14 samples, with 4 n bytes for each
+call. The reduction guide gives the IQR range of each median.
+
+| n | R0 | R1 | R2 | R3 | R4 | R5 | `torch.sum` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 65536 | 13.4 | 23.5 | 28.4 | 33.8 | 38.6 | 24.8 | 36.9 |
+| 1048576 | 19.3 | 50.8 | 90.1 | 141.2 | 199.1 | 283.8 | 331.9 |
+| 16777216 | 19.7 | 56.2 | 93.6 | 110.1 | 107.3 | 106.6 | 101.5 |
+| 67108864 | 19.9 | 55.2 | 100.9 | 108.2 | 107.7 | 108.0 | 108.1 |
+| 10000019 | 19.9 | 55.3 | 95.2 | 97.5 | 99.0 | 93.6 | 18.7 |
+
+Each cell of the next table gives the ratio of a step kernel over its base
+kernel, from their median GB/s at one size. The word after the ratio is the
+verdict of the Day 76 rule. The rule calls a ratio faster or slower only
+when it is 1.1 or more in that direction and the IQR ranges do not overlap.
+
+| Step | Kernel | Base | 65536 | 1048576 | 16777216 | 67108864 | 10000019 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| R0 | `reduce_r0_interleaved` | `torch.sum` | 0.362, slower | 0.058, slower | 0.194, slower | 0.184, slower | 1.063, no clear difference |
+| R1 | `reduce_r1_sequential` | R0 | 1.755, faster | 2.630, faster | 2.848, faster | 2.768, faster | 2.785, faster |
+| R2 | `reduce_r2_first_add` | R1 | 1.213, faster | 1.774, faster | 1.667, faster | 1.829, faster | 1.721, faster |
+| R3 | `reduce_r3_simd_shuffle` | R2 | 1.188, faster | 1.568, faster | 1.176, faster | 1.073, no clear difference | 1.025, no clear difference |
+| R4 | `reduce_r4_simd_sum` | R3 | 1.144, faster | 1.410, faster | 0.974, no clear difference | 0.995, no clear difference | 1.015, no clear difference |
+| R5 | `reduce_r5_grid_stride` | R4 | 0.642, slower | 1.425, faster | 0.994, no clear difference | 1.003, no clear difference | 0.946, no clear difference |
+
+The steps form one chain, so each ratio measures one change on top of the
+changes before it. The predictions held at 23 of 30 points. At 2^16, R0 was
+slower than `torch.sum`, and R2, R3 and R4 were each faster than their bases.
+The plan said that the host dispatch sets the time there. The fastest kernel
+reached 2.891 to 14.707 times the R0 rate.
+
+The ceiling of the fresh Day 74 run was 87.77 GB/s, from `stream_copy` at 256
+MiB. From 2^24, R2 to R5 reached 1.067 to 1.254 of the ceiling. The ceiling is
+the best median of the Day 74 kernels, not a hardware limit. At the ragged size
+of 10000019, `torch.sum` gave 18.7 GB/s. PyTorch does not report which kernel
+`torch.sum` ran, so the lab cannot tell why.
+
+All 78 outputs stayed within their bounds: 13 cases and 6 kernels. In the
+three exact cases, every kernel gave the exact sum. R3 kept the bits of R2 in
+all 13 cases and at all 5 sizes, as the plan predicted. The reduction report
+recorded load averages of 12.58, 11.47 and 12.76 before the run and 12.51,
+11.51 and 12.74 after it. The `uptime` command printed 12.40, 11.38 and 12.76
+before the ceiling run.
+
+One run of the pinned scan config gave these rates. Each value is the median
+GB/s of 11 samples, with 8 bytes for each element. The scan guide gives the IQR
+range of each median.
+
+| Length | S0 | S1 | S2 | `torch.cumsum` | `stream_copy` |
+| --- | --- | --- | --- | --- | --- |
+| 2^16 | 31.93 | 27.54 | 51.49 | 39.32 | 134.47 |
+| 2^20 | 63.44 | 72.46 | 100.62 | 23.38 | 159.38 |
+| 2^24 | 42.98 | 47.08 | 47.78 | 4.21 | 80.00 |
+| 5000003 | 44.01 | 44.58 | 45.35 | 5.08 | 77.42 |
+
+Each cell of the next table gives the ratio over the base kernel of the plan
+and the verdict of the same rule.
+
+| Step | Kernel | Base | 2^16 | 2^20 | 2^24 | 5000003 |
+| --- | --- | --- | --- | --- | --- | --- |
+| S0 | `scan_s0_hillis_steele` | `torch.cumsum` | 0.812, slower | 2.714, no clear difference | 10.210, faster | 8.667, faster |
+| S1 | `scan_s1_blelloch` | `scan_s0_hillis_steele` | 0.862, slower | 1.142, faster | 1.095, no clear difference | 1.013, no clear difference |
+| S2 | `scan_s2_simd` | `scan_s0_hillis_steele` | 1.612, faster | 1.586, faster | 1.112, faster | 1.030, no clear difference |
+
+S2 was the fastest kernel at each point. The predictions held at 5 of 12
+points. At 2^24 and at 5000003, S0 was 10.2 and 8.7 times as fast as
+`torch.cumsum`. At 2^20, the IQR range of `torch.cumsum` was 11.58 to 92.55
+GB/s, a factor of 8.
+
+Each run of each kernel kept its sentinel tail and stayed within its bound. S0
+and S1 held the bits of their CPU replays in each of the 8 normal cases.
+`torch.cumsum` gave other bits from run to run in the normal cases of 65536,
+1048577 and 5000003 elements. The scan report recorded load averages of 10.46,
+10.89 and 12.69 before the run and 11.51, 11.12 and 12.74 after it.
+
+The four tables and the paragraphs between the first table and this one give
+host-specific Apple GPU (Metal) measurements. They come from one shared host,
+and they are not portable figures. One run gives each ratio, so another run can
+give another verdict.
+
+The CUDA check runs 13 checks on the R1 text and 14 checks on the shuffle
+text, at each of 14 sizes. Each pinned text passes each check. The simulator
+predicts 36 results, and each result is within its bound and has no race. At
+all 8 inputs of the recorded Metal report, each simulated result has the bits
+of its Metal twin. These results come from text checks and a CPU model, not
+from a GPU.
+
+The Metal commands exit 0 on success and 1 when a report fails verification.
+They exit 2 for usage errors, unreadable or invalid inputs, or a refused
+output. Code 2 also marks a run that failed a check, had a device error or
+exceeded its time budget. Code 3 means that the host cannot run Metal kernels
+through PyTorch. The CUDA command needs no GPU, so it uses only the codes 0, 1
+and 2.
+
+Evidence boundary: the Metal numbers come from one Apple GPU through Metal on
+one host. SIMD-group functions are Metal's counterpart of CUDA warp shuffles,
+not the same instruction. PyTorch does not name the kernels of `torch.sum` and
+`torch.cumsum`, so each vendor number names the call, not a kernel. No CUDA
+kernel ran, and the labs used no NVIDIA GPU. Nothing compiled or ran the CUDA
+texts. The labs read no hardware counter, so each bound name is an inference
+from timings and measured rates.
+
+CI job `gpu-reduce-scan-contracts` runs the reduction, CUDA and scan tests on
+Linux with CPU torch. It also requires each installed Apple GPU command to exit
+3 and write no report. Then the installed `verify` command of each lab checks
+its recorded report against its recorded config. The reduction report must also
+match the recorded Day 74 ceiling. CI job `nvidia-preflight-contracts` runs the
+same tests. See the [reduction lab guide](docs/gpu-reduction-lab.md), the
+[reduction CUDA contract guide](docs/gpu-reduce-cuda-contract.md) and the
+[scan lab guide](docs/gpu-scan-lab.md).
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with
