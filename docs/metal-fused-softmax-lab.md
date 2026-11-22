@@ -465,7 +465,8 @@ Triton runs each kernel on the CPU with NumPy.
 The test uses the cases of the pinned config, their gapped layouts and the
 float64 reference. NumPy sets the order of each `tl.sum`, so the test uses the
 sanity bound `2**-16 * y_ref + 2**-125` and not the per-order bounds. Without
-the flag or without `triton`, the module skips.
+the flag or without `triton`, the module skips. The CI job
+`triton-matmul-contracts` runs it with the flag on a Linux runner.
 
 On 2026-11-22, the 24 checks passed in a `python:3.11-slim` container with
 Triton 3.9.0, CPU PyTorch 2.15.0 and NumPy 1.26.4. The container mounted the

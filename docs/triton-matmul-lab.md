@@ -335,7 +335,13 @@ the platform `x86_64-manylinux_2_28` and `--only-binary :all:`. It resolved
 `triton==3.9.0` and no other package. The manylinux tags need glibc 2.27 or
 later. Thus `pip install triton==3.9.0` can install the x86_64 wheel on a Linux
 CI host with Python 3.11 and such a glibc. The container install used the
-aarch64 wheel. The repository CI has no job for this lab yet.
+aarch64 wheel.
+
+The CI job `triton-matmul-contracts` installs `triton==3.9.0` and CPU torch
+on a Linux runner, and it sets `TRITON_INTERPRET=1`. It runs the tests of
+this lab and the Triton texts of the fused softmax lab in the interpreter.
+The job fails when a test skips. Then the installed command checks the
+pinned plan and verifies the report. This guide records no run of that job.
 
 ## Lines of code
 

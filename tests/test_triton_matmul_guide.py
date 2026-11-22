@@ -254,9 +254,14 @@ def test_the_guide_names_the_pending_learner_work_and_the_boundary():
         "Nothing here runs on a GPU.",
         "host-specific Apple GPU (Metal) measurement",
         "That time measures the CPU interpreter, so it is not a performance number.",
-        "The repository CI has no job for this lab yet.",
+        "The CI job `triton-matmul-contracts` installs `triton==3.9.0` and CPU torch "
+        "on a Linux runner, and it sets `TRITON_INTERPRET=1`.",
+        "The job fails when a test skips.",
+        "This guide records no run of that job.",
     ):
         assert phrase in text, phrase
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "\n  triton-matmul-contracts:\n" in workflow
 
 
 def test_the_boundary_section_names_each_field_with_its_value():

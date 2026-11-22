@@ -23,18 +23,24 @@ flag is absent.
 """
 
 import os
+import unittest
 from pathlib import Path
 
 import numpy
 import pytest
 
+# pytest and the unittest discovery of the CI job ``test`` both skip a module
+# that raises unittest.SkipTest. A pytest skip fails that discovery.
 if os.environ.get("TRITON_INTERPRET") != "1":
-    pytest.skip(
-        "the Triton harness runs only with TRITON_INTERPRET=1, on the CPU",
-        allow_module_level=True,
+    raise unittest.SkipTest(
+        "the Triton harness runs only with TRITON_INTERPRET=1, on the CPU"
     )
-triton = pytest.importorskip("triton")
-torch = pytest.importorskip("torch")
+try:
+    import torch
+    import triton
+except ImportError as error:
+    reason = f"the Triton harness needs triton and torch: {error}"
+    raise unittest.SkipTest(reason) from None
 tl = triton.language
 
 from ai_journey.metal_fused_config import load_config  # noqa: E402

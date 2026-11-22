@@ -7,14 +7,24 @@ on the CPU, so no test here measures or claims GPU behavior.
 """
 
 import inspect
+import unittest
 
 import numpy
 import pytest
 
-triton = pytest.importorskip("triton", reason="this host has no triton wheel")
-# A jit function finds triton.language in its module globals.
-tl = pytest.importorskip("triton.language")
-torch = pytest.importorskip("torch", reason="the interpreter takes torch tensors")
+# pytest and the unittest discovery of the CI job ``test`` both skip a module
+# that raises unittest.SkipTest. A pytest skip fails that discovery.
+try:
+    import triton
+
+    # A jit function finds triton.language in its module globals.
+    import triton.language as tl
+except ImportError:
+    raise unittest.SkipTest("this host has no triton wheel") from None
+try:
+    import torch
+except ImportError:
+    raise unittest.SkipTest("the interpreter takes torch tensors") from None
 
 from ai_journey import triton_matmul_runtime  # noqa: E402
 from ai_journey.memory_access_tiling import MatmulShape  # noqa: E402
