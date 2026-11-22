@@ -504,7 +504,10 @@ imports neither triton nor torch. It does these checks:
    sentinel tail, and it checks its digest bit for bit.
 4. It checks the structure of each normal record. The record must hold a
    digest and an error inside the bound. Its ratio and its count must agree
-   with its error and its digest.
+   with its error and its digest. No float32 output is nearer to the float64
+   reference than the rounded reference. Thus the error must not be less than
+   the error of the rounded reference. A record with the digest of the rounded
+   reference must have that error.
 5. It counts the lines of each text with a second counter. That counter strips
    `//` comments line by line for the C texts, and it uses `ast` spans for the
    Triton text.

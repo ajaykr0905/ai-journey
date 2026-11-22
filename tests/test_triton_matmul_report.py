@@ -14,6 +14,7 @@ import pytest
 
 from ai_journey.kernel_launch_io import canonical_json_bytes
 from ai_journey.memory_access_tiling import MatmulShape
+from ai_journey.triton_matmul_cli import EXIT_REJECTED, main
 from ai_journey.triton_matmul_config import PINNED_PLAN, TritonMatmulPlan
 from ai_journey.triton_matmul_kernel import AUTOTUNE_CONFIGS, TritonMatmulError
 from ai_journey.triton_matmul_report import (
@@ -33,6 +34,7 @@ from ai_journey.triton_matmul_verify import (
     verify_report,
 )
 from test_triton_matmul_correctness import StandInBackend
+from test_triton_matmul_recorded import RECORDED_REPORT_JSON
 
 SMALL = TritonMatmulPlan(
     name="triton-matmul-small",
@@ -221,6 +223,67 @@ def test_the_verifier_rebuilds_each_exact_buffer_on_the_cpu(small):
     with pytest.raises(TritonMatmulVerificationError, match=r"runs\[1\].buffer_sha256"):
         verify_report(resealed(small, nudge))
     assert numpy.float32(1.0) != numpy.nextafter(numpy.float32(1.0), numpy.float32(2))
+
+
+def set_normal_errors(report, case, error):
+    """Give each normal run of a case another error and keep its sums consistent."""
+
+    record = report["correctness"]["cases"][case]
+    for run in record["runs"]:
+        if run["family"] == "normal":
+            run["max_relative_error"] = error
+            run["bound_ratio"] = error / record["error_bound"]
+    report["summary"]["max_bound_ratio"] = max(
+        run["bound_ratio"]
+        for item in report["correctness"]["cases"]
+        for run in item["runs"]
+        if run["family"] == "normal"
+    )
+
+
+def test_a_normal_record_with_the_rounded_bits_keeps_their_error(small):
+    # At 1 x 1 x 1 the output is the rounded reference, so its error is known.
+    case = SMALL.shapes.index(MatmulShape(1, 1, 1))
+    run = normal(small, case)
+    bound = small["correctness"]["cases"][case]["error_bound"]
+    assert run["rounded_reference_differences"] == 0 < run["max_relative_error"]
+
+    higher = (run["max_relative_error"] + bound) / 2
+    forged = resealed(small, lambda r: set_normal_errors(r, case, higher))
+    with pytest.raises(TritonMatmulVerificationError, match="bits of the rounded"):
+        verify_report(forged, plan=SMALL)
+
+
+def test_a_normal_error_below_the_rounded_reference_error_is_refused(small):
+    # No float32 output is nearer the float64 sum than its rounding.
+    forged = resealed(small, lambda r: set_normal_errors(r, 1, 1e-12))
+
+    with pytest.raises(
+        TritonMatmulVerificationError, match="below the error of the rounded"
+    ):
+        verify_report(forged, plan=SMALL)
+
+
+def test_the_recorded_largest_bound_ratio_cannot_be_lowered():
+    # The largest ratio, 0.516, is the 1 x 1 x 1 case, whose output bits are known.
+    recorded = json.loads(RECORDED_REPORT_JSON)
+    assert recorded["summary"]["max_bound_ratio"] == normal(recorded)["bound_ratio"]
+    assert normal(recorded)["rounded_reference_differences"] == 0
+
+    forged = resealed(recorded, lambda r: set_normal_errors(r, 0, 1e-9))
+    assert forged["summary"]["max_bound_ratio"] < 0.25
+    with pytest.raises(TritonMatmulVerificationError, match=r"cases\[0\].runs\[0\]"):
+        verify_report(forged, plan=PINNED_PLAN)
+
+
+def test_a_label_that_is_not_a_string_is_rejected_with_exit_code_1(small, tmp_path):
+    relabeled = resealed(small, lambda r: r.update(label=[SYNTHETIC_LABEL]))
+    path = tmp_path / "relabeled.json"
+    path.write_bytes(canonical_json_bytes(relabeled) + b"\n")
+
+    with pytest.raises(TritonMatmulVerificationError, match="known label"):
+        verify_report(relabeled)
+    assert main(["verify", "--report", str(path)]) == EXIT_REJECTED
 
 
 def test_a_report_file_must_hold_canonical_bytes(small, tmp_path):

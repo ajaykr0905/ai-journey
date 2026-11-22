@@ -1,9 +1,10 @@
 """Independent verification of sealed Triton matmul comparison reports, on the CPU.
 
-Verification trusts no number in a report. It checks the field set, the label
-and its evidence boundary and the SHA-256 seal, parses the embedded plan, and
-can bind the report to a plan file. It then rebuilds each section, with other
-code than the run's where the run used lab code:
+Verification recomputes each number that the seed and the pinned texts fix,
+and it checks the rest for structure. It checks the field set, the label and
+its evidence boundary and the SHA-256 seal, parses the embedded plan, and can
+bind the report to a plan file. It then rebuilds each section, with other code
+than the run's where the run used lab code:
 
 * the operands, the float64 reference and the bound of each case with the
   Day 74 Metal verifier's code, and the exact operands from the seed;
@@ -17,10 +18,14 @@ code than the run's where the run used lab code:
 A normal output has an unknown order of additions, so its record is checked
 for structure: a digest, an error within the bound, a ratio that recomputes,
 and a count of elements off the rounded reference that is zero exactly when
-the digest is the digest of the rounded reference. The Metal rates, the later
-GPU steps and the PyPI facts are recorded data and must equal the pinned
-data. The summary is rebuilt last. The verifier imports neither triton nor
-torch, so a macOS host can verify a Linux interpreter report.
+the digest is the digest of the rounded reference. No float32 output is
+nearer the float64 reference than its rounding, so no error may be below the
+error of the rounded reference. A record with the digest of the rounded
+reference holds its bits, so it must record its error, as the Day 74 verifier
+requires of a PyTorch record. The Metal rates, the later GPU steps and the
+PyPI facts are recorded data and must equal the pinned data. The summary is
+rebuilt last. The verifier imports neither triton nor torch, so a macOS host
+can verify a Linux interpreter report.
 """
 
 from __future__ import annotations
@@ -38,7 +43,13 @@ import numpy
 from .kernel_launch_config import KernelLaunchError
 from .kernel_launch_io import canonical_json_bytes, loads_strict, read_bounded
 from .kernel_launch_verify import KernelLaunchVerificationError, _compare
-from .matmul_metal_verify import _bound, _hash, _operands, _reference
+from .matmul_metal_verify import (
+    _bound,
+    _hash,
+    _operands,
+    _reference,
+    _relative_error,
+)
 from .triton_matmul_config import TritonMatmulPlan
 from .triton_matmul_kernel import TRITON_SOURCE, TUTORIAL, TritonMatmulError
 from .triton_matmul_loc import COUNTING_RULE, counted_texts
@@ -266,9 +277,16 @@ def _normal_run(
     digest: str,
     size: int,
     bound: float,
+    floor: float,
     path: str,
 ) -> None:
-    """Check the structure of a normal record, then its fixed fields."""
+    """Check the structure of a normal record, then its fixed fields.
+
+    ``digest`` and ``floor`` are the digest and the error of the rounded
+    reference buffer. No float32 value is nearer a float64 sum than its
+    rounding, so no output has a smaller error, and an output with that
+    digest holds those bits, so its error is ``floor`` exactly.
+    """
 
     _require(
         type(record) is dict and set(record) == set(expected),
@@ -299,6 +317,16 @@ def _normal_run(
         (differences == 0) == (buffer == digest),
         f"{path} has a difference count that disagrees with its digest",
     )
+    _require(
+        floor <= error,
+        f"{path} has an error below the error of the rounded reference, which "
+        "no float32 output can have",
+    )
+    _require(
+        buffer != digest or error == floor,
+        f"{path} holds the bits of the rounded reference, so it must record "
+        "their error",
+    )
     _compare(
         {
             **expected,
@@ -326,10 +354,11 @@ def _verify_case(plan: TritonMatmulPlan, index: int, actual: object) -> list[dic
         "normal": _operands(plan.seed, index, m, n, k),
         "exact": _exact_operands(plan.seed, index, m, n, k),
     }
-    operands, rounded = [], {}
+    operands, rounded, floor = [], {}, {}
     for family, (left, right) in families.items():
-        total, _ = _reference(left, right)
+        total, scale = _reference(left, right)
         rounded[family] = total.astype(numpy.float32)
+        floor[family] = _relative_error(rounded[family], total, scale)
         operands.append(
             {
                 "family": family,
@@ -366,7 +395,7 @@ def _verify_case(plan: TritonMatmulPlan, index: int, actual: object) -> list[dic
         if family == "exact":
             _compare(expected, record, where)
         else:
-            _normal_run(record, expected, digest, m * n, bound, where)
+            _normal_run(record, expected, digest, m * n, bound, floor[family], where)
         runs.append(record)
     _compare(
         {
@@ -456,7 +485,10 @@ def _verify(
         report[DIGEST_FIELD] == _canonical_digest(unsigned),
         "report digest does not match its content",
     )
-    _require(report["label"] in _LABELS, "report label is not a known label")
+    _require(
+        type(report["label"]) is str and report["label"] in _LABELS,
+        "report label is not a known label",
+    )
     backend, boundary = _LABELS[report["label"]]
     _require(report["backend"] == backend, "report backend does not match its label")
     _compare(dict(boundary), report["evidence_boundary"], "evidence_boundary")
