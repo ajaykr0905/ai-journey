@@ -1,4 +1,5 @@
 import math
+from decimal import Decimal, localcontext
 from hashlib import sha256
 
 import numpy
@@ -23,6 +24,8 @@ from ai_journey.metal_fused_reference import (
     RowLayout,
     dense_layout,
     error_bounds,
+    exp64,
+    exp_growth,
     exp_probe_arguments,
     exp_probe_errors,
     float32_sha256,
@@ -256,3 +259,69 @@ def test_hashes_cover_the_little_endian_bytes():
     )
     with pytest.raises(MetalFusedError):
         float32_sha256(values.astype(numpy.float64))
+
+
+# The float64 bits of exp64 on a fixed grid, as this host computed them. Every
+# IEEE host must give the same digest, so a report verifies on any of them.
+EXP64_GRID_SHA256 = "4848efd1c733615206d0535944b4fcf8a2596ea78fd1a2b30fadf546bc08b4bc"
+
+
+def exp64_grid():
+    return numpy.concatenate(
+        (-(numpy.arange(200001) / 1000.0), numpy.arange(1025) * 2.0**-20)
+    )
+
+
+def test_exp64_is_within_one_ulp_of_the_exact_exp():
+    generator = numpy.random.default_rng(7979)
+    arguments = numpy.concatenate(
+        (
+            -generator.uniform(0.0, 200.0, 2000),
+            -generator.uniform(0.0, 12.0, 2000),
+            generator.uniform(0.0, 2.0**-10, 500),
+            numpy.linspace(-0.35, 0.35, 1001),
+            [0.0, -0.0, -1e-300, -87.33654475055311, -708.0],
+        )
+    )
+
+    got = exp64(arguments)
+
+    with localcontext() as context:
+        context.prec = 60
+        for value, result in zip(arguments.tolist(), got.tolist()):
+            exact = Decimal(value).exp()
+            ulp = Decimal(float(numpy.spacing(numpy.float64(float(exact)))))
+            assert abs(Decimal(result) - exact) <= ulp, value
+    assert exp64(numpy.array([0.0, -0.0])).tolist() == [1.0, 1.0]
+    assert exp64(numpy.array([-1000.0, -1.0e30, -3.4028234663852886e38])).tolist() == [
+        0.0,
+        0.0,
+        0.0,
+    ]
+    with pytest.raises(MetalFusedError, match="finite"):
+        exp64(numpy.array([0.0, numpy.nan]))
+
+
+def test_exp64_gives_the_same_bits_on_every_ieee_host():
+    assert float64_sha256(exp64(exp64_grid())) == EXP64_GRID_SHA256
+    assert exp_growth(0) == 1.0
+    assert exp_growth(3) == (1 + EXP_ERROR) * (1 + EXP_ERROR) * (1 + EXP_ERROR)
+
+
+def test_the_reference_and_bounds_never_call_the_platform_exp(monkeypatch):
+    layout = RowLayout((1, 31, 33, 1000), CORRECTNESS_GAP)
+    values = softmax_inputs(79, CORRECTNESS_STREAM, 2, layout, UNIFORM_80)
+    expected = softmax_reference(values, layout)
+    bounds = {name: error_bounds(name, expected) for name in (U0, F1, F2, F3)}
+
+    def refused(*args, **kwargs):
+        raise AssertionError("numpy.exp rounds by the libm of the host")
+
+    monkeypatch.setattr(numpy, "exp", refused)
+    reference = softmax_reference(values, layout)
+
+    assert float64_sha256(reference.output) == float64_sha256(expected.output)
+    for name, bound in bounds.items():
+        again = error_bounds(name, reference)
+        assert float64_sha256(again.elements) == float64_sha256(bound.elements)
+        assert float64_sha256(again.row_sums) == float64_sha256(bound.row_sums)

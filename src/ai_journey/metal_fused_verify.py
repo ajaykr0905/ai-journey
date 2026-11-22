@@ -22,6 +22,13 @@ JSON, so ``1``, ``1.0`` and ``true`` stay distinct. Timings cannot be
 observed again, so they are checked for structure only, and torch is never
 imported.
 
+Every float64 value that a digest or an exact comparison covers comes from
+IEEE additions, products, divisions and ``ldexp`` alone. The exp is the
+declared ``exp64`` algorithm, never the platform's ``numpy.exp``, whose libm
+can round a result to the other neighbor, so a report verifies with the
+same bits on any IEEE host. Only the check of the naive float32 softmax
+calls ``numpy.exp``, as that softmax does, and it compares one boolean.
+
 Only a ``time.perf_counter_ns`` report from ``torch.mps.compile_shader``
 verifies as a measurement, and only with a measured ceiling from the same
 environment. Any ``injected`` backend or timer verifies only as synthetic.
@@ -102,6 +109,10 @@ _FLOOR = 2.0**-125
 _REF_UNIT = 2.0**-53
 _VENDOR_UNIT = 2.0**-16
 _PROBE_COUNT = 1 << 18
+_LN2_HI = 6.93147180369123816490e-01
+_LN2_LO = 1.90821492927058770002e-10
+_INV_LN2 = 1.44269504088896338700e00
+_TAYLOR = tuple(1.0 / math.factorial(order) for order in range(2, 15))
 _PROBE_EXTREMES = (
     -3.4028234663852886e38,
     -1.0e30,
@@ -164,6 +175,30 @@ def _hash(array: numpy.ndarray, code: str) -> str:
 def _gamma(count: int, unit: float) -> float:
     product = count * unit
     return product / (1 - product)
+
+
+def _exp(values: numpy.ndarray) -> numpy.ndarray:
+    """The declared exp64: Cody and Waite's reduction and Taylor terms, no libm."""
+
+    x = numpy.clip(numpy.asarray(values, dtype=numpy.float64), -1100.0, 709.0)
+    k = numpy.rint(x * _INV_LN2)
+    high = x - k * _LN2_HI
+    low = k * _LN2_LO
+    r = high - low
+    lost = (high - r) - low
+    series = numpy.full_like(r, _TAYLOR[-1])
+    for term in reversed(_TAYLOR[:-1]):
+        series = series * r + term
+    head = 1.0 + r
+    tail = ((1.0 - head) + r) + (r * r * series + lost * (1.0 + r))
+    return numpy.ldexp(head + tail, k.astype(numpy.int32))
+
+
+def _growth(count: int) -> float:
+    value = 1.0
+    for _ in range(count):
+        value *= 1 + _EXP_ERROR
+    return value
 
 
 def _group(longest: int) -> int:
@@ -242,7 +277,7 @@ def _reference(buffer: numpy.ndarray, layout: _Layout):
     values = buffer[layout.valid].astype(numpy.float64)
     top = numpy.maximum.reduceat(values, layout.packed)
     distance = numpy.repeat(top, layout.lengths) - values
-    terms = numpy.exp(-distance)
+    terms = _exp(-distance)
     totals = numpy.add.reduceat(terms, layout.packed)
     return terms / numpy.repeat(totals, layout.lengths), distance
 
@@ -251,7 +286,7 @@ def _terms(step: str, length: int, size: int) -> tuple[int, int]:
     used = -(-length // size)
     partials = size // _WIDTH - 1
     if step in (_U0, _F1):
-        return (used - 1) + int(math.log2(size)), 1
+        return (used - 1) + size.bit_length() - 1, 1
     if step == _F2:
         return (used - 1) + (_WIDTH - 1) + partials, 1
     return (used - 1) + 1 + (_WIDTH - 1) + 1 + partials, used + 2
@@ -263,13 +298,13 @@ def _bounds(step: str, output, distance, layout: _Layout):
     lengths = layout.lengths
     terms = [_terms(step, int(length), layout.size) for length in lengths]
     additions = numpy.repeat([float(a) for a, _ in terms], lengths)
-    exponentials = numpy.repeat([float(n) for _, n in terms], lengths)
+    growth = numpy.repeat([_growth(n) for _, n in terms], lengths)
     ref = numpy.array([_gamma(int(n) + 8, _REF_UNIT) for n in lengths])
     ref_each = numpy.repeat(ref, lengths)
-    shift = numpy.exp(distance * _UNIT)
+    shift = _exp(distance * _UNIT)
     alpha = shift * (1 + _EXP_ERROR)
     gamma = additions * _UNIT / (1 - additions * _UNIT)
-    beta = shift * (1 + _EXP_ERROR) ** exponentials * (1 + gamma)
+    beta = shift * growth * (1 + gamma)
     weighted = numpy.add.reduceat(output * (beta - 1), layout.packed)
     rho = weighted / (1 - ref) + (lengths + 2 * layout.size) * _FLUSH
     rel = alpha * (1 + _UNIT) / (1 - numpy.repeat(rho, lengths)) - 1
@@ -367,7 +402,7 @@ def _probe(section: object) -> dict[str, object]:
     arguments = numpy.concatenate(
         (grid, numpy.asarray(_PROBE_EXTREMES, dtype=numpy.float32))
     )
-    exact = numpy.exp(arguments.astype(numpy.float64))
+    exact = _exp(arguments.astype(numpy.float64))
     normal = int(numpy.count_nonzero(exact >= _FLUSH))
     _require(type(section) is dict, "the exp probe must be a JSON object")
     tiny = _PROBE_COUNT - normal

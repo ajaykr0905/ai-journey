@@ -219,11 +219,16 @@ The cases of the pinned config cover these rows and inputs:
   `exp` overflows or each term is 0, so the float32 softmax gives NaN.
 
 The reference is the float64 softmax of the float32 inputs, with the max
-subtraction. Each element of each step has a declared bound for the order of
-that step. The bound counts the roundings of each term of the sum, the
-rounding of `x - max` and the error of each `precise::exp` call. A result
-below `2**-126` can flush to zero, so each bound adds `2**-125`. The rows must
-sum to 1 within the sum of the element bounds of the row.
+subtraction. Its exp is `exp64`, which uses only IEEE additions, products and
+`ldexp`. The libm of a host can round a float64 `exp` to the other neighbor,
+and one changed bit changes a digest. With `exp64`, each IEEE 754 host
+computes the same float64 bits, within 1 ulp of the exact `exp`.
+
+Each element of each step has a declared bound for the order of that step.
+The bound counts the roundings of each term of the sum, the rounding of
+`x - max` and the error of each `precise::exp` call. A result below `2**-126`
+can flush to zero, so each bound adds `2**-125`. The rows must sum to 1
+within the sum of the element bounds of the row.
 
 The bound assumes that `precise::exp` has an error of at most 4 units of
 `2**-23`. The run measures this assumption first with the exp probe: 262144
@@ -285,20 +290,20 @@ predicted verdicts.
 
 ## One run on the development host
 
-This run used the pinned config on 2026-11-22 at 04:59 IST. The host was a
+This run used the pinned config on 2026-11-22 at 11:36 IST. The host was a
 shared Darwin arm64 host with an Apple GPU, macOS 27.2, CPython 3.11.14, NumPy
 1.26.4 and PyTorch 2.15.0. The environment did not set
 `PYTORCH_MPS_FAST_MATH` or `PYTORCH_MPS_PREFER_METAL`. The run held the GPU
 lock that the timed GPU jobs on this host take. Other jobs used the CPU.
 
-The report recorded load averages of 5.18, 6.27 and 6.64 before the run. It
-recorded 5.29, 6.26 and 6.63 after the run. The `uptime` command printed the
+The report recorded load averages of 8.00, 8.05 and 8.17 before the run. It
+recorded 7.72, 7.99 and 8.14 after the run. The `uptime` command printed the
 same values before and after the run.
 
 The report digest is
-`587cda576cf9687d27cb1b964371266c10ac729e168be0080d9ce71a32ea01f5`. The run
-took 7.95 seconds after the library compiled, and the command took about 10
-seconds with the torch import. The report has 93676 bytes, and the run caught
+`352e9d14fb8be6ef942191b5618660be42f57e0b1b8818dabb3c85dfd61bfafc`. The run
+took 7.64 seconds after the library compiled, and the command took about 10
+seconds with the torch import. The report has 93765 bytes, and the run caught
 0 Python warnings. The capture began before the import of torch.
 
 Each pipeline allowed 1024 threads and reported a SIMD width of 32. The
@@ -307,8 +312,8 @@ so the run refused no step.
 
 ### Correctness results
 
-- All 32 outputs (8 cases, 4 steps) met the four rules. The largest error was
-  0.706 of its bound, for U0 and F1 in the ragged case.
+- All 32 outputs (8 cases, 4 steps) met the four rules in both runs. The
+  largest error was 0.706 of its bound, for U0 and F1 in the ragged case.
 - The largest relative error of the exp probe was 1.354 units of `2**-23`,
   or 1.406 units in the last place. The bound assumes 4 units. All 42008
   results below `2**-126` were 0.
@@ -330,92 +335,95 @@ the result of the rule.
 
 | Step | Median GB/s (IQR range) | Modeled GB/s | Of the ceiling | Over its base | Over U0 | Over torch | Hypothesis |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| U0 | 57.6 (54.7 to 63.2) | 117.6 | 1.430 | 0.275, slower | | 0.275, slower | held |
-| F1 | 58.3 (53.8 to 62.6) | 58.8 | 0.714 | 1.013, no clear difference | 1.013, no clear difference | 0.279, slower | missed |
-| F2 | 123.5 (109.3 to 131.5) | 124.4 | 1.512 | 2.117, faster | 2.144, faster | 0.590, slower | held |
-| F3 | 106.4 (97.1 to 114.5) | 107.2 | 1.303 | 0.862, no clear difference | 1.847, faster | 0.509, slower | held |
-| torch | 209.2 (176.6 to 216.7) | | | | 3.633, faster | | |
+| U0 | 60.3 (58.7 to 61.9) | 123.2 | 1.497 | 0.330, slower | | 0.330, slower | held |
+| F1 | 60.5 (59.0 to 61.9) | 61.0 | 0.742 | 1.004, no clear difference | 1.004, no clear difference | 0.332, slower | missed |
+| F2 | 125.7 (121.8 to 130.7) | 126.7 | 1.540 | 2.077, faster | 2.085, faster | 0.689, slower | held |
+| F3 | 106.2 (100.3 to 110.2) | 107.0 | 1.301 | 0.845, slower | 1.761, faster | 0.582, slower | held |
+| torch | 182.5 (173.5 to 190.0) | | | | 3.027, faster | | |
 
 #### 4096 x 1024 (G = 64, 8 calls in each sample)
 
 | Step | Median GB/s (IQR range) | Modeled GB/s | Of the ceiling | Over its base | Over U0 | Over torch | Hypothesis |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| U0 | 46.0 (43.3 to 51.4) | 92.2 | 1.120 | 0.620, slower | | 0.620, slower | held |
-| F1 | 96.1 (86.7 to 104.2) | 96.2 | 1.169 | 2.091, faster | 2.091, faster | 1.296, faster | held |
-| F2 | 98.0 (89.9 to 102.5) | 98.1 | 1.192 | 1.020, no clear difference | 2.132, faster | 1.322, faster | held |
-| F3 | 95.5 (89.0 to 101.0) | 95.6 | 1.161 | 0.974, no clear difference | 2.077, faster | 1.288, faster | held |
-| torch | 74.2 (66.7 to 81.7) | | | | 1.613, faster | | |
+| U0 | 54.8 (52.4 to 56.6) | 109.9 | 1.336 | 0.674, slower | | 0.674, slower | held |
+| F1 | 106.2 (101.1 to 111.8) | 106.3 | 1.292 | 1.937, faster | 1.937, faster | 1.305, faster | held |
+| F2 | 104.5 (98.4 to 110.3) | 104.6 | 1.271 | 0.984, no clear difference | 1.906, faster | 1.284, faster | held |
+| F3 | 104.9 (97.7 to 110.4) | 105.0 | 1.276 | 1.004, no clear difference | 1.914, faster | 1.289, faster | held |
+| torch | 81.4 (78.6 to 85.5) | | | | 1.485, faster | | |
 
 #### 1024 x 4096 (G = 256, 8 calls in each sample)
 
 | Step | Median GB/s (IQR range) | Modeled GB/s | Of the ceiling | Over its base | Over U0 | Over torch | Hypothesis |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| U0 | 52.2 (48.9 to 55.0) | 104.5 | 1.270 | 0.541, slower | | 0.541, slower | held |
-| F1 | 104.1 (96.8 to 112.1) | 104.2 | 1.266 | 1.995, faster | 1.995, faster | 1.079, no clear difference | held |
-| F2 | 98.7 (90.4 to 106.5) | 98.8 | 1.200 | 0.948, no clear difference | 1.891, faster | 1.023, no clear difference | held |
-| F3 | 100.3 (94.0 to 107.2) | 100.3 | 1.219 | 1.016, no clear difference | 1.921, faster | 1.039, no clear difference | held |
-| torch | 96.5 (88.0 to 103.4) | | | | 1.849, faster | | |
+| U0 | 55.9 (52.9 to 57.1) | 111.8 | 1.359 | 0.566, slower | | 0.566, slower | held |
+| F1 | 106.3 (99.8 to 109.9) | 106.3 | 1.292 | 1.903, faster | 1.903, faster | 1.077, no clear difference | held |
+| F2 | 104.1 (98.2 to 110.1) | 104.1 | 1.265 | 0.979, no clear difference | 1.863, faster | 1.055, no clear difference | held |
+| F3 | 107.9 (102.4 to 111.2) | 108.0 | 1.312 | 1.037, no clear difference | 1.932, faster | 1.094, no clear difference | held |
+| torch | 98.7 (94.8 to 103.7) | | | | 1.766, faster | | |
 
 #### 256 x 16384 (G = 1024, 8 calls in each sample)
 
 | Step | Median GB/s (IQR range) | Modeled GB/s | Of the ceiling | Over its base | Over U0 | Over torch | Hypothesis |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| U0 | 53.6 (48.7 to 56.1) | 107.3 | 1.304 | 0.840, slower | | 0.840, slower | held |
-| F1 | 92.5 (85.7 to 97.2) | 92.5 | 1.124 | 1.725, faster | 1.725, faster | 1.448, faster | held |
-| F2 | 98.3 (92.8 to 104.4) | 98.3 | 1.194 | 1.062, no clear difference | 1.832, faster | 1.539, faster | held |
-| F3 | 96.4 (90.4 to 102.2) | 96.4 | 1.171 | 0.981, no clear difference | 1.797, faster | 1.509, faster | held |
-| torch | 63.9 (58.3 to 66.4) | | | | 1.191, faster | | |
+| U0 | 57.2 (54.2 to 57.8) | 114.4 | 1.391 | 0.853, slower | | 0.853, slower | held |
+| F1 | 93.4 (88.8 to 97.1) | 93.4 | 1.135 | 1.632, faster | 1.632, faster | 1.392, faster | held |
+| F2 | 100.8 (96.2 to 104.7) | 100.8 | 1.225 | 1.080, no clear difference | 1.762, faster | 1.503, faster | held |
+| F3 | 101.3 (98.8 to 104.3) | 101.3 | 1.231 | 1.005, no clear difference | 1.770, faster | 1.510, faster | held |
+| torch | 67.1 (65.3 to 69.1) | | | | 1.172, faster | | |
 
 #### Ragged: 2048 rows of 1 to 4096 elements (G = 256, 9 calls in each sample)
 
 | Step | Median GB/s (IQR range) | Modeled GB/s | Of the ceiling | Over its base | Over U0 | Over torch | Hypothesis |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| U0 | 53.7 (51.3 to 57.1) | 107.6 | 1.307 | 1.078, no clear difference | | 1.078, no clear difference | missed |
-| F1 | 102.2 (91.6 to 109.8) | 102.2 | 1.242 | 1.902, faster | 1.902, faster | 2.050, faster | held |
-| F2 | 104.9 (97.8 to 111.4) | 104.9 | 1.275 | 1.027, no clear difference | 1.952, faster | 2.104, faster | held |
-| F3 | 100.5 (91.3 to 110.1) | 100.5 | 1.221 | 0.958, no clear difference | 1.870, faster | 2.016, faster | held |
-| torch | 49.8 (47.8 to 51.8) | | | | 0.928, no clear difference | | |
+| U0 | 54.5 (51.5 to 55.9) | 109.2 | 1.327 | 1.056, no clear difference | | 1.056, no clear difference | missed |
+| F1 | 101.9 (99.0 to 106.0) | 101.9 | 1.239 | 1.869, faster | 1.869, faster | 1.974, faster | held |
+| F2 | 105.4 (98.1 to 110.5) | 105.4 | 1.281 | 1.034, no clear difference | 1.933, faster | 2.042, faster | held |
+| F3 | 104.6 (97.1 to 109.1) | 104.6 | 1.272 | 0.992, no clear difference | 1.919, faster | 2.026, faster | held |
+| torch | 51.6 (50.4 to 52.6) | | | | 0.947, no clear difference | | |
 
 The predictions held at 18 of 20 points: 4 steps at 5 points each.
 
 ### What helped
 
-- Fusion (F1 over U0): at the four points of about 4.2 million elements, F1
-  was 1.725 to 2.091 times as fast as U0. The model gives F1 about half the
+- Fusion (F1 over U0): at the four points of 4.1 to 4.2 million elements, F1
+  was 1.632 to 1.937 times as fast as U0. The model gives F1 about half the
   bytes of U0, so the measured ratio is near the modeled one.
-- SIMD reductions (F2 over F1) at 4096 x 128: F2 was 2.117 times as fast as
+- SIMD reductions (F2 over F1) at 4096 x 128: F2 was 2.077 times as fast as
   F1. At this point, G is 32, so each group is one SIMD group, and each
   thread holds only 4 elements. The trees of F1 then probably cost more time
   than the loads.
 
-At the four large points, all four steps ran at about the same modeled GB/s:
-92.2 to 107.6. U0 took about twice the time of a fused step for about twice
-the modeled bytes. This result agrees with steps whose time the device bytes
-set, but no counter shows it.
+At the four large points, all four steps ran at 93.4 to 114.4 modeled GB/s.
+U0 took 1.632 to 1.937 times the time of a fused step for about twice the
+modeled bytes. This result agrees with steps whose time the device bytes set,
+but no counter shows it.
 
 ### What did not help
 
 - Fusion at 4096 x 128: F1 showed no clear difference from U0, with a ratio of
-  1.013. The hypothesis missed there. The 2 MiB input probably stays in a
+  1.004. The hypothesis missed there. The 2 MiB input probably stays in a
   cache between the three passes of U0, and the trees of F1 cost time. These
   are inferences, not observations.
 - SIMD reductions at the large points: F2 showed no clear difference from F1,
-  with ratios of 0.948 to 1.062. The hypothesis allowed this result.
-- The online pass (F3 over F2): no clear difference at any point, with ratios
-  of 0.862 to 1.016. The barrier that F3 saves did not show in the times, and
-  neither did its second `precise::exp` call.
+  with ratios of 0.979 to 1.080. The hypothesis allowed this result.
+- The online pass (F3 over F2): at 4096 x 128, F3 was slower than F2, with a
+  ratio of 0.845. At the other four points, the rule found no clear
+  difference, with ratios of 0.992 to 1.037. The hypothesis allowed both
+  results. The barrier that F3 saves did not show in the times. The second
+  `precise::exp` call of F3 can be the cost at 4096 x 128, but no counter
+  shows it.
 
 ### The vendor side
 
-- At 4096 x 128, `torch.softmax` was the fastest side, with 209.2 GB/s. That
-  is 2.543 times the recorded ceiling and 1.69 times the rate of F2. The 2 MiB
+- At 4096 x 128, `torch.softmax` was the fastest side, with 182.5 GB/s. That
+  is 2.218 times the recorded ceiling and 1.45 times the rate of F2. The 2 MiB
   input and the 2 MiB output probably stay in a cache over the 64 calls of a
   sample. This rate thus probably measures a cache, not device memory.
-- At 4096 x 1024 and 256 x 16384, the fused steps were 1.288 to 1.539 times as
+- At 4096 x 1024 and 256 x 16384, the fused steps were 1.284 to 1.510 times as
   fast as `torch.softmax`.
 - At 1024 x 4096, the rule found no clear difference between the fused steps
   and `torch.softmax`.
-- At the ragged point, the fused steps were 2.016 to 2.104 times as fast as
+- At the ragged point, the fused steps were 1.974 to 2.042 times as fast as
   `torch.softmax`. But `torch.softmax` processed the padded matrix, about
   twice the elements of the rows. U0 showed no clear difference from it, and
   the U0 hypothesis missed there.
@@ -424,7 +432,7 @@ set, but no counter shows it.
 
 The ceiling is 82.28 GB/s, from `stream_read_reduce` at a 4 MiB buffer. It
 comes from the recorded Day 74 report of 2026-11-17, a separate run at load
-averages near 9.5. The fused steps reached 1.124 to 1.275 of this ceiling at
+averages near 9.5. The fused steps reached 1.135 to 1.312 of this ceiling at
 the four large points.
 
 A fraction above 1 does not mean that a kernel moved more data than the
@@ -435,12 +443,12 @@ Day 74 kernels at one small buffer, not a hardware limit.
 
 ### Limits of this run
 
-- One run on one shared host gives each ratio. The load averages were near 6
+- One run on one shared host gives each ratio. The load averages were near 8
   from other jobs.
 - The steps form one chain, so each ratio measures one change on top of the
   changes before it.
 - The rule calls a ratio clear only when the IQR ranges do not overlap. Each
-  range was 7.9 to 20.3 percent of its median, so a small change stays
+  range was 4.4 to 12.1 percent of its median, so a small change stays
   hidden.
 - The byte counts are a model with no cache. The lab cannot see the cache
   hits of a second read.
@@ -489,7 +497,10 @@ passes as a measurement. It also needs a measured ceiling from the same
 interpreter, libraries and platform. The test
 `tests/test_metal_fused_recorded.py` holds one short measured report from the
 development host, so a Linux host without torch or MPS can check a real
-report.
+report. The verifier computes each float64 value with `exp64`, not with the
+libm of the host. The digests of that report thus do not depend on the libm.
+A test verifies the report with a changed `numpy.exp`. No Linux host ran the
+recorded test for this guide.
 
 ## Controls
 

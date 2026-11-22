@@ -21,9 +21,13 @@ the seed. The named distributions are part of the plan:
   that fact for each case.
 
 The reference is the float64 softmax with the max subtraction, from the
-float32 inputs. ``error_bounds`` gives a bound for each element and each
-step's order of operations. With the unit roundoff ``u = 2**-24``, the
-distance ``d = max - x`` and ``EXP_ERROR`` for one call of ``precise::exp``:
+float32 inputs. Its exp is ``exp64``, not ``numpy.exp``: the libm of a
+platform rounds some float64 results to the other neighbor, and one changed
+bit changes a digest. ``exp64`` uses only IEEE additions, products and
+``ldexp``, so a report from one host verifies with the same bits on another
+host. ``error_bounds`` gives a bound for each element and each step's order
+of operations. With the unit roundoff ``u = 2**-24``, the distance
+``d = max - x`` and ``EXP_ERROR`` for one call of ``precise::exp``:
 
 - the computed ``exp(fl(x - max))`` has a relative error of at most
   ``alpha - 1``, with ``alpha = exp(d u) (1 + EXP_ERROR)``;
@@ -42,6 +46,7 @@ with the exp probe and stops when it fails.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from hashlib import sha256
 
@@ -92,7 +97,9 @@ FLOOR = 2.0**-125
 REFERENCE_UNIT = 2.0**-53
 REFERENCE = (
     "float64 softmax of the float32 inputs, row by row: exp(x - max) divided by "
-    "the sum of exp(x - max) over the row, with numpy.exp and numpy.add.reduceat"
+    "the sum of exp(x - max) over the row, with numpy.add.reduceat and exp64, "
+    "an exp of IEEE additions, products and ldexp only, so each host computes "
+    "the same bits"
 )
 BOUND = (
     "|y - y_ref| <= (rel + ref) / (1 - ref) * y_ref + 2**-125 for each element, "
@@ -120,6 +127,55 @@ ROW_SUM_BOUND = (
     "for the unit 2**-53, where sum adds the outputs of the row in float64 in "
     "order"
 )
+
+
+# Cody and Waite's split of ln 2, as in fdlibm: LN2_HI has 32 significant
+# bits, so k * LN2_HI and x - k * LN2_HI are exact for the clamped k.
+_LN2_HI = 6.93147180369123816490e-01
+_LN2_LO = 1.90821492927058770002e-10
+_INV_LN2 = 1.44269504088896338700e00
+# exp rounds to 0 below the low end, and the lab never needs the high end.
+_EXP_LOW = -1100.0
+_EXP_HIGH = 709.0
+# 1/2!, 1/3!, ..., 1/14!: the Taylor terms of expm1(r) - r for |r| <= ln(2)/2.
+_TAYLOR = tuple(1.0 / math.factorial(order) for order in range(2, 15))
+
+
+def exp64(values: object) -> numpy.ndarray:
+    """Return exp of finite float64 values, within 1 ulp, the same on every host.
+
+    ``numpy.exp`` calls the libm of the platform, and two hosts can round
+    one float64 result to different neighbors. Here every step is an IEEE
+    addition, product or ``ldexp``, each correctly rounded, so every IEEE
+    host gives the same bits. ``x = k ln 2 + r`` with ``|r| <= ln(2) / 2``;
+    the Taylor terms give ``expm1(r)``, and the rounding error of ``1 + r``
+    is kept exactly, so one rounding sets most of the error.
+    """
+
+    x = numpy.asarray(values, dtype=numpy.float64)
+    if not numpy.all(numpy.isfinite(x)):
+        raise MetalFusedError("exp64 takes finite values only")
+    x = numpy.clip(x, _EXP_LOW, _EXP_HIGH)
+    k = numpy.rint(x * _INV_LN2)
+    high = x - k * _LN2_HI
+    low = k * _LN2_LO
+    r = high - low
+    lost = (high - r) - low
+    series = numpy.full_like(r, _TAYLOR[-1])
+    for term in reversed(_TAYLOR[:-1]):
+        series = series * r + term
+    head = 1.0 + r
+    tail = ((1.0 - head) + r) + (r * r * series + lost * (1.0 + r))
+    return numpy.ldexp(head + tail, k.astype(numpy.int32))
+
+
+def exp_growth(count: int) -> float:
+    """Return ``(1 + EXP_ERROR) ** count`` by products, the same on every host."""
+
+    value = 1.0
+    for _ in range(count):
+        value *= 1 + EXP_ERROR
+    return value
 
 
 def _gamma(count: int, unit: float) -> float:
@@ -314,7 +370,7 @@ def softmax_reference(buffer: numpy.ndarray, layout: RowLayout) -> SoftmaxRefere
     starts = numpy.concatenate(([0], numpy.cumsum(lengths)[:-1]))
     row_max = numpy.maximum.reduceat(values, starts)
     distance = numpy.repeat(row_max, lengths) - values
-    terms = numpy.exp(-distance)
+    terms = exp64(-distance)
     totals = numpy.add.reduceat(terms, starts)
     return SoftmaxReference(layout, terms / numpy.repeat(totals, lengths), distance)
 
@@ -356,13 +412,13 @@ def error_bounds(variant: str, reference: SoftmaxReference) -> ErrorBounds:
     lengths = layout.lengths_array().astype(numpy.int64)
     terms = [order_terms(variant, int(length), size) for length in layout.lengths]
     additions = numpy.repeat([float(a) for a, _ in terms], lengths)
-    exponentials = numpy.repeat([float(n) for _, n in terms], lengths)
+    growth = numpy.repeat([exp_growth(n) for _, n in terms], lengths)
     ref = numpy.array([_gamma(int(n) + 8, REFERENCE_UNIT) for n in lengths])
     ref_each = numpy.repeat(ref, lengths)
-    shift = numpy.exp(reference.distance * UNIT)
+    shift = exp64(reference.distance * UNIT)
     alpha = shift * (1 + EXP_ERROR)
     gamma = additions * UNIT / (1 - additions * UNIT)
-    beta = shift * (1 + EXP_ERROR) ** exponentials * (1 + gamma)
+    beta = shift * growth * (1 + gamma)
     starts = reference.row_starts()
     weighted = numpy.add.reduceat(reference.output * (beta - 1), starts)
     rho = weighted / (1 - ref) + (lengths + 2 * size) * FLUSH
@@ -456,7 +512,7 @@ def exp_probe_errors(results: numpy.ndarray) -> ExpProbe:
         or results.shape != arguments.shape
     ):
         raise MetalFusedError("the exp probe must return one float32 per argument")
-    exact = numpy.exp(arguments.astype(numpy.float64))
+    exact = exp64(arguments.astype(numpy.float64))
     got = results.astype(numpy.float64)
     if not numpy.all(numpy.isfinite(got)):
         raise MetalFusedError("the exp probe returned a value that is not finite")
