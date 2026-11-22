@@ -9,8 +9,11 @@ of all other fields. The seal detects drift. It is not a signature, and it
 proves nothing about a GPU.
 
 Only a report from ``InterpreterBackend`` gets the interpreter label and its
-evidence boundary. A report from any other backend, such as the NumPy
-stand-in of the tests, is labeled synthetic, and the verifier keeps it so.
+evidence boundary. That backend takes only the host clock ``time.time`` and
+the host load average ``os.getloadavg``, so an interpreter report never holds
+an injected time or load average. A report from any other backend, such as
+the NumPy stand-in of the tests, is labeled synthetic, and the verifier keeps
+it so.
 The report holds no interpreter time: the interpreter runs on the CPU, so a
 time would say nothing about a GPU.
 """
@@ -18,6 +21,7 @@ time would say nothing about a GPU.
 from __future__ import annotations
 
 import math
+import os
 import time
 from collections.abc import Callable, Mapping
 
@@ -215,6 +219,11 @@ def build_report(
     interpreter = type(backend) is InterpreterBackend
     if interpreter and backend.source_sha256 != source_sha256():
         raise TritonMatmulError("the backend did not compile the pinned text")
+    if interpreter and (clock is not time.time or load_average is not os.getloadavg):
+        raise TritonMatmulError(
+            "an interpreter check records the host clock and the host load "
+            "averages, so it takes no injected clock or load average"
+        )
     environment = _environment(backend)
     recorded_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(clock()))
     before = _load(load_average)

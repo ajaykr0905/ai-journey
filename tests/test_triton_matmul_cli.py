@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from ai_journey import triton_matmul_cli
 from ai_journey.kernel_launch_io import canonical_json_bytes
 from ai_journey.triton_matmul_cli import (
     EXIT_INVALID,
@@ -26,6 +27,7 @@ from ai_journey.triton_matmul_cli import (
     main,
 )
 from test_triton_matmul_correctness import StandInBackend
+from test_triton_matmul_report import pinned_impostor
 
 ROOT = Path(__file__).resolve().parents[1]
 PINNED = ROOT / "config/day-79-triton-matmul.json"
@@ -186,6 +188,25 @@ def test_check_never_writes_over_its_config_or_after_a_broken_rule(tmp_path, cap
     bad = write_config(tmp_path / "bad.json", {**SMALL_CONFIG, "seed": True})
     assert stand_in_main(check_argv(bad, output)) == EXIT_INVALID
     assert "seed must be an integer" in capsys.readouterr().err
+
+
+def test_check_refuses_an_injected_load_average_for_the_interpreter(
+    tmp_path, capsys, monkeypatch
+):
+    monkeypatch.setattr(triton_matmul_cli, "InterpreterBackend", pinned_impostor)
+    config = write_config(tmp_path / "config.json")
+    output = tmp_path / "out" / "report.json"
+
+    argv = check_argv(config, output)
+    assert main(argv, load_average=lambda: (1.0, 2.0, 3.0)) == EXIT_INVALID
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "host clock" in captured.err
+    assert not (tmp_path / "out").exists()
+    # With the host clock and load average, the same backend gets its label.
+    assert main(argv) == EXIT_OK
+    summary = capsys.readouterr().out.splitlines()[-1]
+    assert summary.startswith("triton_matmul_interpreter=")
 
 
 def test_verify_rejects_tampered_reformatted_and_unbound_reports(tmp_path, capsys):

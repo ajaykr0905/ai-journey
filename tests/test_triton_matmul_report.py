@@ -7,7 +7,9 @@ expects the verifier to name the section that no longer reproduces.
 
 import copy
 import json
+import os
 import re
+import time
 
 import numpy
 import pytest
@@ -16,7 +18,11 @@ from ai_journey.kernel_launch_io import canonical_json_bytes
 from ai_journey.memory_access_tiling import MatmulShape
 from ai_journey.triton_matmul_cli import EXIT_REJECTED, main
 from ai_journey.triton_matmul_config import PINNED_PLAN, TritonMatmulPlan
-from ai_journey.triton_matmul_kernel import AUTOTUNE_CONFIGS, TritonMatmulError
+from ai_journey.triton_matmul_kernel import (
+    AUTOTUNE_CONFIGS,
+    TritonMatmulError,
+    source_sha256,
+)
 from ai_journey.triton_matmul_report import (
     DIGEST_FIELD,
     INTERPRETER_BOUNDARY,
@@ -130,6 +136,32 @@ def test_only_the_interpreter_backend_gets_the_interpreter_label():
     )
     with pytest.raises(TritonMatmulVerificationError, match="backend does not match"):
         verify_report(relabeled)
+
+
+def pinned_impostor():
+    """An InterpreterBackend shell that runs the stand-in, to reach the label."""
+
+    impostor = object.__new__(InterpreterBackend)
+    impostor.source_sha256 = source_sha256()
+    impostor.environment = dict(StandInBackend().environment)
+    impostor.run = StandInBackend().run
+    return impostor
+
+
+def test_an_interpreter_check_takes_only_the_host_clock_and_load_average():
+    # An interpreter label must not carry an injected time or load average.
+    for clock, load_average in (
+        (lambda: CLOCK, os.getloadavg),
+        (time.time, lambda: LOADS),
+    ):
+        with pytest.raises(TritonMatmulError, match="host clock"):
+            build_report(
+                SMALL, pinned_impostor(), clock=clock, load_average=load_average
+            )
+    report = build_report(
+        SMALL, pinned_impostor(), clock=time.time, load_average=os.getloadavg
+    )
+    assert report["label"] == INTERPRETER_LABEL
 
 
 def test_a_backend_must_name_its_environment():

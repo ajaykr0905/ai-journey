@@ -7,8 +7,10 @@ Day 77 kernel text under the declared rule. It needs no triton.
 the sealed comparison report, verifies it and publishes it atomically, never
 over the plan. It needs triton and torch. Triton has no macOS wheel, so on
 the development host ``check`` stops with exit code 3 before it makes the
-output directory or writes a byte. A backend, clock or load average injected
-through ``main`` gives a report that prints and verifies as synthetic.
+output directory or writes a byte. A backend injected through ``main`` gives
+a report that prints and verifies as synthetic. The interpreter backend
+refuses an injected clock or load average with exit code 2, so an interpreter
+report holds the host time and the host load averages.
 
 ``verify`` recomputes a report on the CPU, optionally against the plan that
 it must come from. It never imports triton or torch.
@@ -194,6 +196,7 @@ def main(
     """Run one command and return its exit code; the keywords are for tests.
 
     A replaced backend makes the report synthetic, never an interpreter check.
+    The interpreter backend refuses a replaced clock or load average.
     """
 
     arguments = build_parser().parse_args(argv)

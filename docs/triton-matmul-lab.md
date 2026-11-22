@@ -489,9 +489,10 @@ The report records these items:
 - a summary and the evidence boundary
 
 Only a report from the interpreter backend gets the label
-`triton_cpu_interpreter_check`. A report from another backend, such as the
-NumPy stand-in of the tests, gets the label `synthetic_backend`. The verifier
-keeps that label.
+`triton_cpu_interpreter_check`. That backend refuses an injected clock or load
+average. Thus its report holds the host time and the host load averages. A
+report from another backend, such as the NumPy stand-in of the tests, gets the
+label `synthetic_backend`. The verifier keeps that label.
 
 The verifier uses other code than the run where the run uses lab code. It
 imports neither triton nor torch. It does these checks:
