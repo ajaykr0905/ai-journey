@@ -6,18 +6,21 @@ or the run stops. Each case then draws seeded rows in a gapped layout,
 computes the float64 reference, and runs every admitted step ``repeats``
 times on the MPS device, each run into a fresh buffer of sentinels.
 
-Four rules apply to every output, and a case that breaks one stops the run,
-so a report never holds a failed check:
+Four rules apply to the output of every repeat, and a case that breaks one
+stops the run, so a report never holds a failed check:
 
-- Every gap slot keeps its sentinel bits, in every repeat.
+- Every gap slot keeps its sentinel bits.
 - Every output element is finite.
 - Every element is within its step's bound of the reference.
 - Every row sum is within its bound of 1. That bound adds the element
   bounds of the row, so this rule also checks the arithmetic of the bounds.
 
-Two facts are measurements, not rules. ``identical_repeats`` records whether
-every repeat gave the bits of the first, and ``same_bits`` records whether a
-step that declares the order of an earlier step kept that step's bits.
+A race or a missed barrier can spoil one repeat only, so the rules check
+each repeat, not only the first. Two facts are measurements, not rules.
+``identical_repeats`` records whether every repeat gave the bits of the
+first, so a repeat that changed bits within the bounds is kept as data, and
+``same_bits`` records whether a step that declares the order of an earlier
+step kept that step's bits. The record holds the errors of the first repeat.
 ``differing_from_rounded_reference`` counts the elements whose bits differ
 from the float64 reference rounded to float32; when it is 0, a verifier can
 rebuild the whole buffer.
@@ -193,6 +196,29 @@ class FusedCase:
         }
 
 
+def _rules(run: numpy.ndarray, slots, reference, bounds, where: str) -> tuple:
+    """Apply the four rules to one repeat; return its errors, or stop the run.
+
+    ``slots`` holds the valid slots in row order and the mask of the gaps.
+    """
+
+    valid, gaps = slots
+    if numpy.any(run[gaps].view(numpy.uint32) != SENTINEL_BITS):
+        raise MetalFusedError(f"{where}: a store escaped into a gap slot")
+    packed = run[valid]
+    if not numpy.all(numpy.isfinite(packed)):
+        raise MetalFusedError(f"{where}: an output is not finite")
+    error = numpy.abs(packed.astype(numpy.float64) - reference.output)
+    ratio = float(numpy.max(error / bounds.elements))
+    if not ratio <= 1.0:
+        raise MetalFusedError(f"{where}: an element exceeds its bound by {ratio!r}")
+    sums = row_sum_errors(packed, reference.layout)
+    sum_ratio = float(numpy.max(sums / bounds.row_sums))
+    if not sum_ratio <= 1.0:
+        raise MetalFusedError(f"{where}: a row sum exceeds its bound by {sum_ratio!r}")
+    return packed, error, ratio, sums, sum_ratio
+
+
 def _buffer(result: object, layout: RowLayout, label: str) -> numpy.ndarray:
     if (
         not isinstance(result, numpy.ndarray)
@@ -233,24 +259,19 @@ def check_case(
             _buffer(backend.run(name, values, layout, required), layout, where)
             for _ in range(repeats)
         ]
-        for run in runs:
-            if numpy.any(run[gaps].view(numpy.uint32) != SENTINEL_BITS):
-                raise MetalFusedError(f"{where}: a store escaped into a gap slot")
-        first = runs[0]
-        packed = first[valid]
-        if not numpy.all(numpy.isfinite(packed)):
-            raise MetalFusedError(f"{where}: an output is not finite")
         bounds = error_bounds(name, reference)
-        error = numpy.abs(packed.astype(numpy.float64) - reference.output)
-        ratio = float(numpy.max(error / bounds.elements))
-        if not ratio <= 1.0:
-            raise MetalFusedError(f"{where}: an element exceeds its bound by {ratio!r}")
-        sums = row_sum_errors(packed, layout)
-        sum_ratio = float(numpy.max(sums / bounds.row_sums))
-        if not sum_ratio <= 1.0:
-            raise MetalFusedError(
-                f"{where}: a row sum exceeds its bound by {sum_ratio!r}"
+        checked = [
+            _rules(
+                run,
+                (valid, gaps),
+                reference,
+                bounds,
+                f"{where}: repeat {number} of {repeats}",
             )
+            for number, run in enumerate(runs, start=1)
+        ]
+        first = runs[0]
+        packed, error, ratio, sums, sum_ratio = checked[0]
         first_bits = first.view(numpy.uint32)
         outputs.append(
             FusedOutput(

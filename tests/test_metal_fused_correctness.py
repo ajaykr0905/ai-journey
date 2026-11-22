@@ -55,8 +55,10 @@ class StandInBackend:
 
     ``faults`` maps a step to one way of going wrong: ``gap`` stores into a
     gap slot, ``nan`` writes a NaN, ``off`` moves one output by 2**-10,
-    ``drift`` changes a bit in the second and later runs, ``torch_off`` moves
-    the torch output at the timing points, and ``probe`` breaks the probe.
+    ``drift`` changes a bit in the second and later runs, ``nan_later`` and
+    ``off_later`` break a rule in the second and later runs only,
+    ``torch_off`` moves the torch output at the timing points, and ``probe``
+    breaks the probe.
     """
 
     def __init__(self, faults=None, limits=None, torch_version="2.15.0"):
@@ -87,6 +89,10 @@ class StandInBackend:
         elif fault == "drift" and count:
             bits = output.view(numpy.uint32)
             bits[valid[-1]] ^= 1
+        elif fault == "nan_later" and count:
+            output[valid[0]] = numpy.nan
+        elif fault == "off_later" and count:
+            output[valid[-1]] += numpy.float32(2.0**-10)
         return output
 
     def exp_probe(self, arguments):
@@ -177,6 +183,16 @@ def test_the_offset_case_records_that_no_max_subtraction_would_fail():
 )
 def test_a_case_that_breaks_a_rule_stops_the_run(fault, message):
     with pytest.raises(MetalFusedError, match=f"{F2}: .*{message}"):
+        run_case(StandInBackend(faults={F2: fault}))
+
+
+@pytest.mark.parametrize(
+    ("fault", "message"),
+    [("nan_later", "not finite"), ("off_later", "exceeds its bound")],
+)
+def test_a_later_repeat_that_breaks_a_rule_stops_the_run(fault, message):
+    # The first run is correct, so only a check of every repeat can see it.
+    with pytest.raises(MetalFusedError, match=f"{F2}: repeat 2 .*{message}"):
         run_case(StandInBackend(faults={F2: fault}))
 
 

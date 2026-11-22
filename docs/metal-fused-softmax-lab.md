@@ -229,16 +229,17 @@ The bound assumes that `precise::exp` has an error of at most 4 units of
 `2**-23`. The run measures this assumption first with the exp probe: 262144
 arguments from -104 to 0 and eight extremes. A failed probe stops the run.
 
-Four rules apply to each output, and a case that breaks one stops the run:
+Each step runs twice on each case. Four rules apply to the output of each
+run, and a case that breaks one stops the run:
 
-1. Each gap slot keeps its sentinel bits in each repeat.
+1. Each gap slot keeps its sentinel bits.
 2. Each output is finite.
 3. Each element is within its bound of the reference.
 4. Each row sum is within its bound of 1.
 
-Two facts are measurements, not rules. Each step runs twice on each case, and
-the run records if the two outputs have the same bits. The run also records
-if F1 kept the bits of U0.
+A race can spoil one run only, so the rules check the second run too. Two
+facts are measurements, not rules. The run records if the two outputs of a
+step have the same bits, and it records if F1 kept the bits of U0.
 
 ## Timing
 
