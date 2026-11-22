@@ -39,8 +39,8 @@ PYTHONPATH=src python -m ai_journey.triton_matmul_cli verify \
   --config config/day-79-triton-matmul.json
 ```
 
-The parser uses the program name `ai-journey-triton-matmul`. The package has
-no console script for this lab, so the commands use `python -m`.
+The parser uses the program name `ai-journey-triton-matmul`. An installed
+wheel gives the same commands under that name.
 
 - `loc` prints one line for each counted text. It needs no triton.
 - `check` loads the plan, runs each case in the Triton CPU interpreter and

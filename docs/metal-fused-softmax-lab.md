@@ -58,8 +58,8 @@ python -m ai_journey.metal_fused_cli verify \
   --ceilings /tmp/day-74-gpu-ceilings.json
 ```
 
-The parser uses the program name `ai-journey-metal-fused`. The package does
-not install this command as a console script yet, so use `python -m`.
+The parser uses the program name `ai-journey-metal-fused`. An installed
+wheel gives the same commands under that name.
 
 The `run` command reads the ceiling report through the Day 74 verifier. Then
 it compiles the kernels, checks them, times them, checks its own report and
