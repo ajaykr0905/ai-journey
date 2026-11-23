@@ -1281,6 +1281,119 @@ same tests. See the [reduction lab guide](docs/gpu-reduction-lab.md), the
 [reduction CUDA contract guide](docs/gpu-reduce-cuda-contract.md) and the
 [scan lab guide](docs/gpu-scan-lab.md).
 
+## Port the matmul to Triton and fuse a softmax on the Apple GPU
+
+The Day 79 labs have two parts. The first part ports the tiled float32 matmul
+of Day 76 to Triton. It compares the lines of code with the Day 76 and Day 77
+CUDA and Metal texts. The second part fuses a row softmax on the Apple GPU of
+a Mac in four steps. Two commands do this work:
+
+- `ai-journey-triton-matmul` counts the lines of each text. It checks one
+  pinned Triton text in the Triton CPU interpreter on the nine Day 74 shapes,
+  with six declared configs.
+- `ai-journey-metal-fused` checks the softmax steps U0 to F3 against a
+  float64 reference. It times each step with `torch.softmax` on the Apple GPU.
+
+These commands count the lines, make a Triton report and recompute it.
+Triton has no macOS wheel, so the `check` command needs a Linux host with
+triton:
+
+```bash
+ai-journey-triton-matmul loc
+ai-journey-triton-matmul check \
+  --config config/day-79-triton-matmul.json \
+  --output /tmp/day-79-triton-matmul.json
+ai-journey-triton-matmul verify \
+  --report /tmp/day-79-triton-matmul.json \
+  --config config/day-79-triton-matmul.json
+```
+
+These commands run the fused softmax lab on a Mac and recompute its report
+on any host. The guide gives the command that writes the gpu-ceilings report:
+
+```bash
+ai-journey-metal-fused run \
+  --config config/day-79-metal-fused.json \
+  --ceilings /tmp/day-74-gpu-ceilings.json \
+  --output /tmp/day-79-metal-fused.json
+ai-journey-metal-fused verify \
+  --report /tmp/day-79-metal-fused.json \
+  --config config/day-79-metal-fused.json \
+  --ceilings /tmp/day-74-gpu-ceilings.json
+```
+
+One declared rule counts the lines of each text. Kernel lines are the code
+lines of a kernel and of its helpers. Host lines are the code lines of the
+launcher and of its helpers. These rows come from the full table of the
+Triton guide:
+
+| Lab | Language | Text | Kernel lines | Host lines | Other | Comment | Blank |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Day 79 | Triton | `matmul_kernel` | 33 | 9 | 2 | 10 | 4 |
+| Day 76 | CUDA C++ | `tiled_matmul_t32_kernel` | 24 | 9 | 0 | 10 | 3 |
+| Day 77 | CUDA C++ | `coarsened_matmul_t16_c2_kernel` | 33 | 9 | 0 | 11 | 3 |
+| Day 77 | CUDA C++ | `blocked_matmul_m64_n64_k16_t4x4_kernel` | 84 | 9 | 0 | 15 | 3 |
+| Day 76 | Metal | `matmul_tiled_32` | 31 | none | 0 | 4 | 0 |
+| Day 77 | Metal | `matmul_s7_interior` | 420 | none | 0 | 3 | 0 |
+
+Nine of the 33 Triton kernel lines are the grouped order, which no CUDA text
+has. One Triton text serves all six configs. A generator writes the Day 77
+Metal texts, so their counts measure generated text. A line count is not a
+speed.
+
+The Triton check ran in a linux/aarch64 container on the development Mac. It
+did 108 runs: 9 cases, 6 configs and 2 families. All 54 normal runs kept the
+Day 74 bound, and all 54 exact runs held the exact bits. The largest share of
+the bound was 0.516, at 1 x 1 x 1. These runs are CPU correctness checks, not
+performance numbers. The lab gives no Triton GPU rate, no CUDA rate and no
+cuBLAS rate, because this host has no NVIDIA or AMD GPU.
+
+On the development host, one run of the pinned fused softmax config gave
+these rates. Each cell gives the median effective GB/s of 50 samples. The
+last column gives the count of steps whose declared hypothesis held at that
+point.
+
+| Point | G | U0 | F1 | F2 | F3 | `torch.softmax` | Hypotheses held |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 4096 x 128 | 32 | 60.3 | 60.5 | 125.7 | 106.2 | 182.5 | 3 of 4 |
+| 4096 x 1024 | 64 | 54.8 | 106.2 | 104.5 | 104.9 | 81.4 | 4 of 4 |
+| 1024 x 4096 | 256 | 55.9 | 106.3 | 104.1 | 107.9 | 98.7 | 4 of 4 |
+| 256 x 16384 | 1024 | 57.2 | 93.4 | 100.8 | 101.3 | 67.1 | 4 of 4 |
+| Ragged, 2048 rows | 256 | 54.5 | 101.9 | 105.4 | 104.6 | 51.6 | 3 of 4 |
+
+The predictions held at 18 of 20 points: 4 steps at 5 points each. At the
+four points of 4.1 to 4.2 million elements, F1 was 1.632 to 1.937 times as
+fast as U0. At 4096 x 128, F1 showed no clear difference from U0, with a ratio
+of 1.004. At the ragged point, `torch.softmax` processed the padded matrix,
+about twice the elements of the rows.
+
+The report recorded load averages of 8.00, 8.05 and 8.17 before the run. It
+recorded 7.72, 7.99 and 8.14 after the run. All 32 outputs (8 cases, 4 steps)
+met the four rules in both runs. All values in the softmax table and in the
+two paragraphs after it come from host-specific Apple GPU (Metal)
+measurements on one shared host. They are not portable figures.
+
+The commands exit 0 on success and 1 when a report fails verification. They
+exit 2 for usage errors, unreadable or invalid inputs, or a refused output.
+Code 2 also marks a check or a run that broke a rule. Code 3 means that the
+host cannot run the Triton CPU interpreter, or that it cannot run Metal
+kernels through PyTorch.
+
+Evidence boundary: no Triton kernel ran on a GPU, and the labs tuned no
+config. No CUDA kernel ran, the labs used no NVIDIA GPU, and they did not
+measure cuBLAS. The softmax rates come from one Apple GPU through Metal on one
+host. PyTorch does not name the kernel of `torch.softmax`. The labs read no
+hardware counter, so each statement about a cache is an inference from
+timings.
+
+CI job `triton-matmul-contracts` runs the Triton tests in the triton 3.9.0
+CPU interpreter on Linux. It also checks the pinned plan and verifies the
+recorded report with the installed command. CI job `metal-fused-contracts`
+runs the fused softmax tests on Linux with CPU torch. It requires the
+installed `run` command to exit 3 and write no report, and it verifies the
+recorded report. See the [Triton matmul lab guide](docs/triton-matmul-lab.md)
+and the [fused softmax lab guide](docs/metal-fused-softmax-lab.md).
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with
