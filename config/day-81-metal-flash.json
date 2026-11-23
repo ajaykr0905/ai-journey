@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "name": "day-81-metal-flash",
+  "seed": 81,
+  "plan_sha256": "23a502f6a118c208a02fbc5ed7b36496edabe8788c9afc624e3b9b0bdfa0cbb5",
+  "correctness": {
+    "cases": [
+      {"lengths": [1, 31, 33, 100, 257], "inputs": "normal"},
+      {"lengths": [1000, 2049], "inputs": "wide_scores"},
+      {"lengths": [64, 700], "inputs": "offset_values"},
+      {"sequences": 2, "length": 1024, "inputs": "normal"}
+    ],
+    "repeats": 2
+  },
+  "benchmark": {
+    "inputs": "normal",
+    "shapes": [
+      {"sequences": 64, "length": 512},
+      {"sequences": 32, "length": 1024},
+      {"sequences": 16, "length": 2048},
+      {"sequences": 8, "length": 4096},
+      {"sequences": 4, "length": 8192}
+    ],
+    "modes": ["full", "causal"],
+    "check_rows": 32,
+    "warmup": 2,
+    "repeats": 12,
+    "target_bytes_per_sample": 67108864,
+    "max_runtime_seconds": 600
+  },
+  "comparison": {"min_faster_ratio": 1.1}
+}
