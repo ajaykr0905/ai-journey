@@ -10,7 +10,7 @@ from ai_journey.metal_fused_report import measure_report
 from ai_journey.metal_fused_source import F1, F2, F3, U0
 from ai_journey.metal_fused_verify import MetalFusedVerificationError, verify_report
 from test_kernel_metal_runtime import requires_metal
-from test_metal_fused_ceiling import recorded_ceiling
+from test_metal_fused_ceiling import host_drift, recorded_ceiling
 from test_metal_fused_config import make_config_mapping
 from test_metal_fused_report import small_config, synthetic_report
 
@@ -195,6 +195,9 @@ def test_an_unsealed_change_is_named_as_a_digest_mismatch(sealed):
 @requires_metal
 def test_a_report_from_this_gpu_verifies_as_a_measurement(tmp_path):
     ceiling = recorded_ceiling(tmp_path)
+    drift = host_drift(ceiling)
+    if drift:
+        pytest.skip(f"the recorded ceiling comes from another host: {drift}")
     report = measure_report(small_config(), ceiling, clock=time.perf_counter_ns)
 
     summary = verify_report(report, config=small_config(), ceiling=ceiling)

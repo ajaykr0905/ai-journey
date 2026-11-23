@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from ai_journey.kernel_metal_report import ENVIRONMENT_FIELDS
+from ai_journey.kernel_metal_report import ENVIRONMENT_FIELDS, host_environment
 from ai_journey.metal_fused_ceiling import (
     DEFINITION,
     SOURCE,
@@ -21,6 +21,24 @@ def write_recorded(directory):
 
 def recorded_ceiling(directory):
     return load_ceiling(write_recorded(directory))
+
+
+def host_drift(ceiling):
+    """The environment fields where this host differs from the ceiling's host.
+
+    A measured run refuses a ceiling from another environment, so a real GPU
+    test that pairs this host with the recorded ceiling can run only where
+    this list is empty, for example not after an operating system update.
+    """
+
+    import torch
+
+    environment = host_environment(torch.__version__)
+    return [
+        f"{field} {ceiling.environment[field]} != {environment.get(field)}"
+        for field in ENVIRONMENT_FIELDS
+        if environment.get(field) != ceiling.environment[field]
+    ]
 
 
 def test_the_recorded_day_74_report_gives_its_measured_bandwidth_ceiling(tmp_path):

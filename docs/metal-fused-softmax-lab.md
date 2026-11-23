@@ -36,6 +36,12 @@ to a file:
 PYTHONPATH=src:tests python -c "from pathlib import Path; from test_gpu_ceiling_recorded import RECORDED_REPORT_JSON as T; Path('/tmp/day-74-gpu-ceilings.json').write_text(T + chr(10), encoding='ascii')"
 ```
 
+A measured run refuses a ceiling report from another interpreter, library
+or platform. On 2026-11-23, the development host had macOS 27.2.1, and the
+recorded report names macOS 27.2. The recorded report then stopped the run
+with code 2. The two real GPU tests that use the recorded report skip on such
+a host, after they check this refusal or before they measure.
+
 A fresh Day 74 run gives a new ceiling for the same file:
 
 ```bash

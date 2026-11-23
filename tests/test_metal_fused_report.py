@@ -27,7 +27,7 @@ from ai_journey.metal_fused_source import (
 )
 from test_kernel_metal_runtime import requires_metal
 from test_metal_fused_benchmark import StepClock
-from test_metal_fused_ceiling import recorded_ceiling
+from test_metal_fused_ceiling import host_drift, recorded_ceiling
 from test_metal_fused_config import make_config_mapping
 from test_metal_fused_correctness import StandInBackend, recorded_limits
 
@@ -180,11 +180,13 @@ def test_a_run_past_its_budget_stops_without_a_report(tmp_path):
 
 @requires_metal
 def test_this_gpu_makes_a_measured_report_with_the_recorded_ceiling(tmp_path):
-    report = measure_report(
-        small_config(),
-        recorded_ceiling(tmp_path),
-        clock=time.perf_counter_ns,
-    )
+    ceiling = recorded_ceiling(tmp_path)
+    drift = host_drift(ceiling)
+    if drift:
+        with pytest.raises(MetalFusedError, match="another interpreter"):
+            measure_report(small_config(), ceiling, clock=time.perf_counter_ns)
+        pytest.skip(f"the recorded ceiling comes from another host: {drift}")
+    report = measure_report(small_config(), ceiling, clock=time.perf_counter_ns)
 
     assert report["measured"] is True
     assert report["backend"] == "torch.mps.compile_shader"
