@@ -75,6 +75,10 @@ PYTHONPATH=src python -m ai_journey.triton_ir_cli check \
 - `check` compiles every config again with triton and compares each digest.
   It writes a sealed report.
 
+The parser uses the program name `ai-journey-triton-ir`. An installed wheel
+gives the same commands under that name. The fixtures stay in `tests/`, so
+each command needs `--fixtures` with the path of a checkout.
+
 The exit codes are the codes of the Day 73 to 79 labs:
 
 - 0: the command succeeded.

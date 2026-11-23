@@ -83,7 +83,8 @@ python -m ai_journey.metal_liger_cli verify \
 ```
 
 On a shared host, run each timed command under the GPU lock. The parser uses
-the program name `ai-journey-metal-liger`.
+the program name `ai-journey-metal-liger`. An installed wheel gives the same
+commands under that name.
 
 The `run` command prints these lines:
 

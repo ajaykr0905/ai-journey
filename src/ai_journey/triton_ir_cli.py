@@ -58,7 +58,7 @@ EXIT_OK = 0
 EXIT_REJECTED = 1
 EXIT_INVALID = 2
 EXIT_UNAVAILABLE = 3
-PROG = "python -m ai_journey.triton_ir_cli"
+PROG = "ai-journey-triton-ir"
 NAME = "triton-ir"
 KINDS = {
     RECORDED_LABEL: "recorded",
