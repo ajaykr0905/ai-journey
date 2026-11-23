@@ -525,7 +525,7 @@ def naive_cross_entropy_finite(inputs: LigerInputs) -> bool:
         raise MetalLigerError("the naive check belongs to cross-entropy")
     x = inputs.main[layout.valid()]
     starts = layout.packed_starts()
-    with numpy.errstate(over="ignore", under="ignore", invalid="ignore"):
+    with numpy.errstate(all="ignore"):
         sums = numpy.add.reduceat(numpy.exp(x), starts, dtype=numpy.float32)
         loss = numpy.log(sums) - x[starts + inputs.second.astype(numpy.int64)]
     return bool(numpy.all(numpy.isfinite(loss)))
