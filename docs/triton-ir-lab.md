@@ -87,6 +87,13 @@ The exit codes are the codes of the Day 73 to 79 labs:
 Triton has no macOS wheel. On the development host, `check` exits 3 before
 it makes the output folder. The `check` tests that need triton skip on macOS.
 
+The texts also name the install path of triton. The TTIR, the TTGIR and the
+PTX locations of the inlined `standard.py` helper hold the path
+`/usr/local/lib/python3.11/site-packages/triton/language/standard.py`. A
+triton at another path, for example in a virtual environment, gives other
+digests for every stage. Then `check` exits 1, although the compiler output
+can be the same in all other bytes.
+
 ## The pipeline
 
 Triton lowers one `@triton.jit` function in these steps:
@@ -296,8 +303,9 @@ The owner reports these results:
 
 The repository holds one run only, so the lab cannot check these results
 itself. For this reason `check` requires each text and each metadata record
-to match, and it records each cubin match without a rule. A Linux host with
-the triton 3.9.0 wheel can run `check` and test the text result again.
+to match, and it records each cubin match without a rule. A Linux host can
+run `check` and test the text result again. It needs Python 3.11 and the
+triton 3.9.0 wheel at the install path of the dump.
 
 ## The report and the verifier
 

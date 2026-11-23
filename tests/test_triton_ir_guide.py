@@ -151,3 +151,18 @@ def test_the_guide_keeps_the_boundary_and_the_pending_work():
     for claim in ("occupancy of", "tflop", "gb/s", "we measured", "ran on an h100"):
         assert claim not in lowered
     assert ";" not in re.sub(r"```.*?```|`[^`]*`", "", guide(), flags=re.DOTALL)
+
+
+def test_the_guide_names_the_install_path_that_check_needs():
+    # Every committed text names the triton install path of the dump, so a
+    # triton installed at another path gives other digests for every stage.
+    path = re.search(
+        r'^\s*\.file\s+\d+\s+"(/[^"]*/triton/language/standard\.py)"',
+        PTX.read_text(encoding="ascii"),
+        flags=re.MULTILINE,
+    ).group(1)
+    for stage in ("ttir.mlir", "ttgir.mlir"):
+        assert f'loc("{path}":' in (PTX.parent / stage).read_text(encoding="ascii")
+    text = flat(guide())
+    assert f"`{path}`" in text
+    assert "A Linux host with the triton 3.9.0 wheel can run `check`" not in text
