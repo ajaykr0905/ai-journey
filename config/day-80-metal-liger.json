@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "name": "day-80-metal-liger",
+  "seed": 80,
+  "plan_sha256": "43d5f63eb9d93415d0b95244f7150d0652aa73a7845d98da7658993ff3f13165",
+  "correctness": {
+    "cases": {
+      "rmsnorm": [
+        {"lengths": [1, 31, 33, 1000, 4096, 16384, 2049, 7], "inputs": "uniform_80"},
+        {"rows": 4, "cols": 4096, "inputs": "offset_plus_1000"},
+        {"rows": 2, "cols": 2049, "inputs": "offset_minus_1000"},
+        {"rows": 8, "cols": 1024, "inputs": "normal"}
+      ],
+      "swiglu": [
+        {"lengths": [1, 31, 33, 1000, 4096, 2049, 7], "inputs": "uniform_80"},
+        {"rows": 2, "cols": 1000, "inputs": "offset_plus_1000"},
+        {"rows": 2, "cols": 1000, "inputs": "offset_minus_1000"},
+        {"rows": 4, "cols": 4096, "inputs": "normal"}
+      ],
+      "cross_entropy": [
+        {"lengths": [1, 31, 33, 1000, 32000, 50257, 7], "inputs": "uniform_80"},
+        {"rows": 4, "cols": 32000, "inputs": "offset_plus_1000"},
+        {"rows": 2, "cols": 50257, "inputs": "offset_minus_1000"},
+        {"rows": 8, "cols": 4096, "inputs": "normal"}
+      ]
+    },
+    "repeats": 2
+  },
+  "benchmark": {
+    "inputs": "normal",
+    "shapes": {
+      "rmsnorm": [
+        {"rows": 4096, "cols": 1024},
+        {"rows": 4096, "cols": 4096},
+        {"rows": 4096, "cols": 2049}
+      ],
+      "swiglu": [
+        {"rows": 4096, "cols": 1024},
+        {"rows": 4096, "cols": 4096},
+        {"rows": 4096, "cols": 2049}
+      ],
+      "cross_entropy": [
+        {"rows": 1024, "cols": 32000},
+        {"rows": 1024, "cols": 50257}
+      ]
+    },
+    "warmup": 3,
+    "repeats": 30,
+    "target_bytes_per_sample": 268435456,
+    "max_runtime_seconds": 600
+  },
+  "comparison": {"min_faster_ratio": 1.1}
+}
