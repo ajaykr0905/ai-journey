@@ -8,7 +8,9 @@ launch, and each pipeline verdict from the recorded limits. An output whose
 values all equal the rounded reference must hash to that reference plus its
 sentinel gaps and must record its errors exactly. Any other output records
 a digest of another buffer, a count of 1 to n differing values, and errors
-within its bounds.
+within its bounds: its largest error must lie from its bound ratio times the
+smallest bound to that ratio times the largest bound. The PyTorch checks
+meet the same rule against the sanity bound that the verifier recomputes.
 
 Besides the label and rule texts of the run, the verifier uses three
 modules of the run that measure nothing: the config parser checks the
@@ -103,6 +105,10 @@ _LOG_ERROR = 4 * 2.0**-23
 _FLUSH = 2.0**-126
 _FLOOR = 2.0**-125
 _TAIL = 2.0**-120
+_VENDOR_UNIT = 2.0**-16
+_VENDOR_FLOOR = 2.0**-100
+# The rounding slack of err / bound and of ratio * bound in float64.
+_SLACK = 1e-12
 _EPS32 = float(numpy.float32(1.0e-6))
 _CHUNK = 1 << 22
 _PROBE_COUNT = 1 << 16
@@ -464,6 +470,25 @@ def _probes(section: object) -> dict[str, dict[str, object]]:
     return section
 
 
+def _vendor_bound(family: str, output: numpy.ndarray) -> numpy.ndarray:
+    if family == _CE:
+        return _VENDOR_UNIT * (output + 1.0)
+    return _VENDOR_UNIT * numpy.abs(output) + _VENDOR_FLOOR
+
+
+def _error_fits(error: float, ratio: float, bound: numpy.ndarray) -> bool:
+    """Whether a largest error agrees with its bound ratio and the bounds.
+
+    Each error is at most ``ratio`` times its own bound, and the value at the
+    largest ratio has exactly that error, so the largest error lies from
+    ``ratio * min(bound)`` to ``ratio * max(bound)``.
+    """
+
+    low = ratio * float(bound.min()) * (1 - _SLACK)
+    high = ratio * float(bound.max()) * (1 + _SLACK)
+    return low <= error <= high
+
+
 def _output_record(entry, family, output, bound, layout, label) -> None:
     keys = {
         "buffer_sha256",
@@ -481,7 +506,8 @@ def _output_record(entry, family, output, bound, layout, label) -> None:
         and type(entry["identical_repeats"]) is bool
         and _number(entry["max_abs_error"])
         and _number(entry["max_bound_ratio"], 0.0, 1.0)
-        and _count(entry["differing_from_rounded_reference"], 0, size),
+        and _count(entry["differing_from_rounded_reference"], 0, size)
+        and _error_fits(entry["max_abs_error"], entry["max_bound_ratio"], bound),
         f"{label} output breaks its bound or its record form",
     )
     rounded = output.astype(numpy.float32)
@@ -599,10 +625,11 @@ def _check(entry: object, name: str, size: int, output, bound) -> dict[str, obje
         == {"max_abs_error", "max_bound_ratio", "differing_from_rounded_reference"}
         and _number(entry["max_abs_error"])
         and _number(entry["max_bound_ratio"], 0.0, 1.0)
-        and _count(entry["differing_from_rounded_reference"], 0, size),
+        and _count(entry["differing_from_rounded_reference"], 0, size)
+        and _error_fits(entry["max_abs_error"], entry["max_bound_ratio"], bound),
         f"the check of {name} breaks its bound or its record form",
     )
-    if bound is not None and entry["differing_from_rounded_reference"] == 0:
+    if entry["differing_from_rounded_reference"] == 0:
         error = numpy.abs(output.astype(numpy.float32).astype(numpy.float64) - output)
         _require(
             _exact(entry["max_abs_error"], float(error.max()))
@@ -670,7 +697,11 @@ def _points(section: object, config: MetalLigerConfig) -> list[dict[str, object]
                         checks.get(names[0]), names[0], size, output, bound
                     ),
                     names[1]: _check(
-                        checks.get(names[1]), names[1], size, output, None
+                        checks.get(names[1]),
+                        names[1],
+                        size,
+                        output,
+                        _vendor_bound(family, output),
                     ),
                 },
             }

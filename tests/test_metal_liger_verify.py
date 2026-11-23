@@ -166,6 +166,40 @@ def test_a_tampered_and_resealed_report_is_rejected(report, change, message):
         verify_report(_reseal(report, change))
 
 
+def _scale_error(entry, factor):
+    entry["max_abs_error"] = entry["max_abs_error"] * factor
+
+
+@pytest.mark.parametrize("factor", [1e6, 1e-6, 0.0])
+@pytest.mark.parametrize(
+    "locate",
+    [
+        lambda r: r["correctness"]["cases"][0]["output"],
+        lambda r: r["benchmark"]["points"][0]["checks"]["liger_rmsnorm"],
+        lambda r: r["benchmark"]["points"][1]["checks"]["torch_swiglu"],
+    ],
+    ids=["case_output", "kernel_check", "torch_check"],
+)
+def test_a_largest_error_that_disagrees_with_its_bound_ratio_is_rejected(
+    report, locate, factor
+):
+    # Each error is at most ratio * its bound, and the value at the largest
+    # ratio has exactly ratio * its bound, so the largest error lies between
+    # ratio * min(bound) and ratio * max(bound) of the recomputed bounds.
+    with pytest.raises(MetalLigerVerificationError, match="bound"):
+        verify_report(_reseal(report, lambda r: _scale_error(locate(r), factor)))
+
+
+def test_a_torch_check_that_claims_the_rounded_reference_must_rebuild_it(report):
+    def claim(r):
+        r["benchmark"]["points"][0]["checks"]["torch_rmsnorm"].update(
+            differing_from_rounded_reference=0
+        )
+
+    with pytest.raises(MetalLigerVerificationError, match="rounded reference"):
+        verify_report(_reseal(report, claim))
+
+
 def test_a_change_without_a_new_seal_breaks_the_digest(report):
     tampered = copy.deepcopy(report)
     tampered["summary"]["warnings"] = 1
