@@ -108,14 +108,17 @@ class RunRecord:
 
 @dataclass(frozen=True)
 class OperandRecord:
-    """The digests of one family's inputs and of its float64 reference."""
+    """The digests of one family's float32 inputs.
+
+    The float64 reference goes through ``numpy.matmul``, whose order of
+    additions depends on the BLAS build, so its bits differ between hosts. A
+    record keeps no digest of it, and a verifier rebuilds it on its own host.
+    """
 
     family: str
     q_sha256: str
     k_sha256: str
     v_sha256: str
-    reference_sha256: str
-    lse_sha256: str
 
     def to_mapping(self) -> dict[str, str]:
         return {
@@ -123,8 +126,6 @@ class OperandRecord:
             "q_sha256": self.q_sha256,
             "k_sha256": self.k_sha256,
             "v_sha256": self.v_sha256,
-            "reference_sha256": self.reference_sha256,
-            "lse_sha256": self.lse_sha256,
         }
 
 
@@ -269,13 +270,7 @@ def check_case(
         inputs = attention_inputs(family, seed, index, checked)
         reference = naive_attention(*inputs, checked.causal)
         prepared[family] = (inputs, reference)
-        operands.append(
-            OperandRecord(
-                family,
-                *(array_sha256(item) for item in inputs),
-                *(array_sha256(item) for item in reference),
-            )
-        )
+        operands.append(OperandRecord(family, *(array_sha256(item) for item in inputs)))
     runs = [
         check_run(
             backend,
