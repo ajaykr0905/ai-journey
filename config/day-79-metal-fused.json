@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "name": "day-79-metal-fused",
+  "seed": 79,
+  "plan_sha256": "198870239a4a52adb106ed2396e7f9a99d1c2c52ba9770e9fea820e28b032990",
+  "correctness": {
+    "cases": [
+      {"rows": 4, "cols": 1, "inputs": "normal"},
+      {"rows": 8, "cols": 31, "inputs": "uniform_80"},
+      {"rows": 8, "cols": 33, "inputs": "normal"},
+      {"rows": 6, "cols": 1000, "inputs": "uniform_80"},
+      {"rows": 4, "cols": 4096, "inputs": "normal"},
+      {"rows": 2, "cols": 4096, "inputs": "offset_plus_1000"},
+      {"rows": 2, "cols": 1000, "inputs": "offset_minus_1000"},
+      {"lengths": [1, 31, 33, 1000, 4096, 16384, 2049, 7], "inputs": "uniform_80"}
+    ],
+    "repeats": 2
+  },
+  "benchmark": {
+    "inputs": "normal",
+    "shapes": [
+      {"rows": 4096, "cols": 128},
+      {"rows": 4096, "cols": 1024},
+      {"rows": 1024, "cols": 4096},
+      {"rows": 256, "cols": 16384},
+      {"rows": 2048, "max_length": 4096}
+    ],
+    "warmup": 5,
+    "repeats": 50,
+    "target_bytes_per_sample": 268435456,
+    "max_runtime_seconds": 300
+  },
+  "comparison": {"min_faster_ratio": 1.1}
+}

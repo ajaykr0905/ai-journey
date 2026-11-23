@@ -91,6 +91,8 @@ ai-journey-matmul-tiled = "ai_journey.matmul_tiled_cli:main"
 ai-journey-matmul-checklist = "ai_journey.matmul_checklist_cli:main"
 ai-journey-gpu-reduce = "ai_journey.gpu_reduce_cli:main"
 ai-journey-gpu-scan = "ai_journey.gpu_scan_cli:main"
+ai-journey-triton-matmul = "ai_journey.triton_matmul_cli:main"
+ai-journey-metal-fused = "ai_journey.metal_fused_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

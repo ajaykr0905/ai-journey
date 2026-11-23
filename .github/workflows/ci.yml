@@ -1914,3 +1914,131 @@ jobs:
             ${{ runner.temp }}/gpu-reduce-scan-evidence/
             ${{ runner.temp }}/gpu-reduce-scan-dist/
           if-no-files-found: error
+  triton-matmul-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TRITON_INTERPRET: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Day 79 Triton matmul lab contract tools, CPU-only PyTorch and triton
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2" triton==3.9.0
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check the Triton matmul contracts and the fused softmax Triton texts in the Triton CPU interpreter
+        run: |
+          ruff check src/ai_journey/triton_matmul_*.py tests/test_triton_matmul_*.py
+          ruff format --check src/ai_journey/triton_matmul_*.py tests/test_triton_matmul_*.py
+          python -m compileall -q src/ai_journey/triton_matmul_*.py tests/test_triton_matmul_*.py
+          python -c 'import os, torch, triton; assert triton.__version__ == "3.9.0"; assert os.environ["TRITON_INTERPRET"] == "1"; assert not torch.cuda.is_available()'
+          python -m pytest -q -rs --junitxml="$RUNNER_TEMP/triton-matmul-evidence/pytest.xml" tests/test_triton_matmul_*.py tests/test_metal_fused_triton.py
+          python -c 'import sys, xml.etree.ElementTree as tree; suite = tree.parse(sys.argv[1]).getroot()[0]; assert suite.get("skipped") == "0", suite.attrib' "$RUNNER_TEMP/triton-matmul-evidence/pytest.xml"
+      - name: Build and install isolated Day 79 Triton matmul lab wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/triton-matmul-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/triton-matmul-installed" "$RUNNER_TEMP"/triton-matmul-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/triton-matmul-evidence"
+      - name: Check the pinned plan in the Triton CPU interpreter with the installed command
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/triton-matmul-installed
+        run: |
+          export PATH="$RUNNER_TEMP/triton-matmul-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/triton-matmul-installed/")'
+          ai-journey-triton-matmul loc > "$RUNNER_TEMP/triton-matmul-evidence/loc.txt"
+          cat "$RUNNER_TEMP/triton-matmul-evidence/loc.txt"
+          grep -Fx "loc lab=day-79 language=triton text=matmul_kernel kernel=33 host=9 other=2 comment=10 blank=4 sha256=9eb35e273b0fd229e83e223861ef7ce13c4f15ea46d2694baf13920851a31d56" "$RUNNER_TEMP/triton-matmul-evidence/loc.txt"
+          status=0
+          TRITON_INTERPRET=0 ai-journey-triton-matmul check --config "$GITHUB_WORKSPACE/config/day-79-triton-matmul.json" --output "$RUNNER_TEMP/triton-matmul-evidence/refused/triton-matmul.json" 2> "$RUNNER_TEMP/triton-matmul-evidence/interpreter-disabled.txt" || status=$?
+          cat "$RUNNER_TEMP/triton-matmul-evidence/interpreter-disabled.txt"
+          test "$status" -eq 3
+          grep -F "triton-matmul check unavailable: TRITON_INTERPRET='0' gives JITFunction, and this lab runs only the CPU interpreter (interpreter_disabled)" "$RUNNER_TEMP/triton-matmul-evidence/interpreter-disabled.txt"
+          test ! -e "$RUNNER_TEMP/triton-matmul-evidence/refused"
+          ai-journey-triton-matmul check --config "$GITHUB_WORKSPACE/config/day-79-triton-matmul.json" --output "$RUNNER_TEMP/triton-matmul-evidence/triton-matmul.json"
+          ai-journey-triton-matmul verify --report "$RUNNER_TEMP/triton-matmul-evidence/triton-matmul.json" --config "$GITHUB_WORKSPACE/config/day-79-triton-matmul.json"
+      - name: Verify the recorded interpreter report with the installed command
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/triton-matmul-installed
+        run: |
+          export PATH="$RUNNER_TEMP/triton-matmul-installed/bin:$PATH"
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_triton_matmul_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/triton-matmul-evidence/recorded-triton-matmul.json"
+          ai-journey-triton-matmul verify --report "$RUNNER_TEMP/triton-matmul-evidence/recorded-triton-matmul.json" --config "$GITHUB_WORKSPACE/config/day-79-triton-matmul.json"
+      - name: Retain the interpreter reports, the refused check and the package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: triton-matmul-contracts-evidence
+          path: |
+            ${{ runner.temp }}/triton-matmul-evidence/
+            ${{ runner.temp }}/triton-matmul-dist/
+          if-no-files-found: error
+  metal-fused-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Day 79 fused softmax lab contract tools and CPU-only PyTorch
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check the fused softmax contracts without an Apple GPU
+        run: |
+          ruff check src/ai_journey/metal_fused_*.py tests/test_metal_fused_*.py
+          ruff format --check src/ai_journey/metal_fused_*.py tests/test_metal_fused_*.py
+          python -m compileall -q src/ai_journey/metal_fused_*.py tests/test_metal_fused_*.py
+          python -m pytest -q -rs tests/test_metal_fused_*.py
+      - name: Build and install isolated Day 79 fused softmax lab wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/metal-fused-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/metal-fused-installed" "$RUNNER_TEMP"/metal-fused-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/metal-fused-evidence"
+      - name: Check that the installed Apple GPU command stops where MPS is not available
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/metal-fused-installed
+        run: |
+          export PATH="$RUNNER_TEMP/metal-fused-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/metal-fused-installed/")'
+          python -c 'import torch; assert not torch.backends.mps.is_available()'
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_gpu_ceiling_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/metal-fused-evidence/recorded-gpu-ceilings.json"
+          status=0
+          ai-journey-metal-fused run --config "$GITHUB_WORKSPACE/config/day-79-metal-fused.json" --ceilings "$RUNNER_TEMP/metal-fused-evidence/recorded-gpu-ceilings.json" --output "$RUNNER_TEMP/metal-fused-evidence/metal-fused.json" 2> "$RUNNER_TEMP/metal-fused-evidence/metal-fused-unavailable.txt" || status=$?
+          cat "$RUNNER_TEMP/metal-fused-evidence/metal-fused-unavailable.txt"
+          test "$status" -eq 3
+          grep -F "metal-fused run unavailable: Metal kernels run only on macOS (unsupported_operating_system)" "$RUNNER_TEMP/metal-fused-evidence/metal-fused-unavailable.txt"
+          test ! -e "$RUNNER_TEMP/metal-fused-evidence/metal-fused.json"
+      - name: Verify the recorded Apple GPU report with the installed command
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/metal-fused-installed
+        run: |
+          export PATH="$RUNNER_TEMP/metal-fused-installed/bin:$PATH"
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_metal_fused_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/metal-fused-evidence/recorded-metal-fused.json"
+          python -c 'import json, os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_metal_fused_recorded import RECORDED_CONFIG; open(sys.argv[1], "w", encoding="ascii").write(json.dumps(RECORDED_CONFIG) + "\n")' "$RUNNER_TEMP/metal-fused-evidence/recorded-metal-fused-config.json"
+          ai-journey-metal-fused verify --report "$RUNNER_TEMP/metal-fused-evidence/recorded-metal-fused.json" --config "$RUNNER_TEMP/metal-fused-evidence/recorded-metal-fused-config.json" --ceilings "$RUNNER_TEMP/metal-fused-evidence/recorded-gpu-ceilings.json"
+      - name: Retain the refused run, the recorded reports and the package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metal-fused-contracts-evidence
+          path: |
+            ${{ runner.temp }}/metal-fused-evidence/
+            ${{ runner.temp }}/metal-fused-dist/
+          if-no-files-found: error
