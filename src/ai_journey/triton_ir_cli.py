@@ -33,9 +33,16 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from .kernel_launch_io import canonical_json_bytes, write_atomic
+from .kernel_launch_io import canonical_json_bytes, paths_alias, write_atomic
 from .kernel_metal_cli import _refuse_unusable_output
-from .triton_ir_manifest import MANIFEST_NAME, load_manifest
+from .triton_ir_manifest import (
+    COMMITTED_CONFIG,
+    COMMITTED_STAGES,
+    COMMITTED_TARGET,
+    MANIFEST_NAME,
+    load_manifest,
+    stage_path,
+)
 from .triton_ir_report import (
     DIGEST_FIELD,
     RECORDED_LABEL,
@@ -229,11 +236,30 @@ def _sealed(
     return report
 
 
+def _stage_texts(fixtures: Path) -> tuple[Path, ...]:
+    return tuple(
+        fixtures / stage_path(COMMITTED_TARGET, COMMITTED_CONFIG, stage)
+        for stage in COMMITTED_STAGES
+    )
+
+
+def _refuse_output(output: Path, fixtures: Path) -> None:
+    """Refuse an output that would replace the manifest or a committed text.
+
+    The committed texts are the only copy of the recorded dump in the
+    repository, so a report must never take the place of one of them.
+    """
+
+    _refuse_unusable_output(output, fixtures / MANIFEST_NAME)
+    if any(paths_alias(output, text) for text in _stage_texts(fixtures)):
+        raise ValueError("report output must not alias a committed stage text")
+
+
 def _write(output: Path, fixtures: Path, report: Mapping[str, object]) -> None:
     write_atomic(
         output,
         canonical_json_bytes(report) + b"\n",
-        protected=(fixtures / MANIFEST_NAME,),
+        protected=(fixtures / MANIFEST_NAME, *_stage_texts(fixtures)),
     )
 
 
@@ -257,9 +283,7 @@ def main(
     try:
         if arguments.command == "summarize":
             if arguments.output is not None:
-                _refuse_unusable_output(
-                    arguments.output, arguments.fixtures / MANIFEST_NAME
-                )
+                _refuse_output(arguments.output, arguments.fixtures)
             report = _sealed(arguments.fixtures, clock, load_average)
             if arguments.output is not None:
                 _write(arguments.output, arguments.fixtures, report)
@@ -270,9 +294,7 @@ def main(
             report = load_report(arguments.report, arguments.fixtures)
             lines = [summary_line("verified_triton_ir", report)]
         else:
-            _refuse_unusable_output(
-                arguments.output, arguments.fixtures / MANIFEST_NAME
-            )
+            _refuse_output(arguments.output, arguments.fixtures)
             load_manifest(arguments.fixtures)
             chosen = CompilerBackend() if backend is None else backend
             report = _sealed(arguments.fixtures, clock, load_average, chosen)

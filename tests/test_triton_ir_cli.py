@@ -139,6 +139,21 @@ def test_check_with_a_stand_in_backend_writes_a_synthetic_report_and_exits_1(
     assert capsys.readouterr().out.startswith("verified_triton_ir_synthetic=")
 
 
+@pytest.mark.parametrize("stage", ["ttir.mlir", "ttgir.mlir", "ptx.ptx"])
+@pytest.mark.parametrize("command", ["summarize", "check"])
+def test_an_output_never_replaces_a_committed_stage_text(
+    tmp_path, capsys, command, stage
+):
+    folder = tmp_path / "fixtures"
+    shutil.copytree(FIXTURES, folder)
+    text = folder / "sm_80" / "m32_n64_k32_g8_w2_s5" / stage
+    before = text.read_bytes()
+    argv = [command, "--fixtures", str(folder), "--output", str(text)]
+    assert main(argv, backend=FixtureBackend(), **CLOCK) == EXIT_INVALID
+    assert "alias a committed stage text" in capsys.readouterr().err
+    assert text.read_bytes() == before
+
+
 def test_bad_inputs_and_outputs_exit_2_and_write_nothing(tmp_path, capsys):
     folder = tmp_path / "fixtures"
     shutil.copytree(FIXTURES, folder)
