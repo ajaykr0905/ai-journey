@@ -373,6 +373,8 @@ def test_the_day_77_row_keeps_the_lectures_and_learner_evidence_pending():
     assert lecture == "GPU MODE Lectures 8 and 2 pending user confirmation"
     assert manual.startswith("Learner-printed checklist")
     assert manual.endswith("an NVIDIA run of the CUDA texts pending")
-    assert "Last updated: 2026-11-20" in progress
+    (updated,) = [line for line in progress if line.startswith("Last updated: ")]
+    # A later day updates the file again, so the date may only move forward.
+    assert updated.removeprefix("Last updated: ") >= "2026-11-20"
     for guide_name in (CHECKLIST_GUIDE, BOUND_GUIDE, CUDA_GUIDE):
         assert (ROOT / guide_name).is_file()
