@@ -1394,6 +1394,128 @@ installed `run` command to exit 3 and write no report, and it verifies the
 recorded report. See the [Triton matmul lab guide](docs/triton-matmul-lab.md)
 and the [fused softmax lab guide](docs/metal-fused-softmax-lab.md).
 
+## Read the Triton compiler output and fuse LLM layers on the Apple GPU
+
+The Day 80 labs have two parts. The first part reads the TTIR, TTGIR and PTX
+that triton 3.9.0 wrote for the Day 79 matmul kernel. The second part fuses
+three forward layers of LLM training on the Apple GPU of a Mac. Two commands
+do this work:
+
+- `ai-journey-triton-ir` checks the recorded dump, counts the committed texts
+  and maps each kernel line to its ops. Only its `check` command needs triton.
+- `ai-journey-metal-liger` checks fused RMSNorm, SwiGLU and cross-entropy
+  kernels against a float64 reference. It times each kernel against its
+  PyTorch sequence on the Apple GPU.
+
+These commands check the dump, write a sealed report and recompute it. The
+fixtures stay in `tests/`, so each command needs `--fixtures` with the path of
+a checkout:
+
+```bash
+ai-journey-triton-ir summarize \
+  --fixtures tests/fixtures/day80_triton_ir \
+  --output /tmp/day-80-triton-ir.json
+ai-journey-triton-ir verify \
+  --report /tmp/day-80-triton-ir.json \
+  --fixtures tests/fixtures/day80_triton_ir
+ai-journey-triton-ir stage-map \
+  --fixtures tests/fixtures/day80_triton_ir
+```
+
+These commands run the fused kernel lab on a Mac and recompute its report on
+any host. The guide gives the command that writes the gpu-ceilings report:
+
+```bash
+ai-journey-metal-liger run \
+  --config config/day-80-metal-liger.json \
+  --ceilings /tmp/day-74-gpu-ceilings.json \
+  --output /tmp/day-80-metal-liger.json
+ai-journey-metal-liger verify \
+  --report /tmp/day-80-metal-liger.json \
+  --config config/day-80-metal-liger.json \
+  --ceilings /tmp/day-74-gpu-ceilings.json
+```
+
+The repository holds the TTIR, TTGIR and PTX of `sm_80` for the config
+`m32_n64_k32_g8_w2_s5`. The other 11 compiles stay digest only. The entry
+holds 3097 instructions. These rows come from the PTX table of the Triton IR
+guide:
+
+| Family | Count |
+| --- | ---: |
+| `fma.rn.f32` | 1024 |
+| `cp.async` copies | 240 |
+| `ld.shared` | 96 |
+| `bar.sync` | 18 |
+| `st.global` | 32 |
+| `ld.global` | 0 |
+| `mma` | 0 |
+
+The K loop starts on line 2216 of `ptx.ptx` and ends on line 3869. One pass
+holds 1450 instructions in this order:
+
+1. `cp.async.wait_group 6` and one `bar.sync` make the oldest ring slot ready.
+2. 96 `ld.shared.v4.b32` loads move the A and B tiles into registers.
+3. 1024 `fma.rn.f32` instructions compute the part of one thread.
+4. A second `bar.sync` protects the slot from the next copies.
+5. 48 `cp.async` copies fetch the tile of the iteration 4 steps ahead.
+
+The kernel calls `tl.dot` with `input_precision="ieee"`, so Triton took the
+FMA path. The TTGIR has no `#mma` encoding, and the PTX has no `mma`
+instruction. With `num_stages = 5`, each operand has a ring of 4 shared
+buffers. In all 12 compiles, the shared bytes equal `(num_stages - 1)` times
+the tile bytes. The TTIR is identical for `sm_80` and `sm_90` in all 6
+configs. These texts are compiler output for declared targets. No `ptxas`
+report exists, so the lab states no register use and no occupancy.
+
+On the development host, one run of the pinned fused kernel config gave these
+times. Each median and IQR is the time of one call. Each GB/s divides the
+compulsory bytes by the median time. "Of the ceiling" divides that GB/s by
+the ceiling of 124.61 GB/s from a fresh Day 74 run.
+
+| Family | Shape | Kernel median (IQR), us | Kernel GB/s | Of the ceiling | PyTorch median (IQR), us | Ratio, verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| RMSNorm | 4096 x 1024 | 287.6 (23.6) | 116.7 | 0.936 | 1664.6 (24.9) | 5.79, faster |
+| RMSNorm | 4096 x 4096 | 1160.4 (57.5) | 115.7 | 0.928 | 6496.2 (198.8) | 5.60, faster |
+| RMSNorm | 4096 x 2049 | 625.7 (57.5) | 107.3 | 0.861 | 3325.1 (76.1) | 5.31, faster |
+| SwiGLU | 4096 x 1024 | 452.0 (47.9) | 111.3 | 0.894 | 710.4 (43.7) | 1.57, faster |
+| SwiGLU | 4096 x 4096 | 1742.9 (113.9) | 115.5 | 0.927 | 2754.2 (196.7) | 1.58, faster |
+| SwiGLU | 4096 x 2049 | 864.2 (55.1) | 116.5 | 0.935 | 1413.6 (71.9) | 1.64, faster |
+| cross-entropy | 1024 x 32000 | 1039.3 (63.2) | 126.1 | 1.012 | 4130.5 (112.6) | 3.97, faster |
+| cross-entropy | 1024 x 50257 | 1678.4 (136.0) | 122.7 | 0.984 | 6679.0 (201.4) | 3.98, faster |
+
+The predictions held at 8 of 8 points. All 12 cases met the three rules in
+both runs. The cross-entropy kernel does not write the softmax: 131072000
+bytes at 32000 columns and 205852672 bytes at 50257 columns. These are counts
+of a model, not measured allocations. The ceiling is the best Day 74 median,
+not a hardware limit, so a fraction above 1 is possible.
+
+The Day 80 report recorded load averages of 7.73, 8.02 and 7.68 before the
+run. It recorded 7.10, 7.87 and 7.63 after the run. All values in the fused
+kernel table and in the paragraph after it come from host-specific Apple GPU
+(Metal) measurements on one shared host. They are not portable figures.
+
+The commands exit 0 on success and 1 when a report fails verification. Code
+1 also marks a `check` whose regenerated text or metadata differs from the
+dump. They exit 2 for usage errors, unreadable or invalid inputs, or a refused
+output. Code 2 also marks a run that broke a rule. Code 3 means that the host
+cannot compile with triton, or that it cannot run Metal kernels through
+PyTorch.
+
+Evidence boundary: the Triton IR and PTX are compiler output for the declared
+NVIDIA targets `sm_80` and `sm_90`. No PTX or cubin ran, and the labs used no
+NVIDIA GPU. The fused kernel times come from one Apple GPU through Metal on
+one host. The lab ran no Liger Kernel code and no backward pass. PyTorch does
+not name the kernels of its sequences. The labs read no hardware counter.
+
+CI job `triton-ir-contracts` runs the installed `check` on an x86_64 Linux
+runner and compares each stage with the aarch64 dump. Its tests with the real
+triton then require every text to match. CI job `metal-liger-contracts` runs
+the fused kernel tests on Linux with CPU torch. It requires the installed
+`run` command to exit 3 and write no report, and it verifies the recorded
+report. See the [Triton IR lab guide](docs/triton-ir-lab.md) and the
+[fused kernel lab guide](docs/metal-liger-lab.md).
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with
