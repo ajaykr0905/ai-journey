@@ -22,8 +22,8 @@ The lab does these steps:
 
 Nothing here runs on a GPU. The host has no NVIDIA GPU, and Triton has no
 macOS wheel. Thus the kernel can run only in the Triton CPU interpreter on a
-Linux host, such as a CI job. The lab reports no Triton GPU time and tunes no
-config.
+Linux host. No CI job runs the interpreter tests yet. The lab reports no
+Triton GPU time and tunes no config.
 
 Ajay must still watch Lecture 12 and Lecture 36. This lab does not replace
 them.
@@ -254,11 +254,13 @@ safety factor of 2. It is not a proof. With `u = 2**-24`, the terms are:
 - The log-sum-exp bound is `2 * (E + R)`.
 
 The bound is loose. In the NumPy stand-in, the worst output ratio of the
-pinned plan is 0.0014, and the worst log-sum-exp ratio is 0.0152. A text without
-the rescale step breaks the bound by a factor of about 760 in the case N = 129 with D = 64. The
-bound holds for the NumPy exponential of the CPU interpreter. A GPU `tl.exp`
-uses an approximate base-2 exponential, so a later GPU run needs its own
-bound.
+pinned plan is 0.0014, and the worst log-sum-exp ratio is 0.0152. Under the
+NumPy model of `triton.language`, a text without the rescale step breaks the
+bound. The factor is about 760 in the case N = 129 with D = 64.
+
+The bound is for the NumPy exponential of the CPU interpreter. No interpreter
+run checked the bound. A GPU `tl.exp` uses an approximate base-2
+exponential, so a later GPU run needs its own bound.
 
 Each run gets O, m and l buffers with whole query blocks of rows. Every slot
 holds a quiet-NaN sentinel before the run. After the run, the rows past N must keep their
@@ -293,9 +295,11 @@ verifier keeps it so.
 
 - The host has no NVIDIA GPU, no CUDA and no Triton wheel. No GPU compiled or
   ran the text.
-- The kernel can run only in the Triton CPU interpreter on a Linux host, such
-  as a CI job with triton 3.9.0 and CPU torch. No such run happened on the
-  development Mac. Ajay must still read the CI log of the interpreter tests.
+- The kernel can run only in the Triton CPU interpreter on a Linux host with
+  triton 3.9.0 and CPU torch. No such run happened. No CI job runs the
+  interpreter tests yet.
+- Ajay must still add a Linux CI job for the interpreter tests, and then read
+  its log.
 - The interpreter runs each program in turn as Python and NumPy code. Its time
   says nothing about a GPU, so the lab reports no time.
 - The memory section is a model. It is not a measured GPU footprint.
@@ -303,8 +307,9 @@ verifier keeps it so.
 
 ## Reading notes on FlashAttention-2 and FlashAttention-3
 
-These notes come from the papers. The lab implements none of these features,
-and Ajay must still read both papers.
+These notes are a summary from memory. Nobody checked them against the
+papers. The lab implements none of these features, and Ajay must still read
+both papers.
 
 FlashAttention-2 (Dao, 2023) changes the work split:
 
@@ -330,5 +335,6 @@ watch it for the CUTLASS details.
 ## What Ajay must still do
 
 - Ajay must still watch Lecture 12 and Lecture 36.
-- Ajay must still read the CI log of the interpreter tests.
+- Ajay must still add a Linux CI job for the interpreter tests, and then read
+  its log.
 - Ajay must still read the FlashAttention-2 and FlashAttention-3 papers.

@@ -31,9 +31,9 @@ It is not a proof:
   output row is a convex mix of value rows, and the log-sum-exp bound is
   ``2 (E + R)``.
 
-The bound holds for the NumPy exp of the CPU interpreter. A GPU ``tl.exp``
-compiles to an approximate base-2 exponential, so a later GPU run needs its
-own bound.
+The bound is for the NumPy exp of the CPU interpreter, and no interpreter
+run checked it. A GPU ``tl.exp`` compiles to an approximate base-2
+exponential, so a later GPU run needs its own bound.
 """
 
 from __future__ import annotations

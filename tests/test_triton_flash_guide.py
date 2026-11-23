@@ -156,14 +156,13 @@ def test_the_cited_ratios_come_from_the_stand_in_and_the_changed_text(monkeypatc
         )
     ratio = float(re.search(r"is ([0-9.]+) times", str(caught.value)).group(1))
     assert 740 < ratio < 780
-    assert "by a factor of about 760 in the case N = 129 with D = 64" in text
+    assert "The factor is about 760 in the case N = 129 with D = 64." in text
 
 
 def test_the_guide_keeps_the_boundary_and_the_pending_work():
     text = flat(guide())
 
     assert "Ajay must still watch Lecture 12 and Lecture 36." in text
-    assert "Ajay must still read the CI log of the interpreter tests." in text
     assert "Ajay must still read both papers." in text
     assert "No GPU compiled or ran the text." in text
     assert "The lab reports no Triton GPU time and tunes no config." in text
@@ -171,3 +170,30 @@ def test_the_guide_keeps_the_boundary_and_the_pending_work():
     for word in ("CUDA run", "measured on the GPU", "occupancy", "production"):
         assert word not in text
     assert ";" not in re.sub(r"```.*?```", "", guide(), flags=re.DOTALL)
+
+
+def test_no_text_says_that_a_ci_job_or_the_interpreter_ran_the_kernel():
+    # The interpreter tests need a Linux job with triton. Until the workflow
+    # runs them, the guide and the test module must say that no job does.
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    interpreter_tests = flat(
+        (ROOT / "tests/test_triton_flash_interpreter.py").read_text(encoding="utf-8")
+    )
+    text = flat(guide())
+    assert "test_triton_flash_" not in workflow
+    assert "No CI job runs the interpreter tests yet." in text
+    assert "no CI job runs them yet" in interpreter_tests
+    assert "run in the Linux CI job" not in interpreter_tests
+    assert "such as a CI job" not in text
+    assert "read the CI log" not in text
+    assert "Ajay must still add a Linux CI job for the interpreter tests" in text
+    # The cited fault ratio comes from the NumPy model, not the interpreter.
+    assert (
+        "Under the NumPy model of `triton.language`, a text without the rescale "
+        "step breaks the bound" in text
+    )
+    assert "The bound holds for" not in text
+    assert "No interpreter run checked the bound." in text
+    # The paper notes are a summary from memory, not a checked reading.
+    assert "These notes come from the papers." not in text
+    assert "Nobody checked them against the papers." in text

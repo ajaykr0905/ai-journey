@@ -1,9 +1,10 @@
 """Tests that run the pinned flash attention text in the Triton CPU interpreter.
 
 They need triton and torch, so they skip on a host without them. Triton has
-no macOS wheel, so they skip on the development Mac and run in the Linux CI
-job with triton 3.9.0, CPU torch and ``TRITON_INTERPRET=1``. The interpreter
-runs on the CPU, so no test here measures or claims GPU behavior.
+no macOS wheel, so they skip on the development Mac. They are for a Linux job
+with triton 3.9.0, CPU torch and ``TRITON_INTERPRET=1``, but no CI job runs
+them yet. The interpreter runs on the CPU, so no test here measures or claims
+GPU behavior.
 """
 
 import inspect
