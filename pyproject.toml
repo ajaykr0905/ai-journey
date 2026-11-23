@@ -93,6 +93,8 @@ ai-journey-gpu-reduce = "ai_journey.gpu_reduce_cli:main"
 ai-journey-gpu-scan = "ai_journey.gpu_scan_cli:main"
 ai-journey-triton-matmul = "ai_journey.triton_matmul_cli:main"
 ai-journey-metal-fused = "ai_journey.metal_fused_cli:main"
+ai-journey-triton-ir = "ai_journey.triton_ir_cli:main"
+ai-journey-metal-liger = "ai_journey.metal_liger_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
