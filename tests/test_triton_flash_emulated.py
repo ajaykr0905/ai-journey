@@ -77,7 +77,7 @@ class Language(types.ModuleType):
         self.touched.append(offsets[lanes])
         return out
 
-    def store(self, pointer, value, mask):
+    def store(self, pointer, value, mask=True):
         offsets = numpy.asarray(pointer.offset)
         lanes = numpy.broadcast_to(mask, offsets.shape)
         values = numpy.broadcast_to(value, offsets.shape)
@@ -120,8 +120,9 @@ class Kernel:
         return launch
 
 
-@pytest.fixture
-def emulated(monkeypatch):
+def install(monkeypatch):
+    """Put the model in ``sys.modules`` for one test; return its language."""
+
     language = Language()
     triton = types.ModuleType("triton")
     triton.language = language
@@ -129,17 +130,31 @@ def emulated(monkeypatch):
     triton.cdiv = lambda a, b: -(-a // b)
     monkeypatch.setitem(sys.modules, "triton", triton)
     monkeypatch.setitem(sys.modules, "triton.language", language)
+    return language
+
+
+def compile_emulated(text):
     namespace = {"__name__": "emulated_flash_text"}
-    exec(compile(TRITON_SOURCE, "<flash text>", "exec"), namespace)
-    return namespace, language
+    exec(compile(text, "<flash text>", "exec"), namespace)
+    return namespace
 
 
-def run_text(namespace, q, k, v, causal, config):
+@pytest.fixture
+def emulated(monkeypatch):
+    language = install(monkeypatch)
+    return compile_emulated(TRITON_SOURCE), language
+
+
+def run_text(namespace, q, k, v, causal, config, buffers=None):
     heads, sequence, dim = q.shape
     rows = padded_rows(sequence, config)
-    o = numpy.full(heads * rows * dim, SENTINEL).view(numpy.float32)
-    maxima = numpy.full(heads * rows, SENTINEL).view(numpy.float32)
-    sums = numpy.full(heads * rows, SENTINEL).view(numpy.float32)
+    if buffers is None:
+        buffers = (
+            numpy.full(heads * rows * dim, SENTINEL).view(numpy.float32),
+            numpy.full(heads * rows, SENTINEL).view(numpy.float32),
+            numpy.full(heads * rows, SENTINEL).view(numpy.float32),
+        )
+    o, maxima, sums = buffers
     namespace[LAUNCHER_NAME](
         Pointer(q.reshape(-1)),
         Pointer(k.reshape(-1)),
@@ -160,6 +175,19 @@ def run_text(namespace, q, k, v, causal, config):
         maxima.reshape(heads, rows),
         sums.reshape(heads, rows),
     )
+
+
+class EmulatedBackend:
+    """A harness backend that runs one text under the model."""
+
+    environment = {}
+
+    def __init__(self, text=TRITON_SOURCE):
+        self.namespace = compile_emulated(text)
+
+    def run(self, q, k, v, *, causal, config, output, maxima, sums):
+        run_text(self.namespace, q, k, v, causal, config, (output, maxima, sums))
+        return output, maxima, sums
 
 
 CASES = (
