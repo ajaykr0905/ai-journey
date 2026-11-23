@@ -597,7 +597,7 @@ def _regeneration(label: str, raw, actual: object) -> object:
     environment = actual["environment"]
     _require(
         isinstance(environment, dict)
-        and list(environment) == list(ENVIRONMENT_FIELDS)
+        and set(environment) == set(ENVIRONMENT_FIELDS)
         and all(type(value) is str for value in environment.values()),
         "regeneration environment does not match the schema",
     )

@@ -216,3 +216,9 @@ def test_load_report_needs_canonical_bytes(tmp_path):
         load_report(tmp_path / "missing.json", FIXTURES)
     with pytest.raises(TypeError, match="pathlib.Path"):
         verify_report(RECORDED, str(FIXTURES))
+
+
+def test_a_synthetic_report_verifies_after_a_canonical_file_round_trip(tmp_path):
+    path = tmp_path / "synthetic.json"
+    path.write_bytes(canonical_json_bytes(SYNTHETIC) + b"\n")
+    assert load_report(path, FIXTURES) == SYNTHETIC
