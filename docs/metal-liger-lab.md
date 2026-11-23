@@ -409,6 +409,10 @@ sizes, the cost of each synchronize call sets most of the time. Two of its
 three predictions missed, and the report records that result. The report is
 there to be verified on a Linux host without torch, not to show speed.
 
+The CI job `metal-liger-contracts` runs the tests with CPU-only torch. There
+the installed `run` must exit 3 and write nothing. The installed `verify` must
+accept this report with its recorded config.
+
 ## Work that Ajay must still do
 
 - Ajay must still watch Lecture 28.

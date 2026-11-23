@@ -311,6 +311,14 @@ to match, and it records each cubin match without a rule. A Linux host can
 run `check` and test the text result again. It needs Python 3.11 and the
 triton 3.9.0 wheel at the install path of the dump.
 
+The CI job `triton-ir-contracts` does this test on an x86_64 Linux runner. It
+uses the `python:3.11-slim` image of the dump, so triton has the same install
+path. The installed `check` compares the x86_64 texts with the aarch64 dump,
+and the job prints each digest pair as data. Then the tests with the real
+triton run with no skip. They require all 48 texts and all 12 metadata
+records to match. Thus a difference between the two architectures fails the
+job on purpose. No result of this job exists yet.
+
 ## The report and the verifier
 
 The report holds the manifest, the source digest and the committed files.

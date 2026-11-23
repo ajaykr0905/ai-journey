@@ -2042,3 +2042,128 @@ jobs:
             ${{ runner.temp }}/metal-fused-evidence/
             ${{ runner.temp }}/metal-fused-dist/
           if-no-files-found: error
+  triton-ir-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The recorded dump ran in this image on linux/aarch64. Here it runs on
+    # x86_64, and triton sits at the same install path as in the dump.
+    container: python:3.11-slim
+    defaults:
+      run:
+        shell: bash
+    env:
+      PIP_ROOT_USER_ACTION: ignore
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install Day 80 Triton IR lab contract tools, CPU-only PyTorch and triton
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2" triton==3.9.0
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check the Triton IR sources and tests statically
+        run: |
+          ruff check src/ai_journey/triton_ir_*.py tests/test_triton_ir_*.py
+          ruff format --check src/ai_journey/triton_ir_*.py tests/test_triton_ir_*.py
+          python -m compileall -q src/ai_journey/triton_ir_*.py tests/test_triton_ir_*.py
+          python -c 'import os, platform, triton; assert triton.__version__ == "3.9.0"; assert triton.__file__ == "/usr/local/lib/python3.11/site-packages/triton/__init__.py", triton.__file__; assert platform.machine() == "x86_64"; assert "TRITON_INTERPRET" not in os.environ'
+      - name: Build and install isolated Day 80 Triton IR lab wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/triton-ir-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/triton-ir-installed" "$RUNNER_TEMP"/triton-ir-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/triton-ir-evidence"
+      - name: Regenerate every stage on x86_64 with the installed command and compare it with the aarch64 dump
+        run: |
+          cd "$RUNNER_TEMP"
+          export PYTHONPATH="$RUNNER_TEMP/triton-ir-installed"
+          export PATH="$RUNNER_TEMP/triton-ir-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/triton-ir-installed/")'
+          ai-journey-triton-ir summarize --fixtures "$GITHUB_WORKSPACE/tests/fixtures/day80_triton_ir" --output "$RUNNER_TEMP/triton-ir-evidence/recorded-triton-ir.json"
+          ai-journey-triton-ir verify --report "$RUNNER_TEMP/triton-ir-evidence/recorded-triton-ir.json" --fixtures "$GITHUB_WORKSPACE/tests/fixtures/day80_triton_ir"
+          ai-journey-triton-ir stage-map --fixtures "$GITHUB_WORKSPACE/tests/fixtures/day80_triton_ir" > "$RUNNER_TEMP/triton-ir-evidence/stage-map.txt"
+          cat "$RUNNER_TEMP/triton-ir-evidence/stage-map.txt"
+          status=0
+          ai-journey-triton-ir check --fixtures "$GITHUB_WORKSPACE/tests/fixtures/day80_triton_ir" --output "$RUNNER_TEMP/triton-ir-evidence/regenerated-triton-ir.json" 2> "$RUNNER_TEMP/triton-ir-evidence/check-stderr.txt" || status=$?
+          cat "$RUNNER_TEMP/triton-ir-evidence/check-stderr.txt"
+          test "$status" -eq 0 -o "$status" -eq 1
+          python -c 'import json, sys; report = json.load(open(sys.argv[1], encoding="ascii")); [print("triton_ir x86_64_vs_aarch64", row["target"], row["config"], stage, "match=" + str(texts["match"]).lower(), "recorded=" + texts["recorded_sha256"], "regenerated=" + texts["regenerated_sha256"]) for row in report["regeneration"]["compiles"] for stage, texts in row["stages"].items()]' "$RUNNER_TEMP/triton-ir-evidence/regenerated-triton-ir.json" | tee "$RUNNER_TEMP/triton-ir-evidence/x86_64-vs-aarch64.txt"
+          ai-journey-triton-ir verify --report "$RUNNER_TEMP/triton-ir-evidence/regenerated-triton-ir.json" --fixtures "$GITHUB_WORKSPACE/tests/fixtures/day80_triton_ir"
+          echo "check_status=$status" | tee "$RUNNER_TEMP/triton-ir-evidence/check-status.txt"
+      - name: Run the Triton IR tests with the real triton and no skip
+        run: |
+          python -m pytest -q -rs --junitxml="$RUNNER_TEMP/triton-ir-evidence/pytest.xml" tests/test_triton_ir_*.py
+          python -c 'import sys, xml.etree.ElementTree as tree; suite = tree.parse(sys.argv[1]).getroot()[0]; assert suite.get("skipped") == "0", suite.attrib' "$RUNNER_TEMP/triton-ir-evidence/pytest.xml"
+      - name: Collect the regenerated reports, the comparison and the package
+        if: always()
+        run: |
+          mkdir -p triton-ir-ci-evidence
+          for folder in triton-ir-evidence triton-ir-dist; do if [ -d "$RUNNER_TEMP/$folder" ]; then cp -R "$RUNNER_TEMP/$folder" triton-ir-ci-evidence/; fi; done
+      - name: Retain the regenerated reports, the comparison and the package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: triton-ir-contracts-evidence
+          path: triton-ir-ci-evidence/
+          if-no-files-found: warn
+  metal-liger-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Day 80 fused kernel lab contract tools and CPU-only PyTorch
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check the fused kernel contracts without an Apple GPU
+        run: |
+          ruff check src/ai_journey/metal_liger_*.py tests/test_metal_liger_*.py
+          ruff format --check src/ai_journey/metal_liger_*.py tests/test_metal_liger_*.py
+          python -m compileall -q src/ai_journey/metal_liger_*.py tests/test_metal_liger_*.py
+          python -m pytest -q -rs tests/test_metal_liger_*.py
+      - name: Build and install isolated Day 80 fused kernel lab wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/metal-liger-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/metal-liger-installed" "$RUNNER_TEMP"/metal-liger-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/metal-liger-evidence"
+      - name: Check that the installed Apple GPU command stops where MPS is not available
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/metal-liger-installed
+        run: |
+          export PATH="$RUNNER_TEMP/metal-liger-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/metal-liger-installed/")'
+          python -c 'import torch; assert not torch.backends.mps.is_available()'
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_gpu_ceiling_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/metal-liger-evidence/recorded-gpu-ceilings.json"
+          status=0
+          ai-journey-metal-liger run --config "$GITHUB_WORKSPACE/config/day-80-metal-liger.json" --ceilings "$RUNNER_TEMP/metal-liger-evidence/recorded-gpu-ceilings.json" --output "$RUNNER_TEMP/metal-liger-evidence/metal-liger.json" 2> "$RUNNER_TEMP/metal-liger-evidence/metal-liger-unavailable.txt" || status=$?
+          cat "$RUNNER_TEMP/metal-liger-evidence/metal-liger-unavailable.txt"
+          test "$status" -eq 3
+          grep -F "metal-liger run unavailable: Metal kernels run only on macOS (unsupported_operating_system)" "$RUNNER_TEMP/metal-liger-evidence/metal-liger-unavailable.txt"
+          test ! -e "$RUNNER_TEMP/metal-liger-evidence/metal-liger.json"
+      - name: Verify the recorded Apple GPU report with the installed command
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/metal-liger-installed
+        run: |
+          export PATH="$RUNNER_TEMP/metal-liger-installed/bin:$PATH"
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_metal_liger_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/metal-liger-evidence/recorded-metal-liger.json"
+          python -c 'import json, os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_metal_liger_recorded import RECORDED_CONFIG; open(sys.argv[1], "w", encoding="ascii").write(json.dumps(RECORDED_CONFIG) + "\n")' "$RUNNER_TEMP/metal-liger-evidence/recorded-metal-liger-config.json"
+          ai-journey-metal-liger verify --report "$RUNNER_TEMP/metal-liger-evidence/recorded-metal-liger.json" --config "$RUNNER_TEMP/metal-liger-evidence/recorded-metal-liger-config.json"
+      - name: Retain the refused run, the recorded reports and the package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metal-liger-contracts-evidence
+          path: |
+            ${{ runner.temp }}/metal-liger-evidence/
+            ${{ runner.temp }}/metal-liger-dist/
+          if-no-files-found: error
