@@ -1516,6 +1516,137 @@ the fused kernel tests on Linux with CPU torch. It requires the installed
 report. See the [Triton IR lab guide](docs/triton-ir-lab.md) and the
 [fused kernel lab guide](docs/metal-liger-lab.md).
 
+## Check flash attention in the Triton interpreter and time it on the Apple GPU
+
+The Day 81 labs have two parts. The first part writes a simplified flash
+attention forward pass in Triton and states a memory model of naive and flash
+attention. The second part times a naive and a flash attention kernel in
+Metal against the PyTorch attention call on the Apple GPU of a Mac. Two
+commands do this work:
+
+- `ai-journey-triton-flash` prints the memory model and checks the Triton
+  kernel against a float64 reference. Only its `check` command needs triton,
+  and it runs only the Triton CPU interpreter.
+- `ai-journey-metal-flash` checks the naive kernel N0 and the flash kernel F1
+  against a float64 reference. It times N0, F1 and
+  `torch.nn.functional.scaled_dot_product_attention` on the Apple GPU.
+
+These commands print the model, check the pinned plan in the interpreter and
+recompute the report. Triton has no macOS wheel, so `check` runs on a Linux
+host:
+
+```bash
+ai-journey-triton-flash model
+ai-journey-triton-flash check \
+  --config config/day-81-triton-flash.json \
+  --output /tmp/day-81-triton-flash.json
+ai-journey-triton-flash verify \
+  --report /tmp/day-81-triton-flash.json \
+  --config config/day-81-triton-flash.json
+```
+
+These commands run the Metal lab on a Mac and recompute its report on any
+host. The guide gives the command that writes the gpu-ceilings report:
+
+```bash
+ai-journey-metal-flash run \
+  --config config/day-81-metal-flash.json \
+  --ceilings /tmp/day-74-gpu-ceilings.json \
+  --output /tmp/day-81-metal-flash.json
+ai-journey-metal-flash verify \
+  --report /tmp/day-81-metal-flash.json \
+  --config config/day-81-metal-flash.json \
+  --ceilings /tmp/day-74-gpu-ceilings.json
+```
+
+The memory model counts the float32 bytes of one head. Naive attention holds
+Q, K, V and O, and also S and P of N x N values. Flash attention holds Q, K,
+V and O, and only `m` and `l` of N values. Flash traffic reads K and V once
+for each query block of 128 rows. This table comes from the model:
+
+| N | d | Naive MiB | Flash MiB | Memory ratio | Traffic ratio |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 512 | 64 | 2.50 | 0.50 | 4.96 | 3.59 |
+| 1024 | 64 | 9.00 | 1.01 | 8.93 | 3.77 |
+| 2048 | 64 | 34.00 | 2.02 | 16.87 | 3.88 |
+| 4096 | 64 | 132.00 | 4.03 | 32.74 | 3.94 |
+| 8192 | 64 | 520.00 | 8.06 | 64.50 | 3.97 |
+| 512 | 128 | 3.00 | 1.00 | 2.99 | 2.00 |
+| 1024 | 128 | 10.00 | 2.01 | 4.98 | 2.00 |
+| 2048 | 128 | 36.00 | 4.02 | 8.96 | 2.00 |
+| 4096 | 128 | 136.00 | 8.03 | 16.93 | 2.00 |
+| 8192 | 128 | 528.00 | 16.06 | 32.87 | 2.00 |
+
+This model is not a measured GPU footprint. The pinned Triton plan holds 6
+cases, and each case runs with 4 configs and 2 input families. Thus a check
+holds 48 runs. No interpreter run of the pinned text happened yet.
+
+On the development host, one run of the pinned Metal config gave these times.
+Each point holds 32768 tokens with a head dimension of 64. Each time is the
+median time of one call in milliseconds, with the IQR in parentheses. A ratio
+divides the median time of the base side by the median time of the first
+side.
+
+| Shape | Mode | N0 ms | F1 ms | PyTorch ms | F1 over N0 | F1 over PyTorch |
+| --- | --- | --- | --- | --- | --- | --- |
+| 64 x 512 | full | 14.28 (0.29) | 4.62 (0.23) | 1.84 (0.32) | 3.09 | 0.40 |
+| 64 x 512 | causal | 7.42 (0.31) | 2.52 (0.28) | 0.98 (0.11) | 2.95 | 0.39 |
+| 32 x 1024 | full | 29.25 (0.72) | 8.92 (0.40) | 3.30 (0.31) | 3.28 | 0.37 |
+| 32 x 1024 | causal | 14.37 (0.24) | 4.95 (0.26) | 1.75 (0.23) | 2.90 | 0.35 |
+| 16 x 2048 | full | 61.48 (1.61) | 17.78 (0.30) | 6.10 (0.47) | 3.46 | 0.34 |
+| 16 x 2048 | causal | 29.00 (0.50) | 9.36 (0.22) | 3.12 (0.19) | 3.10 | 0.33 |
+| 8 x 4096 | full | 134.68 (4.23) | 35.36 (1.07) | 12.44 (0.53) | 3.81 | 0.35 |
+| 8 x 4096 | causal | 60.90 (4.08) | 18.71 (1.93) | 6.37 (0.71) | 3.26 | 0.34 |
+| 4 x 8192 | full | 285.65 (15.42) | 77.50 (6.75) | 26.12 (6.01) | 3.69 | 0.34 |
+| 4 x 8192 | causal | 135.89 (3.35) | 38.65 (1.54) | 14.09 (1.42) | 3.52 | 0.36 |
+
+The predictions held at 30 of 30 step results. F1 was faster than N0 at all
+10 points, and slower than the PyTorch call at all 10 points. F1 ran at
+about 0.2 of the FMA ceiling of 4665.5 GFLOP/s from a fresh Day 74 run.
+
+The same run measured the memory of each side alone, in MiB. "Allocated" is
+the growth of the live tensor count. "Driver peak" is the largest polled
+driver count during the call, less the count before the side allocated:
+
+| Shape | N0 allocated | N0 driver peak | F1 allocated | F1 driver peak | PyTorch allocated | PyTorch driver peak |
+| --- | --- | --- | --- | --- | --- | --- |
+| 64 x 512 | 96.3 | 1064.0 | 32.0 | 40.0 | 24.0 | 32.0 |
+| 32 x 1024 | 160.3 | 1064.0 | 32.0 | 40.0 | 24.0 | 32.0 |
+| 16 x 2048 | 288.3 | 1064.0 | 32.0 | 40.0 | 24.0 | 32.0 |
+| 8 x 4096 | 544.3 | 552.0 | 32.0 | 40.0 | 24.0 | 32.0 |
+| 4 x 8192 | 1056.3 | 1064.0 | 32.0 | 40.0 | 24.0 | 32.0 |
+
+The driver count grows in heaps of about 1 GiB. For the PyTorch call, no
+counter showed an N x N buffer. This result does not prove that no such
+buffer existed, because the polls cannot see a buffer that lived between two
+polls.
+
+The Day 81 report recorded load averages of 8.87, 8.36 and 11.07 before the
+run. It recorded 11.94, 9.21 and 11.24 after the run. All values in the two
+Metal tables come from host-specific Apple GPU (Metal) measurements on one
+shared host. They are not portable figures.
+
+The commands exit 0 on success and 1 when a report fails verification. They
+exit 2 for usage errors, unreadable or invalid inputs, or a refused output.
+Code 2 also marks a run or a check that broke a rule. Code 3 means that the
+host cannot run the Triton CPU interpreter, or that it cannot run Metal
+kernels through PyTorch.
+
+Evidence boundary: the Triton kernel runs only in the Triton CPU interpreter.
+No GPU compiled or ran the Triton text, and the lab reports no Triton time.
+The Triton memory table is a model. The Metal times and memory readings come
+from one Apple GPU through Metal on one host. The labs used no NVIDIA GPU and
+ran no CUDA kernel. The labs read no hardware counter.
+
+CI job `triton-flash-contracts` runs the Triton tests in the CPU interpreter
+on Linux with triton 3.9.0 and fails on a skipped test. It then runs the
+installed `check` on the pinned plan and verifies the report. CI job
+`metal-flash-contracts` runs the Metal tests on Linux with CPU torch. It
+requires the installed `run` command to exit 3 and write no report, and it
+verifies the recorded report. No run of either job happened yet. See the
+[Triton flash attention lab guide](docs/triton-flash-attention-lab.md) and
+the [Metal flash attention lab guide](docs/metal-flash-attention-lab.md).
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with
