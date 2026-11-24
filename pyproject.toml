@@ -95,6 +95,8 @@ ai-journey-triton-matmul = "ai_journey.triton_matmul_cli:main"
 ai-journey-metal-fused = "ai_journey.metal_fused_cli:main"
 ai-journey-triton-ir = "ai_journey.triton_ir_cli:main"
 ai-journey-metal-liger = "ai_journey.metal_liger_cli:main"
+ai-journey-triton-flash = "ai_journey.triton_flash_cli:main"
+ai-journey-metal-flash = "ai_journey.metal_flash_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

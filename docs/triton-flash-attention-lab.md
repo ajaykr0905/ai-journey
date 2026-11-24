@@ -40,7 +40,8 @@ PYTHONPATH=src python -m ai_journey.triton_flash_cli verify \
   --config config/day-81-triton-flash.json
 ```
 
-The parser uses the program name `ai-journey-triton-flash`.
+The parser uses the program name `ai-journey-triton-flash`. An installed wheel
+gives the same commands under that name.
 
 - `model` prints one line for each row of the memory table. It needs no
   triton.

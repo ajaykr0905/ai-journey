@@ -71,8 +71,8 @@ python -m ai_journey.metal_flash_cli verify \
 ```
 
 On a shared host, run each timed command under the GPU lock. The parser uses
-the program name `ai-journey-metal-flash`. This branch adds no console script
-with that name, because it changes no file that the repository tracks.
+the program name `ai-journey-metal-flash`. An installed wheel gives the same
+commands under that name.
 
 The `run` command prints these lines:
 
