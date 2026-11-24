@@ -170,9 +170,13 @@ look at the data. The other two predictions came before any timing of N0.
 ## Correctness
 
 Each case draws seeded sequences in a gapped layout. Three guard rows follow
-each sequence in Q, K, V and O. Each input guard row holds `2**100`, so a
-kernel that reads one as a key gets an infinite score and a NaN. Before the
-run, each output row holds a quiet NaN with one known bit pattern.
+each sequence in Q, K, V and O. Each input guard row holds `2**100`. A query
+that reads a guard row as a key gets a finite score near plus or minus
+`2**100`. A positive score gives the guard row all the weight, and the output
+breaks the bound. A negative score gives it a weight of 0, so that query
+cannot show the read. About half of the queries get a positive score, so the
+check relies on the many queries of each case. Before the run, each output
+row holds a quiet NaN with one known bit pattern.
 
 The pinned cases cover these sequences and inputs:
 
@@ -369,15 +373,17 @@ the size of its O.
 
 ### How to read the results
 
-- F1 took 0.26 to 0.34 of the time of N0. The ratio grew from about 3.1 at
-  512 tokens to about 3.7 at 4096 and 8192 tokens in the full mode.
+- F1 took 0.26 to 0.34 of the time of N0. In the full mode, the ratio was
+  3.1 at 512 tokens, 3.8 at 4096 tokens and 3.7 at 8192 tokens.
 - F1 ran at 855 to 972 GFLOP/s, about 0.2 of the FMA ceiling. F1 uses scalar
   `fma` for both products. The lab cannot show which resource limits F1,
   because it reads no counter.
-- The PyTorch call ran at 2187 to 2815 GFLOP/s, about 2.5 to 2.9 times the
+- The PyTorch call ran at 2187 to 2815 GFLOP/s, about 2.5 to 3.0 times the
   rate of F1. This lab cannot tell which kernel PyTorch ran.
-- The live tensor count of N0 grew by the score buffer, exactly as its
-  construction requires. The driver count grew in heaps of about 1 GiB, so it
+- The live tensor count of N0 grew by its bytes by construction, the score
+  buffer included. At 512 tokens the two counts are equal. At the other shapes
+  the live count is 384 to 720 bytes larger, which agrees with the rounding of
+  the allocator to its blocks. The driver count grew in heaps of about 1 GiB, so it
   shows 1064 MiB even when the scores need 64 MiB.
 - For the PyTorch call, no counter showed an N x N buffer. At 8192 tokens,
   the scores of the 4 sequences need 1024 MiB in float32. The polls saw no

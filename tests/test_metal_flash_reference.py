@@ -157,3 +157,20 @@ def test_inputs_that_are_not_finite_or_unknown_are_refused():
         flash_inputs(81, 0, 0, RAGGED, "uniform")
     with pytest.raises(MetalFlashError, match="stream"):
         flash_inputs(81, 2, 0, RAGGED, "normal")
+
+
+def test_a_gap_key_gives_a_finite_score_that_about_half_the_queries_cannot_see():
+    # A stray read of a gap key must be described as what it does: the score is
+    # finite, and a query whose score is negative gives the key a zero weight.
+    import ai_journey.metal_flash_reference as reference
+
+    inputs = flash_inputs(81, 0, 0, RAGGED, "normal")
+    q = inputs.q.reshape(-1, 64)[RAGGED.valid_rows()]
+    gap = numpy.full(64, GAP_INPUT, dtype=numpy.float32)
+    scores = (q * gap).sum(axis=1, dtype=numpy.float32) * numpy.float32(0.125)
+
+    assert numpy.all(numpy.isfinite(scores))
+    hidden = numpy.exp((scores - numpy.abs(scores).max()).astype(numpy.float64))
+    assert 0.3 < float(numpy.mean(scores < 0)) < 0.7
+    assert numpy.all(hidden[scores < 0] == 0.0)
+    assert "infinite score" not in " ".join(reference.__doc__.split())

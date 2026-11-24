@@ -102,3 +102,16 @@ def test_the_guide_keeps_the_evidence_boundary_and_the_learner_work_honest():
     for claim in ("ran on an NVIDIA", "CUDA kernel ran", "PTX ran", "occupancy of"):
         assert claim not in text
     assert ";" not in re.sub(r"```.*?```|`[^`]*`", "", guide(), flags=re.DOTALL)
+
+
+def test_the_stated_pytorch_over_f1_range_covers_the_timing_table():
+    text = guide()
+    rates = re.findall(r"\| (\d+) / (\d+) / (\d+) \| 0\.\d+ \|", text)
+    ratios = [int(torch) / int(f1) for _, f1, torch in rates]
+    low, high = re.search(
+        r"about (\d\.\d) to (\d\.\d) times the rate of F1", flat(text)
+    ).groups()
+
+    assert len(ratios) == 10
+    assert float(low) - 0.05 <= min(ratios) and max(ratios) <= float(high) + 0.05
+    assert "infinite score" not in flat(text)

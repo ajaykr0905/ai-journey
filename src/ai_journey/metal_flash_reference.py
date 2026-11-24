@@ -2,10 +2,13 @@
 
 A layout lists the length of each sequence, and ``gap`` guard rows follow
 every sequence. A row holds ``HEAD_DIM = 64`` floats. Every gap row of Q, K
-and V holds ``GAP_INPUT`` (``2**100``), so a kernel that reads one as a key
-gets an infinite score and a NaN output. Every gap row of O starts as the
-Day 79 sentinel, and a correct kernel keeps it. A timing layout packs its
-sequences with no gap.
+and V holds ``GAP_INPUT`` (``2**100``). A query that reads one as a key gets
+a finite score near ``+-2**100``. If the score is positive, the gap row takes
+the whole weight and the output is far outside the bound. If it is negative,
+the weight is 0 and that query cannot show the read, so the check relies on
+the many queries of a case. Every gap row of O starts as the Day 79
+sentinel, and a correct kernel keeps it. A timing layout packs its sequences
+with no gap.
 
 Every case draws from its own stream, ``numpy.random.default_rng([seed,
 stream, index])``, so a run and the verifier rebuild identical inputs. The
