@@ -255,8 +255,10 @@ safety factor of 2. It is not a proof. With `u = 2**-24`, the terms are:
 - The output bound is `2 * ((exp(2E) - 1) + R + u) * max|V|`.
 - The log-sum-exp bound is `2 * (E + R)`.
 
-The bound is loose. In the NumPy stand-in, the worst output ratio of the
-pinned plan is 0.0014, and the worst log-sum-exp ratio is 0.0152. Under the
+The bound is loose. In the NumPy stand-in on this Mac, the worst output ratio of the
+pinned plan is 0.0014, and the worst log-sum-exp ratio is 0.0152. The last
+digits depend on the BLAS library under NumPy, so another host can differ a
+little. Under the
 NumPy model of `triton.language`, a text without the rescale step breaks the
 bound. The factor is about 760 in the case N = 129 with D = 64.
 
