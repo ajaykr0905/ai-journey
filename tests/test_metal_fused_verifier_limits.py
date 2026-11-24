@@ -2,12 +2,14 @@
 
 A report keeps only a digest of each GPU output, not its values. So the CPU
 verifier cannot rebuild the error of an output whose bits differ from the
-rounded reference. This test keeps the list true: a resealed report with any one of them
-changed still verifies.
+rounded reference. The guide names these fields, and this test keeps the list
+true: a resealed report with any one of them changed still verifies.
 """
 
 import copy
 import json
+import re
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +19,7 @@ from ai_journey.metal_fused_verify import verify_report
 from test_metal_fused_ceiling import recorded_ceiling
 from test_metal_fused_recorded import RECORDED_CONFIG, RECORDED_REPORT_JSON
 
+ROOT = Path(__file__).resolve().parents[1]
 CHECK_FIELDS = ("max_abs_error", "max_bound_ratio", "differing_from_rounded_reference")
 OUTPUT_FIELDS = (*CHECK_FIELDS, "max_row_sum_error", "max_row_sum_ratio")
 
@@ -65,3 +68,12 @@ def test_a_resealed_gpu_only_error_change_still_verifies(recorded, pick, field):
     entry[field] = _smaller(entry[field])
 
     assert verify_report(_reseal(changed), config=config, ceiling=ceiling)
+
+
+def test_the_guide_names_every_field_the_verifier_cannot_recompute():
+    guide = (ROOT / "docs/metal-fused-softmax-lab.md").read_text(encoding="utf-8")
+    text = re.sub(r"\s+", " ", guide)
+
+    assert "The verifier cannot recompute the error of an output whose bits" in text
+    for field in OUTPUT_FIELDS:
+        assert f"`{field}`" in text
