@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "name": "day-81-triton-flash",
+  "seed": 81,
+  "cases": [
+    {"batch_heads": 1, "sequence": 1, "head_dim": 16, "causal": false},
+    {"batch_heads": 2, "sequence": 17, "head_dim": 16, "causal": true},
+    {"batch_heads": 2, "sequence": 70, "head_dim": 32, "causal": false},
+    {"batch_heads": 1, "sequence": 129, "head_dim": 64, "causal": true},
+    {"batch_heads": 1, "sequence": 77, "head_dim": 64, "causal": false},
+    {"batch_heads": 1, "sequence": 40, "head_dim": 128, "causal": true}
+  ],
+  "configs": ["m128_n64_w8_s3", "m64_n64_w4_s3", "m64_n32_w4_s4", "m16_n16_w1_s1"]
+}
