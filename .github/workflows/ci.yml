@@ -2167,3 +2167,123 @@ jobs:
             ${{ runner.temp }}/metal-liger-evidence/
             ${{ runner.temp }}/metal-liger-dist/
           if-no-files-found: error
+  triton-flash-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TRITON_INTERPRET: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Day 81 Triton flash attention lab contract tools, CPU-only PyTorch and triton
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2" triton==3.9.0
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check the flash attention contracts in the Triton CPU interpreter with no skip
+        run: |
+          ruff check src/ai_journey/triton_flash_*.py tests/test_triton_flash_*.py
+          ruff format --check src/ai_journey/triton_flash_*.py tests/test_triton_flash_*.py
+          python -m compileall -q src/ai_journey/triton_flash_*.py tests/test_triton_flash_*.py
+          python -c 'import os, torch, triton; assert triton.__version__ == "3.9.0"; assert os.environ["TRITON_INTERPRET"] == "1"; assert not torch.cuda.is_available()'
+          python -m pytest -q -rs --junitxml="$RUNNER_TEMP/triton-flash-evidence/pytest.xml" tests/test_triton_flash_*.py
+          python -c 'import sys, xml.etree.ElementTree as tree; suite = tree.parse(sys.argv[1]).getroot()[0]; assert suite.get("skipped") == "0", suite.attrib' "$RUNNER_TEMP/triton-flash-evidence/pytest.xml"
+      - name: Build and install isolated Day 81 Triton flash attention lab wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/triton-flash-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/triton-flash-installed" "$RUNNER_TEMP"/triton-flash-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/triton-flash-evidence"
+      - name: Check the pinned plan in the Triton CPU interpreter with the installed command
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/triton-flash-installed
+        run: |
+          export PATH="$RUNNER_TEMP/triton-flash-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/triton-flash-installed/")'
+          ai-journey-triton-flash model > "$RUNNER_TEMP/triton-flash-evidence/model.txt"
+          cat "$RUNNER_TEMP/triton-flash-evidence/model.txt"
+          grep -Fx "memory n=8192 d=64 naive_bytes=545259520 flash_bytes=8454144 naive_mib=520.00 flash_mib=8.06 memory_ratio=64.50 naive_traffic_mib=1032.00 flash_traffic_mib=260.06 traffic_ratio=3.97" "$RUNNER_TEMP/triton-flash-evidence/model.txt"
+          status=0
+          TRITON_INTERPRET=0 ai-journey-triton-flash check --config "$GITHUB_WORKSPACE/config/day-81-triton-flash.json" --output "$RUNNER_TEMP/triton-flash-evidence/refused/triton-flash.json" 2> "$RUNNER_TEMP/triton-flash-evidence/interpreter-disabled.txt" || status=$?
+          cat "$RUNNER_TEMP/triton-flash-evidence/interpreter-disabled.txt"
+          test "$status" -eq 3
+          grep -F "triton-flash check unavailable: TRITON_INTERPRET='0' gives JITFunction, and this lab runs only the CPU interpreter (interpreter_disabled)" "$RUNNER_TEMP/triton-flash-evidence/interpreter-disabled.txt"
+          test ! -e "$RUNNER_TEMP/triton-flash-evidence/refused"
+          ai-journey-triton-flash check --config "$GITHUB_WORKSPACE/config/day-81-triton-flash.json" --output "$RUNNER_TEMP/triton-flash-evidence/triton-flash.json"
+          ai-journey-triton-flash verify --report "$RUNNER_TEMP/triton-flash-evidence/triton-flash.json" --config "$GITHUB_WORKSPACE/config/day-81-triton-flash.json"
+      - name: Retain the interpreter report, the refused check, the test results and the package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: triton-flash-contracts-evidence
+          path: |
+            ${{ runner.temp }}/triton-flash-evidence/
+            ${{ runner.temp }}/triton-flash-dist/
+          if-no-files-found: warn
+  metal-flash-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Day 81 Metal flash attention lab contract tools and CPU-only PyTorch
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check the Metal flash attention contracts without an Apple GPU
+        run: |
+          ruff check src/ai_journey/metal_flash_*.py tests/test_metal_flash_*.py
+          ruff format --check src/ai_journey/metal_flash_*.py tests/test_metal_flash_*.py
+          python -m compileall -q src/ai_journey/metal_flash_*.py tests/test_metal_flash_*.py
+          python -m pytest -q -rs tests/test_metal_flash_*.py
+      - name: Build and install isolated Day 81 Metal flash attention lab wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/metal-flash-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/metal-flash-installed" "$RUNNER_TEMP"/metal-flash-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/metal-flash-evidence"
+      - name: Check that the installed Apple GPU command stops where MPS is not available
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/metal-flash-installed
+        run: |
+          export PATH="$RUNNER_TEMP/metal-flash-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/metal-flash-installed/")'
+          python -c 'import torch; assert not torch.backends.mps.is_available()'
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_gpu_ceiling_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/metal-flash-evidence/recorded-gpu-ceilings.json"
+          status=0
+          ai-journey-metal-flash run --config "$GITHUB_WORKSPACE/config/day-81-metal-flash.json" --ceilings "$RUNNER_TEMP/metal-flash-evidence/recorded-gpu-ceilings.json" --output "$RUNNER_TEMP/metal-flash-evidence/metal-flash.json" 2> "$RUNNER_TEMP/metal-flash-evidence/metal-flash-unavailable.txt" || status=$?
+          cat "$RUNNER_TEMP/metal-flash-evidence/metal-flash-unavailable.txt"
+          test "$status" -eq 3
+          grep -F "metal-flash run unavailable: Metal kernels run only on macOS (unsupported_operating_system)" "$RUNNER_TEMP/metal-flash-evidence/metal-flash-unavailable.txt"
+          test ! -e "$RUNNER_TEMP/metal-flash-evidence/metal-flash.json"
+      - name: Verify the recorded Apple GPU report with the installed command
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/metal-flash-installed
+        run: |
+          export PATH="$RUNNER_TEMP/metal-flash-installed/bin:$PATH"
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_metal_flash_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/metal-flash-evidence/recorded-metal-flash.json"
+          python -c 'import json, os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_metal_flash_recorded import RECORDED_CONFIG; open(sys.argv[1], "w", encoding="ascii").write(json.dumps(RECORDED_CONFIG) + "\n")' "$RUNNER_TEMP/metal-flash-evidence/recorded-metal-flash-config.json"
+          ai-journey-metal-flash verify --report "$RUNNER_TEMP/metal-flash-evidence/recorded-metal-flash.json" --config "$RUNNER_TEMP/metal-flash-evidence/recorded-metal-flash-config.json"
+      - name: Retain the refused run, the recorded reports and the package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metal-flash-contracts-evidence
+          path: |
+            ${{ runner.temp }}/metal-flash-evidence/
+            ${{ runner.temp }}/metal-flash-dist/
+          if-no-files-found: error

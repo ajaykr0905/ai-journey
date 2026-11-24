@@ -121,14 +121,14 @@ def write(keys, evidence):
     assert completed.returncode == 0, completed.stderr
 
 
-def test_the_liger_job_is_the_last_job_and_follows_the_triton_ir_job():
+def test_the_liger_job_follows_the_triton_ir_job():
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     jobs = re.findall(
         r"^  ([a-z0-9-]+):$", workflow.split("\njobs:\n", 1)[1], flags=re.MULTILINE
     )
 
     assert jobs.count(JOB) == 1
-    assert jobs[-2:] == [PREVIOUS, JOB]
+    assert jobs[jobs.index(JOB) - 1] == PREVIOUS
 
 
 def test_ci_gates_the_liger_lab_with_cpu_only_torch_and_numpy():

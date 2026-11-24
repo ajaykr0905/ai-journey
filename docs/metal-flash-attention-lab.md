@@ -435,16 +435,18 @@ the time. Three of its six predictions missed, and the report records that
 result. The report is there to be verified on a Linux host without torch,
 not to show speed.
 
-This branch adds no CI job for the lab, because it changes no tracked file.
-The tests do not depend on the operating system of the host. Each test that
-needs MPS skips where MPS is not available.
+The CI job `metal-flash-contracts` runs the tests with CPU-only torch. The
+tests do not depend on the operating system of the host. Each test that needs
+MPS skips where MPS is not available. In that job, the installed `run` must
+stop with exit code 3 and write nothing. The installed `verify` must accept
+the recorded report against its recorded config.
 
 ## Work that Ajay must still do
 
 - Ajay must still watch Lecture 12.
 - Ajay must still check the FlashAttention facts in this guide against the
   lecture and the paper.
-- Ajay must still decide whether to add a CI job and a console script for
-  this lab.
+- Ajay must still read the log of the first run of the CI job
+  `metal-flash-contracts`.
 - Ajay must still compare F1 with a CUDA flash-attention kernel. That
   comparison needs a host with an NVIDIA GPU.

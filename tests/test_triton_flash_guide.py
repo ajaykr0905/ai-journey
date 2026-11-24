@@ -173,20 +173,27 @@ def test_the_guide_keeps_the_boundary_and_the_pending_work():
 
 
 def test_no_text_says_that_a_ci_job_or_the_interpreter_ran_the_kernel():
-    # The interpreter tests need a Linux job with triton. Until the workflow
-    # runs them, the guide and the test module must say that no job does.
+    # The CI job runs the interpreter tests, but it did not run when the guide
+    # was written. The guide must name the job and keep the pending log read.
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     interpreter_tests = flat(
         (ROOT / "tests/test_triton_flash_interpreter.py").read_text(encoding="utf-8")
     )
     text = flat(guide())
-    assert "test_triton_flash_" not in workflow
-    assert "No CI job runs the interpreter tests yet." in text
-    assert "no CI job runs them yet" in interpreter_tests
-    assert "run in the Linux CI job" not in interpreter_tests
+    assert "\n  triton-flash-contracts:\n" in workflow
+    assert "tests/test_triton_flash_*.py" in workflow
+    assert "The CI job `triton-flash-contracts` runs the interpreter tests" in text
+    assert text.count("That job did not run yet.") == 2
+    assert "``triton-flash-contracts``" in interpreter_tests
+    assert "That job did not run when this text was written." in interpreter_tests
+    assert "No such run happened." in text
     assert "such as a CI job" not in text
     assert "read the CI log" not in text
-    assert "Ajay must still add a Linux CI job for the interpreter tests" in text
+    assert "Ajay must still add a Linux CI job" not in text
+    assert (
+        "Ajay must still read the log of the first run of the CI job "
+        "`triton-flash-contracts`." in text
+    )
     # The cited fault ratio comes from the NumPy model, not the interpreter.
     assert (
         "Under the NumPy model of `triton.language`, a text without the rescale "

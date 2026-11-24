@@ -22,7 +22,8 @@ The lab does these steps:
 
 Nothing here runs on a GPU. The host has no NVIDIA GPU, and Triton has no
 macOS wheel. Thus the kernel can run only in the Triton CPU interpreter on a
-Linux host. No CI job runs the interpreter tests yet. The lab reports no
+Linux host. The CI job `triton-flash-contracts` runs the interpreter tests on
+a Linux runner. That job did not run yet. The lab reports no
 Triton GPU time and tunes no config.
 
 Ajay must still watch Lecture 12 and Lecture 36. This lab does not replace
@@ -297,10 +298,12 @@ verifier keeps it so.
 - The host has no NVIDIA GPU, no CUDA and no Triton wheel. No GPU compiled or
   ran the text.
 - The kernel can run only in the Triton CPU interpreter on a Linux host with
-  triton 3.9.0 and CPU torch. No such run happened. No CI job runs the
-  interpreter tests yet.
-- Ajay must still add a Linux CI job for the interpreter tests, and then read
-  its log.
+  triton 3.9.0 and CPU torch. No such run happened.
+- The CI job `triton-flash-contracts` installs triton 3.9.0 and CPU torch,
+  and sets `TRITON_INTERPRET=1`. It runs the tests and fails on a skipped
+  test. Then it runs `check` on the pinned plan and verifies the report. That
+  job did not run yet.
+- Ajay must still read the log of the first run of that job.
 - The interpreter runs each program in turn as Python and NumPy code. Its time
   says nothing about a GPU, so the lab reports no time.
 - The memory section is a model. It is not a measured GPU footprint.
@@ -336,6 +339,6 @@ watch it for the CUTLASS details.
 ## What Ajay must still do
 
 - Ajay must still watch Lecture 12 and Lecture 36.
-- Ajay must still add a Linux CI job for the interpreter tests, and then read
-  its log.
+- Ajay must still read the log of the first run of the CI job
+  `triton-flash-contracts`.
 - Ajay must still read the FlashAttention-2 and FlashAttention-3 papers.
