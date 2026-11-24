@@ -499,6 +499,19 @@ with its own code:
 5. It accepts an output that claims the bits of the rounded reference only
    when the output hash and errors match that reference.
 
+The verifier cannot recompute the error of an output whose bits differ from
+the rounded reference. The report keeps only a digest of each GPU output, not
+its values. So a resealed report with a changed error still verifies in these
+fields:
+
+- In each benchmark check: `max_abs_error`, `max_bound_ratio` and
+  `differing_from_rounded_reference`.
+- In each correctness output whose bits differ from the rounded reference:
+  the same three fields, `max_row_sum_error` and `max_row_sum_ratio`.
+
+A test reseals the recorded report with each of these changes, and the
+verifier accepts each one.
+
 Only a report from `torch.mps.compile_shader` and `time.perf_counter_ns`
 passes as a measurement. It also needs a measured ceiling from the same
 interpreter, libraries and platform. The test
