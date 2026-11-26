@@ -119,8 +119,11 @@ accumulation.
 `ai_journey.triton_tc_ptx` splits a PTX text into statements at each `;`. It
 removes comments, directives, labels and predicate guards, and it takes the
 first word as the opcode. Thus it also counts an MMA inside inline asm, the
-form that Triton writes. The first rule that matches an opcode gives its
-class:
+form that Triton writes. Comments follow the C rules of PTX. A `/* */`
+comment can span lines, and a comment mark inside a comment or a string
+starts no comment. The analyzer refuses a text with an unpaired `/*` or
+`*/`. The verifier applies the same rules with its own expressions. The first rule
+that matches an opcode gives its class:
 
 | Class | Rule |
 |---|---|

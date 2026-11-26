@@ -15,7 +15,9 @@ small tiles. PTX names it in two forms:
 ``read_instructions`` splits the text into statements at each ``;``, drops
 comments, directives, labels and predicate guards, and takes the first word
 as the opcode. Thus an instruction inside an inline-asm block counts, as
-Triton writes each MMA as inline asm. ``RULES`` then gives each opcode one
+Triton writes each MMA as inline asm. Comments follow the C rules of PTX:
+``/* */`` can span lines, and a ``//`` comment, a ``/* */`` comment or a
+string literal hides the comment marks inside it. ``RULES`` then gives each opcode one
 class, first match wins. An MMA opcode must name its shape and its operand
 types, or the analysis fails: a rule that the compiler output does not match
 must not count silently.
@@ -82,7 +84,30 @@ _VERSION = re.compile(r"^\.version\s+(\d+\.\d+)$")
 _TARGET = re.compile(r"^\.target\s+([\w,\s]+)$")
 _LABEL = re.compile(r"^[A-Za-z_$][\w$]*:")
 _GUARD = re.compile(r"^@!?%?\w+\s+")
-_BLOCK_COMMENT = re.compile(r"/\*.*?\*/")
+# One left-to-right pass: the comment or string that starts first wins.
+_COMMENT_OR_STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"|//[^\n]*|/\*.*?\*/', re.S)
+
+
+def _blank(match: re.Match) -> str:
+    """Keep a string as an empty one; a comment becomes a space and its newlines."""
+
+    token = match.group()
+    return '""' if token.startswith('"') else " " + "\n" * token.count("\n")
+
+
+def strip_comments(text: str) -> str:
+    """Return a PTX text without its comments, so each line keeps its number.
+
+    A comment mark that stays after the pass is a block comment that never
+    closes or a ``*/`` that closes none, so the text is refused, not read.
+    """
+
+    if type(text) is not str:
+        raise TritonTcError("a PTX text must be a string")
+    cleaned = _COMMENT_OR_STRING.sub(_blank, text)
+    if "/*" in cleaned or "*/" in cleaned:
+        raise TritonTcError("a PTX text holds an unpaired block comment mark")
+    return cleaned
 
 
 def classify(opcode: str) -> str | None:
@@ -177,14 +202,9 @@ def parse_mma(opcode: str, count: int = 1) -> MmaForm:
     )
 
 
-def read_instructions(text: str) -> list[tuple[int, str]]:
-    """Return ``(line, opcode)`` for every instruction statement of a PTX text."""
-
-    if type(text) is not str:
-        raise TritonTcError("a PTX text must be a string")
+def _statements(cleaned: str) -> list[tuple[int, str]]:
     found = []
-    for number, raw in enumerate(text.splitlines(), start=1):
-        line = _BLOCK_COMMENT.sub(" ", raw.split("//", 1)[0])
+    for number, line in enumerate(cleaned.splitlines(), start=1):
         for part in line.split(";"):
             statement = part.strip().lstrip("{}").strip()
             while _LABEL.match(statement):
@@ -199,8 +219,14 @@ def read_instructions(text: str) -> list[tuple[int, str]]:
     return found
 
 
-def _header(text: str, pattern: re.Pattern, name: str) -> str:
-    lines = (line.split("//", 1)[0].strip() for line in text.splitlines())
+def read_instructions(text: str) -> list[tuple[int, str]]:
+    """Return ``(line, opcode)`` for every instruction statement of a PTX text."""
+
+    return _statements(strip_comments(text))
+
+
+def _header(cleaned: str, pattern: re.Pattern, name: str) -> str:
+    lines = (line.strip() for line in cleaned.splitlines())
     values = [match.group(1).strip() for match in map(pattern.match, lines) if match]
     if len(values) != 1:
         raise TritonTcError(f"a PTX text must declare .{name} once")
@@ -239,11 +265,10 @@ class PtxAnalysis:
 def analyze_ptx(text: str) -> PtxAnalysis:
     """Apply ``RULES`` to every instruction of one PTX text."""
 
-    if type(text) is not str:
-        raise TritonTcError("a PTX text must be a string")
-    version = _header(text, _VERSION, "version")
-    target = _header(text, _TARGET, "target")
-    opcodes = Counter(opcode for _, opcode in read_instructions(text))
+    cleaned = strip_comments(text)
+    version = _header(cleaned, _VERSION, "version")
+    target = _header(cleaned, _TARGET, "target")
+    opcodes = Counter(opcode for _, opcode in _statements(cleaned))
     classes = dict.fromkeys(CLASSES, 0)
     forms = []
     loads: dict[str, int] = {}

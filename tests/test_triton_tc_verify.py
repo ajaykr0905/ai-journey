@@ -25,6 +25,7 @@ from ai_journey.triton_tc_verify import (
     recount_ptx,
     verify_report,
 )
+from test_triton_tc_ptx import SYNTHETIC_COMMENTS
 from test_triton_tc_report import SyntheticTcBackend, unsealed
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -205,6 +206,20 @@ def test_the_verifier_recount_agrees_with_the_lab_on_real_compiler_output():
     assert recount["instructions"] == lab["instructions"] == 3097
     assert (recount["target"], recount["version"]) == (lab["target"], lab["version"])
     assert recount["ldmatrix_forms"] == lab["ldmatrix_forms"]
+
+
+def test_the_verifier_recount_reads_synthetic_comments_and_labels_as_the_lab():
+    """SYNTHETIC text: C comment rules, a string literal and a lowercase label."""
+
+    lab = analyze_ptx(SYNTHETIC_COMMENTS).to_mapping()
+    recount = recount_ptx(SYNTHETIC_COMMENTS)
+
+    assert recount["classes"] == lab["classes"]
+    assert recount["instructions"] == lab["instructions"] == 4
+    assert (recount["target"], recount["version"]) == ("sm_80", "8.8")
+    for tail in ("/* never closed\n", "*/\n"):
+        with pytest.raises(TritonTcVerificationError, match="block comment"):
+            recount_ptx(SYNTHETIC_COMMENTS + tail)
 
 
 def ttgir(report, variant="bf16", target="sm_80"):

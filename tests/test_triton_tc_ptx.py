@@ -114,6 +114,26 @@ LAB_WAIT:
 }
 """
 )
+# PTX comments follow C: a block comment can span lines, and a comment or a
+# string literal hides the comment marks inside it.
+SYNTHETIC_COMMENTS = (
+    HEADER_80
+    + """\
+\t.file\t1 "/srv//synthetic/*kernel.py"
+\t/* A SYNTHETIC block comment. The next two lines are no code:
+\tmma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 { %f1 }, { %r1 }, { %r2 }, { %f1 };
+.target sm_90a
+\t*/
+\t/* a // in a block comment */ fma.rn.f32 %f1, %f2, %f3, %f1;
+\t// a /* in a line comment starts no block comment
+\tfma.rn.f32 %f4, %f2, %f3, %f4;
+\t// so this */ closes nothing
+loop:
+\t@%p1 bra loop;
+\tret;
+}
+"""
+)
 
 
 def test_the_rules_give_each_class_of_the_synthetic_opcodes():
@@ -229,6 +249,32 @@ def test_a_synthetic_scalar_text_counts_only_the_exact_fma_rn_f32_opcode():
         "mad.lo.s32",
         "ret",
     ]
+
+
+def test_synthetic_comments_follow_the_c_rules_of_ptx():
+    """No commented-out MMA or header counts, and no real FMA is lost."""
+
+    analysis = analyze_ptx(SYNTHETIC_COMMENTS)
+
+    assert (analysis.version, analysis.target) == ("8.8", "sm_80")
+    assert {name: count for name, count in analysis.classes.items() if count} == {
+        "fma_rn_f32": 2
+    }
+    assert analysis.mma_forms == ()
+    first = HEADER_80.count("\n") + 6
+    assert read_instructions(SYNTHETIC_COMMENTS) == [
+        (first, "fma.rn.f32"),
+        (first + 2, "fma.rn.f32"),
+        (first + 5, "bra"),
+        (first + 6, "ret"),
+    ]
+    assert analysis.instructions == 4
+
+
+@pytest.mark.parametrize("tail", ["\t/* never closed\n\tret;\n}\n", "\tret; */\n}\n"])
+def test_a_synthetic_text_with_an_unpaired_block_comment_mark_is_refused(tail):
+    with pytest.raises(TritonTcError, match="block comment"):
+        analyze_ptx(HEADER_80 + tail)
 
 
 def test_static_tile_products_of_synthetic_counts_follow_the_instruction_shapes():

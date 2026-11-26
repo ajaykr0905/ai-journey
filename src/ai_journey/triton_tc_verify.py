@@ -70,10 +70,15 @@ _WGMMA = re.compile(
     r"wgmma\.mma_async(?:\.sp)?\.sync\.aligned\.m(\d+)n(\d+)k(\d+)"
     r"(?:\.satfinite)?\.(\w+)\.(\w+)\.(\w+)"
 )
+# An opcode may hold "::", as in shared::cta, but it never ends in ":", so a
+# label such as "loop:" is not an opcode.
 _STATEMENT = re.compile(
     r"(?:^|[;{}\n])[ \t]*(?:[A-Za-z_$][\w$]*:[ \t]*)*(?:@!?%?\w+[ \t]+)?"
-    r"([a-z][\w.:]*)"
+    r"([a-z](?:[\w.]|::)*)(?![\w.:])"
 )
+# PTX comments follow C. The token that starts first wins: a string literal,
+# a line comment, or a block comment that can span lines.
+_PTX_TOKEN = re.compile(r'"(?:[^"\\\n]|\\.)*"|//[^\n]*|/\*.*?\*/', re.S)
 _CLASS_PREFIXES = (
     ("mma.sync.aligned.", "mma_sync"),
     ("wgmma.mma_async.", "wgmma_mma_async"),
@@ -476,7 +481,16 @@ def _check_row(row: Mapping, variant: str, target: str) -> None:
 def recount_ptx(text: str) -> dict[str, object]:
     """Recount the PTX classes and MMA forms with whole-text expressions."""
 
-    cleaned = re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", " ", text, flags=re.S))
+    cleaned = _PTX_TOKEN.sub(
+        lambda found: '""'
+        if found.group().startswith('"')
+        else " " + "\n" * found.group().count("\n"),
+        text,
+    )
+    _require(
+        "/*" not in cleaned and "*/" not in cleaned,
+        "a PTX text holds an unpaired block comment mark",
+    )
     opcodes = Counter(_STATEMENT.findall(cleaned))
     targets = re.findall(r"^[ \t]*\.target[ \t]+(\S+)[ \t]*$", cleaned, re.M)
     versions = re.findall(r"^[ \t]*\.version[ \t]+(\S+)[ \t]*$", cleaned, re.M)
