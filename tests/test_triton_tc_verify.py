@@ -3,12 +3,14 @@
 Each test changes one field of a sealed report and seals it again, so only
 the recomputation can catch the change. The compile reports come from the
 SYNTHETIC backend of ``test_triton_tc_report``: hand-built texts, not
-compiler output. One test reads the real Day 80 PTX fixture to show that
-the verifier's own recount agrees with the lab analyzer on compiler output.
-No test imports triton.
+compiler output. ``DottedSyntheticBackend`` adds one hand-written ``tt.dot``
+line, so the dot fields of a row are in the tests too. Two tests read the
+real Day 80 fixture to show that the verifier's own recount rebuilds the
+lab's record of compiler output. No test imports triton.
 """
 
 import copy
+import dataclasses
 import json
 from hashlib import sha256
 from pathlib import Path
@@ -16,23 +18,56 @@ from pathlib import Path
 import pytest
 
 from ai_journey.kernel_launch_io import canonical_json_bytes
-from ai_journey.triton_tc_compile import compile_all, stage_path, write_dump
+from ai_journey.triton_tc_compile import (
+    CompiledVariant,
+    compile_all,
+    stage_path,
+    write_dump,
+)
 from ai_journey.triton_tc_ptx import analyze_ptx
 from ai_journey.triton_tc_report import DIGEST_FIELD, seal_report
+from ai_journey.triton_tc_rule import check_compile
 from ai_journey.triton_tc_verify import (
     TritonTcVerificationError,
     load_report,
     recount_ptx,
+    recount_ttgir,
     verify_report,
 )
 from test_triton_tc_ptx import SYNTHETIC_COMMENTS
-from test_triton_tc_report import SyntheticTcBackend, unsealed
+from test_triton_tc_report import SyntheticTcBackend, synthetic_texts, unsealed
+from test_triton_tc_ttgir import (
+    SYNTHETIC_AMPERE_BF16,
+    SYNTHETIC_BLOCKED_FP32,
+    SYNTHETIC_HOPPER_TF32,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "day-82-triton-tc.json"
-DAY80_PTX = ROOT / "tests/fixtures/day80_triton_ir/sm_80/m32_n64_k32_g8_w2_s5/ptx.ptx"
+DAY80 = ROOT / "tests/fixtures/day80_triton_ir/sm_80/m32_n64_k32_g8_w2_s5"
+DAY80_PTX = DAY80 / "ptx.ptx"
+# One SYNTHETIC tt.dot line, written by hand for the bf16 sm_80 TTGIR.
+DOT_LINE = (
+    "    %z = tt.dot %x, %y, %acc : tensor<128x32xbf16, #ttg.dot_op<{opIdx = 0, "
+    "parent = #mma, kWidth = 8}>> * tensor<32x128xbf16, #ttg.dot_op<{opIdx = 1, "
+    "parent = #mma, kWidth = 8}>> -> tensor<128x128xf32, #mma>"
+)
+
+
+class DottedSyntheticBackend(SyntheticTcBackend):
+    """The SYNTHETIC texts, with ``DOT_LINE`` in the bf16 sm_80 TTGIR."""
+
+    def compile(self, variant, target):
+        item = super().compile(variant, target)
+        if item.key != ("bf16", "sm_80"):
+            return item
+        ttgir = item.ttgir.replace("    tt.return", DOT_LINE + "\n    tt.return")
+        return dataclasses.replace(item, ttgir=ttgir)
+
+
 MODEL = seal_report(unsealed())
 SYNTHETIC = seal_report(unsealed(SyntheticTcBackend()))
+DOTTED = seal_report(unsealed(DottedSyntheticBackend()))
 
 
 def reseal(report, edit):
@@ -41,8 +76,8 @@ def reseal(report, edit):
     return seal_report(body)
 
 
-def dump(folder):
-    backend = SyntheticTcBackend()
+def dump(folder, backend_type=SyntheticTcBackend):
+    backend = backend_type()
     write_dump(folder, compile_all(backend), backend.environment)
     return folder
 
@@ -231,13 +266,20 @@ def ttgir(report, variant="bf16", target="sm_80"):
     [
         lambda r: ttgir(r)["mma"][0]["parameters"].update(instrShape=[16, 16]),
         lambda r: ttgir(r)["mma"][0]["parameters"].update(warpsPerCTA=[2, 2]),
-        lambda r: ttgir(r)["ops"].update({"ttg.local_alloc": 2}),
+        lambda r: ttgir(r)["ops"].update({"ttg.local_load": 2}),
         lambda r: ttgir(r)["dot_operands"].append(
-            {"alias": None, "kind": "dot_op", "parameters": {"opIdx": 0}}
+            {
+                "alias": None,
+                "kind": "dot_op",
+                "parameters": {"opIdx": 0},
+                "parent_kind": None,
+            }
         ),
         lambda r: ttgir(r)["shared"][0]["parameters"].update(vec=4),
         lambda r: row(r, "bf16", "sm_80")["ptx"].update(version="9.0"),
-        lambda r: row(r, "bf16", "sm_80")["ptx"]["ldmatrix_forms"].clear(),
+        lambda r: row(r, "bf16", "sm_80")["ptx"].update(
+            ldmatrix_forms={"ldmatrix.sync.aligned.m8n8.x2.shared.b16": 1}
+        ),
     ],
 )
 def test_a_text_field_edit_is_caught_only_with_the_dump(edit, tmp_path):
@@ -257,3 +299,153 @@ def test_an_mma_form_must_agree_with_the_opcode_grammar(field, value):
     report = reseal(SYNTHETIC, lambda r: mma_form(r).update({field: value}))
     with pytest.raises(TritonTcVerificationError, match="mma_forms"):
         verify_report(report, CONFIG)
+
+
+def bf16(report):
+    return row(report, "bf16", "sm_80")
+
+
+def test_the_dotted_synthetic_report_verifies_with_its_dump(tmp_path):
+    record = bf16(DOTTED)["ttgir"]
+
+    assert record["ops"]["tt.dot"] == len(record["dots"]) == 1
+    assert record["dots"][0]["result_kind"] == "nvidia_mma"
+    assert [item["parent_kind"] for item in record["dot_operands"]] == [
+        "nvidia_mma",
+        "nvidia_mma",
+    ]
+    verify_report(DOTTED, CONFIG, dump(tmp_path, DottedSyntheticBackend))
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (lambda r: bf16(r).update(gpu_time_us=1.0), "fields do not match"),
+        (lambda r: bf16(r)["ptx"].update(measured=True), "fields do not match"),
+        (lambda r: bf16(r)["ttgir"].update(occupancy=1), "fields do not match"),
+        (lambda r: bf16(r)["stages"]["ptx"].update(run=1), "fields do not match"),
+        (lambda r: bf16(r)["ptx"]["classes"].update(hmma=1), "classes"),
+        (lambda r: bf16(r)["ttgir"]["ops"].update({"tt.load": 2}), "ops"),
+        (lambda r: mma_form(r).update(extra="x"), "mma_forms"),
+        (lambda r: mma_form(r).update(m=32), "mma_forms"),
+        (lambda r: mma_form(r).update(n=16), "mma_forms"),
+        (lambda r: mma_form(r).update(opcode="mma.sync.aligned.x"), "mma_forms"),
+        (lambda r: bf16(r)["ptx"]["ldmatrix_forms"].clear(), "ldmatrix"),
+        (
+            lambda r: bf16(r)["ttgir"]["buffers"][0].update(element_bits=8),
+            "element_bits",
+        ),
+        (
+            lambda r: bf16(r)["ttgir"]["mma"][0]["parameters"].update(versionMajor=3),
+            "mma_versions",
+        ),
+        (lambda r: bf16(r)["ttgir"]["dots"].clear(), "dots"),
+        (lambda r: bf16(r)["ttgir"]["buffers"].clear(), "buffers"),
+        (lambda r: bf16(r)["ttgir"]["dot_operands"][0].update(kind="blocked"), "dot"),
+        (lambda r: bf16(r)["ttgir"]["shared"][0].update(kind="blocked"), "shared"),
+    ],
+)
+def test_a_row_field_outside_its_record_is_caught_without_the_dump(edit, message):
+    with pytest.raises(TritonTcVerificationError, match=message):
+        verify_report(reseal(DOTTED, edit), CONFIG)
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda r: bf16(r)["ttgir"].update(num_warps=8),
+        lambda r: bf16(r)["ttgir"]["dots"][0].update(input_precision="tf32"),
+        lambda r: bf16(r)["ttgir"]["dots"][0].update(result_kind="blocked"),
+        lambda r: bf16(r)["ttgir"]["dots"][0].update(line=1),
+        lambda r: bf16(r)["ttgir"]["buffers"][0].update(encoding="#shared9"),
+        lambda r: bf16(r)["ttgir"]["buffers"][0].update(memory=None),
+        lambda r: bf16(r)["ttgir"]["buffers"][0].update(line=1),
+        lambda r: bf16(r)["ttgir"]["mma"][0].update(kind="mma"),
+        lambda r: bf16(r)["ttgir"]["mma"][0]["parameters"].update(CTAOrder=[0, 1]),
+        lambda r: bf16(r)["ttgir"]["shared"][0]["parameters"].update(order=[0, 1]),
+        lambda r: bf16(r)["ttgir"]["shared"][0].update(kind="nvmma_shared"),
+        lambda r: bf16(r)["ttgir"]["dot_operands"][0].update(parent_kind="blocked"),
+        lambda r: bf16(r)["ttgir"]["dot_operands"][1]["parameters"].update(kWidth=4),
+    ],
+)
+def test_every_text_field_of_a_row_is_rebuilt_from_the_dump(edit, tmp_path):
+    """Without the texts the row agrees with itself; the rebuild finds it."""
+
+    report = reseal(DOTTED, edit)
+    verify_report(report, CONFIG)
+    with pytest.raises(TritonTcVerificationError, match=r"dump\[bf16@sm_80\]"):
+        verify_report(report, CONFIG, dump(tmp_path, DottedSyntheticBackend))
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (lambda index: index.update(kernel_sha256="3" * 64), "kernel_sha256"),
+        (lambda index: index["config"].update(num_stages=4), "config"),
+        (lambda index: index["environment"].update(triton="3.8.0"), "environment"),
+        (lambda index: index["compiles"][6].update(num_warps=8), "num_warps"),
+        (lambda index: index.update(measured=True), "fields do not match"),
+    ],
+)
+def test_the_dump_index_must_name_the_text_config_and_environment_of_the_report(
+    edit, message, tmp_path
+):
+    folder = dump(tmp_path)
+    index = json.loads((folder / "index.json").read_text("ascii"))
+    edit(index)
+    (folder / "index.json").write_text(json.dumps(index), encoding="ascii")
+    with pytest.raises(TritonTcVerificationError, match=message):
+        verify_report(SYNTHETIC, CONFIG, folder)
+
+
+def test_a_consistent_change_of_a_dumped_text_size_is_caught_by_its_text(tmp_path):
+    folder = dump(tmp_path)
+    index = json.loads((folder / "index.json").read_text("ascii"))
+    index["compiles"][6]["stages"]["ptx"]["lines"] += 1
+    (folder / "index.json").write_text(json.dumps(index), encoding="ascii")
+    report = reseal(
+        SYNTHETIC,
+        lambda r: bf16(r)["stages"]["ptx"].update(
+            lines=index["compiles"][6]["stages"]["ptx"]["lines"]
+        ),
+    )
+    verify_report(report, CONFIG)
+    with pytest.raises(TritonTcVerificationError, match="lines and bytes"):
+        verify_report(report, CONFIG, folder)
+
+
+def lab_record(variant, target, ttgir_text, ptx_text):
+    return check_compile(
+        CompiledVariant(variant, target, ttgir_text, ptx_text, 65536, 4, 3)
+    )
+
+
+def test_the_verifier_rebuilds_the_lab_record_of_real_compiler_output():
+    """The Day 80 fixture is real triton 3.9.0 output of the Day 79 kernel."""
+
+    ttgir_text = (DAY80 / "ttgir.mlir").read_text(encoding="ascii")
+    ptx_text = DAY80_PTX.read_text(encoding="ascii")
+    record = lab_record("fp32-ieee", "sm_80", ttgir_text, ptx_text)
+
+    assert recount_ptx(ptx_text) == record["ptx"]
+    assert recount_ttgir(ttgir_text) == record["ttgir"]
+    assert record["ttgir"]["dots"][0]["result_kind"] == "blocked"
+
+
+@pytest.mark.parametrize(
+    ("variant", "target", "text"),
+    [
+        ("bf16", "sm_80", SYNTHETIC_AMPERE_BF16),
+        ("fp32-tf32", "sm_90", SYNTHETIC_HOPPER_TF32),
+        ("fp32-ieee", "sm_80", SYNTHETIC_BLOCKED_FP32),
+    ],
+    ids=["ampere-bf16", "hopper-tf32", "blocked-fp32"],
+)
+def test_the_verifier_rebuilds_the_lab_record_of_synthetic_modules(
+    variant, target, text
+):
+    """SYNTHETIC modules: MMA v2 and v3, nvmma_shared and warp_group_dot."""
+
+    ptx_text = synthetic_texts(variant, target)[1]
+
+    assert recount_ttgir(text) == lab_record(variant, target, text, ptx_text)["ttgir"]

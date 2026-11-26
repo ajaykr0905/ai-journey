@@ -12,12 +12,15 @@ lab's:
   own formulas and its own half-to-even rounding;
 * the verdict of each compile row from the counts that the row records,
   with a rule table and an opcode grammar written here;
-* with a dump folder, every text by its digest, and the PTX and TTGIR
-  counts with whole-text regular expressions.
+* the field set of every record in a row, each MMA form from its opcode,
+  and the counts that the lab derives from other counts of the row;
+* with a dump folder, the index against the report, every text by its
+  digest, line count and size, and the whole PTX and TTGIR record of each
+  row from its text, with expressions and a parameter parser written here.
 
-Without a dump folder, the verifier cannot recount the texts, so it checks
-only that each row agrees with its own counts. The verifier imports
-neither triton nor torch.
+Without a dump folder, the verifier cannot read the texts, so it checks only
+that each row is complete and agrees with its own counts. The verifier
+imports neither triton nor torch.
 """
 
 from __future__ import annotations
@@ -127,6 +130,87 @@ _TTGIR_OPS = (
     "ttng.async_tma_copy_global_to_local",
     "scf.for",
 )
+_CLASSES = (
+    "mma_sync",
+    "wgmma_mma_async",
+    "wgmma_fence",
+    "wgmma_commit_group",
+    "wgmma_wait_group",
+    "ldmatrix",
+    "stmatrix",
+    "cp_async",
+    "cp_async_commit_group",
+    "cp_async_wait_group",
+    "cp_async_bulk",
+    "cvt_tf32",
+    "fma_rn_f32",
+)
+_FAMILIES = ("mma_sync", "wgmma_mma_async")
+_MMA_KINDS = ("nvidia_mma", "mma")
+_SHARED_KINDS = ("swizzled_shared", "nvmma_shared", "shared", "shared_linear")
+_DOT_OPS = ("tt.dot", "ttng.warp_group_dot")
+# The record of each compile row, field by field, as the lab writes it.
+_ROW_FIELDS = {
+    "variant",
+    "target",
+    "expected",
+    "allowed",
+    "observed",
+    "checks",
+    "accepted",
+    "note",
+    "shared_bytes",
+    "largest_buffer_bytes",
+    "buffer_bytes",
+    "tile_products",
+    "ptx",
+    "ttgir",
+    "stages",
+}
+_PTX_FIELDS = {
+    "version",
+    "target",
+    "instructions",
+    "classes",
+    "mma_forms",
+    "ldmatrix_forms",
+    "tensor_core_classes",
+}
+_TTGIR_FIELDS = {
+    "target",
+    "num_warps",
+    "mma_versions",
+    "mma",
+    "shared",
+    "dot_operands",
+    "dots",
+    "buffers",
+    "ops",
+}
+_ENCODING_FIELDS = {"alias", "kind", "parameters"}
+_OPERAND_FIELDS = {"alias", "kind", "parameters", "parent_kind"}
+_DOT_FIELDS = {"op", "line", "result_encoding", "input_precision", "result_kind"}
+_BUFFER_FIELDS = {
+    "line",
+    "shape",
+    "element",
+    "element_bits",
+    "encoding",
+    "encoding_kind",
+    "memory",
+    "bytes",
+}
+_STAGE_FIELDS = {"file", "sha256", "lines", "bytes"}
+_INDEX_FIELDS = {"kernel_sha256", "config", "environment", "compiles"}
+_INDEX_COMPILE_FIELDS = {
+    "variant",
+    "target",
+    "shared_bytes",
+    "num_warps",
+    "num_stages",
+    "stages",
+}
+_STAGES = 3
 _TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 _HEX = re.compile(r"[0-9a-f]{64}")
 
@@ -145,6 +229,22 @@ def _same(expected: object, actual: object, path: str) -> None:
         _compare(expected, actual, path)
     except KernelLaunchVerificationError as error:
         raise TritonTcVerificationError(str(error)) from error
+
+
+def _fields(value: object, expected: set[str], label: str) -> dict:
+    _require(
+        isinstance(value, dict) and set(value) == expected,
+        f"{label} fields do not match",
+    )
+    return value
+
+
+def _counts(value: object, names: tuple[str, ...]) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == set(names)
+        and all(type(item) is int and item >= 0 for item in value.values())
+    )
 
 
 def _read(path: Path, limit: int, label: str) -> bytes:
@@ -335,22 +435,27 @@ def _observed(classes: Mapping[str, int]) -> str:
     return "scalar_fma" if classes["fma_rn_f32"] > 0 else "none"
 
 
-def _form(opcode: str) -> dict[str, object]:
-    """Read one MMA opcode with the grammar written here."""
+def _form(opcode: object, label: str) -> dict[str, object]:
+    """Read one MMA opcode with the grammar written here; return every field."""
 
+    _require(type(opcode) is str, f"{label} must name its opcode")
     match = _MMA.fullmatch(opcode)
     if match:
         m, n, k, left, right, d, a, b, c = match.groups()
         family, layouts = "mma_sync", [left, right]
     else:
         match = _WGMMA.fullmatch(opcode)
-        _require(match is not None, f"{opcode} is not an MMA opcode of the grammar")
+        _require(match is not None, f"{label}: {opcode} is not an MMA of the grammar")
         (m, n, k, d, a, b), c = match.groups(), None
         family, layouts = "wgmma_mma_async", []
     m, n, k = int(m), int(n), int(k)
     return {
+        "opcode": opcode,
         "family": family,
         "shape": f"m{m}n{n}k{k}",
+        "m": m,
+        "n": n,
+        "k": k,
         "multiply_adds": m * n * k,
         "d_type": d,
         "a_type": a,
@@ -360,31 +465,150 @@ def _form(opcode: str) -> dict[str, object]:
     }
 
 
+def _bits(element: object) -> int:
+    _require(type(element) is str, "a buffer element must be a type name")
+    if element in _BITS:
+        return _BITS[element]
+    match = re.fullmatch(r"[fiu](\d+)|f8\w+", element)
+    _require(match is not None, f"buffer element {element} has no known width")
+    return int(match.group(1)) if match.group(1) else 8
+
+
 def _buffer_bytes(buffer: Mapping) -> int:
     product = 1
     for size in buffer["shape"]:
         product *= size
-    element = buffer["element"]
-    bits = _BITS.get(element)
-    if bits is None:
-        match = re.fullmatch(r"[fiu](\d+)|f8\w+", element)
-        _require(match is not None, f"buffer element {element} has no known width")
-        bits = int(match.group(1)) if match.group(1) else 8
-    return product * bits // 8
+    return product * _bits(buffer["element"]) // 8
+
+
+def _check_ptx_record(ptx: object, label: str) -> None:
+    """Hold the PTX record of a row to its fields and to its own counts."""
+
+    _fields(ptx, _PTX_FIELDS, label)
+    _require(
+        type(ptx["version"]) is str and type(ptx["target"]) is str,
+        f"{label} must name its version and target",
+    )
+    classes = ptx["classes"]
+    _require(_counts(classes, _CLASSES), f"{label}.classes must count each class")
+    loads = ptx["ldmatrix_forms"]
+    _require(
+        isinstance(loads, dict)
+        and all(
+            type(name) is str
+            and name.startswith("ldmatrix.sync.aligned.")
+            and type(count) is int
+            and count > 0
+            for name, count in loads.items()
+        )
+        and sum(loads.values()) == classes["ldmatrix"],
+        f"{label}.ldmatrix_forms must add up to its ldmatrix class",
+    )
+    _require(
+        type(ptx["instructions"]) is int
+        and ptx["instructions"] >= sum(classes.values()),
+        f"{label}.instructions must hold every counted class",
+    )
+    forms = ptx["mma_forms"]
+    _require(type(forms) is list, f"{label}.mma_forms must be a list")
+    opcodes = [form.get("opcode") if isinstance(form, dict) else None for form in forms]
+    _require(
+        all(type(opcode) is str for opcode in opcodes)
+        and opcodes == sorted(set(opcodes)),
+        f"{label}.mma_forms must name each opcode once, in order",
+    )
+    for number, form in enumerate(forms):
+        path = f"{label}.mma_forms[{number}]"
+        count = form.get("count")
+        _require(type(count) is int and count > 0, f"{path} must count its opcode")
+        _same({**_form(form["opcode"], path), "count": count}, form, path)
+
+
+def _check_ttgir_record(ttgir: object, label: str) -> None:
+    """Hold the TTGIR record of a row to its fields and to its own counts."""
+
+    _fields(ttgir, _TTGIR_FIELDS, label)
+    _require(
+        type(ttgir["target"]) is str and type(ttgir["num_warps"]) is int,
+        f"{label} must name its target and warps",
+    )
+    for name, kinds in (("mma", _MMA_KINDS), ("shared", _SHARED_KINDS)):
+        _require(type(ttgir[name]) is list, f"{label}.{name} must be a list")
+        for number, item in enumerate(ttgir[name]):
+            path = f"{label}.{name}[{number}]"
+            _fields(item, _ENCODING_FIELDS, path)
+            _require(
+                type(item["alias"]) is str
+                and item["kind"] in kinds
+                and isinstance(item["parameters"], dict),
+                f"{path} must be a {name} encoding alias",
+            )
+    versions = [item["parameters"].get("versionMajor", 0) for item in ttgir["mma"]]
+    _require(
+        all(type(version) is int for version in versions)
+        and ttgir["mma_versions"] == sorted(set(versions)),
+        f"{label}.mma_versions must be the versions of its mma encodings",
+    )
+    lists = ("dot_operands", "dots", "buffers")
+    _require(
+        all(type(ttgir[name]) is list for name in lists),
+        f"{label} must hold lists of dot operands, dots and buffers",
+    )
+    for number, item in enumerate(ttgir["dot_operands"]):
+        path = f"{label}.dot_operands[{number}]"
+        _fields(item, _OPERAND_FIELDS, path)
+        _require(
+            item["alias"] is None
+            and item["kind"] == "dot_op"
+            and isinstance(item["parameters"], dict),
+            f"{path} must be an inline dot_op encoding",
+        )
+    for number, item in enumerate(ttgir["dots"]):
+        path = f"{label}.dots[{number}]"
+        _fields(item, _DOT_FIELDS, path)
+        _require(
+            item["op"] in _DOT_OPS and type(item["line"]) is int and item["line"] > 0,
+            f"{path} must name a dot op and its line",
+        )
+    for number, item in enumerate(ttgir["buffers"]):
+        path = f"{label}.buffers[{number}]"
+        _fields(item, _BUFFER_FIELDS, path)
+        _require(
+            type(item["line"]) is int
+            and item["line"] > 0
+            and type(item["shape"]) is list
+            and all(type(size) is int and size > 0 for size in item["shape"]),
+            f"{path} must name its line and a static shape",
+        )
+        _require(
+            item["element_bits"] == _bits(item["element"]),
+            f"{path}.element_bits does not match its element",
+        )
+    ops = ttgir["ops"]
+    _require(_counts(ops, _TTGIR_OPS), f"{label}.ops must count each op")
+    _require(
+        ops["tt.dot"] + ops["ttng.warp_group_dot"] == len(ttgir["dots"]),
+        f"{label}.dots must hold one row for each dot op",
+    )
+    _require(
+        ops["ttg.local_alloc"] == len(ttgir["buffers"]),
+        f"{label}.buffers must hold one row for each ttg.local_alloc",
+    )
 
 
 def _check_row(row: Mapping, variant: str, target: str) -> None:
     """Recompute one row's verdict from the counts that the row records."""
 
     label = f"compile.rows[{variant}@{target}]"
+    _fields(row, _ROW_FIELDS, label)
     _require((row["variant"], row["target"]) == (variant, target), f"{label} order")
     ptx, ttgir = row["ptx"], row["ttgir"]
+    _check_ptx_record(ptx, f"{label}.ptx")
+    _check_ttgir_record(ttgir, f"{label}.ttgir")
     classes = ptx["classes"]
     issued = {"mma_sync": 0, "wgmma_mma_async": 0}
     for form in ptx["mma_forms"]:
-        read = _form(form["opcode"])
-        _same(read, {key: form[key] for key in read}, f"{label}.mma_forms")
-        issued[read["family"]] += form["count"] * read["multiply_adds"]
+        issued[form["family"]] += form["count"] * form["multiply_adds"]
     for family in issued:
         _require(
             classes[family]
@@ -466,8 +690,9 @@ def _check_row(row: Mapping, variant: str, target: str) -> None:
         type(row["shared_bytes"]) is int and 0 <= row["shared_bytes"] <= 227 * 1024,
         f"{label}.shared_bytes is out of range",
     )
+    stages = _fields(row["stages"], {"ttgir", "ptx"}, f"{label}.stages")
     for stage in ("ttgir", "ptx"):
-        record = row["stages"][stage]
+        record = _fields(stages[stage], _STAGE_FIELDS, f"{label}.stages.{stage}")
         _require(
             record["file"]
             == f"{variant}/{target}/"
@@ -476,10 +701,17 @@ def _check_row(row: Mapping, variant: str, target: str) -> None:
             and _HEX.fullmatch(record["sha256"]) is not None,
             f"{label}.stages.{stage} does not name its dump file and digest",
         )
+        _require(
+            all(
+                type(record[name]) is int and record[name] > 0
+                for name in ("lines", "bytes")
+            ),
+            f"{label}.stages.{stage} must name the lines and bytes of its text",
+        )
 
 
 def recount_ptx(text: str) -> dict[str, object]:
-    """Recount the PTX classes and MMA forms with whole-text expressions."""
+    """Rebuild the whole PTX record of a row with whole-text expressions."""
 
     cleaned = _PTX_TOKEN.sub(
         lambda found: '""'
@@ -495,24 +727,7 @@ def recount_ptx(text: str) -> dict[str, object]:
     targets = re.findall(r"^[ \t]*\.target[ \t]+(\S+)[ \t]*$", cleaned, re.M)
     versions = re.findall(r"^[ \t]*\.version[ \t]+(\S+)[ \t]*$", cleaned, re.M)
     _require(len(targets) == 1 and len(versions) == 1, "a PTX text needs one header")
-    classes = dict.fromkeys(
-        (
-            "mma_sync",
-            "wgmma_mma_async",
-            "wgmma_fence",
-            "wgmma_commit_group",
-            "wgmma_wait_group",
-            "ldmatrix",
-            "stmatrix",
-            "cp_async",
-            "cp_async_commit_group",
-            "cp_async_wait_group",
-            "cp_async_bulk",
-            "cvt_tf32",
-            "fma_rn_f32",
-        ),
-        0,
-    )
+    classes = dict.fromkeys(_CLASSES, 0)
     forms, loads = {}, {}
     for opcode, count in opcodes.items():
         name = _CLASS_EXACT.get(opcode)
@@ -535,192 +750,232 @@ def recount_ptx(text: str) -> dict[str, object]:
         "target": targets[0],
         "instructions": sum(opcodes.values()),
         "classes": classes,
-        "mma_forms": dict(sorted(forms.items())),
+        "mma_forms": [
+            {**_form(opcode, "ptx.mma_forms"), "count": count}
+            for opcode, count in sorted(forms.items())
+        ],
         "ldmatrix_forms": dict(sorted(loads.items())),
+        "tensor_core_classes": [name for name in _FAMILIES if classes[name]],
     }
+
+
+def _split(text: str) -> list[str]:
+    """Split at each comma outside brackets; drop empty parts."""
+
+    parts, depth, start = [], 0, 0
+    for index, char in enumerate(text):
+        if char in "<{([":
+            depth += 1
+        elif char in ">})]":
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append(text[start:index])
+            start = index + 1
+    parts.append(text[start:])
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _parameter(text: str) -> object:
+    text = text.strip()
+    if re.fullmatch(r"-?\d+", text):
+        return int(text)
+    if text in ("true", "false"):
+        return text == "true"
+    if text[:1] == "[" and text[-1:] == "]":
+        return [_parameter(part) for part in _split(text[1:-1])]
+    return text.strip('"')
+
+
+def _parameters(body: str) -> dict[str, object]:
+    """Parse the ``name = value`` parts of one encoding; keep the other parts."""
+
+    found: dict[str, object] = {}
+    others = []
+    for part in _split(body):
+        named = re.fullmatch(r"([A-Za-z_]\w*)\s*=(.*)", part, re.S)
+        if named:
+            found[named.group(1)] = _parameter(named.group(2))
+        else:
+            others.append(part)
+    if others:
+        found["unparsed"] = others
+    return found
 
 
 def recount_ttgir(text: str) -> dict[str, object]:
-    """Recount the MMA versions, swizzles and buffers with expressions."""
+    """Rebuild the whole TTGIR record of a row from its text.
 
-    aliases = dict(re.findall(r"^#(\w+) = #(?:ttg|triton_gpu|ttng)\.(\w+)", text, re.M))
-    versions = sorted(
-        {
-            int(version)
-            for kind, version in re.findall(
-                r"^#\w+ = #(?:ttg|triton_gpu)\.(nvidia_mma|mma)<\{[^\n]*?"
-                r"versionMajor = (\d+)",
-                text,
-                re.M,
+    Each line is an alias, the module line or a statement. The parser of the
+    encoding parameters, the op grammar and the memdesc grammar are written
+    here, not taken from the lab.
+    """
+
+    aliases: list[tuple[str, str, dict[str, object]]] = []
+    modules, dots, buffers = [], [], []
+    operands: dict[str, dict[str, object]] = {}
+    ops = dict.fromkeys(_TTGIR_OPS, 0)
+    for number, raw in enumerate(text.splitlines(), start=1):
+        line = raw.strip()
+        alias = re.fullmatch(
+            r"#(\w+) = #(?:ttg|triton_gpu|ttng)\.(\w+)(?:<\{(.*)\}>)?", line
+        )
+        if alias:
+            name, kind, body = alias.groups()
+            aliases.append((name, kind, {} if body is None else _parameters(body)))
+            continue
+        module = re.fullmatch(r"module(?: attributes \{(.*)\})? \{", line)
+        if module:
+            modules.append(module.group(1) or "")
+            continue
+        if not line or line[0] in "#}^":
+            continue
+        for body in re.findall(r"#(?:ttg|triton_gpu)\.dot_op<\{([^{}]*)\}>", line):
+            found = _parameters(body)
+            operands.setdefault(repr(found), found)
+        statement = re.match(
+            r'(?:%[^=]*=[ \t]*)?"?([a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)+)', line
+        )
+        if statement is None:
+            continue
+        name = statement.group(1)
+        if name in ops:
+            ops[name] += 1
+        if name in _DOT_OPS:
+            result = re.search(r"->[ \t]*tensor<[^,>]*,[ \t]*(#\w+)>", line)
+            precision = re.search(r"inputPrecision = (\w+)", line)
+            dots.append(
+                {
+                    "op": name,
+                    "line": number,
+                    "result_encoding": result.group(1) if result else None,
+                    "input_precision": precision.group(1) if precision else None,
+                }
             )
-        }
+        if name == "ttg.local_alloc":
+            found = re.findall(
+                r"!ttg\.memdesc<(\d+(?:x\d+)*)x(\w+), (#\w+)(?:, (#\w+))?", line
+            )
+            _require(bool(found), f"TTGIR line {number} allocates no memdesc")
+            buffers.append((number, *found[-1]))
+    _require(len(modules) == 1, "a TTGIR text needs one module")
+    targets = re.findall(r'(?:^|, )"?ttg\.target"? = "([^"]*)"', modules[0])
+    warps = re.findall(r'(?:^|, )"ttg\.num-warps" = (\d+) : i32', modules[0])
+    _require(
+        len(targets) == 1 and len(warps) == 1,
+        "a TTGIR module needs one ttg.target and one ttg.num-warps",
     )
-    targets = re.findall(r'ttg\.target = "([^"]+)"', text)
-    _require(len(targets) == 1, "a TTGIR text needs one ttg.target")
-    buffers = []
-    for line in re.findall(r"^[^\n]*= ttg\.local_alloc[^\n]*$", text, re.M):
-        found = re.findall(r"!ttg\.memdesc<([0-9x]+)x(\w+), (#\w+)", line)
-        _require(bool(found), "a local_alloc line names no memdesc")
-        shape, element, encoding = found[-1]
+    kinds = {f"#{name}": kind for name, kind, _ in aliases}
+    by_name = {}
+    for name, kind, _ in aliases:
+        by_name.setdefault(name, kind)
+    mma = [
+        {"alias": name, "kind": kind, "parameters": found}
+        for name, kind, found in aliases
+        if kind in _MMA_KINDS
+    ]
+    rows = []
+    for number, shape, element, encoding, memory in buffers:
         buffer = {
-            "shape": [int(item) for item in shape.split("x")],
+            "line": number,
+            "shape": [int(size) for size in shape.split("x")],
             "element": element,
-            "encoding_kind": aliases.get(encoding[1:]),
+            "element_bits": _bits(element),
+            "encoding": encoding,
+            "encoding_kind": kinds.get(encoding),
+            "memory": memory or None,
         }
         buffer["bytes"] = _buffer_bytes(buffer)
-        buffers.append(buffer)
-    swizzles = [
-        dict(re.findall(r"(vec|perPhase|maxPhase|swizzlingByteWidth) = (\d+)", line))
-        for line in re.findall(
-            r"^#\w+ = #(?:ttg|triton_gpu)\.(?:swizzled_shared|shared|nvmma_shared|shared_linear)<"
-            r"[^\n]*$",
-            text,
-            re.M,
-        )
-    ]
-    body = "\n".join(line for line in text.splitlines() if not line.startswith("#"))
-    mma = [
-        {
-            "alias": alias,
-            "versionMajor": int(re.search(r"versionMajor = (\d+)", rest).group(1)),
-            "versionMinor": int(re.search(r"versionMinor = (\d+)", rest).group(1)),
-            "warpsPerCTA": _integers(re.search(r"warpsPerCTA = \[([^\]]*)\]", rest)),
-            "instrShape": _integers(re.search(r"instrShape = \[([^\]]*)\]", rest)),
-        }
-        for alias, rest in re.findall(
-            r"^#(\w+) = #(?:ttg|triton_gpu)\.(?:nvidia_mma|mma)<\{([^\n]*)\}>$",
-            text,
-            re.M,
-        )
-    ]
-    operands = []
-    for item in re.findall(r"#(?:ttg|triton_gpu)\.dot_op<\{([^}]*)\}>", body):
-        found = dict(re.findall(r"(opIdx|kWidth) = (\d+)", item))
-        parent = re.search(r"parent = (#\w+)", item)
-        operand = {key: int(value) for key, value in found.items()}
-        operand["parent"] = parent.group(1) if parent else None
-        if operand not in operands:
-            operands.append(operand)
-    ops = {
-        name: len(
-            re.findall(
-                r'^[ \t]*(?:%[^=\n]*=[ \t]*)?"?'
-                + re.escape(name)
-                + r'"?(?=[ \t({<"]|$)',
-                body,
-                re.M,
-            )
-        )
-        for name in _TTGIR_OPS
-    }
+        rows.append(buffer)
     return {
         "target": targets[0],
-        "mma_versions": versions,
-        "buffers": buffers,
-        "swizzles": [
-            {key: int(value) for key, value in item.items()} for item in swizzles
-        ],
+        "num_warps": int(warps[0]),
+        "mma_versions": sorted(
+            {int(item["parameters"].get("versionMajor", 0)) for item in mma}
+        ),
         "mma": mma,
-        "dot_operands": operands,
+        "shared": [
+            {"alias": name, "kind": kind, "parameters": found}
+            for name, kind, found in aliases
+            if kind in _SHARED_KINDS
+        ],
+        "dot_operands": [
+            {
+                "alias": None,
+                "kind": "dot_op",
+                "parameters": found,
+                "parent_kind": by_name.get(
+                    str(found.get("parent", "")).removeprefix("#")
+                ),
+            }
+            for found in operands.values()
+        ],
+        "dots": [
+            {**dot, "result_kind": kinds.get(dot["result_encoding"])} for dot in dots
+        ],
+        "buffers": rows,
         "ops": ops,
     }
 
 
-def _integers(match: re.Match | None) -> list[int] | None:
-    if match is None:
-        return None
-    return [int(item) for item in match.group(1).split(",") if item.strip()]
+def _check_dump(rows: list, directory: Path, section: Mapping) -> None:
+    """Hold the dump index to the report; rebuild every row from its texts."""
 
-
-def _check_dump(rows: list, directory: Path) -> None:
-    """Recount every text of a dump folder and compare it with its row."""
-
-    index = json.loads(_read(directory / "index.json", 256 * 1024, "dump index"))
+    try:
+        index = loads_strict(
+            _read(directory / "index.json", 256 * 1024, "dump index"),
+            label="dump index",
+        )
+    except KernelLaunchError as error:
+        raise TritonTcVerificationError(str(error)) from error
+    _fields(index, _INDEX_FIELDS, "dump index")
     _require(
-        [(item["variant"], item["target"]) for item in index["compiles"]] == _ORDER,
+        index["kernel_sha256"] == _KERNEL_SHA256,
+        "dump index kernel_sha256 is not the pinned kernel text",
+    )
+    _same(expected_kernel()["config"], index["config"], "dump index config")
+    _same(section["environment"], index["environment"], "dump index environment")
+    compiles = index["compiles"]
+    _require(
+        type(compiles) is list
+        and [
+            (item.get("variant"), item.get("target"))
+            for item in compiles
+            if isinstance(item, dict)
+        ]
+        == _ORDER,
         "the dump index does not hold the compile order",
     )
-    for row, record in zip(rows, index["compiles"]):
+    for row, record in zip(rows, compiles):
         label = f"dump[{row['variant']}@{row['target']}]"
+        _fields(record, _INDEX_COMPILE_FIELDS, label)
+        _require(
+            (record["num_warps"], record["num_stages"]) == (_WARPS, _STAGES),
+            f"{label} num_warps and num_stages are not the declared config",
+        )
+        _require(record["shared_bytes"] == row["shared_bytes"], f"{label} shared")
+        stages = _fields(record["stages"], {"ttgir", "ptx"}, f"{label}.stages")
         texts = {}
         for stage in ("ttgir", "ptx"):
-            listed = record["stages"][stage]
+            listed = stages[stage]
             _same(listed, row["stages"][stage], f"{label}.stages.{stage}")
             data = _read(directory / listed["file"], MAX_TEXT_BYTES, stage)
             _require(
                 sha256(data).hexdigest() == listed["sha256"],
                 f"{label}.{stage} does not match its digest",
             )
-            texts[stage] = data.decode("utf-8")
-        _require(record["shared_bytes"] == row["shared_bytes"], f"{label} shared")
-        ptx = recount_ptx(texts["ptx"])
-        _same(
-            ptx,
-            {
-                "version": row["ptx"]["version"],
-                "target": row["ptx"]["target"],
-                "instructions": row["ptx"]["instructions"],
-                "classes": row["ptx"]["classes"],
-                "mma_forms": {
-                    form["opcode"]: form["count"] for form in row["ptx"]["mma_forms"]
-                },
-                "ldmatrix_forms": row["ptx"]["ldmatrix_forms"],
-            },
-            f"{label}.ptx",
-        )
-        ttgir = recount_ttgir(texts["ttgir"])
-        _same(
-            ttgir,
-            {
-                "target": row["ttgir"]["target"],
-                "mma_versions": row["ttgir"]["mma_versions"],
-                "buffers": [
-                    {
-                        "shape": item["shape"],
-                        "element": item["element"],
-                        "encoding_kind": item["encoding_kind"],
-                        "bytes": item["bytes"],
-                    }
-                    for item in row["ttgir"]["buffers"]
-                ],
-                "swizzles": [
-                    {
-                        key: value
-                        for key, value in item["parameters"].items()
-                        if key in ("vec", "perPhase", "maxPhase", "swizzlingByteWidth")
-                    }
-                    for item in row["ttgir"]["shared"]
-                ],
-                "mma": [
-                    {
-                        "alias": item["alias"],
-                        **{
-                            key: item["parameters"].get(key)
-                            for key in (
-                                "versionMajor",
-                                "versionMinor",
-                                "warpsPerCTA",
-                                "instrShape",
-                            )
-                        },
-                    }
-                    for item in row["ttgir"]["mma"]
-                ],
-                "dot_operands": [
-                    {
-                        **{
-                            key: item["parameters"][key]
-                            for key in ("opIdx", "kWidth")
-                            if key in item["parameters"]
-                        },
-                        "parent": item["parameters"].get("parent"),
-                    }
-                    for item in row["ttgir"]["dot_operands"]
-                ],
-                "ops": row["ttgir"]["ops"],
-            },
-            f"{label}.ttgir",
-        )
+            try:
+                texts[stage] = data.decode("utf-8")
+            except UnicodeDecodeError as error:
+                raise TritonTcVerificationError(
+                    f"{label}.{stage} is not UTF-8"
+                ) from error
+            _require(
+                listed["lines"] == len(texts[stage].splitlines())
+                and listed["bytes"] == len(data),
+                f"{label}.{stage} lines and bytes do not match its text",
+            )
+        _same(recount_ptx(texts["ptx"]), row["ptx"], f"{label}.ptx")
+        _same(recount_ttgir(texts["ttgir"]), row["ttgir"], f"{label}.ttgir")
 
 
 def _check_compile(section: object, label: str, dump: Path | None) -> None:
@@ -760,7 +1015,7 @@ def _check_compile(section: object, label: str, dump: Path | None) -> None:
         "compile.summary",
     )
     if dump is not None:
-        _check_dump(rows, dump)
+        _check_dump(rows, dump, section)
 
 
 def verify_report(

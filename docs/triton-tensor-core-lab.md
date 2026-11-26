@@ -119,11 +119,14 @@ accumulation.
 `ai_journey.triton_tc_ptx` splits a PTX text into statements at each `;`. It
 removes comments, directives, labels and predicate guards, and it takes the
 first word as the opcode. Thus it also counts an MMA inside inline asm, the
-form that Triton writes. Comments follow the C rules of PTX. A `/* */`
-comment can span lines, and a comment mark inside a comment or a string
-starts no comment. The analyzer refuses a text with an unpaired `/*` or
-`*/`. The verifier applies the same rules with its own expressions. The first rule
-that matches an opcode gives its class:
+form that Triton writes.
+
+Comments follow the C rules of PTX. A `/* */` comment can span lines, and a
+comment mark inside a comment or a string starts no comment. The analyzer
+refuses a text with an unpaired `/*` or `*/`. The verifier applies the same
+rules with its own expressions.
+
+The first rule that matches an opcode gives its class:
 
 | Class | Rule |
 |---|---|
@@ -153,7 +156,7 @@ encodings, the module attributes, the dot ops and each `ttg.local_alloc`
 buffer with its shape, element type and bytes.
 
 The unit tests use hand-written SYNTHETIC PTX and TTGIR snippets. Their test
-names and docstrings say so. They are not compiler output. Three tests also
+names and docstrings say so. They are not compiler output. Four tests also
 read the recorded Day 80 texts of the Day 79 kernel, which are real triton
 3.9.0 output. On those texts, the analyzer and the Day 80 reader count the
 same 3097 instructions.
@@ -353,10 +356,20 @@ The label states where the compile section came from:
 the lab's. It reads the config as raw JSON and recomputes the whole model in
 exact fractions, with its own half-to-even rounding. It recounts the verdict
 of each compile row from the counts that the row records, with its own rule
-table and opcode grammar. With a dump folder, it also checks the digest of
-each text and recounts the PTX and TTGIR with whole-text regular expressions.
-The tamper tests change one field of a sealed report, seal it again, and
-expect the verifier to refuse it.
+table and opcode grammar. It refuses a row with a missing or an unknown
+field, and it rebuilds each MMA form from its opcode.
+
+With a dump folder, the verifier also compares the dump index with the
+report. The index must name the kernel digest, the config, the environment,
+the warps and the stages of the report. The verifier checks the digest, the
+line count and the size of each text. Then it rebuilds the whole PTX and
+TTGIR record of each row from the texts. It uses its own expressions and its
+own parser of the encoding parameters.
+
+Without a dump folder, the verifier cannot read the texts. So only a run
+with the dump finds a changed text field, for example a dot precision or a
+buffer encoding. The tamper tests change one field of a sealed report, seal
+it again, and expect the verifier to refuse it.
 
 ## The honest boundary
 
