@@ -7,6 +7,9 @@ the development Mac. A Linux CI job with triton 3.9.0 runs it for real. That
 job did not run when this text was written. Triton compiles for the declared
 targets sm_80 and sm_90; no GPU runs, and no PTX or cubin is executed.
 
+The rule states what Triton 3.9 does, so one test requires the declared
+triton 3.9.0 release; another release fails it instead of skipping.
+
 When ``TRITON_TC_DUMP_DIR`` names a folder, the module writes there every
 TTGIR and PTX text, the dump index and ``summary.json`` with the rule rows,
 so the CI job can keep the compiler output as an artifact. It writes the
@@ -42,6 +45,7 @@ from ai_journey.triton_tc_kernel import (  # noqa: E402
     VARIANTS_BY_NAME,
     TritonTcError,
 )
+from ai_journey.triton_matmul_runtime import PYPI_VERSION  # noqa: E402
 from ai_journey.triton_tc_rule import check_compile, rule_summary  # noqa: E402
 
 DUMP_VARIABLE = "TRITON_TC_DUMP_DIR"
@@ -100,6 +104,17 @@ def row_of(rows, variant, target):
     row = rows[(variant, target)]
     assert "error" not in row, row.get("error")
     return row
+
+
+def test_the_compiler_is_the_declared_triton_release():
+    """The rule states what Triton 3.9 does, so another release fails here.
+
+    A skip would hide a CI job that installed another triton, for example the
+    one that a CUDA torch wheel pulls in, so the version must match.
+    """
+
+    assert PYPI_VERSION == "3.9.0"
+    assert triton.__version__ == PYPI_VERSION
 
 
 def test_the_real_triton_compiles_every_variant_for_both_targets(compiled):
