@@ -20,7 +20,7 @@ from ai_journey.metal_tc_report import (
 )
 from ai_journey.metal_tc_source import KERNEL_NAME, M1, M3, MetalTcError
 from test_kernel_metal_runtime import requires_metal
-from test_metal_fused_ceiling import host_drift, write_recorded
+from test_metal_fused_ceiling import write_recorded
 from test_metal_liger_emulator import ticking_clock
 from test_metal_tc_emulator import TcEmulator
 
@@ -158,8 +158,11 @@ def test_the_report_keeps_each_raw_sample_beside_its_rates(tmp_path):
 @requires_metal
 def test_this_gpu_refuses_a_ceiling_from_another_environment(tmp_path):
     ceiling = load_tc_ceiling(write_recorded(tmp_path))
-    drift = host_drift(ceiling.bandwidth)
-    if not drift:
-        pytest.skip("the recorded ceiling matches this host")
+    environment = {**ceiling.bandwidth.environment, "numpy_version": "0.0.0"}
+    foreign = dataclasses.replace(
+        ceiling,
+        bandwidth=dataclasses.replace(ceiling.bandwidth, environment=environment),
+    )
+
     with pytest.raises(MetalTcError, match="another interpreter"):
-        measure_report(small_config(), ceiling, clock=time.perf_counter_ns)
+        measure_report(small_config(), foreign, clock=time.perf_counter_ns)
