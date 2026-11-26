@@ -16,6 +16,8 @@ Support is checked at run time and recorded, never assumed:
   recorded as unsupported with its reason, and it never launches.
 - The bfloat16 PyTorch call is supported only when the same product on
   bfloat16 tensors gives the exact result.
+- A support check that raises an error records its side as unsupported,
+  and a timing point places no operand of a type that no side reads.
 
 A kernel launches only when its pipeline admits it (``admit``): the
 pipeline allows 128 threads, reports a SIMD width of 32, and reports the
@@ -45,7 +47,7 @@ from .metal_fused_runtime import (
     OTHER_SIMD_WIDTH,
     OTHER_THREADGROUP_BYTES,
 )
-from .metal_tc_plan import SIDES, TORCH_BFLOAT16, TORCH_SIDES
+from .metal_tc_plan import SIDE_PRECISION, SIDES, TORCH_BFLOAT16, TORCH_SIDES
 from .metal_tc_reference import TcOperands, guarded, sentinel_output
 from .metal_tc_source import (
     ARG_CASTS,
@@ -169,6 +171,16 @@ def admit(limits: Mapping[str, PipelineLimits]) -> dict[str, TcAdmission]:
     return {name: TcAdmission(name, limits[name]) for name in KERNELS if name in limits}
 
 
+def needed_precisions(supported: tuple[str, ...]) -> tuple[str, ...]:
+    """The input types that the supported sides read, so no other type is made.
+
+    A host without bfloat16 tensors keeps its float32 and float16 sides.
+    """
+
+    kinds = {SIDE_PRECISION[side] for side in supported}
+    return tuple(precision for precision in PRECISIONS if precision in kinds)
+
+
 def launch(shape: MatmulShape):
     """One group of 128 threads for each 32 x 32 tile of C, as a 1D launch."""
 
@@ -289,7 +301,10 @@ class MetalTcRuntime:
         a, b, exact = support_operands()
         shape = MatmulShape(*exact.shape, a.shape[1])
         values = TcOperands(shape, a, b)
-        output = self._launch(M3, values)[: exact.size].astype(numpy.float64)
+        try:
+            output = self._launch(M3, values)[: exact.size].astype(numpy.float64)
+        except (RuntimeError, TypeError):
+            return Support(False, CALL_FAILED)
         if not numpy.array_equal(output, exact.reshape(-1)):
             return Support(False, WRONG_RESULT)
         return Support(True, None)
@@ -375,8 +390,9 @@ class MetalTcRuntime:
             raise TypeError("values must be TcOperands")
         shape = values.shape
         torch = self._torch
+        supported = tuple(side for side in SIDES if self.supported(side))
         tensors = {}
-        for precision in PRECISIONS:
+        for precision in needed_precisions(supported):
             a, b = values.inputs(precision)
             tensors[precision] = (
                 self._tensor(a, precision).view(shape.m, shape.k),
@@ -387,7 +403,6 @@ class MetalTcRuntime:
             for variant in VARIANTS
         }
         latest: dict[str, object] = {}
-        supported = tuple(side for side in SIDES if self.supported(side))
         sides: dict[str, Callable[[], object]] = {}
         for side in SIDES:
             if side not in supported:

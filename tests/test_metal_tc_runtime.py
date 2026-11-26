@@ -13,6 +13,7 @@ from ai_journey.metal_tc_reference import (
     tc_reference,
 )
 from ai_journey.metal_tc_runtime import (
+    CALL_FAILED,
     COMPILE_FAILED,
     FEWER_THREADS,
     OTHER_SIMD_WIDTH,
@@ -24,6 +25,7 @@ from ai_journey.metal_tc_runtime import (
     admit,
     launch,
     launch_mapping,
+    needed_precisions,
     support_operands,
 )
 from ai_journey.metal_tc_source import (
@@ -78,6 +80,26 @@ def test_a_support_record_needs_one_known_reason():
     for supported, reason in ((False, None), (True, COMPILE_FAILED), (False, "x")):
         with pytest.raises(MetalTcError):
             Support(supported, reason)
+
+
+def test_a_support_check_that_raises_records_the_side_as_unsupported():
+    runtime = object.__new__(MetalTcRuntime)
+
+    def fail(*args):
+        raise RuntimeError("this host makes no bfloat16 tensor")
+
+    runtime._launch = fail
+    runtime._tensor = fail
+
+    assert runtime._kernel_support() == Support(False, CALL_FAILED)
+    assert runtime._torch_support() == Support(False, CALL_FAILED)
+
+
+def test_only_the_types_of_supported_sides_reach_the_device():
+    without = tuple(side for side in SIDES if side not in ("m3", "torch_bfloat16"))
+
+    assert needed_precisions(SIDES) == ("float32", "float16", "bfloat16")
+    assert needed_precisions(without) == ("float32", "float16")
 
 
 def test_the_support_product_is_exact_in_bfloat():
