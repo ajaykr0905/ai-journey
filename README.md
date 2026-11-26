@@ -1647,6 +1647,143 @@ verifies the recorded report. No run of either job happened yet. See the
 [Triton flash attention lab guide](docs/triton-flash-attention-lab.md) and
 the [Metal flash attention lab guide](docs/metal-flash-attention-lab.md).
 
+## Compile for Tensor Cores in CI and time the Apple GPU matrix path
+
+The Day 82 labs have two parts. The first part pins one Triton matmul text
+with four variants: fp32 with IEEE math, fp32 with TF32, fp16 and bf16. A
+Linux CI job compiles each variant offline for the declared targets sm_80
+and sm_90. The lab reads the PTX and the TTGIR of each compile and checks
+its instruction classes. It also models the fp32, tf32 and bf16 times on
+A100 and H100 from declared datasheet inputs. The second part times a matmul
+with and without the `simdgroup_matrix` path on the Apple GPU of a Mac. Two
+commands do this work:
+
+- `ai-journey-triton-tc` prints the speedup model and verifies a sealed
+  report. Only its `compile` command needs triton. Triton has no macOS
+  wheel, so `compile` runs only on a Linux host.
+- `ai-journey-metal-tc` checks the scalar kernel S1 and the matrix-path
+  kernels M1, M2 and M3 against a float64 reference. It times them and
+  `torch.matmul` in float32, float16 and bfloat16 on the Apple GPU.
+
+These commands print the model, compile the pinned text and recompute each
+report:
+
+```bash
+ai-journey-triton-tc model \
+  --config config/day-82-triton-tc.json \
+  --output /tmp/day-82-model.json
+ai-journey-triton-tc verify \
+  --report /tmp/day-82-model.json \
+  --config config/day-82-triton-tc.json
+ai-journey-triton-tc compile \
+  --config config/day-82-triton-tc.json \
+  --output /tmp/day-82-compile.json \
+  --dump /tmp/day-82-dump
+ai-journey-triton-tc verify \
+  --report /tmp/day-82-compile.json \
+  --config config/day-82-triton-tc.json \
+  --dump /tmp/day-82-dump
+```
+
+The model uses the listed dense peaks and the memory bandwidth of each
+device. A square N x N x N matmul does 2 N^3 FLOPs. It moves at least one
+read of A and B and one float32 write of C. The time of a path is the larger
+of its compute time and its memory time. This table comes from the model,
+and its times are in microseconds:
+
+| Device | N | fp32 us | tf32 us | bf16 us | Memory-bound paths | fp32 : tf32 : bf16 |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| A100 | 512 | 13.766 | 1.721 | 1.029 | fp16, bf16 | 13.38 : 1.67 : 1 |
+| A100 | 1024 | 110.127 | 13.766 | 6.883 | none | 16.00 : 2.00 : 1 |
+| A100 | 2048 | 881.019 | 110.127 | 55.064 | none | 16.00 : 2.00 : 1 |
+| A100 | 4096 | 7048.151 | 881.019 | 440.509 | none | 16.00 : 2.00 : 1 |
+| A100 | 8192 | 56385.212 | 7048.151 | 3524.076 | none | 16.00 : 2.00 : 1 |
+| H100 | 512 | 4.006 | 0.939 | 0.626 | tf32, fp16, bf16 | 6.40 : 1.50 : 1 |
+| H100 | 1024 | 32.052 | 4.343 | 2.504 | fp16, bf16 | 12.80 : 1.73 : 1 |
+| H100 | 2048 | 256.416 | 34.742 | 17.362 | none | 14.77 : 2.00 : 1 |
+| H100 | 4096 | 2051.328 | 277.935 | 138.897 | none | 14.77 : 2.00 : 1 |
+| H100 | 8192 | 16410.621 | 2223.482 | 1111.179 | none | 14.77 : 2.00 : 1 |
+
+Per clock, the Tensor Cores of one SM do 16 times more bf16 FMAs than its
+FMA lanes do FP32 FMAs. They do 8 times more TF32 FMAs. So a compute-bound
+matmul has the time ratio 16 : 2 : 1 when all paths run at one clock. A100
+shows that ratio from N = 1024. The listed H100 peaks imply about 1983 MHz
+for FP32 and about 1830 MHz for the Tensor Cores. So H100 gives
+14.77 : 2.00 : 1 at large N. At small N, the 16-bit paths are memory-bound,
+and the ratio falls. This table is a model, not a measurement.
+
+These commands run the Metal lab on a Mac and recompute its report on any
+host. The guide gives the command that writes the gpu-ceilings report:
+
+```bash
+ai-journey-metal-tc run \
+  --config config/day-82-metal-tc.json \
+  --ceilings /tmp/day-74-gpu-ceilings.json \
+  --output /tmp/day-82-metal-tc.json
+ai-journey-metal-tc verify \
+  --report /tmp/day-82-metal-tc.json \
+  --config config/day-82-metal-tc.json \
+  --ceilings /tmp/day-74-gpu-ceilings.json
+```
+
+On the development host, one run of the pinned Metal config gave these
+times. S1 uses scalar `fma` with float32 inputs. M1, M2 and M3 use the
+matrix path with float32, half and bfloat inputs on the same tiles. Each
+time is the median time of one call in milliseconds, with the IQR in
+parentheses:
+
+| Side | 512 | 1024 | 2048 | 4096 |
+| --- | --- | --- | --- | --- |
+| S1 | 0.212 (0.004) | 1.504 (0.007) | 12.199 (0.412) | 98.171 (1.306) |
+| M1 | 0.147 (0.004) | 1.040 (0.010) | 8.681 (0.077) | 78.656 (2.130) |
+| M2 | 0.147 (0.007) | 1.002 (0.005) | 10.129 (0.094) | 95.811 (2.719) |
+| M3 | 0.145 (0.006) | 1.003 (0.017) | 10.030 (0.122) | 95.502 (1.466) |
+| PyTorch float32 | 0.100 (0.014) | 0.585 (0.009) | 4.431 (0.077) | 34.036 (1.089) |
+| PyTorch float16 | 0.088 (0.008) | 0.535 (0.013) | 4.059 (0.050) | 30.399 (1.013) |
+| PyTorch bfloat16 | 0.089 (0.008) | 0.533 (0.009) | 4.025 (0.082) | 30.019 (0.341) |
+
+M1 over S1 is 1.44, 1.45, 1.41 and 1.25. M3 over S1 is the pair of the
+hands-on task: bfloat with the matrix path over float32 without it. Its
+ratios are 1.46, 1.50, 1.22 and 1.03. M3 over M1 is 1.04 or less at each
+size, so the gain comes from the matrix path, not from bfloat. The float16
+and bfloat16 PyTorch calls ran 1.09 to 1.14 times as fast as the float32
+call. The predictions held at 31 of 36 step results. These bf16 over fp32
+ratios are not Tensor Core ratios, because Apple GPUs have no NVIDIA Tensor
+Cores.
+
+The FMA ceiling is 4665.5 GFLOP/s, and the bandwidth ceiling is 107.71 GB/s.
+Both come from a fresh Day 74 run on this host. The Day 82 report recorded
+load averages of 7.09, 5.19 and 5.35 before the run. It recorded 5.86, 5.02
+and 5.29 after the run. All values in the Metal table come from
+host-specific Apple GPU (Metal) measurements on one shared host. They are
+not portable figures.
+
+The commands exit 0 on success and 1 when a report fails verification. The
+`compile` command also exits 1 when a compile breaks the instruction-class
+rule, and it still writes the report. The commands exit 2 for usage errors,
+unreadable or invalid inputs, or a refused output. Code 2 also marks a Metal
+run that failed a check. Code 3 means that the host cannot compile with
+triton, or that it cannot run Metal kernels through PyTorch.
+
+Evidence boundary: the Triton instruction classes come only from the Linux
+CI compile and its artifact. That job did not run yet, so this section
+states no Day 82 instruction count. Triton compiles offline for the declared
+targets, and nothing runs a PTX text or a cubin. The speedup model uses
+declared datasheet inputs, and it is not a measurement. The Metal numbers
+come from one Apple GPU through Metal on one host. The labs used no NVIDIA
+GPU and ran no CUDA kernel. The labs read no hardware counter.
+
+CI job `triton-tc-contracts` runs the Day 82 Triton tests on Linux with
+triton 3.9.0 and fails on a skipped test. It sets `TRITON_TC_DUMP_DIR`, runs
+the installed `compile` with a dump, verifies the report against the dump
+and keeps the dump as an artifact. CI job `metal-tc-contracts` runs the
+Metal tests on Linux with CPU torch. It requires the installed `run` command
+to exit 3 and write no report, and it verifies the recorded report. No run
+of either job happened yet. Ajay must still watch Lectures 23 and 15, read
+the first CI dump and measure an fp32 and bf16 ratio on an NVIDIA GPU. See
+the [Tensor Core lab guide](docs/triton-tensor-core-lab.md) and the
+[Metal matrix lab guide](docs/metal-matrix-precision-lab.md).
+
 ## Project 1 release status
 
 The flagship is a decoder-only transformer training and serving lab with
