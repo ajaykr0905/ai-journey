@@ -1648,6 +1648,7 @@
     "tests/test_metal_fused_speedup.py",
     "tests/test_metal_fused_triton.py",
     "tests/test_metal_fused_verify.py",
+    "tests/test_metal_fused_verifier_limits.py",
     "tests/test_triton_matmul_ci_contract.py",
     "tests/test_triton_matmul_cli.py",
     "tests/test_triton_matmul_config.py",
