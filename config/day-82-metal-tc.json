@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "name": "day-82-metal-tc",
+  "seed": 82,
+  "plan_sha256": "69a30fcd7855fadccf99d7028dccf726b7d3812cbaac6ff87573bdd61521ec1a",
+  "correctness": {
+    "cases": [
+      {"m": 1, "n": 1, "k": 1},
+      {"m": 7, "n": 9, "k": 5},
+      {"m": 33, "n": 65, "k": 17},
+      {"m": 100, "n": 129, "k": 70},
+      {"m": 64, "n": 96, "k": 48},
+      {"m": 257, "n": 131, "k": 1000}
+    ],
+    "repeats": 2
+  },
+  "benchmark": {
+    "sizes": [512, 1024, 2048, 4096],
+    "check_rows": 16,
+    "warmup": 2,
+    "repeats": 21,
+    "target_flops_per_sample": 17179869184,
+    "max_runtime_seconds": 600
+  },
+  "comparison": {"min_faster_ratio": 1.1}
+}
