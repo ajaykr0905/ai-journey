@@ -19,10 +19,10 @@ these steps instead:
    from declared datasheet inputs, and it explains the ratio.
 5. It seals one report, and an independent verifier checks the report.
 
-Nothing here ran on an NVIDIA GPU. The compiler output comes only from a
-Linux CI job, and that job had not run when this guide got its text. The
-model times are model output from declared inputs. They are not
-measurements.
+Nothing here ran on an NVIDIA GPU. The compiler output comes only from the
+Linux CI job `triton-tc-contracts`, and that job had not run when this guide
+got its text. The model times are model output from declared inputs. They
+are not measurements.
 
 Ajay must still watch Lecture 23 and Lecture 15. Ajay must still read the PTX
 and TTGIR that the CI job keeps. This guide shows where to start. It does not
@@ -220,9 +220,13 @@ or the dump folder. The exit codes are:
 The CI-only test `tests/test_triton_tc_compile_contract.py` compiles all
 eight variants and targets with the real triton. On a host without triton,
 it skips at import. When `TRITON_TC_DUMP_DIR` names a folder, it writes every
-text, the index and `summary.json` there. This change holds no CI job for it.
-An integration step must add the Linux CI job that runs it and keeps that
-folder as an artifact.
+text, the index and `summary.json` there.
+
+The CI job `triton-tc-contracts` runs the Day 82 tests on a Linux runner with
+triton 3.9.0 and fails on a skipped test. It sets `TRITON_TC_DUMP_DIR` and
+keeps that folder as an artifact. Then it runs the installed `compile` with a
+dump, verifies the report with the dump, and runs `model`. That job did not
+run yet.
 
 ## The declared inputs
 
@@ -378,9 +382,9 @@ it again, and expect the verifier to refuse it.
 
 - This host has no NVIDIA GPU, no CUDA, no `nvcc` and no `ptxas`. No NVIDIA
   GPU ran the kernel, and nothing executed a PTX text or a cubin.
-- The compiler output comes only from a Linux CI job with triton 3.9.0. That
-  job had not run when this guide got its text. So this guide states no
-  instruction count of a Day 82 compile.
+- The compiler output comes only from the Linux CI job `triton-tc-contracts`
+  with triton 3.9.0. That job had not run when this guide got its text. So
+  this guide states no instruction count of a Day 82 compile.
 - The lab measured no NVIDIA time. The model times are model output from
   declared datasheet inputs.
 - Each datasheet value is a declared input with a source. No value is a
@@ -388,5 +392,6 @@ it again, and expect the verifier to refuse it.
 - The synthetic PTX and TTGIR snippets are test inputs written by hand. They
   are not compiler output.
 - Ajay must still watch Lecture 23 and Lecture 15. Ajay must still read the
-  CI dump. Ajay must still measure the fp32 and bf16 ratio on an NVIDIA GPU
-  when one is available.
+  CI dump. Ajay must still read the log of the first run of the CI job
+  `triton-tc-contracts`. Ajay must still measure the fp32 and bf16 ratio on
+  an NVIDIA GPU when one is available.

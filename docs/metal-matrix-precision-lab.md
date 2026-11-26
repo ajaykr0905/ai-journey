@@ -457,16 +457,18 @@ sizes, the cost of each synchronize call sets most of the time. Eight of its
 18 predictions missed, and the report records that result. The report is
 there to be verified on a host without torch, not to show speed.
 
-The tests do not depend on the operating system of the host. Each test that
-needs MPS skips where MPS is not available. Under an emulation of a Linux
-host with no MPS, each test passed or skipped. This branch adds no CI job.
+The CI job `metal-tc-contracts` runs the tests with CPU-only torch. The tests
+do not depend on the operating system of the host. Each test that needs MPS
+skips where MPS is not available. In that job, the installed `run` must stop
+with exit code 3 and write nothing. The installed `verify` must accept the
+recorded report against its recorded config.
 
 ## Work that Ajay must still do
 
 - Ajay must still watch Lectures 23 and 15.
 - Ajay must still check the Tensor Core and CUTLASS facts of the lectures
   against the NVIDIA documentation. This guide states none of them.
-- Ajay must still add a CI job that runs these tests with CPU-only torch, and
-  read the log of its first run.
+- Ajay must still read the log of the first run of the CI job
+  `metal-tc-contracts`.
 - Ajay must still run the same comparison on a GPU with Tensor Cores. That
   comparison needs a host with an NVIDIA GPU.

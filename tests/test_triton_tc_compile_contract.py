@@ -3,9 +3,10 @@
 This module needs triton, so it raises ``unittest.SkipTest`` at import on a
 host without it: pytest and the unittest discovery of the CI job ``test``
 both count that as a skip. Triton has no macOS wheel, so the module skips on
-the development Mac. A Linux CI job with triton 3.9.0 runs it for real. That
-job did not run when this text was written. Triton compiles for the declared
-targets sm_80 and sm_90; no GPU runs, and no PTX or cubin is executed.
+the development Mac. The Linux CI job ``triton-tc-contracts`` installs triton
+3.9.0, runs it for real and fails when a test skips. That job did not run
+when this text was written. Triton compiles for the declared targets sm_80
+and sm_90; no GPU runs, and no PTX or cubin is executed.
 
 The rule states what Triton 3.9 does, so one test requires the declared
 triton 3.9.0 release; another release fails it instead of skipping.

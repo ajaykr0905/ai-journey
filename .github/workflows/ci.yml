@@ -2287,3 +2287,122 @@ jobs:
             ${{ runner.temp }}/metal-flash-evidence/
             ${{ runner.temp }}/metal-flash-dist/
           if-no-files-found: error
+  triton-tc-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Day 82 Tensor Core lab contract tools, CPU-only PyTorch and triton
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2" triton==3.9.0
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Compile the four variants for sm_80 and sm_90 in the tests with no skip
+        run: |
+          ruff check src/ai_journey/triton_tc_*.py tests/test_triton_tc_*.py
+          ruff format --check src/ai_journey/triton_tc_*.py tests/test_triton_tc_*.py
+          python -m compileall -q src/ai_journey/triton_tc_*.py tests/test_triton_tc_*.py
+          python -c 'import os, torch, triton; assert triton.__version__ == "3.9.0"; assert "TRITON_INTERPRET" not in os.environ; assert not torch.cuda.is_available()'
+          mkdir -p "$RUNNER_TEMP/triton-tc-evidence"
+          TRITON_TC_DUMP_DIR="$RUNNER_TEMP/triton-tc-evidence/test-dump" python -m pytest -q -rs --junitxml="$RUNNER_TEMP/triton-tc-evidence/pytest.xml" tests/test_triton_tc_*.py
+          python -c 'import sys, xml.etree.ElementTree as tree; suite = tree.parse(sys.argv[1]).getroot()[0]; assert suite.get("skipped") == "0", suite.attrib' "$RUNNER_TEMP/triton-tc-evidence/pytest.xml"
+          test -s "$RUNNER_TEMP/triton-tc-evidence/test-dump/summary.json"
+      - name: Build and install isolated Day 82 Tensor Core lab wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/triton-tc-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/triton-tc-installed" "$RUNNER_TEMP"/triton-tc-dist/*.whl
+      - name: Compile, verify and model the pinned config with the installed command
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/triton-tc-installed
+        run: |
+          export PATH="$RUNNER_TEMP/triton-tc-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/triton-tc-installed/")'
+          status=0
+          ai-journey-triton-tc compile --config "$GITHUB_WORKSPACE/config/day-82-triton-tc.json" --output "$RUNNER_TEMP/triton-tc-evidence/compile.json" --dump "$RUNNER_TEMP/triton-tc-evidence/dump" > "$RUNNER_TEMP/triton-tc-evidence/compile.txt" 2> "$RUNNER_TEMP/triton-tc-evidence/compile-stderr.txt" || status=$?
+          cat "$RUNNER_TEMP/triton-tc-evidence/compile.txt" "$RUNNER_TEMP/triton-tc-evidence/compile-stderr.txt"
+          echo "compile_status=$status" | tee "$RUNNER_TEMP/triton-tc-evidence/compile-status.txt"
+          test "$status" -eq 0
+          grep -F " label=triton_compiler_output " "$RUNNER_TEMP/triton-tc-evidence/compile.txt"
+          ai-journey-triton-tc verify --report "$RUNNER_TEMP/triton-tc-evidence/compile.json" --config "$GITHUB_WORKSPACE/config/day-82-triton-tc.json" --dump "$RUNNER_TEMP/triton-tc-evidence/dump"
+          ai-journey-triton-tc model --config "$GITHUB_WORKSPACE/config/day-82-triton-tc.json" --output "$RUNNER_TEMP/triton-tc-evidence/model.json" > "$RUNNER_TEMP/triton-tc-evidence/model.txt"
+          cat "$RUNNER_TEMP/triton-tc-evidence/model.txt"
+          grep -Fx "triton_tc model_row device=h100-sxm5-80gb n=8192 fp32_us=16410.621 tf32_us=2223.482 bf16_us=1111.179 bound=compute,compute,compute ratio=14.77:2.00:1 memory_bound=none" "$RUNNER_TEMP/triton-tc-evidence/model.txt"
+          ai-journey-triton-tc verify --report "$RUNNER_TEMP/triton-tc-evidence/model.json" --config "$GITHUB_WORKSPACE/config/day-82-triton-tc.json"
+      - name: Retain the compiler output, the reports, the test results and the package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: triton-tc-contracts-evidence
+          path: |
+            ${{ runner.temp }}/triton-tc-evidence/
+            ${{ runner.temp }}/triton-tc-dist/
+          if-no-files-found: warn
+  metal-tc-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Day 82 Metal matrix-path lab contract tools and CPU-only PyTorch
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "numpy>=1.24,<2"
+          python -m pip install -e . --no-deps
+          python -m pip install ruff==0.6.9 pytest==9.0.2 build==1.2.2.post1
+      - name: Check the Metal matrix-path contracts without an Apple GPU
+        run: |
+          ruff check src/ai_journey/metal_tc_*.py tests/test_metal_tc_*.py
+          ruff format --check src/ai_journey/metal_tc_*.py tests/test_metal_tc_*.py
+          python -m compileall -q src/ai_journey/metal_tc_*.py tests/test_metal_tc_*.py
+          python -m pytest -q -rs tests/test_metal_tc_*.py
+      - name: Build and install isolated Day 82 Metal matrix-path lab wheel
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/metal-tc-dist"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/metal-tc-installed" "$RUNNER_TEMP"/metal-tc-dist/*.whl
+          mkdir -p "$RUNNER_TEMP/metal-tc-evidence"
+      - name: Check that the installed Apple GPU command stops where MPS is not available
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/metal-tc-installed
+        run: |
+          export PATH="$RUNNER_TEMP/metal-tc-installed/bin:$PATH"
+          python -c 'import ai_journey, os; assert ai_journey.__file__.startswith(os.environ["RUNNER_TEMP"] + "/metal-tc-installed/")'
+          python -c 'import torch; assert not torch.backends.mps.is_available()'
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_gpu_ceiling_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/metal-tc-evidence/recorded-gpu-ceilings.json"
+          status=0
+          ai-journey-metal-tc run --config "$GITHUB_WORKSPACE/config/day-82-metal-tc.json" --ceilings "$RUNNER_TEMP/metal-tc-evidence/recorded-gpu-ceilings.json" --output "$RUNNER_TEMP/metal-tc-evidence/metal-tc.json" 2> "$RUNNER_TEMP/metal-tc-evidence/metal-tc-unavailable.txt" || status=$?
+          cat "$RUNNER_TEMP/metal-tc-evidence/metal-tc-unavailable.txt"
+          test "$status" -eq 3
+          grep -F "metal-tc run unavailable: Metal kernels run only on macOS (unsupported_operating_system)" "$RUNNER_TEMP/metal-tc-evidence/metal-tc-unavailable.txt"
+          test ! -e "$RUNNER_TEMP/metal-tc-evidence/metal-tc.json"
+      - name: Verify the recorded Apple GPU report with the installed command
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ runner.temp }}/metal-tc-installed
+        run: |
+          export PATH="$RUNNER_TEMP/metal-tc-installed/bin:$PATH"
+          python -c 'import os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_metal_tc_recorded import RECORDED_REPORT_JSON; open(sys.argv[1], "w", encoding="ascii").write(RECORDED_REPORT_JSON + "\n")' "$RUNNER_TEMP/metal-tc-evidence/recorded-metal-tc.json"
+          python -c 'import json, os, sys; sys.path.insert(0, os.environ["GITHUB_WORKSPACE"] + "/tests"); from test_metal_tc_recorded import RECORDED_CONFIG; open(sys.argv[1], "w", encoding="ascii").write(json.dumps(RECORDED_CONFIG) + "\n")' "$RUNNER_TEMP/metal-tc-evidence/recorded-metal-tc-config.json"
+          ai-journey-metal-tc verify --report "$RUNNER_TEMP/metal-tc-evidence/recorded-metal-tc.json" --config "$RUNNER_TEMP/metal-tc-evidence/recorded-metal-tc-config.json"
+      - name: Retain the refused run, the recorded reports and the package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metal-tc-contracts-evidence
+          path: |
+            ${{ runner.temp }}/metal-tc-evidence/
+            ${{ runner.temp }}/metal-tc-dist/
+          if-no-files-found: error
