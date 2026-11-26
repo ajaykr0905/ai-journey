@@ -63,7 +63,7 @@ _WARPS = 4
 _GROUPS = 1
 _BITS = {"f32": 32, "f16": 16, "bf16": 16, "i64": 64, "i32": 32, "i8": 8, "i1": 1}
 _MMA = re.compile(
-    r"mma\.sync\.aligned\.m(\d+)n(\d+)k(\d+)\.(?:row|col)\.(?:row|col)"
+    r"mma\.sync\.aligned\.m(\d+)n(\d+)k(\d+)\.(row|col)\.(row|col)"
     r"(?:\.satfinite)?\.(\w+)\.(\w+)\.(\w+)\.(\w+)"
 )
 _WGMMA = re.compile(
@@ -107,6 +107,21 @@ _REPORT_FIELDS = {
     "summary",
     DIGEST_FIELD,
 }
+_TTGIR_OPS = (
+    "tt.dot",
+    "ttng.warp_group_dot",
+    "ttng.warp_group_dot_wait",
+    "ttg.local_alloc",
+    "ttg.local_load",
+    "ttg.local_store",
+    "ttg.async_copy_global_to_local",
+    "ttg.async_commit_group",
+    "ttg.async_wait",
+    "ttg.convert_layout",
+    "ttng.fence_async_shared",
+    "ttng.async_tma_copy_global_to_local",
+    "scf.for",
+)
 _TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 _HEX = re.compile(r"[0-9a-f]{64}")
 
@@ -315,15 +330,29 @@ def _observed(classes: Mapping[str, int]) -> str:
     return "scalar_fma" if classes["fma_rn_f32"] > 0 else "none"
 
 
-def _form(opcode: str) -> tuple[str, int, int, int, str, str, str]:
+def _form(opcode: str) -> dict[str, object]:
+    """Read one MMA opcode with the grammar written here."""
+
     match = _MMA.fullmatch(opcode)
     if match:
-        m, n, k, d, a, b, _ = match.groups()
-        return "mma_sync", int(m), int(n), int(k), d, a, b
-    match = _WGMMA.fullmatch(opcode)
-    _require(match is not None, f"{opcode} is not an MMA opcode of the grammar")
-    m, n, k, d, a, b = match.groups()
-    return "wgmma_mma_async", int(m), int(n), int(k), d, a, b
+        m, n, k, left, right, d, a, b, c = match.groups()
+        family, layouts = "mma_sync", [left, right]
+    else:
+        match = _WGMMA.fullmatch(opcode)
+        _require(match is not None, f"{opcode} is not an MMA opcode of the grammar")
+        (m, n, k, d, a, b), c = match.groups(), None
+        family, layouts = "wgmma_mma_async", []
+    m, n, k = int(m), int(n), int(k)
+    return {
+        "family": family,
+        "shape": f"m{m}n{n}k{k}",
+        "multiply_adds": m * n * k,
+        "d_type": d,
+        "a_type": a,
+        "b_type": b,
+        "c_type": c,
+        "layouts": layouts,
+    }
 
 
 def _buffer_bytes(buffer: Mapping) -> int:
@@ -348,20 +377,9 @@ def _check_row(row: Mapping, variant: str, target: str) -> None:
     classes = ptx["classes"]
     issued = {"mma_sync": 0, "wgmma_mma_async": 0}
     for form in ptx["mma_forms"]:
-        family, m, n, k, d, a, b = _form(form["opcode"])
-        _same(
-            [family, f"m{m}n{n}k{k}", m * n * k, d, a, b],
-            [
-                form["family"],
-                form["shape"],
-                form["multiply_adds"],
-                form["d_type"],
-                form["a_type"],
-                form["b_type"],
-            ],
-            f"{label}.mma_forms",
-        )
-        issued[family] += form["count"] * m * n * k
+        read = _form(form["opcode"])
+        _same(read, {key: form[key] for key in read}, f"{label}.mma_forms")
+        issued[read["family"]] += form["count"] * read["multiply_adds"]
     for family in issued:
         _require(
             classes[family]
@@ -546,6 +564,41 @@ def recount_ttgir(text: str) -> dict[str, object]:
             re.M,
         )
     ]
+    body = "\n".join(line for line in text.splitlines() if not line.startswith("#"))
+    mma = [
+        {
+            "alias": alias,
+            "versionMajor": int(re.search(r"versionMajor = (\d+)", rest).group(1)),
+            "versionMinor": int(re.search(r"versionMinor = (\d+)", rest).group(1)),
+            "warpsPerCTA": _integers(re.search(r"warpsPerCTA = \[([^\]]*)\]", rest)),
+            "instrShape": _integers(re.search(r"instrShape = \[([^\]]*)\]", rest)),
+        }
+        for alias, rest in re.findall(
+            r"^#(\w+) = #(?:ttg|triton_gpu)\.(?:nvidia_mma|mma)<\{([^\n]*)\}>$",
+            text,
+            re.M,
+        )
+    ]
+    operands = []
+    for item in re.findall(r"#(?:ttg|triton_gpu)\.dot_op<\{([^}]*)\}>", body):
+        found = dict(re.findall(r"(opIdx|kWidth) = (\d+)", item))
+        parent = re.search(r"parent = (#\w+)", item)
+        operand = {key: int(value) for key, value in found.items()}
+        operand["parent"] = parent.group(1) if parent else None
+        if operand not in operands:
+            operands.append(operand)
+    ops = {
+        name: len(
+            re.findall(
+                r'^[ \t]*(?:%[^=\n]*=[ \t]*)?"?'
+                + re.escape(name)
+                + r'"?(?=[ \t({<"]|$)',
+                body,
+                re.M,
+            )
+        )
+        for name in _TTGIR_OPS
+    }
     return {
         "target": targets[0],
         "mma_versions": versions,
@@ -553,7 +606,16 @@ def recount_ttgir(text: str) -> dict[str, object]:
         "swizzles": [
             {key: int(value) for key, value in item.items()} for item in swizzles
         ],
+        "mma": mma,
+        "dot_operands": operands,
+        "ops": ops,
     }
+
+
+def _integers(match: re.Match | None) -> list[int] | None:
+    if match is None:
+        return None
+    return [int(item) for item in match.group(1).split(",") if item.strip()]
 
 
 def _check_dump(rows: list, directory: Path) -> None:
@@ -615,6 +677,33 @@ def _check_dump(rows: list, directory: Path) -> None:
                     }
                     for item in row["ttgir"]["shared"]
                 ],
+                "mma": [
+                    {
+                        "alias": item["alias"],
+                        **{
+                            key: item["parameters"].get(key)
+                            for key in (
+                                "versionMajor",
+                                "versionMinor",
+                                "warpsPerCTA",
+                                "instrShape",
+                            )
+                        },
+                    }
+                    for item in row["ttgir"]["mma"]
+                ],
+                "dot_operands": [
+                    {
+                        **{
+                            key: item["parameters"][key]
+                            for key in ("opIdx", "kWidth")
+                            if key in item["parameters"]
+                        },
+                        "parent": item["parameters"].get("parent"),
+                    }
+                    for item in row["ttgir"]["dot_operands"]
+                ],
+                "ops": row["ttgir"]["ops"],
             },
             f"{label}.ttgir",
         )

@@ -205,3 +205,40 @@ def test_the_verifier_recount_agrees_with_the_lab_on_real_compiler_output():
     assert recount["instructions"] == lab["instructions"] == 3097
     assert (recount["target"], recount["version"]) == (lab["target"], lab["version"])
     assert recount["ldmatrix_forms"] == lab["ldmatrix_forms"]
+
+
+def ttgir(report, variant="bf16", target="sm_80"):
+    return row(report, variant, target)["ttgir"]
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda r: ttgir(r)["mma"][0]["parameters"].update(instrShape=[16, 16]),
+        lambda r: ttgir(r)["mma"][0]["parameters"].update(warpsPerCTA=[2, 2]),
+        lambda r: ttgir(r)["ops"].update({"ttg.local_alloc": 2}),
+        lambda r: ttgir(r)["dot_operands"].append(
+            {"alias": None, "kind": "dot_op", "parameters": {"opIdx": 0}}
+        ),
+        lambda r: ttgir(r)["shared"][0]["parameters"].update(vec=4),
+        lambda r: row(r, "bf16", "sm_80")["ptx"].update(version="9.0"),
+        lambda r: row(r, "bf16", "sm_80")["ptx"]["ldmatrix_forms"].clear(),
+    ],
+)
+def test_a_text_field_edit_is_caught_only_with_the_dump(edit, tmp_path):
+    """Without the texts the row agrees with itself; the recount finds it."""
+
+    report = reseal(SYNTHETIC, edit)
+    verify_report(report, CONFIG)
+    with pytest.raises(TritonTcVerificationError, match=r"dump\[bf16@sm_80\]"):
+        verify_report(report, CONFIG, dump(tmp_path))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("layouts", ["col", "row"]), ("c_type", "f16"), ("shape", "m16n8k8")],
+)
+def test_an_mma_form_must_agree_with_the_opcode_grammar(field, value):
+    report = reseal(SYNTHETIC, lambda r: mma_form(r).update({field: value}))
+    with pytest.raises(TritonTcVerificationError, match="mma_forms"):
+        verify_report(report, CONFIG)
