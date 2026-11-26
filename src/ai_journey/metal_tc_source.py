@@ -1,12 +1,13 @@
 """Metal Shading Language source of the Day 82 matmul kernels, with and without MMA.
 
 Curriculum Day 82 follows GPU MODE Lecture 23, "Tensor Cores", and Lecture
-15, "CUTLASS". Apple GPUs have no NVIDIA Tensor Cores. Their matrix path is
-``simdgroup_matrix``: the 32 threads of one SIMD group hold one 8 x 8
-matrix together, and ``simdgroup_multiply_accumulate`` multiplies two of
-them into a third. This lab compares a matmul with that path and without
-it, on the same tiling. ``C[m, n] = A[m, k] @ B[k, n]`` is row-major, C is
-float32, and every kernel adds its products into float32 accumulators.
+15, "CUTLASS". Apple GPUs have no NVIDIA Tensor Cores. The matrix path that
+this lab uses is ``simdgroup_matrix``: the 32 threads of one SIMD group
+hold one 8 x 8 matrix together, and ``simdgroup_multiply_accumulate``
+multiplies two of them into a third. This lab compares a matmul with that
+path and without it, on the same tiling. ``C[m, n] = A[m, k] @ B[k, n]`` is
+row-major, C is float32, and every kernel adds its products into float32
+accumulators.
 
 - S1 (``tc_s1_float``): float32 inputs, scalar ``fma`` only. Each of the 128
   threads of a group owns a 2 x 4 block of float accumulators, at the rows

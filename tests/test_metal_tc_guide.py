@@ -144,3 +144,18 @@ def test_the_guide_keeps_the_evidence_boundary_and_the_learner_work_honest():
     ):
         assert claim not in text
     assert ";" not in re.sub(r"```.*?```|`[^`]*`", "", guide(), flags=re.DOTALL)
+
+
+def test_the_guide_claims_no_more_than_the_kernel_texts_and_runs_show():
+    text = flat(guide())
+
+    assert "The lab cannot show the order of operations inside the matrix path." in (
+        text
+    )
+    assert "ran at 4.6 to 4.8 TFLOP/s for float, half and bfloat" in text
+    for claim in (
+        "The matrix path of the Apple GPU is",
+        "The two kernels do the same fma steps",
+        "ran at the same rate for the three types",
+    ):
+        assert claim not in text, claim

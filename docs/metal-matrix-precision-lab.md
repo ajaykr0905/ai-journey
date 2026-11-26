@@ -5,11 +5,11 @@ Lecture 15, "CUTLASS". Ajay must still watch Lectures 23 and 15. This guide
 does not summarize the lectures, and it makes no claim about what the
 lectures show.
 
-Apple GPUs have no NVIDIA Tensor Cores. The matrix path of the Apple GPU is
-`simdgroup_matrix`. The 32 threads of one SIMD group hold one 8 x 8 matrix
-together, and `simdgroup_multiply_accumulate` multiplies two of them into a
-third. This lab times a matmul with that path and without it, on the same
-tiles, in float32, half and bfloat.
+Apple GPUs have no NVIDIA Tensor Cores. The matrix path that this lab uses
+on the Apple GPU is `simdgroup_matrix`. The 32 threads of one SIMD group hold
+one 8 x 8 matrix together, and `simdgroup_multiply_accumulate` multiplies two
+of them into a third. This lab times a matmul with that path and without it,
+on the same tiles, in float32, half and bfloat.
 
 Nothing here runs a CUDA kernel, uses an NVIDIA GPU or a Tensor Core, runs
 PTX or runs a Triton kernel on a GPU. The lab reads no hardware counters.
@@ -386,16 +386,16 @@ The intensity of each side is 85 FLOP/byte or more, and the ridge point is
 ceiling. The roofline model calls every side compute-bound. By this model,
 the bytes of the operands do not set the ratios below.
 
-- M1 over S1 is 1.44, 1.45, 1.41 and 1.25. The two kernels do the same fma
-  steps and gave the same bits. For 8 values of k, one SIMD group of M1 reads
-  4 fragments, 256 values, from threadgroup memory for 2048 fma steps. One
-  thread of S1 reads 6 values for 8 fma steps, 6 times as many for each
-  step. This count is a model of the text. The lab reads no counter, so it
-  cannot show which resource limits S1.
+- M1 over S1 is 1.44, 1.45, 1.41 and 1.25. By the model of the text, the two
+  kernels do the same count of fma steps, and they gave the same bits. For 8
+  values of k, one SIMD group of M1 reads 4 fragments, 256 values, from
+  threadgroup memory for 2048 fma steps. One thread of S1 reads 6 values for
+  8 fma steps, 6 times as many for each step. This count is a model of the
+  text. The lab reads no counter, so it cannot show which resource limits S1.
 - M2 over M1 and M3 over M1 are about 1.0 at 512 and 1024, and 0.82 to 0.87
   at 2048 and 4096. Half and bfloat halve the bytes of the tiles, but every
-  side is compute-bound by the model. The scratch MMA chains ran at the same
-  rate for the three types. So this lab expected no gain from the type
+  side is compute-bound by the model. The scratch MMA chains ran at 4.6 to
+  4.8 TFLOP/s for the three types. So this lab expected no gain from the type
   alone. The lab cannot show why M2 and M3 lost speed at the large sizes.
 - M3 over S1 is the pair of the hands-on task: bf16 with the matrix path
   over fp32 without it. It is 1.46, 1.50, 1.22 and 1.03. M3 over M1 is 1.04
