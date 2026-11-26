@@ -4,7 +4,8 @@ The verifier checks the field set, the label and its evidence boundary and
 the SHA-256 seal. Then it rebuilds every section with other code than the
 lab's:
 
-* the kernel digest with ``hashlib`` over ``TRITON_SOURCE``, against a digest
+* the kernel section field by field from a table written here, and the
+  kernel digest with ``hashlib`` over ``TRITON_SOURCE`` against a digest
   pinned here;
 * the config from the raw file bytes with plain ``json``, and its digest;
 * the whole model from the raw config mapping, in exact fractions, with its
@@ -255,6 +256,46 @@ def expected_model(config: Mapping) -> dict[str, object]:
         "omitted": list(OMITTED),
         "sizes": list(config["sizes"]),
         "devices": [_expected_device(device, config) for device in config["devices"]],
+    }
+
+
+def expected_kernel() -> dict[str, object]:
+    """Rebuild the kernel section from a table written here, field by field."""
+
+    rows = (
+        ("fp32-ieee", "fp32", "ieee", 4, False, "fp32"),
+        ("fp32-tf32", "fp32", "tf32", 4, True, "tf32"),
+        ("fp16", "fp16", "ieee", 2, True, "fp16"),
+        ("bf16", "bf16", "ieee", 2, True, "bf16"),
+    )
+    return {
+        "language": "Triton (Python)",
+        "kernel": "tc_matmul_kernel",
+        "plan_file": "plans/d82/tc_kernel.py",
+        "sha256": _KERNEL_SHA256,
+        "text": TRITON_SOURCE,
+        "config": {
+            "name": "m128_n128_k32_w4_s3",
+            "block_m": 128,
+            "block_n": 128,
+            "block_k": 32,
+            "num_warps": 4,
+            "num_stages": 3,
+        },
+        "variants": [
+            {
+                "name": name,
+                "input_type": kind,
+                "output_type": "fp32",
+                "accumulator": "float32",
+                "input_precision": precision,
+                "element_bytes": size,
+                "tensor_cores": tensor,
+                "math": math_path,
+                "mma_operand_type": _OPERAND[name],
+            }
+            for name, kind, precision, size, tensor, math_path in rows
+        ],
     }
 
 
@@ -640,25 +681,7 @@ def verify_report(
     _same(dict(BOUNDARIES[label]), report["evidence_boundary"], "evidence_boundary")
     digest = sha256(TRITON_SOURCE.encode("ascii")).hexdigest()
     _require(digest == _KERNEL_SHA256, "TRITON_SOURCE is not the pinned kernel text")
-    kernel = report["kernel"]
-    _require(
-        isinstance(kernel, dict)
-        and kernel.get("sha256") == _KERNEL_SHA256
-        and kernel.get("text") == TRITON_SOURCE
-        and [item["name"] for item in kernel["variants"]] == list(_VARIANTS)
-        and [item["mma_operand_type"] for item in kernel["variants"]]
-        == [_OPERAND[name] for name in _VARIANTS]
-        and kernel["config"]
-        == {
-            "name": "m128_n128_k32_w4_s3",
-            "block_m": 128,
-            "block_n": 128,
-            "block_k": 32,
-            "num_warps": 4,
-            "num_stages": 3,
-        },
-        "kernel section does not match the pinned text, variants and config",
-    )
+    _same(expected_kernel(), report["kernel"], "kernel")
     payload = _read(config, 64 * 1024, "config")
     declared = json.loads(payload.decode("utf-8"))
     _same(declared, report["config"], "config")

@@ -83,8 +83,14 @@ def test_an_unsealed_change_breaks_the_seal():
         (lambda r: r["evidence_boundary"].update(nvidia_gpu_used=True), "evidence"),
         (lambda r: r["evidence_boundary"].update(model_is_measurement=True), "evid"),
         (lambda r: r.update(label="triton_compiler_output"), "evidence_boundary"),
-        (lambda r: r["kernel"].update(sha256="1" * 64), "kernel section"),
-        (lambda r: r["kernel"]["config"].update(num_stages=4), "kernel section"),
+        (lambda r: r["kernel"].update(sha256="1" * 64), "kernel.sha256"),
+        (lambda r: r["kernel"]["config"].update(num_stages=4), "kernel.config"),
+        (
+            lambda r: r["kernel"]["variants"][2].update(input_precision="tf32"),
+            r"kernel.variants\[2\]",
+        ),
+        (lambda r: r["kernel"].update(plan_file="other.py"), "kernel.plan_file"),
+        (lambda r: r["kernel"].update(text="import triton\n"), "kernel.text"),
         (
             lambda r: r["config"]["devices"][1][
                 "memory_bandwidth_gb_per_second"
