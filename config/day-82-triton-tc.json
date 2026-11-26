@@ -1,0 +1,207 @@
+{
+  "schema_version": 1,
+  "name": "day-82-triton-tc",
+  "statement": "Every device value is a declared input copied from the public page that its source names, read on 2026-11-26. No value is a measurement, and no NVIDIA GPU ran anything for this lab.",
+  "sizes": [512, 1024, 2048, 4096, 8192],
+  "output_bytes": 4,
+  "sources": {
+    "a100-product": {
+      "title": "NVIDIA A100 Tensor Core GPU product page, Specifications table",
+      "url": "https://www.nvidia.com/en-us/data-center/a100/",
+      "read_on": "2026-11-26"
+    },
+    "ampere-blog": {
+      "title": "NVIDIA Ampere Architecture In-Depth, NVIDIA Technical Blog",
+      "url": "https://developer.nvidia.com/blog/nvidia-ampere-architecture-in-depth/",
+      "read_on": "2026-11-26"
+    },
+    "h100-product": {
+      "title": "NVIDIA H100 Tensor Core GPU product page, Product Specifications table",
+      "url": "https://www.nvidia.com/en-us/data-center/h100/",
+      "read_on": "2026-11-26"
+    },
+    "hopper-blog": {
+      "title": "NVIDIA Hopper Architecture In-Depth, NVIDIA Technical Blog",
+      "url": "https://developer.nvidia.com/blog/nvidia-hopper-architecture-in-depth/",
+      "read_on": "2026-11-26"
+    }
+  },
+  "sparsity": {
+    "factor": 2,
+    "status": "declared",
+    "source": "hopper-blog",
+    "states": "The Sparsity feature exploits fine-grained structured sparsity in deep learning networks, doubling the performance of standard Tensor Core operations."
+  },
+  "devices": [
+    {
+      "key": "a100-sxm4-80gb",
+      "name": "NVIDIA A100 80GB SXM",
+      "target": "sm_80",
+      "sm_count": {
+        "value": 108,
+        "status": "declared",
+        "source": "ampere-blog",
+        "states": "The A100 is based on GA100 and has 108 SMs."
+      },
+      "boost_clock_mhz": {
+        "value": 1410,
+        "status": "declared",
+        "source": "ampere-blog",
+        "states": "The comparison table lists a GPU Boost Clock of 1410 MHz for A100."
+      },
+      "memory_bandwidth_gb_per_second": {
+        "value": "2039",
+        "status": "declared",
+        "source": "a100-product",
+        "states": "GPU Memory Bandwidth: 2,039 GB/s for A100 80GB SXM."
+      },
+      "paths": {
+        "fp32": {
+          "fma_per_sm_per_clock": {
+            "value": 64,
+            "status": "declared",
+            "source": "ampere-blog",
+            "states": "The comparison table lists 64 FP32 Cores / SM for A100; each core does one FP32 FMA per clock."
+          },
+          "listed_tflops": {
+            "value": "19.5",
+            "with_sparsity": false,
+            "status": "declared",
+            "source": "a100-product",
+            "states": "FP32: 19.5 TFLOPS."
+          }
+        },
+        "tf32": {
+          "fma_per_sm_per_clock": {
+            "value": 512,
+            "status": "declared",
+            "source": "ampere-blog",
+            "states": "Peak TF32 Tensor TFLOPS 156/312 is half of Peak FP16 Tensor TFLOPS 312/624 at the same clock and SM count, so TF32 runs at half of 1024 dense FMA per clock per SM."
+          },
+          "listed_tflops": {
+            "value": "156",
+            "with_sparsity": false,
+            "status": "declared",
+            "source": "a100-product",
+            "states": "Tensor Float 32 (TF32): 156 TFLOPS | 312 TFLOPS*, * With sparsity."
+          }
+        },
+        "fp16": {
+          "fma_per_sm_per_clock": {
+            "value": 1024,
+            "status": "declared",
+            "source": "ampere-blog",
+            "states": "A100 has four Tensor Cores per SM, which together deliver 1024 dense FP16/FP32 FMA operations per clock."
+          },
+          "listed_tflops": {
+            "value": "312",
+            "with_sparsity": false,
+            "status": "declared",
+            "source": "a100-product",
+            "states": "FP16 Tensor Core: 312 TFLOPS | 624 TFLOPS*, * With sparsity."
+          }
+        },
+        "bf16": {
+          "fma_per_sm_per_clock": {
+            "value": 1024,
+            "status": "declared",
+            "source": "ampere-blog",
+            "states": "Peak BF16 Tensor TFLOPS with FP32 Accumulate 312/624 equals the FP16 row at the same clock and SM count, so BF16 runs at 1024 dense FMA per clock per SM."
+          },
+          "listed_tflops": {
+            "value": "312",
+            "with_sparsity": false,
+            "status": "declared",
+            "source": "a100-product",
+            "states": "BFLOAT16 Tensor Core: 312 TFLOPS | 624 TFLOPS*, * With sparsity."
+          }
+        }
+      }
+    },
+    {
+      "key": "h100-sxm5-80gb",
+      "name": "NVIDIA H100 SXM",
+      "target": "sm_90",
+      "sm_count": {
+        "value": 132,
+        "status": "declared",
+        "source": "hopper-blog",
+        "states": "The H100 SXM5 GPU has 132 SMs, and the PCIe version has 114 SMs."
+      },
+      "boost_clock_mhz": {
+        "value": null,
+        "status": "not_stated",
+        "source": "hopper-blog",
+        "states": "The comparison table lists the H100 GPU Boost Clock as Not finalized, and the H100 product page lists no clock."
+      },
+      "memory_bandwidth_gb_per_second": {
+        "value": "3350",
+        "status": "declared",
+        "source": "h100-product",
+        "states": "GPU Memory Bandwidth: 3.35TB/s for H100 SXM."
+      },
+      "paths": {
+        "fp32": {
+          "fma_per_sm_per_clock": {
+            "value": 128,
+            "status": "declared",
+            "source": "hopper-blog",
+            "states": "128 FP32 CUDA Cores per SM, 16896 FP32 CUDA Cores per GPU."
+          },
+          "listed_tflops": {
+            "value": "67",
+            "with_sparsity": false,
+            "status": "declared",
+            "source": "h100-product",
+            "states": "FP32: 67 teraFLOPS for H100 SXM."
+          }
+        },
+        "tf32": {
+          "fma_per_sm_per_clock": {
+            "value": 1024,
+            "status": "declared",
+            "source": "hopper-blog",
+            "states": "On a per SM basis, the Tensor Cores deliver 2x the MMA computational rates of the A100 SM on equivalent data types: 2 x 512."
+          },
+          "listed_tflops": {
+            "value": "989",
+            "with_sparsity": true,
+            "status": "declared",
+            "source": "h100-product",
+            "states": "TF32 Tensor Core*: 989 teraFLOPS for H100 SXM, * With sparsity."
+          }
+        },
+        "fp16": {
+          "fma_per_sm_per_clock": {
+            "value": 2048,
+            "status": "declared",
+            "source": "hopper-blog",
+            "states": "On a per SM basis, the Tensor Cores deliver 2x the MMA computational rates of the A100 SM on equivalent data types: 2 x 1024."
+          },
+          "listed_tflops": {
+            "value": "1979",
+            "with_sparsity": true,
+            "status": "declared",
+            "source": "h100-product",
+            "states": "FP16 Tensor Core*: 1,979 teraFLOPS for H100 SXM, * With sparsity."
+          }
+        },
+        "bf16": {
+          "fma_per_sm_per_clock": {
+            "value": 2048,
+            "status": "declared",
+            "source": "hopper-blog",
+            "states": "On a per SM basis, the Tensor Cores deliver 2x the MMA computational rates of the A100 SM on equivalent data types: 2 x 1024."
+          },
+          "listed_tflops": {
+            "value": "1979",
+            "with_sparsity": true,
+            "status": "declared",
+            "source": "h100-product",
+            "states": "BFLOAT16 Tensor Core*: 1,979 teraFLOPS for H100 SXM, * With sparsity."
+          }
+        }
+      }
+    }
+  ]
+}
