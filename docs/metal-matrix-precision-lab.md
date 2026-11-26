@@ -277,7 +277,7 @@ bandwidth ceiling is the better median rate of the two Day 74 stream
 kernels. Neither ceiling is a vendor peak or a hardware limit.
 
 A call of size n reads A and B once and writes C once, at least. That is
-`(2 e + c) n**2` bytes, with `e` bytes for each input value and `c` bytes
+`(2 w + c) n**2` bytes, with `w` bytes for each input value and `c` bytes
 for each output value. The roofline of a side is `min(F, I B)`, with the FMA
 ceiling `F`, the intensity `I` in FLOP/byte and the bandwidth ceiling `B`.
 
@@ -305,9 +305,9 @@ The report digest is
 run took 16.5 seconds after the libraries compiled. The run caught 0 Python
 warnings, and the capture began before the import of torch. The Metal
 language version was 400. The runtime found support for M3 and for the
-bfloat16 PyTorch call.
-Each pipeline allowed 1024 threads, reported a SIMD width of 32 and reported
-its declared threadgroup bytes. The CPU verifier took about 3 seconds.
+bfloat16 PyTorch call. Each pipeline allowed 1024 threads, reported a SIMD
+width of 32 and reported its declared threadgroup bytes. The CPU verifier
+took about 3 seconds.
 
 ### Correctness results
 
@@ -383,8 +383,8 @@ the half and bfloat kernels at 2048 and 4096.
 
 The intensity of each side is 85 FLOP/byte or more, and the ridge point is
 43.3 FLOP/byte. So the roofline of every side at every size is the FMA
-ceiling. The roofline model calls every side compute-bound. The ratios below
-come from the arithmetic path, not from the bytes of the operands.
+ceiling. The roofline model calls every side compute-bound. By this model,
+the bytes of the operands do not set the ratios below.
 
 - M1 over S1 is 1.44, 1.45, 1.41 and 1.25. The two kernels do the same fma
   steps and gave the same bits. For 8 values of k, one SIMD group of M1 reads
@@ -410,9 +410,9 @@ come from the arithmetic path, not from the bytes of the operands.
   same type. The gap grew with the size. This lab cannot tell which kernel
   PyTorch ran.
 
-A bf16 over fp32 ratio near 1.1 to 1.5 on this host is not a Tensor Core
-ratio. The Lecture 23 hands-on task expects the ratio of a GPU with Tensor
-Cores. This host has none, so this lab cannot measure that ratio. The lab
+The bf16 over fp32 ratios of this host, 1.03 to 1.50, are not Tensor Core
+ratios. The hands-on task of Day 82 asks for a matmul with and without
+Tensor Cores. This host has none, so this lab cannot measure that ratio. The lab
 did not measure a half or bfloat FMA ceiling. The scratch MMA chains are the
 only sign that the three types share one arithmetic rate here.
 

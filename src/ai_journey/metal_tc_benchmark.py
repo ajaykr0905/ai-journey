@@ -1,7 +1,8 @@
 """Time the seven sides of one size in one rotated run.
 
 Each point draws one pair of seeded square operands and places them on the
-device once in each input type. It binds the seven sides in plan order:
+device once in each input type that a supported side reads. It binds the
+seven sides in plan order:
 S1, M1, M2, M3, and ``torch.matmul`` in float32, float16 and bfloat16. The
 timing is the Day 74 and Day 76 method, run by the Day 78 sweep timer
 ``time_shapes``:
