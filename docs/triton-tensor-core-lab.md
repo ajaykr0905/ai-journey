@@ -205,6 +205,9 @@ PYTHONPATH=src python -m ai_journey.triton_tc_cli compile --config config/day-82
 PYTHONPATH=src python -m ai_journey.triton_tc_cli verify --report /tmp/day-82-compile.json --config config/day-82-triton-tc.json --dump /tmp/day-82-dump
 ```
 
+The parser uses the program name `ai-journey-triton-tc`. An installed wheel
+gives the same commands under that name.
+
 On a host without triton, `compile` exits 3 before it makes the output folder
 or the dump folder. The exit codes are:
 

@@ -72,8 +72,8 @@ python -m ai_journey.metal_tc_cli verify \
 ```
 
 On a shared host, run each timed command under the GPU lock. The parser uses
-the program name `ai-journey-metal-tc`. This branch adds no entry point for
-that name, so use `python -m ai_journey.metal_tc_cli`.
+the program name `ai-journey-metal-tc`. An installed wheel gives the same
+commands under that name.
 
 The `run` command prints these lines:
 
