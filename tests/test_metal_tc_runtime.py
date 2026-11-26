@@ -1,8 +1,11 @@
 import functools
+import re
+from types import SimpleNamespace
 
 import numpy
 import pytest
 
+from ai_journey import metal_tc_runtime
 from ai_journey.kernel_metal_geometry import PipelineLimits
 from ai_journey.memory_access_tiling import MatmulShape
 from ai_journey.metal_tc_plan import SIDES
@@ -29,14 +32,18 @@ from ai_journey.metal_tc_runtime import (
     support_operands,
 )
 from ai_journey.metal_tc_source import (
+    BFLOAT_LIBRARY,
     KERNEL_NAME,
     KERNELS,
     M1,
+    M3,
+    MAIN_LIBRARY,
     PRECISION,
     VARIANTS,
     MetalTcError,
+    library_source,
 )
-from test_kernel_metal_runtime import importer, requires_metal
+from test_kernel_metal_runtime import darwin, fake_torch, importer, requires_metal
 
 RAGGED = MatmulShape(45, 70, 37)
 
@@ -46,6 +53,97 @@ def tc_runtime():
     """Compile both libraries once per test process; call only under requires_metal."""
 
     return MetalTcRuntime()
+
+
+class _Probe:
+    """The output of the version probe in the torch stand-in."""
+
+    value = 0
+
+    def cpu(self):
+        return self
+
+    def item(self):
+        return self.value
+
+
+class _Pipeline:
+    """One kernel of the torch stand-in, with the limits its pipeline reports."""
+
+    def __init__(self, name):
+        self.max_threads_per_threadgroup = 1024
+        self.thread_execution_width = 32
+        self.static_thread_group_memory_length = KERNELS[name].threadgroup_bytes
+
+    def __call__(self, out, **launch_arguments):
+        out.value = 400
+
+
+class _Library:
+    """A compiled library of the stand-in; with ``broken`` no kernel builds."""
+
+    def __init__(self, source, broken):
+        self.names = re.findall(r"kernel void (\w+)\(", source)
+        self.broken = broken
+
+    def __getattr__(self, name):
+        if name not in self.names:
+            raise AttributeError(name)
+        if self.broken is not None:
+            raise self.broken
+        return _Pipeline(name)
+
+
+def refusing_torch(library, error, stage="compile"):
+    """A torch stand-in that refuses one library at one stage, as PyTorch does.
+
+    PyTorch raises ``SyntaxError`` when the Metal compiler rejects a text, and
+    ``RuntimeError`` when a kernel of a compiled library builds no pipeline,
+    because it builds the pipeline when the kernel is read. The stand-in
+    makes no tensor, so its bfloat16 call fails too.
+    """
+
+    def compile_shader(source):
+        refused = source == library_source(library)
+        if refused and stage == "compile":
+            raise error
+        return _Library(source, error if refused else None)
+
+    def no_tensor(values):
+        raise RuntimeError("the stand-in makes no tensor")
+
+    torch = fake_torch()
+    torch.mps = SimpleNamespace(compile_shader=compile_shader, synchronize=print)
+    for dtype in ("int32", "float32", "float16", "bfloat16"):
+        setattr(torch, dtype, dtype)
+    torch.zeros = lambda *shape, **options: _Probe()
+    torch.from_numpy = no_tensor
+    return torch
+
+
+@pytest.mark.parametrize(
+    ("error", "stage"),
+    [
+        (SyntaxError("program_source: error: unknown type name 'bfloat'"), "compile"),
+        (RuntimeError("Failed to create pipeline state object"), "pipeline"),
+    ],
+)
+def test_a_host_that_refuses_the_bfloat_library_runs_the_other_kernels(error, stage):
+    torch = refusing_torch(BFLOAT_LIBRARY, error, stage)
+    runtime = MetalTcRuntime(system=darwin, import_module=importer(torch))
+
+    assert runtime.support[M3] == Support(False, COMPILE_FAILED)
+    assert set(runtime.limits) == set(KERNELS) - {KERNEL_NAME[M3]}
+    assert all(verdict.admitted for verdict in admit(runtime.limits).values())
+    assert runtime.metal_version == 400
+    assert runtime.supported(M1) and not runtime.supported(M3)
+
+
+def test_a_compiler_that_refuses_the_main_library_makes_the_host_unavailable():
+    torch = refusing_torch(MAIN_LIBRARY, SyntaxError("program_source: error"))
+
+    with pytest.raises(MetalTcUnavailableError, match="rejected the Day 82 main"):
+        MetalTcRuntime(system=darwin, import_module=importer(torch))
 
 
 def test_a_host_that_is_not_macos_is_refused_before_torch_is_imported():
@@ -162,3 +260,23 @@ def test_the_workload_binds_seven_sides_in_plan_order():
     for side, output in outputs.items():
         error = numpy.abs(output.reshape(64, 64) - reference.output)
         assert numpy.max(error / reference.magnitude) < 2.0**-4, side
+
+
+@requires_metal
+def test_this_compiler_refuses_a_broken_bfloat_text_and_m3_is_unsupported(
+    monkeypatch,
+):
+    registry = metal_tc_runtime.library_source
+
+    def broken(library):
+        text = registry(library)
+        if library == BFLOAT_LIBRARY:
+            text += "kernel void tc_broken() { undeclared_value; }\n"
+        return text
+
+    monkeypatch.setattr(metal_tc_runtime, "library_source", broken)
+    runtime = MetalTcRuntime()
+
+    assert runtime.support[M3] == Support(False, COMPILE_FAILED)
+    assert set(runtime.limits) == set(KERNELS) - {KERNEL_NAME[M3]}
+    assert runtime.supported(M1)

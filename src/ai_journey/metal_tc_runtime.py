@@ -8,12 +8,18 @@ imports torch, and compiles two libraries through the public
 ``torch.mps.compile_shader``: the main library (S1, M1, M2 and the version
 probe) and the bfloat library (M3).
 
+PyTorch raises ``SyntaxError`` when the Metal compiler rejects a text, and
+``RuntimeError`` when a kernel builds no pipeline. PyTorch builds the
+pipeline when the kernel is read. A rejected main library makes the host
+unavailable. Either error in the bfloat library records M3 as unsupported.
+
 Support is checked at run time and recorded, never assumed:
 
 - The version probe writes ``__METAL_VERSION__`` of the main library.
-- M3 is supported only when the bfloat library compiles and one 8 x 8 x 8
-  product of small integers gives the exact result. Otherwise M3 is
-  recorded as unsupported with its reason, and it never launches.
+- M3 is supported only when the bfloat library compiles, its kernel builds a
+  pipeline and one 8 x 8 x 8 product of small integers gives the exact
+  result. Otherwise M3 is recorded as unsupported with its reason, and it
+  never launches.
 - The bfloat16 PyTorch call is supported only when the same product on
   bfloat16 tensors gives the exact result.
 - A support check that raises an error records its side as unsupported,
@@ -72,6 +78,9 @@ from .metal_tc_source import (
 )
 
 REFUSALS = (FEWER_THREADS, OTHER_SIMD_WIDTH, OTHER_THREADGROUP_BYTES)
+# A rejected text raises SyntaxError, and a kernel without a pipeline raises
+# RuntimeError, so both mean that a library did not build.
+BUILD_ERRORS = (SyntaxError, RuntimeError)
 COMPILE_FAILED = "the_bfloat_library_did_not_compile"
 WRONG_RESULT = "the_support_product_was_not_exact"
 CALL_FAILED = "the_bfloat16_call_raised_an_error"
@@ -221,10 +230,20 @@ class TcWorkload:
 def _compile(torch: object, source: str) -> object:
     try:
         return torch.mps.compile_shader(source)
-    except RuntimeError as error:
+    except BUILD_ERRORS as error:
         raise MetalTcUnavailableError(
             f"the Metal compiler rejected the Day 82 main library: {error}"
         ) from error
+
+
+def _pipelines(compiled: object, library: str) -> dict[str, object]:
+    """Read the kernels of one compiled library, which builds their pipelines."""
+
+    return {
+        name: getattr(compiled, name)
+        for name, kernel in KERNELS.items()
+        if kernel.library == library
+    }
 
 
 def _nothing() -> None:
@@ -252,18 +271,15 @@ class MetalTcRuntime:
         self._torch = torch
         self.library_sources = sources
         self.torch_version = availability.torch_version
-        libraries = {MAIN_LIBRARY: _compile(torch, sources[MAIN_LIBRARY])}
+        functions = _pipelines(_compile(torch, sources[MAIN_LIBRARY]), MAIN_LIBRARY)
         compiled = True
         try:
-            libraries[BFLOAT_LIBRARY] = torch.mps.compile_shader(
-                sources[BFLOAT_LIBRARY]
-            )
-        except RuntimeError:
+            bfloat = torch.mps.compile_shader(sources[BFLOAT_LIBRARY])
+            functions.update(_pipelines(bfloat, BFLOAT_LIBRARY))
+        except BUILD_ERRORS:
             compiled = False
         self._functions = {
-            name: getattr(libraries[kernel.library], name)
-            for name, kernel in KERNELS.items()
-            if kernel.library in libraries
+            name: functions[name] for name in KERNELS if name in functions
         }
         self.limits = {
             name: pipeline_limits(function)
