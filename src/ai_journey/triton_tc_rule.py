@@ -8,10 +8,11 @@ hold, from the PTX and the TTGIR of that compile:
 - ``fp32-tf32``, ``fp16`` and ``bf16`` on sm_80: ``mma.sync`` and no
   ``wgmma``, because sm_80 has no ``wgmma``;
 - the same three on sm_90: ``wgmma`` is the class that the lab expects, as
-  Triton picks its MMA version 3 for a 4-warp 128 x 128 tile on Hopper. The
-  rule also accepts ``mma.sync`` there and records the choice: a Hopper GPU
-  runs ``mma.sync`` too, so the choice is the compiler's, and the lab must
-  report what Triton 3.9 does, not what the lab expects.
+  Hopper has it and the 4-warp 128 x 128 tile fills one warpgroup. No compile
+  had confirmed it when this rule was written. The rule also accepts
+  ``mma.sync`` there and records the choice: a Hopper GPU runs ``mma.sync``
+  too, so the choice is the compiler's, and the lab must report what
+  Triton 3.9 does, not what the lab expects.
 
 Each compile must also pass these checks: every MMA takes the variant's
 operand type (``tf32``, ``f16`` or ``bf16``) and accumulates in ``f32``; the

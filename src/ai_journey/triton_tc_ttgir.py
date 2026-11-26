@@ -20,7 +20,7 @@ encodings that decide Tensor Core use are these:
   together start in different banks;
 - ``#ttg.nvmma_shared<{swizzlingByteWidth, transposed, elementBitWidth}>``:
   the shared layout that a ``wgmma`` descriptor reads. It names the swizzle
-  by its byte width, 32, 64 or 128, as the hardware does.
+  by its byte width, for example 128, as the descriptor does.
 
 ``analyze_ttgir`` reads the encoding aliases, the inline encodings, the
 module attributes, the dot ops and every ``ttg.local_alloc`` buffer with its
