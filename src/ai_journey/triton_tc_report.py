@@ -31,6 +31,7 @@ from .triton_tc_compile import (
     CompilerBackend,
     compile_all,
     environment_of,
+    write_dump,
 )
 from .triton_tc_config import config_sha256, read_config
 from .triton_tc_kernel import TritonTcError, kernel_mapping
@@ -89,12 +90,19 @@ def _load(load_average: Callable[[], tuple[float, float, float]]) -> list[float]
     return values
 
 
-def compile_section(backend: object) -> dict[str, object]:
-    """Compile every variant for both targets and apply the rule to each."""
+def compile_section(backend: object, dump: Path | None = None) -> dict[str, object]:
+    """Compile every variant for both targets and apply the rule to each.
+
+    With a dump folder, the texts are written before the rule runs, so a
+    compile that the rule refuses still leaves its texts to read.
+    """
 
     environment = environment_of(backend)
+    results = compile_all(backend)
+    if dump is not None:
+        write_dump(dump, results, environment)
     rows = []
-    for compiled in compile_all(backend):
+    for compiled in results:
         row = check_compile(compiled)
         row["stages"] = compiled.to_mapping()["stages"]
         rows.append(row)
@@ -139,11 +147,14 @@ def build_report(
     clock: Callable[[], float],
     load_average: Callable[[], tuple[float, float, float]],
     backend: object | None = None,
+    dump: Path | None = None,
 ) -> dict[str, object]:
     """Build the unsealed report; with a backend, compile and check first."""
 
     if not isinstance(config, Path):
         raise TypeError("config must be pathlib.Path")
+    if dump is not None and backend is None:
+        raise TritonTcError("a dump folder needs a compile backend")
     compiler = type(backend) is CompilerBackend
     if compiler and (clock is not time.time or load_average is not os.getloadavg):
         raise TritonTcError(
@@ -153,7 +164,7 @@ def build_report(
     payload, declared = read_config(config)
     recorded_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(clock()))
     before = _load(load_average)
-    compiled = None if backend is None else compile_section(backend)
+    compiled = None if backend is None else compile_section(backend, dump)
     after = _load(load_average)
     if backend is None:
         label = MODEL_LABEL
