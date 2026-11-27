@@ -75,8 +75,8 @@ The tests that need triton skip on a host without them. Other tests run the
 exact pinned text under a small NumPy model of `triton.language`. That model
 covers only the calls of the text, and it is not the Triton interpreter. Under
 the model, the text matches the NumPy blockwise loop for every declared config,
-within a relative tolerance of 1e-5. Both sides call `numpy.matmul`, so on
-another BLAS build the bits can differ by a few units in the last place.
+within twice the declared error bound of each head. Both sides call
+`numpy.matmul`, so on another BLAS build the bits can differ.
 
 ## The algorithm step by step
 
