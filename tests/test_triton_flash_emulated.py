@@ -6,8 +6,10 @@ that the text makes: a pointer is a flat array and an offset array, a masked
 load reads only the lanes of its mask, and ``tl.dot`` is ``numpy.matmul`` plus
 the accumulator. The model is not the Triton interpreter. It checks the
 indexing, the masks, the grid and the online softmax of the text against the
-blockwise reference bit for bit. The interpreter tests check the real thing on
-Linux.
+blockwise reference. Both sides call ``numpy.matmul``, which can add in another
+order on another BLAS build, so the values must agree within twice the declared
+error bound of each head, not to the bit. The interpreter tests check the real
+thing on Linux.
 """
 
 import math
@@ -28,6 +30,7 @@ from ai_journey.triton_flash_kernel import (
 from ai_journey.triton_flash_reference import (
     FAMILIES,
     AttentionCase,
+    attention_bounds,
     attention_inputs,
     blockwise_attention,
 )
@@ -200,7 +203,7 @@ CASES = (
 
 @pytest.mark.parametrize("config", FLASH_CONFIGS, ids=lambda config: config.name)
 @pytest.mark.parametrize("family", FAMILIES)
-def test_the_text_gives_the_bits_of_the_blockwise_reference(emulated, config, family):
+def test_the_text_matches_the_blockwise_reference(emulated, config, family):
     namespace, language = emulated
     for index, case in enumerate(CASES):
         q, k, v = attention_inputs(family, 74, index, case)
@@ -210,8 +213,18 @@ def test_the_text_gives_the_bits_of_the_blockwise_reference(emulated, config, fa
         )
         n = case.sequence
 
-        for got, want in zip((o[:, :n], maxima[:, :n], sums[:, :n]), expected):
-            assert numpy.array_equal(got.view(numpy.uint32), want.view(numpy.uint32))
+        # Both sides sit within one declared bound of float64 attention, so
+        # they differ by at most twice that bound on any BLAS build.
+        want_o, want_m, want_l = expected
+        for head, bound in enumerate(
+            attention_bounds(q, k, v, case.causal, config.block_n)
+        ):
+            assert numpy.abs(o[head, :n] - want_o[head]).max() <= 2 * bound.output
+            got_lse = numpy.log(sums[head, :n].astype(numpy.float64))
+            got_lse += maxima[head, :n].astype(numpy.float64)
+            want_lse = numpy.log(want_l[head].astype(numpy.float64))
+            want_lse += want_m[head].astype(numpy.float64)
+            assert numpy.abs(got_lse - want_lse).max() <= 2 * bound.lse
         # Rows past N keep their sentinels: every store kept its mask.
         for guard in (o[:, n:], maxima[:, n:], sums[:, n:]):
             assert (guard.view(numpy.uint32) == SENTINEL).all()

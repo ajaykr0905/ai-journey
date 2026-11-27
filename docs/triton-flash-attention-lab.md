@@ -74,8 +74,9 @@ sets `TRITON_INTERPRET=1` when the variable is unset. It refuses a host where
 The tests that need triton skip on a host without them. Other tests run the
 exact pinned text under a small NumPy model of `triton.language`. That model
 covers only the calls of the text, and it is not the Triton interpreter. Under
-the model, the text gives the same bits as the NumPy blockwise loop, for every
-declared config.
+the model, the text matches the NumPy blockwise loop for every declared config,
+within twice the declared error bound of each head. Both sides call
+`numpy.matmul`, so on another BLAS build the bits can differ.
 
 ## The algorithm step by step
 
